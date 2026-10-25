@@ -4,6 +4,8 @@ from fastapi import FastAPI, Query
 
 app = FastAPI(title="Demo business API")
 
+# Smoke-test comment for the AI PR review pipeline (branch test/ai-review-smoke).
+
 
 @app.get("/orders")
 async def order(order_id: str = Query(pattern=r"^DEMO-[0-9]{3}$")):
