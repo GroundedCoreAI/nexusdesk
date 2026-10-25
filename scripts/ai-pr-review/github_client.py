@@ -106,6 +106,38 @@ class GitHubClient:
             payload["comments"] = comments
         return self.post(f"/repos/{self.repo}/pulls/{number}/reviews", json=payload)
 
+    def list_pr_reviews(self, number: int) -> list[dict[str, Any]]:
+        """All reviews on the PR, chronological, paginated."""
+        reviews: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            batch = self.get(
+                f"/repos/{self.repo}/pulls/{number}/reviews",
+                params={"per_page": 100, "page": page},
+            )
+            if not batch:
+                break
+            reviews.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return reviews
+
+    # -- actions / collaborators -------------------------------------------------
+
+    def list_workflow_runs(self, head_sha: str, event: str) -> list[dict[str, Any]]:
+        """Workflow runs for one commit, newest first."""
+        data = self.get(
+            f"/repos/{self.repo}/actions/runs",
+            params={"head_sha": head_sha, "event": event, "per_page": 50},
+        )
+        return data.get("workflow_runs", [])
+
+    def get_collaborator_permission(self, login: str) -> str:
+        """Permission level of a user: admin / write / read / none."""
+        data = self.get(f"/repos/{self.repo}/collaborators/{login}/permission")
+        return data.get("permission", "none")
+
     # -- check runs ------------------------------------------------------------
 
     def list_check_runs(self, ref: str, check_name: str) -> list[dict[str, Any]]:

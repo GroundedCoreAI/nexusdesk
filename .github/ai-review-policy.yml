@@ -17,9 +17,9 @@ branches:
 review:
   enabled: true
 
-  # Phase 1: publish COMMENT reviews only. Flip to true in Phase 3 after the
-  # App's APPROVE behavior has been verified against branch protection.
-  auto_approve_enabled: false
+  # Phase 3: eligible low-risk PRs (per the rules below) receive an automatic
+  # APPROVE once all gates (latest head SHA, required CI) are satisfied.
+  auto_approve_enabled: true
 
   require_complete_review: true
   require_latest_head_sha: true
@@ -68,9 +68,9 @@ review:
     ci_failure: keep_blocked
 
 checks:
-  # Phase 3/4: create the "AI Review Policy" check run and wire it into
-  # branch protection. Phase 1 publishes reviews only.
-  enabled: false
+  # Phase 3/4: maintain the "AI Review Policy" check run on the PR head SHA.
+  # Wire it into branch protection as a required check to enforce the gate.
+  enabled: true
   ai_review_check_name: "AI Review Policy"
 
   # Must match the actual workflow name in .github/workflows/ci.yml.

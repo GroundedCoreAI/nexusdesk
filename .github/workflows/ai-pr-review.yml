@@ -1,13 +1,10 @@
 name: AI PR Review
 
-# Spec: "GitHub PR LLM 自动评审与分级审批规范" — Phase 1 (review only).
+# Spec: "GitHub PR LLM 自动评审与分级审批规范" — Phase 2/3 (risk tiers +
+# auto-approve for eligible low-risk PRs, gated by .github/ai-review-policy.yml).
 #
-# Phase 1 publishes COMMENT reviews only: no APPROVE, no check runs, no
-# branch-protection wiring. Auto-approval (Phase 3) is gated behind
-# `review.auto_approve_enabled` in .github/ai-review-policy.yml.
-#
-# SECURITY (spec sections 6/13): this workflow runs in the privileged
-# `pull_request_target` context with access to secrets. It therefore:
+# SECURITY (spec sections 6/13): this workflow runs in privileged contexts
+# with access to secrets. It therefore:
 #   - checks out ONLY the protected default branch (never the PR head),
 #   - reads the PR exclusively through the GitHub API, treating the diff as
 #     untrusted data passed to the LLM,
@@ -22,13 +19,27 @@ on:
       - synchronize
       - ready_for_review
 
+  # A human review may clear the REQUIRE_HUMAN_REVIEW gate. The pipeline
+  # ignores reviews submitted by bots (including itself) to prevent loops.
+  pull_request_review:
+    types:
+      - submitted
+
+  # A finished CI run may clear the awaiting-CI gate. The name must match the
+  # actual workflow name in ci.yml, not the filename.
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
 permissions:
   contents: read
 
 concurrency:
-  # One review run per PR; new commits queue behind, never cancel, the queued
-  # run re-fetches the latest head SHA from the API before reviewing.
-  group: ai-pr-review-${{ github.event.pull_request.number }}
+  # One review run per PR; new events queue behind, never cancel. Queued runs
+  # re-fetch the latest head SHA from the API before acting.
+  group: ai-pr-review-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -71,4 +82,7 @@ jobs:
           # Optional overrides; defaults live in llm_review.py.
           LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
+          # Bilingual output doubles generation time; 300s default avoids
+          # spurious read timeouts on slower providers (override via variable).
+          LLM_TIMEOUT: ${{ vars.LLM_TIMEOUT || '300' }}
         run: uv run --frozen python main.py
