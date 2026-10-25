@@ -82,4 +82,7 @@ jobs:
           # Optional overrides; defaults live in llm_review.py.
           LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
+          # Bilingual output doubles generation time; 300s default avoids
+          # spurious read timeouts on slower providers (override via variable).
+          LLM_TIMEOUT: ${{ vars.LLM_TIMEOUT || '300' }}
         run: uv run --frozen python main.py
