@@ -4,6 +4,8 @@ from fastapi import FastAPI, Query
 
 app = FastAPI(title="Demo business API")
 
+# Phase 3 smoke test: auto-approve gate verification (safe to close unmerged).
+
 # Smoke-test comment for the AI PR review pipeline (branch test/ai-review-smoke).
 
 
