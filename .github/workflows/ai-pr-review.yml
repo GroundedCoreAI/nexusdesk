@@ -1,0 +1,74 @@
+name: AI PR Review
+
+# Spec: "GitHub PR LLM 自动评审与分级审批规范" — Phase 1 (review only).
+#
+# Phase 1 publishes COMMENT reviews only: no APPROVE, no check runs, no
+# branch-protection wiring. Auto-approval (Phase 3) is gated behind
+# `review.auto_approve_enabled` in .github/ai-review-policy.yml.
+#
+# SECURITY (spec sections 6/13): this workflow runs in the privileged
+# `pull_request_target` context with access to secrets. It therefore:
+#   - checks out ONLY the protected default branch (never the PR head),
+#   - reads the PR exclusively through the GitHub API, treating the diff as
+#     untrusted data passed to the LLM,
+#   - never installs, builds, or executes code from the PR,
+#   - uses the default GITHUB_TOKEN read-only; all writes go through the
+#     short-lived GitHub App installation token.
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+
+concurrency:
+  # One review run per PR; new commits queue behind, never cancel, the queued
+  # run re-fetches the latest head SHA from the API before reviewing.
+  group: ai-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout trusted default-branch code
+        uses: actions/checkout@v4
+        with:
+          # The review code and policy must come from the protected default
+          # branch, never from the PR under review.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ai-pr-review
+            .github/ai-review-policy.yml
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Pinned to match the version used by the CI workflow and Dockerfile.
+          version: "0.7.21"
+          enable-cache: true
+          cache-dependency-glob: scripts/ai-pr-review/uv.lock
+
+      - name: Run AI PR Review
+        working-directory: scripts/ai-pr-review
+        env:
+          GITHUB_APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          # Optional overrides; defaults live in llm_review.py.
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+        run: uv run --frozen python main.py

@@ -1,0 +1,88 @@
+# AI PR review policy (spec section 9).
+#
+# Trusted configuration: the AI review workflow checks out the default branch
+# and loads THIS file, so a PR cannot relax its own review by editing it.
+# Changes to this file are CODEOWNERS-gated (core maintainer review required).
+
+version: 1
+
+branches:
+  # Low-risk PRs targeting integration may be auto-approved (Phase 3+).
+  auto_approve_targets:
+    - integration
+  # main always requires human approval — the AI never approves release PRs.
+  never_auto_approve_targets:
+    - main
+
+review:
+  enabled: true
+
+  # Phase 1: publish COMMENT reviews only. Flip to true in Phase 3 after the
+  # App's APPROVE behavior has been verified against branch protection.
+  auto_approve_enabled: false
+
+  require_complete_review: true
+  require_latest_head_sha: true
+  require_ci_success: true
+
+  limits:
+    max_changed_files: 20
+    max_changed_lines: 400
+
+  severity_policy:
+    critical: block_for_fix
+    high: require_human_review
+    medium: require_human_review
+    low: comment_only
+    uncertain: require_human_review
+
+  # Paths that always require human review (spec section 8.3), adapted to the
+  # nexusdesk repository layout.
+  human_review_paths:
+    # Database schema / alembic migrations.
+    - "backend/migrations/**"
+    - "backend/alembic.ini"
+    # Authentication, authorization, secrets, permission boundaries.
+    - "backend/src/agent_platform/platform/identity/**"
+    - "backend/src/agent_platform/platform/secrets/**"
+    - "backend/src/agent_platform/modules/access_control/**"
+    - "backend/src/agent_platform/modules/policy/**"
+    # Infrastructure, deployment, CI/CD.
+    - "deploy/**"
+    - "Dockerfile"
+    - "compose.yaml"
+    - "nexusdesk"
+    - "nexusdesk.ps1"
+    - ".github/workflows/**"
+    - ".github/CODEOWNERS"
+    # The review pipeline itself must never be self-approved.
+    - ".github/ai-review-policy.yml"
+    - "scripts/ai-pr-review/**"
+
+  failure_policy:
+    invalid_output: require_human_review
+    missing_context: require_human_review
+    llm_timeout: require_human_review
+    github_api_error: keep_blocked
+    stale_head_sha: rerun_review
+    ci_failure: keep_blocked
+
+checks:
+  # Phase 3/4: create the "AI Review Policy" check run and wire it into
+  # branch protection. Phase 1 publishes reviews only.
+  enabled: false
+  ai_review_check_name: "AI Review Policy"
+
+  # Must match the actual workflow name in .github/workflows/ci.yml.
+  required_ci_workflows:
+    - "CI"
+
+  require_latest_head_sha: true
+
+review_output:
+  publish_summary: true
+  publish_inline_comments: true
+  include_file_and_line: true
+  include_severity: true
+  include_evidence: true
+  include_recommendation: true

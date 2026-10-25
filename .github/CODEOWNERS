@@ -17,3 +17,7 @@
 
 # Database schema migrations affect production data and rollbacks.
 /backend/migrations/ @jackchow621 @GroundedCore
+
+# AI review policy and pipeline: a PR must never relax its own review.
+/.github/ai-review-policy.yml @jackchow621 @GroundedCore
+/scripts/ai-pr-review/ @jackchow621 @GroundedCore
