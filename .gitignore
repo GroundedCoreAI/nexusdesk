@@ -22,7 +22,9 @@ backend/data/credentials/
 docs/onboarding/
 
 .claude/
-scripts/
+scripts/*
+# The AI PR review pipeline is source, not a local scratch script.
+!scripts/ai-pr-review/
 .run-logs/
 # Local agent artifacts (memory, plan drafts, probe scripts)
 .workbuddy/
