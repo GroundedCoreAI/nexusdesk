@@ -40,7 +40,12 @@ class Decision(StrEnum):
 
 
 class Finding(BaseModel):
-    """One concrete issue reported by the LLM."""
+    """One concrete issue reported by the LLM.
+
+    Display text is bilingual: ``title``/``recommendation`` are English,
+    ``title_zh``/``recommendation_zh`` are Simplified Chinese. The published
+    review keeps the two languages in separate sections — never mixed.
+    """
 
     severity: Severity
     path: str = Field(description="Repo-relative file path the issue belongs to")
@@ -49,17 +54,21 @@ class Finding(BaseModel):
         ge=1,
         description="Line number in the NEW version of the file, if known",
     )
-    title: str
-    evidence: str = Field(description="Quoted code or reasoning backing the finding")
-    recommendation: str
+    title: str = Field(description="Short title in English")
+    title_zh: str = Field(description="Short title in Simplified Chinese")
+    evidence: str = Field(description="Quoted code or concrete reasoning backing the finding")
+    recommendation: str = Field(description="Suggested fix in English")
+    recommendation_zh: str = Field(description="Suggested fix in Simplified Chinese")
 
 
 class UncertainItem(BaseModel):
     """Something the model could not reliably judge; routes to humans."""
 
     path: str | None = None
-    question: str
-    reason: str
+    question: str = Field(description="Question for the human reviewer, in English")
+    question_zh: str = Field(description="Question for the human reviewer, in Simplified Chinese")
+    reason: str = Field(description="Why the model cannot judge, in English")
+    reason_zh: str = Field(description="Why the model cannot judge, in Simplified Chinese")
 
 
 class ReviewResult(BaseModel):
@@ -68,7 +77,8 @@ class ReviewResult(BaseModel):
     review_complete: bool = Field(
         description="True only if every changed file was actually reviewed"
     )
-    summary: str
+    summary_en: str = Field(description="Overall assessment in English")
+    summary_zh: str = Field(description="Overall assessment in Simplified Chinese")
     findings: list[Finding] = Field(default_factory=list)
     uncertain: list[UncertainItem] = Field(default_factory=list)
 

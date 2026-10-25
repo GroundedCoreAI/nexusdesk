@@ -49,22 +49,35 @@ Do NOT report style nitpicks or things you cannot support with evidence from
 the diff. If context is insufficient to judge something, put it in
 "uncertain" instead of guessing.
 
+All free-text output is bilingual: fields ending in _zh must be written in
+Simplified Chinese ONLY (no English mixed in), and their counterparts without
+the suffix must be written in English ONLY (no Chinese mixed in).
+
 Respond with ONE JSON object, no markdown fences, matching exactly:
 {
   "review_complete": boolean,   // false if any shown file was not actually reviewed
-  "summary": string,            // <= 10 sentences, overall assessment
+  "summary_en": string,         // <= 8 sentences, overall assessment, English only
+  "summary_zh": string,         // same content, Simplified Chinese only
   "findings": [
     {
       "severity": "critical" | "high" | "medium" | "low",
       "path": string,           // repo-relative path of an actually changed file
       "line": integer | null,   // line in the NEW version, null if unknown
-      "title": string,
+      "title": string,          // English only
+      "title_zh": string,       // Simplified Chinese only
       "evidence": string,       // quoted code / concrete reasoning
-      "recommendation": string
+      "recommendation": string, // English only
+      "recommendation_zh": string // Simplified Chinese only
     }
   ],
   "uncertain": [
-    { "path": string | null, "question": string, "reason": string }
+    {
+      "path": string | null,
+      "question": string,       // English only
+      "question_zh": string,    // Simplified Chinese only
+      "reason": string,         // English only
+      "reason_zh": string       // Simplified Chinese only
+    }
   ]
 }
 """
