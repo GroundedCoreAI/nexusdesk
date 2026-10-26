@@ -1,8 +1,9 @@
 """Phase 7 P7-IT-13: observability interface performance under 万级 data.
 
 Seeds one tenant with >=10k memory_tasks and >=10k runtime_events rows —
-plus a larger decoy tenant so the tenant filter is genuinely selective —
-then:
+plus many smaller decoy tenants (the production multi-tenant shape) so the
+target is a small fraction of every table and the tenant filter is genuinely
+selective — then:
 
 (a) hammers ``memory_summary`` (24h and 168h windows) and ``memory_alerts``
     20 times each and asserts the plan's P95-style bound: every call must
@@ -29,15 +30,21 @@ platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 # 万级 seeding volumes: the target tenant clears the 10k bar on both tasks
-# and events; the decoy is bigger still so tenant-scoped indexes, where they
-# exist, win over sequential scans on planner cost rather than on table size.
+# and events. The decoy side is split across many tenants — the production
+# multi-tenant shape — so the target is a small fraction of every table and
+# tenant-scoped indexes win on selectivity, not on table size.
 TARGET_TASKS = 12_000
-DECOY_TASKS = 30_000
+DECOY_TENANTS = 40
+DECOY_TASKS_PER_TENANT = 750  # 30k decoy tasks
 TARGET_RUNS = 500
-DECOY_RUNS = 1_500
-EVENTS_PER_RUN = 24  # => 12k target / 36k decoy runtime_events rows
+DECOY_RUNS_PER_TENANT = 625  # 25k decoy runs => target is ~2% of runtime_runs
+EVENTS_PER_RUN = 24  # => 12k target / 600k decoy runtime_events rows
+# Runs/events span a 30-day horizon so a 24h window keeps ~3% of the rows —
+# the selectivity the "既有索引 + 时间窗过滤" design promise assumes (a 48h
+# horizon would keep half the table in-window and make Seq Scan competitive).
+HORIZON_HOURS = 720
 TARGET_ALERT_AUDITS = 50
-DECOY_AUDITS = 20_000
+DECOY_AUDITS_PER_TENANT = 500  # 20k decoy audits
 
 CALL_BOUND_SECONDS = 2.0
 CALL_REPETITIONS = 20
@@ -45,8 +52,7 @@ CALL_REPETITIONS = 20
 BIG_TABLES = ("memory_tasks", "runtime_events", "runtime_runs", "audit_records")
 
 
-async def _seed(engine, tenant, decoy):
-    """Bulk-seed via generate_series: six statements, no per-row round trips."""
+async def _seed_tasks(engine, t, n):
     await db_exec(
         engine,
         """INSERT INTO memory_tasks(id,tenant_id,kind,status,payload,attempts,max_attempts,
@@ -55,83 +61,85 @@ async def _seed(engine, tenant, decoy):
             (ARRAY['memory_extract','conversation_summary','reinforce'])[1 + g % 3],
             CASE WHEN g % 20 = 0 THEN 'failed' WHEN g % 25 = 0 THEN 'pending' ELSE 'done' END,
             '{}', 1, 2,
-            now() - (g % 48) * interval '1 hour',
-            now() - (g % 48) * interval '1 hour',
+            now() - (g % :h) * interval '1 hour',
+            now() - (g % :h) * interval '1 hour',
             CASE WHEN g % 25 = 0 THEN NULL ELSE 50 + g % 400 END
         FROM generate_series(1, :n) g""",
-        t=tenant,
-        n=TARGET_TASKS,
+        t=t,
+        h=HORIZON_HOURS,
+        n=n,
+    )
+
+
+async def _seed_runs_events(engine, t, runs):
+    conversation_id = uuid4()
+    await db_exec(
+        engine,
+        "INSERT INTO runtime_conversations(id,tenant_id,external_id) VALUES(:id,:t,:e)",
+        id=conversation_id,
+        t=t,
+        e=f"perf-{uuid4().hex[:8]}",
     )
     await db_exec(
         engine,
-        """INSERT INTO memory_tasks(id,tenant_id,kind,status,payload,attempts,max_attempts,
-           created_at,updated_at,duration_ms)
-        SELECT gen_random_uuid(), :t, 'memory_extract', 'done', '{}', 1, 2,
-            now() - interval '3 days' - (g % 10) * interval '1 day',
-            now() - interval '3 days' - (g % 10) * interval '1 day',
-            50 + g % 400
+        """INSERT INTO runtime_runs(id,conversation_id,tenant_id,input,config,status,
+           queue_expires_at,created_at,finished_at)
+        SELECT gen_random_uuid(), :c, :t, '历史消息', '{}', 'completed',
+            now() + interval '1 hour',
+            now() - (g % :h) * interval '1 hour',
+            now() - (g % :h) * interval '1 hour'
         FROM generate_series(1, :n) g""",
-        t=decoy,
-        n=DECOY_TASKS,
+        c=conversation_id,
+        t=t,
+        h=HORIZON_HOURS,
+        n=runs,
     )
-    for t, runs in ((tenant, TARGET_RUNS), (decoy, DECOY_RUNS)):
-        conversation_id = uuid4()
-        await db_exec(
-            engine,
-            "INSERT INTO runtime_conversations(id,tenant_id,external_id) VALUES(:id,:t,:e)",
-            id=conversation_id,
-            t=t,
-            e=f"perf-{uuid4().hex[:8]}",
-        )
-        await db_exec(
-            engine,
-            """INSERT INTO runtime_runs(id,conversation_id,tenant_id,input,config,status,
-               queue_expires_at,created_at,finished_at)
-            SELECT gen_random_uuid(), :c, :t, '历史消息', '{}', 'completed',
-                now() + interval '1 hour',
-                now() - (g % 48) * interval '1 hour',
-                now() - (g % 48) * interval '1 hour'
-            FROM generate_series(1, :n) g""",
-            c=conversation_id,
-            t=t,
-            n=runs,
-        )
-        await db_exec(
-            engine,
-            """INSERT INTO runtime_events(run_id,seq,type,data,created_at)
-            SELECT r.id, s.seq, 'memory_search.completed',
-                jsonb_build_object(
-                    'mode', (ARRAY['vector','text','keyword_fallback'])[1 + s.seq % 3],
-                    'hits', s.seq % 3,
-                    'returned', s.seq % 5),
-                r.created_at
-            FROM runtime_runs r CROSS JOIN generate_series(1, :per) s(seq)
-            WHERE r.tenant_id=:t""",
-            t=t,
-            per=EVENTS_PER_RUN,
-        )
+    await db_exec(
+        engine,
+        """INSERT INTO runtime_events(run_id,seq,type,data,created_at)
+        SELECT r.id, s.seq, 'memory_search.completed',
+            jsonb_build_object(
+                'mode', (ARRAY['vector','text','keyword_fallback'])[1 + s.seq % 3],
+                'hits', s.seq % 3,
+                'returned', s.seq % 5),
+            r.created_at
+        FROM runtime_runs r CROSS JOIN generate_series(1, :per) s(seq)
+        WHERE r.tenant_id=:t""",
+        t=t,
+        per=EVENTS_PER_RUN,
+    )
+
+
+async def _seed_audits(engine, t, n, *, alert):
     await db_exec(
         engine,
         """INSERT INTO audit_records(tenant_id,actor,action,resource,details,created_at)
-        SELECT :t, 'memory', 'memory.alert.task_failed', 'task_failed',
+        SELECT :t, 'memory', :a, :r,
             CAST(:d AS jsonb),
             now() - (g % 48) * interval '1 hour'
         FROM generate_series(1, :n) g""",
-        t=tenant,
-        d='{"value":1,"threshold":0,"window":"15m"}',
-        n=TARGET_ALERT_AUDITS,
+        t=t,
+        a="memory.alert.task_failed" if alert else "memory.maintenance.completed",
+        r="task_failed" if alert else "ttl_purge",
+        d=(
+            '{"value":1,"threshold":0,"window":"15m"}'
+            if alert
+            else '{"job":"ttl_purge","result":"ok","stats":{"expired":1}}'
+        ),
+        n=n,
     )
-    await db_exec(
-        engine,
-        """INSERT INTO audit_records(tenant_id,actor,action,resource,details,created_at)
-        SELECT :t, 'memory', 'memory.maintenance.completed', 'ttl_purge',
-            CAST(:d AS jsonb),
-            now() - (g % 48) * interval '1 hour'
-        FROM generate_series(1, :n) g""",
-        t=decoy,
-        d='{"job":"ttl_purge","result":"ok","stats":{"expired":1}}',
-        n=DECOY_AUDITS,
-    )
+
+
+async def _seed(engine, tenant, decoys):
+    """Bulk-seed via generate_series: a few statements per tenant, no per-row
+    round trips."""
+    await _seed_tasks(engine, tenant, TARGET_TASKS)
+    await _seed_runs_events(engine, tenant, TARGET_RUNS)
+    await _seed_audits(engine, tenant, TARGET_ALERT_AUDITS, alert=True)
+    for decoy in decoys:
+        await _seed_tasks(engine, decoy, DECOY_TASKS_PER_TENANT)
+        await _seed_runs_events(engine, decoy, DECOY_RUNS_PER_TENANT)
+        await _seed_audits(engine, decoy, DECOY_AUDITS_PER_TENANT, alert=False)
     # Fresh planner statistics and visibility maps: without ANALYZE the
     # just-inserted rows are invisible to the cost model, and without VACUUM
     # no heap page is all-visible so index-only scans are unavailable — the
@@ -144,11 +152,11 @@ async def _seed(engine, tenant, decoy):
             await c.execute(text(f"VACUUM ANALYZE {table}"))
 
 
-async def _cleanup(engine, tenant, decoy):
+async def _cleanup(engine, tenant, decoys):
     async with engine.begin() as c:
         for table in ("memory_tasks", "runtime_runs", "runtime_conversations", "audit_records"):
-            await c.execute(text(f"DELETE FROM {table} WHERE tenant_id=:t"), {"t": tenant})
-            await c.execute(text(f"DELETE FROM {table} WHERE tenant_id=:t"), {"t": decoy})
+            for t in (tenant, *decoys):
+                await c.execute(text(f"DELETE FROM {table} WHERE tenant_id=:t"), {"t": t})
 
 
 async def _explain(engine, sql) -> str:
@@ -161,10 +169,10 @@ async def test_p7_it13_observability_performance_at_10k_scale(platform):
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
     observability = services.platform.observability
-    decoy = f"perf-decoy-{uuid4()}"
+    decoys = [f"perf-decoy-{i}-{uuid4().hex[:8]}" for i in range(DECOY_TENANTS)]
 
     try:
-        await _seed(engine, tenant, decoy)
+        await _seed(engine, tenant, decoys)
         # (a) Response-time bound: 20 timed calls per surface after one
         # warm-up (the first call warms the connection pool and the plan
         # cache; it is not part of the measurement).
@@ -248,4 +256,4 @@ async def test_p7_it13_observability_performance_at_10k_scale(platform):
                     f"query [{name}] sequential-scans {table} at 万级 scale:\n{plan}"
                 )
     finally:
-        await _cleanup(engine, tenant, decoy)
+        await _cleanup(engine, tenant, decoys)
