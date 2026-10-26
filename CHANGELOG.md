@@ -4,9 +4,9 @@
 
 版本号对应 `v` 前缀的 Git 标签，遵循[语义化版本](https://semver.org/lang/zh-CN/)。`0.x` 阶段按功能批次发布：`x` 是功能批次，`y` 是修复。
 
-## v0.2.0 — 2026-10-24
+## v0.2.0 — 2026-10-26
 
-第二个功能批次：回答流式输出、Agent 记忆系统（阶段 1–6）、渠道原生集成、成员与权限管理、评估工作台，以及发布准入化的部署链路。
+第二个功能批次：回答流式输出、Agent 记忆系统（阶段 1–6）、渠道原生集成、成员与权限管理、评估工作台，以及 AI PR 自动评审和测试与正式发布分离的 CI/CD 链路。
 
 ### 新增
 
@@ -43,7 +43,9 @@
 **工程与发布**
 
 - 分支管理规范化：`integration` 为默认分支，Rulesets 保护 `main`/`integration`，CODEOWNERS 强制敏感路径复核。
-- 部署改为发布准入制：仅由 GitHub Release（`v*` tag）或手动指定版本触发 CD，经 `production` Environment 审批；quickstart 镜像推送 GHCR 并镜像到 Docker Hub。
+- 新增 AI PR 自动评审流水线 Phase 1–3：由策略驱动的风险检查、PR 上下文采集、LLM 评审和中英双语评论组成，模型超时支持配置。
+- CI/CD V2 将测试部署与正式发布分离：`integration` 的 Push 在 CI 成功后自动部署测试服务器，镜像以 Commit SHA 标识；`main`、正式 Tag 和 GitHub Release 均不触发服务器部署。
+- 依赖升级：pypdf 升级至 6.21.2，并同步更新发布与部署相关测试。
 - quickstart 默认使用 pgvector 镜像；新增 AGENTS.md 与团队标准 skills（提交规范、开发流程等）。
 - 新品牌标识（轨道图形 + 渐变字标）；quickstart 登录表单预填演示账号。
 
