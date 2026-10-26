@@ -47,7 +47,7 @@ All scenarios below: executor = AI acceptance agent (Claude Code); date = 2026-1
 |---|---|---|
 | Drill 1: Worker down | Standalone Worker (`AGENT_EMBEDDED_WORKER=false`) wrote heartbeat audit → process killed → heartbeat record aged 31min → one standalone-form scan (0.047s) fired both `pending_task_age` (value=3663s) and `worker_heartbeat` (`value=31.0 > threshold=30, window=30m`) → Worker restarted, fresh heartbeat within 5min → after clearing conditions and passing cooldown, rescan returned `fired=[]` — no residual false alerts. Real-form detection-latency bound = heartbeat interval 300s + 30min window + 1 scan period, meeting the ≤30min discovery requirement (constructed aging makes it immediately decidable) | Pass |
 | Drill 2: embedding service outage | Embed profile created via the real management API (`11561124-61df-486e-88ef-0198edb51921` v1, base pointing at mock 9871) → API restarted in vector form (no degradation warning in startup log) → mock taken down; 3 event writes raised the `embedding_failed` backlog 2→5→7→9 period over period → `memory.alert.embedding_growing` fired at 19:41:34Z (`{"value":9,"window":"2 scans","threshold":7}`, fired on the third reading after two consecutive rising scans) → mock restored and API restarted; startup maintenance `embedding_retry` drained the backlog 9→0 with audit `{"scanned":9,"succeeded":9,"failed":0,"result":"ok"}`; 9 vector columns backfilled | Pass |
-| Drill 3: pgvector unavailable | With `AGENT_MEMORY_VECTOR_ENABLED=false`, probe confirmed `store impl: TsVectorStore / available(): text` → API restarted in forced text mode → 5 constructed `mode=text` search events → retrieval mode distribution `{"vector":14,"text":6,"keyword_fallback":5,"fallback_rate":0.2}` correctly shows the degraded mix. In pure text mode the `keyword_fallback` share is 0, so R4 cannot fire by construction (prefer-miss-over-misfire); the R4 firing path was demonstrated in A7 | Pass |
+| Drill 3: pgvector unavailable | With `AGENT_MEMORY_VECTOR_ENABLED=false`, probe confirmed `store impl: TsVectorStore / available(): text` → API restarted in forced text mode → 5 constructed `mode=text` search events → retrieval mode distribution `{"vector":14,"text":6,"keyword_fallback":5,"fallback_rate":0.2}` correctly shows the degraded mix. In pure text mode the `keyword_fallback` share is 0, so R4 cannot fire by construction (prefer-miss-over-misfire); the R4 firing path was demonstrated in A7. **Spec amendment record (final review)**: the R4 row of `02-requirements.md` originally read "keyword fallback + text mode share", which did not match the implementation and would false-fire at 100% in the quickstart pure-text topology; the final review amended the numerator to the keyword_fallback share (text is the configured mode of the TSVECTOR deployment form, not a degradation). The implementation already matches the amended spec — no code change needed | Pass |
 
 ## 4. Metric Reconciliation Data (A1 sample + full)
 
@@ -95,7 +95,7 @@ Code defaults (`backend/src/agent_platform/settings.py`) confirmed item by item 
 | memory_alert_cooldown_minutes | 60 | 60 | ✓ |
 | memory_alert_pending_task_max_age_minutes | 60 | 60 | ✓ |
 | memory_alert_pending_backlog_threshold | 500 | 500 | ✓ |
-| memory_alert_vector_fallback_threshold | 0.2 | 0.2 | ✓ |
+| memory_alert_vector_fallback_rate | 0.2 | 0.2 | ✓ |
 | memory_alert_webhook_url | "" (empty) | "" (empty) | ✓ |
 | memory_alert_webhook_timeout_seconds | 5 | — (additive item beyond requirements; implements the FR-3 webhook ≤5s timeout constraint) | ✓ (additive, flagged) |
 
@@ -109,6 +109,7 @@ Module constants rechecked (`alerting.py` / `worker.py`): R1 window 15min ✓; R
 | L-2 | P3 | A12's 1-hour continuous soak was substituted with ~40min multi-restart observation; redo a 1h continuous soak smoke test once the quickstart environment is restored | QA | 2026-11-10 |
 | L-3 | P3 | Acceptance environment used local uvicorn embedded/standalone processes instead of the Docker quickstart dual-container form (Docker networking restricted on this machine); equivalence statement in §1; smoke-recheck once the environment is restored | Platform ops | 2026-11-10 |
 | L-4 | P3 | Bulk-aging UPDATEs during acceptance gave several pending_task_age alerts identical `created_at` values (display-layer noise only); evidence is read by audit id — no fix needed | QA | Record only |
+| L-5 | P3 | The FR-1 quality row originally promised confirm/reject rates in both 7d and 30d windows; only 7d is implemented. The final review amended `02-requirements.md` to 7d (30d listed as a future enhancement); no code change needed | Engineering lead | At future-enhancement scheduling |
 
 No P0/P1/P2 residuals.
 
@@ -120,7 +121,7 @@ No P0/P1/P2 residuals.
 - All three failure drills met their criteria;
 - Veto items C1/C2 passed clean; C3–C5 passed;
 - All threshold defaults and module constants confirmed correct;
-- Residuals are 4 P3-level execution-coverage/documentation items only, each with an owner and deadline; the false-positive-rate metric is deferred to the first-month post-launch observation window per the plan.
+- Residuals are 5 P3-level execution-coverage/documentation items only, each with an owner and deadline; the false-positive-rate metric is deferred to the first-month post-launch observation window per the plan.
 
 This report was executed and generated by an AI acceptance agent; the conclusion takes final effect upon four-party human sign-off.
 

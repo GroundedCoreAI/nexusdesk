@@ -47,7 +47,7 @@
 |---|---|---|
 | 演练 1：Worker 宕机 | 独立 Worker（`AGENT_EMBEDDED_WORKER=false`）写入心跳审计 → kill 进程 → 心跳记录老化 31min → 独立形态扫描一轮（0.047s）同时触发 `pending_task_age`（value=3663s）与 `worker_heartbeat`（`value=31.0 > threshold=30, window=30m`）→ 重启 Worker 后 5min 内新心跳落库 → 清除条件并过冷却后复扫 `fired=[]`，无残留误报。真实形态时延上界 = 心跳间隔 300s + 30min 窗口 + 1 个扫描周期，满足 ≤30 分钟发现要求（构造老化即刻可判） | 通过 |
 | 演练 2：embedding 服务异常 | 经真实管理 API 创建 embed profile（`11561124-61df-486e-88ef-0198edb51921` v1，base 指向 mock 9871）→ API 以向量形态重启（启动日志无降级告警）→ mock 下线，3 笔事件写入使 `embedding_failed` 积压 2→5→7→9 逐周期上升 → 19:41:34Z 触发 `memory.alert.embedding_growing`（`{"value":9,"window":"2 scans","threshold":7}`，连续两周期上升后第三读数触发）→ 恢复 mock 并重启，启动维护 `embedding_retry` 重试清零：积压 9→0，审计 `{"scanned":9,"succeeded":9,"failed":0,"result":"ok"}`，向量列回填 9 条 | 通过 |
-| 演练 3：pgvector 不可用 | `AGENT_MEMORY_VECTOR_ENABLED=false` 下探针确认 `store impl: TsVectorStore / available(): text` → API 以强制文本形态重启 → 构造 5 笔 `mode=text` 检索事件 → 检索模式分布 `{"vector":14,"text":6,"keyword_fallback":5,"fallback_rate":0.2}` 正确展示降级构成。纯文本形态下 `keyword_fallback` 份额为 0，R4 构造型不触发（宁漏不误）；R4 触发路径已由 A7 演示 | 通过 |
+| 演练 3：pgvector 不可用 | `AGENT_MEMORY_VECTOR_ENABLED=false` 下探针确认 `store impl: TsVectorStore / available(): text` → API 以强制文本形态重启 → 构造 5 笔 `mode=text` 检索事件 → 检索模式分布 `{"vector":14,"text":6,"keyword_fallback":5,"fallback_rate":0.2}` 正确展示降级构成。纯文本形态下 `keyword_fallback` 份额为 0，R4 构造型不触发（宁漏不误）；R4 触发路径已由 A7 演示。**规格修正记录（终审）**：`02-requirements.md` R4 行原写"keyword fallback + text 模式占比"，与实现不符且会使 quickstart 纯文本形态恒为 100% 误报；终审已将分子修正为 keyword_fallback 占比（text 为 TSVECTOR 部署形态的配置模式而非降级），实现与此修正一致、无需改码 | 通过 |
 
 ## 4. 指标对账数据（A1 抽样 + 全量）
 
@@ -95,7 +95,7 @@
 | memory_alert_cooldown_minutes | 60 | 60 | ✓ |
 | memory_alert_pending_task_max_age_minutes | 60 | 60 | ✓ |
 | memory_alert_pending_backlog_threshold | 500 | 500 | ✓ |
-| memory_alert_vector_fallback_threshold | 0.2 | 0.2 | ✓ |
+| memory_alert_vector_fallback_rate | 0.2 | 0.2 | ✓ |
 | memory_alert_webhook_url | ""（空） | ""（空） | ✓ |
 | memory_alert_webhook_timeout_seconds | 5 | —（需求外新增，实现 FR-3 webhook ≤5s 超时约束） | ✓（新增项，已标记） |
 
@@ -109,6 +109,7 @@
 | L-2 | P3 | A12 的 1 小时连续浸泡以约 40 分钟多轮重启观察替代；quickstart 环境恢复后补做 1h 连续浸泡冒烟 | QA | 2026-11-10 |
 | L-3 | P3 | 验收环境以本地 uvicorn 内嵌/独立进程替代 Docker quickstart 双容器（本机 Docker 网络受限），等效性声明见 §1；环境恢复后冒烟复核 | 平台运维 | 2026-11-10 |
 | L-4 | P3 | 验收中批量老化 UPDATE 使多条 pending_task_age 告警 `created_at` 相同（展示层噪音）；证据按审计 id 解读，无需修复 | QA | 记录即可 |
+| L-5 | P3 | FR-1 质量行原承诺确认率/拒绝率 7d/30d 双窗口，实现仅 7d；终审已将 `02-requirements.md` 修正为 7d（30d 列为后续增强），代码无需变更 | 研发负责人 | 后续增强排期时 |
 
 无 P0/P1/P2 遗留。
 
@@ -120,7 +121,7 @@
 - 三项故障演练全部达标；
 - 一票否决项 C1/C2 清洁通过，C3~C5 通过；
 - 阈值默认值与模块常量全部确认无误；
-- 遗留仅 4 项 P3 级执行覆盖/文档事项，均含 owner 与期限；误报率指标按方案留待上线后首月观测期跟踪。
+- 遗留仅 5 项 P3 级执行覆盖/文档事项，均含 owner 与期限；误报率指标按方案留待上线后首月观测期跟踪。
 
 本报告由 AI 验收代理执行并生成，结论以四方人工签字为最终生效条件。
 
