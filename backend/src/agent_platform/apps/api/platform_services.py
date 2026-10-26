@@ -66,7 +66,7 @@ class PlatformServices:
         self.channels = ChannelService(
             engine, self.conversations, self.customer, self.agents, settings
         )
-        self.observability = ObservabilityService(engine)
+        self.observability = ObservabilityService(engine, settings)
         self.open_platform = OpenPlatform(self)
         self.evaluation = None
 
