@@ -39,3 +39,39 @@ def test_0042_adds_duration_ms_and_downgrade_drops_it(migration_database):
         " WHERE table_name='memory_tasks' AND column_name='duration_ms'",
     )
     migrate(url, "head")
+
+
+NEW_0043_INDEXES = (
+    "memory_tasks_tenant_created",
+    "memory_tasks_tenant_status",
+    "runtime_events_type_created",
+)
+
+
+def test_0043_adds_tenant_indexes_and_downgrade_drops_them(migration_database):
+    url = migration_database
+    migrate(url, "0042_memory_observability")
+    assert not query(
+        url,
+        "SELECT indexname FROM pg_indexes WHERE indexname IN"
+        " ('memory_tasks_tenant_created','memory_tasks_tenant_status',"
+        " 'runtime_events_type_created')",
+    )
+    migrate(url, "head")
+    found = {
+        row[0]
+        for row in query(
+            url,
+            "SELECT indexname FROM pg_indexes WHERE tablename IN"
+            " ('memory_tasks','runtime_events')",
+        )
+    }
+    assert set(NEW_0043_INDEXES) <= found
+    migrate(url, "0042_memory_observability", "downgrade")
+    assert not query(
+        url,
+        "SELECT indexname FROM pg_indexes WHERE indexname IN"
+        " ('memory_tasks_tenant_created','memory_tasks_tenant_status',"
+        " 'runtime_events_type_created')",
+    )
+    migrate(url, "head")

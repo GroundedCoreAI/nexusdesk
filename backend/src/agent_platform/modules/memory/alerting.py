@@ -264,10 +264,15 @@ async def collect(engine, settings, *, embedded: bool) -> AlertContext:
             count(*) FILTER (WHERE status='failed'
                 AND updated_at>now()-interval '15 minutes')::int AS failed_15m,
             min(created_at) FILTER (WHERE status='pending') AS oldest_pending_at,
-            EXISTS(SELECT 1 FROM memory_tasks t2
+            -- Two EXISTS clauses, not one EXISTS over an OR: each arm is then
+            -- index-served (tenant+created_at / tenant+status), while the OR
+            -- form defeats both indexes and seq-scans memory_tasks at scale.
+            (EXISTS(SELECT 1 FROM memory_tasks t2
                 WHERE t2.tenant_id=:t
-                AND (t2.created_at>now()-interval '24 hours'
-                    OR t2.status IN ('pending','running'))) AS activity
+                AND t2.created_at>now()-interval '24 hours')
+            OR EXISTS(SELECT 1 FROM memory_tasks t3
+                WHERE t3.tenant_id=:t
+                AND t3.status IN ('pending','running'))) AS activity
             FROM memory_tasks WHERE tenant_id=:t""",
             t=tenant,
         )

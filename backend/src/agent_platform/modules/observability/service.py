@@ -522,9 +522,13 @@ class ObservabilityService:
         activity = (
             await one(
                 c,
+                # Two EXISTS clauses, not one EXISTS over an OR: each arm is
+                # then index-served (tenant+created_at / tenant+status), while
+                # the OR form defeats both indexes and seq-scans at scale.
                 """SELECT EXISTS(SELECT 1 FROM memory_tasks WHERE tenant_id=:t
-                AND (created_at>now()-interval '24 hours'
-                    OR status IN ('pending','running'))) AS active""",
+                AND created_at>now()-interval '24 hours')
+                OR EXISTS(SELECT 1 FROM memory_tasks WHERE tenant_id=:t
+                AND status IN ('pending','running')) AS active""",
                 t=tenant,
             )
         )["active"]

@@ -132,12 +132,16 @@ async def _seed(engine, tenant, decoy):
         d='{"job":"ttl_purge","result":"ok","stats":{"expired":1}}',
         n=DECOY_AUDITS,
     )
-    # Fresh planner statistics: without ANALYZE the just-inserted rows are
-    # invisible to the cost model and the EXPLAIN assertions below would
-    # measure stale-statistics plans, not production-shaped ones.
-    async with engine.begin() as c:
+    # Fresh planner statistics and visibility maps: without ANALYZE the
+    # just-inserted rows are invisible to the cost model, and without VACUUM
+    # no heap page is all-visible so index-only scans are unavailable — the
+    # EXPLAIN assertions below would measure a freshly bulk-loaded table, not
+    # a production-shaped one (autovacuum maintains both in production).
+    # VACUUM cannot run inside a transaction, hence AUTOCOMMIT.
+    async with engine.connect() as c:
+        c = await c.execution_options(isolation_level="AUTOCOMMIT")
         for table in ("memory_tasks", "runtime_runs", "runtime_events", "audit_records"):
-            await c.execute(text(f"ANALYZE {table}"))
+            await c.execute(text(f"VACUUM ANALYZE {table}"))
 
 
 async def _cleanup(engine, tenant, decoy):
@@ -225,8 +229,9 @@ async def test_p7_it13_observability_performance_at_10k_scale(platform):
                 GROUP BY resource""",
             "maintenance_activity": f"""SELECT EXISTS(SELECT 1 FROM memory_tasks
                 WHERE tenant_id='{t}'
-                AND (created_at>now()-interval '24 hours'
-                    OR status IN ('pending','running'))) AS active""",
+                AND created_at>now()-interval '24 hours')
+                OR EXISTS(SELECT 1 FROM memory_tasks WHERE tenant_id='{t}'
+                AND status IN ('pending','running')) AS active""",
             "alerts_listing": f"""SELECT resource AS rule, created_at AS at,
                 CAST(details->>'value' AS double precision) AS value
                 FROM audit_records
