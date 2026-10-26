@@ -4,8 +4,10 @@
 Adapted from the Deepexi git-commit-standard skill: TAPD references are
 replaced by GitHub issue references, the HMAC key can be supplied via the
 GCA_COMMIT_HMAC_KEY environment variable, the commit-msg hook is opt-in
-(--enforce), and a Co-Authored-By attribution trailer is appended after
-signing.
+(--enforce), and automated AI co-author attribution is never appended.
+
+GitHub treats Co-Authored-By trailers as contributors. This helper therefore
+rejects Claude/Anthropic co-author attribution instead of adding it to commits.
 
 The built-in fallback HMAC key is intentionally local and readable. It is
 not a security boundary; it raises the cost of casual hand-written messages
@@ -28,8 +30,8 @@ import tempfile
 from pathlib import Path
 
 
-VERSION = "1.0.0"
-SUPPORTED_VERSIONS = ("1.0.0",)
+VERSION = "1.0.1"
+SUPPORTED_VERSIONS = ("1.0.0", "1.0.1")
 POLICY = "groundedcore-conventional-v1"
 SKILL_NAME = "groundedcoreai-commit-standard"
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -43,7 +45,10 @@ INSTRUCTION_SECTION = (
     "`groundedcoreai-commit-standard` skill。\n"
     "不要手写普通 commit message；如需提交请通过该 skill 生成、签名并执行提交。\n"
 )
-ATTRIBUTION = "Co-Authored-By: Claude Code <noreply@anthropic.com>"
+FORBIDDEN_ATTRIBUTION_RE = re.compile(
+    r"^Co-Authored-By:.*(?:Claude(?:\s+Code)?|Anthropic|noreply@anthropic\.com)",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 ALLOWED_AGENTS = ("codex", "claude", "cursor", "manual-ai")
 ALLOWED_TYPES = (
@@ -190,6 +195,15 @@ def hmac_key():
     if value:
         return value.encode("utf-8")
     return DEFAULT_HMAC_KEY
+
+
+def reject_forbidden_attribution(text):
+    match = FORBIDDEN_ATTRIBUTION_RE.search(normalize_lf(text))
+    if match:
+        raise GroundedCoreError(
+            "Claude/Anthropic co-author attribution is forbidden because GitHub "
+            "counts Co-Authored-By trailers as project contributors."
+        )
 
 
 def normalize_lf(text):
@@ -620,6 +634,7 @@ def hmac_signature(payload):
 
 
 def sign_message_text(message, agent, issue_id, issue_url):
+    reject_forbidden_attribution(message)
     if agent and agent not in ALLOWED_AGENTS:
         raise GroundedCoreError("Unsupported agent: %s" % agent)
     issue_url = validate_issue_args(issue_id, issue_url)
@@ -646,7 +661,8 @@ def sign_message_text(message, agent, issue_id, issue_url):
     trailers[SIGNATURE_KEY] = "hmac-sha256:%s" % hmac_signature(payload)
     full = build_message(message, trailers, include_signature=True)
     validate_policy_message(full, require_signature=True)
-    return full.rstrip("\n") + "\n\n" + ATTRIBUTION + "\n"
+    reject_forbidden_attribution(full)
+    return full
 
 
 def parse_subject(subject):
@@ -829,6 +845,7 @@ def command_verify(args):
         print("groundedcore.commit.required is not true; skipping GroundedCore commit check.")
         return
     message = read_text(args.commit_msg)
+    reject_forbidden_attribution(message)
     context = staged_context(require_changes=False)
     verify_signature(message, context, require_signature=True)
     print("GroundedCore commit message verified.")
