@@ -301,7 +301,7 @@ class ObservabilityService:
                 t=tenant,
             )
             return {
-                "window_hours": 24,
+                "window_hours": window_hours,
                 "extraction_daily": extraction_daily,
                 "hit_rate": hit_rate,
                 "backlog": backlog,

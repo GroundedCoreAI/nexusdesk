@@ -20,7 +20,10 @@
   rule_scan 的 memory.maintenance.completed 审计，时间错开且都在各自
   cadence 内（maintenance.overdue 为空，展示"全绿"卡片）；embedding_retry
   另有一条 3 天前的记录，喂 7 天重试汇总（scanned=16, succeeded=15）。
-  heartbeat 不种——quickstart 是内嵌拓扑，heartbeat 记录只属于独立 worker。
+  "全绿"不是一次性窗口：终审修复后 worker 每轮维护/规则扫描（含零命中
+  的 quiet pass）都会写实审计，启动后内嵌 worker 的实时扫描持续刷新各
+  卡片 last_at，长期保持绿色。heartbeat 不种——quickstart 是内嵌拓扑，
+  heartbeat 记录只属于独立 worker。
   计数非零的维护审计都带配套证据：ttl_purge{expired:2} 对应 2 条
   expires_at 已过、status=expired 的 event 行（ttl_purge 只软过期不删行）；
   decay{profile_pending:1, preference_expired:2} 对应 3 条真实迁移后状态的

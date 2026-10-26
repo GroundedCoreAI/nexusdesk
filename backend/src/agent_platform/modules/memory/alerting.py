@@ -16,8 +16,11 @@ Honest limitations, by design:
   a worker restart resamples from scratch, so a rise straddling a restart is
   missed rather than risk a false fire (宁漏不误).
 - R5/R6 are exempt by construction when there is nothing to act on (no
-  memory-task activity / no overdue tickets / rule scan disabled), matching
-  Task 1's quiet-pass-silent audit design.
+  memory-task activity / no overdue tickets / rule scan disabled). Every
+  maintenance/rule-scan pass writes a completion audit — quiet passes
+  included (final-review fix restoring the 03 design) — so a healthy
+  active tenant always has fresh evidence and these exemptions only cover
+  the genuinely idle or disabled cases.
 - R8 worker_heartbeat only exists in the standalone topology and is written
   by the worker's own claim loop, so a fully dead worker also stops this
   scanner: R8 catches wedged or partially-alive states (claim loop alive,
@@ -160,11 +163,13 @@ def rule_maintenance_silent(ctx: AlertContext, settings) -> Alert | None:
     has work to do) AND no memory.maintenance.completed/failed audit exists
     in the same window. The worker's heartbeat liveness records are excluded
     from that evidence: the standalone worker writes one every 5 minutes, so
-    counting them would silence R5 exactly where it matters. Tenants with
-    zero memory activity are EXEMPT, which avoids false positives from
-    Task 1's quiet-pass-silent design (a pass that affected no rows writes
-    nothing). The value is the maintenance audit count in the window; the
-    threshold is the zero it must stay above.
+    counting them would silence R5 exactly where it matters. Every
+    maintenance pass writes a completion audit — quiet passes included — so
+    a healthy active tenant always has fresh evidence; the activity gate
+    stays to exempt tenants with zero memory activity at all (a fresh
+    tenant may legitimately have no per-tenant audit before the worker's
+    first pass). The value is the maintenance audit count in the window;
+    the threshold is the zero it must stay above.
     """
     if ctx.memory_task_activity and ctx.maintenance_audits_24h == 0:
         return Alert("maintenance_silent", 0, 0, "24h")
@@ -175,9 +180,10 @@ def rule_rule_scan_missed(ctx: AlertContext, settings) -> Alert | None:
     """R6: the built-in rule scan is enabled, has overdue work, no evidence.
 
     Evidence = a memory.maintenance.completed audit with job=rule_scan or a
-    memory.flag.removed audit within the last 2x scan interval. No overdue
-    tickets -> exempt (a quiet pass legitimately writes nothing); a disabled
-    scan -> exempt.
+    memory.flag.removed audit within the last 2x scan interval. Every
+    rule-scan pass writes its completion audit (quiet passes included), so
+    evidence exists whenever the scan actually runs; the no-overdue-tickets
+    gate stays as a cheap exemption, and a disabled scan is exempt too.
     """
     interval = getattr(settings, "memory_rule_scan_interval_minutes", 15)
     if interval <= 0:

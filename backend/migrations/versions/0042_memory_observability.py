@@ -1,9 +1,11 @@
 """Phase 7 of agent memory: production observability — task duration column.
 
 Purely additive: one nullable ``duration_ms`` column on ``memory_tasks``,
-written by the memory worker's ``_finish`` when a claimed task reaches a
-final state (done/failed, and retry requeues — every executed attempt is
-timed).
+written by the memory worker's ``_finish`` after every executed attempt
+(done/failed and retry requeues alike). A requeue overwrites the previous
+attempt's value (``COALESCE`` only shields against a NULL argument), so a
+finished row carries its final attempt's wall time, not a per-attempt
+history.
 
 - D1 (as adjusted at implementation time): the Phase 7 design doc assumed
   ``memory_tasks`` lacked ``created_at`` and planned a ``run_after``

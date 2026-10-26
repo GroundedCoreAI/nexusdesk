@@ -253,12 +253,17 @@ class MemoryWorker:
         )
 
     async def _maintenance_completed(self, job, stats):
-        """Phase 7: one completion audit for a maintenance job pass.
+        """Phase 7: one completion audit for every maintenance job pass.
 
         Every maintenance job is single-tenant — the worker is bound to
         ``settings.tenant_id`` — so the per-tenant observability contract is
-        exactly one row per affected job pass for this tenant. Call sites
-        skip zero-affect passes to keep the audit table quiet.
+        exactly one row per job pass for this tenant. Quiet passes (zero
+        affected rows) write too, with zeroed stats: R5
+        (memory.alert.maintenance_silent) and the maintenance.overdue card
+        read a missing audit as "maintenance not running", so a healthy
+        tenant whose passes affect nothing must still leave evidence
+        (03-technical-design: 每轮结束写审计). One row per job per pass
+        keeps the cost negligible.
         """
         async with self.engine.begin() as c:
             await audit(
@@ -293,8 +298,9 @@ class MemoryWorker:
 
         Attempt-stamped up front like the maintenance pass, so a failing scan
         retries at the next interval rather than on every idle cycle.
-        Phase 7: a pass that actually marked or cleared flags writes one
-        ``memory.maintenance.completed`` audit (job=rule_scan); a failure
+        Phase 7: every completed pass writes one
+        ``memory.maintenance.completed`` audit (job=rule_scan) — quiet passes
+        included, with zeroed stats (see _maintenance_completed); a failure
         writes ``memory.maintenance.failed`` and still propagates.
         """
         self.last_rule_scan = time.monotonic()
@@ -303,15 +309,14 @@ class MemoryWorker:
         except Exception as exc:
             await self._maintenance_failed("rule_scan", exc)
             raise
-        if stats["marked"] or stats["removed"]:
-            await self._maintenance_completed(
-                "rule_scan",
-                {
-                    "scanned": stats["overdue_customers"],
-                    "marked": stats["marked"],
-                    "flags_removed": stats["removed"],
-                },
-            )
+        await self._maintenance_completed(
+            "rule_scan",
+            {
+                "scanned": stats["overdue_customers"],
+                "marked": stats["marked"],
+                "flags_removed": stats["removed"],
+            },
+        )
 
     async def maintenance(self):
         """One maintenance pass: TTL soft-expiry plus bounded embedding retry.
@@ -322,8 +327,9 @@ class MemoryWorker:
         on every idle cycle. Phase 4 (R14): the daily decay migration and
         capacity eviction ride along, gated by ``memory_decay_enabled`` —
         with the switch off the pass is exactly the Phase 3 one (AC-13).
-        Phase 7: every job that affected rows writes one
-        ``memory.maintenance.completed`` audit ({job, result, stats}); a
+        Phase 7: every completed job pass writes one
+        ``memory.maintenance.completed`` audit ({job, result, stats}) — quiet
+        passes included, with zeroed stats (see _maintenance_completed); a
         failing job writes ``memory.maintenance.failed`` ({job, error}) and
         the error still propagates to the dispatcher boundary.
         """
@@ -341,16 +347,16 @@ class MemoryWorker:
                 )
                 if expired:
                     logger.info("Memory TTL pass expired %d event items", len(expired))
-                    await audit(
-                        c,
-                        tenant,
-                        "memory",
-                        "memory.maintenance.completed",
-                        job,
-                        job=job,
-                        result="ok",
-                        stats={"expired": len(expired)},
-                    )
+                await audit(
+                    c,
+                    tenant,
+                    "memory",
+                    "memory.maintenance.completed",
+                    job,
+                    job=job,
+                    result="ok",
+                    stats={"expired": len(expired)},
+                )
                 # Phase 6 (D3): expired injection detail rows ride the same daily
                 # pass, single DELETE in the same transaction.
                 job = "injection_log_purge"
@@ -365,16 +371,16 @@ class MemoryWorker:
                 )
                 if purged:
                     logger.info("Memory TTL pass purged %d injection log rows", len(purged))
-                    await audit(
-                        c,
-                        tenant,
-                        "memory",
-                        "memory.maintenance.completed",
-                        job,
-                        job=job,
-                        result="ok",
-                        stats={"purged": len(purged)},
-                    )
+                await audit(
+                    c,
+                    tenant,
+                    "memory",
+                    "memory.maintenance.completed",
+                    job,
+                    job=job,
+                    result="ok",
+                    stats={"purged": len(purged)},
+                )
                 job = "embedding_retry"
                 retry = []
                 if self.store is not None and self.store.available() == "vector":
@@ -390,10 +396,12 @@ class MemoryWorker:
             await self._maintenance_failed(job, exc)
             raise
         # Embedding runs outside the sweep transaction; per-item failures keep
-        # the embedding_failed flag and wait for the next pass (P3-IT-10).
+        # the embedding_failed flag and wait for the next pass (P3-IT-10). A
+        # non-vector topology (or no store) scans nothing and still records
+        # the pass with zeroed stats.
+        succeeded = failed = 0
         if retry:
             try:
-                succeeded = failed = 0
                 for row in retry:
                     if await self.store.embed_and_save(row["id"], row["content"]):
                         succeeded += 1
@@ -402,10 +410,10 @@ class MemoryWorker:
             except Exception as exc:
                 await self._maintenance_failed(job, exc)
                 raise
-            await self._maintenance_completed(
-                job,
-                {"scanned": len(retry), "succeeded": succeeded, "failed": failed},
-            )
+        await self._maintenance_completed(
+            job,
+            {"scanned": len(retry), "succeeded": succeeded, "failed": failed},
+        )
         # Phase 4 decay rides the same daily window (R14).
         if getattr(self.settings, "memory_decay_enabled", False):
             job = "decay"
@@ -414,8 +422,7 @@ class MemoryWorker:
             except Exception as exc:
                 await self._maintenance_failed(job, exc)
                 raise
-            if any(stats.values()):
-                await self._maintenance_completed(job, stats)
+            await self._maintenance_completed(job, stats)
 
     def alert_scan_due(self):
         """Phase 7 alert scan gate: master switch and interval 0 disable it."""

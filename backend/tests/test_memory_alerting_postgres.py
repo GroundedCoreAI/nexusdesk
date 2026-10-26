@@ -249,6 +249,28 @@ async def test_r5_maintenance_silent_fires_with_activity_and_is_exempt_when_idle
     assert "maintenance_silent" not in fired
 
 
+async def test_r5_quiet_pass_audits_keep_healthy_tenant_silent(platform):
+    """Final-review regression: a healthy tenant whose daily maintenance
+    passes affect zero rows for weeks (180d TTL, nothing to decay, nothing
+    overdue, TSVECTOR skips embedding retry) used to leave zero audits, so
+    R5 false-fired every cooldown and the maintenance card showed a red
+    overdue banner. With per-pass completion audits (quiet passes included,
+    zeroed stats), real worker passes keep R5 silent and overdue empty."""
+    _client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    await make_task(engine, tenant, status="done")  # memory-task activity
+
+    # Real quiet passes: nothing to expire/purge/retry/decay/flag.
+    maintenance_worker = MemoryWorker(engine, None, settings)
+    await maintenance_worker.maintenance()
+    await maintenance_worker.rule_scan()
+
+    fired = await make_worker(services, settings).alert_scan()
+    assert "maintenance_silent" not in fired
+    summary = await services.platform.observability.memory_summary(tenant)
+    assert summary["maintenance"]["overdue"] == []
+
+
 async def test_r5_heartbeat_rows_are_not_maintenance_evidence(platform):
     """Regression: the standalone worker writes a heartbeat audit every 5
     minutes; if those counted as maintenance evidence R5 could never fire in

@@ -144,8 +144,13 @@ async def test_p7_it_maintenance_audits_ttl_and_injection_purge(platform):
     assert await audit_records(engine, tenant, "memory.maintenance.failed") == []
 
 
-async def test_p7_it_maintenance_quiet_pass_writes_no_audit(platform):
-    """Zero-affect jobs stay silent: no completion rows, no failure rows."""
+async def test_p7_it_maintenance_quiet_pass_writes_zero_stat_audits(platform):
+    """Spec compliance (03-technical-design: every pass writes an audit): a
+    quiet pass — zero rows affected in any job — still writes one
+    memory.maintenance.completed row per job with zeroed stats, because R5
+    (maintenance_silent) and the maintenance.overdue card read a missing
+    audit as "maintenance not running". Runs on plain PG: with store=None
+    the embedding_retry pass scans nothing and records zeros."""
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
     await make_customer(engine, tenant)  # nothing expires, nothing purges
@@ -154,7 +159,16 @@ async def test_p7_it_maintenance_quiet_pass_writes_no_audit(platform):
     await worker.maintenance()
     await worker.rule_scan()
 
-    assert await audit_records(engine, tenant, "memory.maintenance.completed") == []
+    records = await audit_records(engine, tenant, "memory.maintenance.completed")
+    by_job = {}
+    for r in records:
+        by_job.setdefault(r["details"]["job"], []).append(r["details"]["stats"])
+    assert by_job["ttl_purge"] == [{"expired": 0}]
+    assert by_job["injection_log_purge"] == [{"purged": 0}]
+    assert by_job["embedding_retry"] == [{"scanned": 0, "succeeded": 0, "failed": 0}]
+    assert by_job["decay"] == [{"profile_pending": 0, "preference_expired": 0, "evicted": 0}]
+    assert by_job["rule_scan"] == [{"scanned": 0, "marked": 0, "flags_removed": 0}]
+    assert all(r["actor"] == "memory" for r in records)
     assert await audit_records(engine, tenant, "memory.maintenance.failed") == []
 
 
@@ -233,7 +247,14 @@ async def test_p7_it_maintenance_failure_writes_failed_audit_and_reraises(platfo
     assert failed[0]["actor"] == "memory"
     assert details["job"] == "embedding_retry"
     assert details["error"] == boom[:500]
-    assert await audit_records(engine, tenant, "memory.maintenance.completed") == []
+    # The sweep transaction committed before the embedding loop failed, so
+    # the two quiet jobs it covered left their zero-stat completion rows;
+    # the failed embedding_retry job itself has no completion row.
+    completed = await audit_records(engine, tenant, "memory.maintenance.completed")
+    assert sorted(r["details"]["job"] for r in completed) == [
+        "injection_log_purge",
+        "ttl_purge",
+    ]
 
 
 async def test_p7_it_rule_scan_audit(platform):

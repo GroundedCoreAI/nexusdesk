@@ -501,7 +501,8 @@ async def test_p7_it_memory_endpoint_window_validation(platform):
     ok = await client.get("/api/v1/observability/memory?window_hours=168", headers=headers)
     assert ok.status_code == 200, ok.text
     body = ok.json()
-    assert body["tasks"]["by_kind"] and body["window_hours"] == 24
+    # The echoed window_hours reflects the requested window, not a constant.
+    assert body["tasks"]["by_kind"] and body["window_hours"] == 168
     for bad in ("0", "169", "-1", "abc"):
         response = await client.get(
             f"/api/v1/observability/memory?window_hours={bad}", headers=headers
