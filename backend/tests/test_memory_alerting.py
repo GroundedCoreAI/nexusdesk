@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from agent_platform.modules.memory import alerting
 from agent_platform.modules.memory.alerting import (
     SEARCH_MIN_CALLS_24H,
     AlertContext,
@@ -294,6 +295,12 @@ def test_worker_wires_scanner_and_heartbeat_mode():
     disabled = MemoryWorker(None, None, make_settings(memory_alert_enabled=False))
     assert disabled.alert_scan_due() is False
     assert disabled.heartbeat_audit_due() is False
+    # Scan interval 0: no scanner consuming the record, so no heartbeat rows.
+    unscanning = MemoryWorker(
+        None, None, make_settings(embedded_worker=False, memory_alert_scan_interval_minutes=0)
+    )
+    assert unscanning.alert_scan_due() is False
+    assert unscanning.heartbeat_audit_due() is False
     # Explicit override wins over the settings flag.
     forced = MemoryWorker(None, None, make_settings(), embedded=False)
     assert forced.embedded is False
@@ -310,3 +317,81 @@ def test_evaluate_runs_all_rules_and_updates_r3_state():
     names = {alert.name for alert in evaluate(ctx, settings, samples)}
     assert {"task_failed", "embedding_growing"} <= names
     assert samples == [2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Scan orchestration (DB stubbed): multi-fire webhook fan-out, audit-failure
+# isolation
+# ---------------------------------------------------------------------------
+
+
+class StubEngine:
+    """Just enough engine for AlertScanner.scan: begin() as an async CM."""
+
+    def __init__(self, fail_on_enter=False):
+        self.fail_on_enter = fail_on_enter
+
+    def begin(self):
+        fail = self.fail_on_enter
+
+        class _Tx:
+            async def __aenter__(self):
+                if fail:
+                    raise RuntimeError("db down")
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        return _Tx()
+
+
+def stub_collect(monkeypatch, ctx):
+    async def fake_collect(engine, settings, *, embedded):
+        return ctx
+
+    monkeypatch.setattr(alerting, "collect", fake_collect)
+
+
+@pytest.mark.asyncio
+async def test_scan_multiple_rules_one_webhook_call_per_alert(monkeypatch):
+    settings = make_settings(memory_alert_webhook_url="https://hooks.example/x")
+    stub_collect(monkeypatch, make_ctx(embedded=True, failed_tasks_15m=2, pending_items=600))
+    audits = []
+
+    async def fake_audit(conn, tenant, actor, action, resource, **details):
+        audits.append({"action": action, "resource": resource, "details": details})
+
+    monkeypatch.setattr(alerting, "audit", fake_audit)
+    calls = []
+
+    async def sender(url, payload, timeout):
+        calls.append(payload)
+
+    scanner = AlertScanner(StubEngine(), settings, embedded=True, webhook=sender)
+    fired = await scanner.scan()
+    assert set(fired) == {"task_failed", "pending_backlog"}
+    assert [row["action"] for row in audits] == [
+        "memory.alert.task_failed",
+        "memory.alert.pending_backlog",
+    ]
+    # One webhook call per fired alert, each carrying that rule's payload.
+    assert [call["rule"] for call in calls] == ["task_failed", "pending_backlog"]
+    assert all(
+        set(call) == {"rule", "tenant", "value", "threshold", "window", "at"} for call in calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_scan_audit_write_failure_never_attempts_webhook(monkeypatch):
+    settings = make_settings(memory_alert_webhook_url="https://hooks.example/x")
+    stub_collect(monkeypatch, make_ctx(failed_tasks_15m=1))
+    calls = []
+
+    async def sender(url, payload, timeout):
+        calls.append(payload)
+
+    scanner = AlertScanner(StubEngine(fail_on_enter=True), settings, embedded=True, webhook=sender)
+    with pytest.raises(RuntimeError, match="db down"):
+        await scanner.scan()
+    assert calls == []

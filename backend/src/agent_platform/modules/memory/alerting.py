@@ -31,6 +31,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+import httpx
 from sqlalchemy import text
 
 from agent_platform.platform.persistence.store import audit, one
@@ -128,14 +129,13 @@ def rule_embedding_growing(ctx: AlertContext, settings, samples: list[int]) -> A
     restart is missed rather than false-fired). The caller owns the list;
     this rule shifts the current reading in after deciding.
     """
-    previous = samples[-1] if samples else None
     alert = None
     if (
         len(samples) == 2
         and ctx.embedding_backlog > 0
         and ctx.embedding_backlog > samples[-1] > samples[0]
     ):
-        alert = Alert("embedding_growing", ctx.embedding_backlog, previous or 0, "2 scans")
+        alert = Alert("embedding_growing", ctx.embedding_backlog, samples[-1], "2 scans")
     samples[:] = (samples + [ctx.embedding_backlog])[-2:]
     return alert
 
@@ -158,10 +158,13 @@ def rule_maintenance_silent(ctx: AlertContext, settings) -> Alert | None:
     tenant had memory-task activity in the last 24h (any memory_tasks row
     created in the window, or pending/running right now — i.e. maintenance
     has work to do) AND no memory.maintenance.completed/failed audit exists
-    in the same window. Tenants with zero memory activity are EXEMPT, which
-    avoids false positives from Task 1's quiet-pass-silent design (a pass
-    that affected no rows writes nothing). The value is the maintenance
-    audit count in the window; the threshold is the zero it must stay above.
+    in the same window. The worker's heartbeat liveness records are excluded
+    from that evidence: the standalone worker writes one every 5 minutes, so
+    counting them would silence R5 exactly where it matters. Tenants with
+    zero memory activity are EXEMPT, which avoids false positives from
+    Task 1's quiet-pass-silent design (a pass that affected no rows writes
+    nothing). The value is the maintenance audit count in the window; the
+    threshold is the zero it must stay above.
     """
     if ctx.memory_task_activity and ctx.maintenance_audits_24h == 0:
         return Alert("maintenance_silent", 0, 0, "24h")
@@ -301,9 +304,11 @@ async def collect(engine, settings, *, embedded: bool) -> AlertContext:
             """SELECT
             count(*) FILTER (WHERE action IN
                 ('memory.maintenance.completed','memory.maintenance.failed')
+                AND resource<>:heartbeat
                 AND created_at>now()-interval '24 hours')::int AS maintenance_24h,
             max(created_at) FILTER (WHERE action='memory.maintenance.completed'
-                AND resource=:heartbeat) AS last_heartbeat,
+                AND resource=:heartbeat
+                AND created_at>now()-interval '24 hours') AS last_heartbeat,
             EXISTS(SELECT 1 FROM audit_records a2 WHERE a2.tenant_id=:t
                 AND a2.created_at>now()-:evidence*interval '1 minute'
                 AND ((a2.action='memory.maintenance.completed'
@@ -330,22 +335,28 @@ async def collect(engine, settings, *, embedded: bool) -> AlertContext:
                 t=tenant,
             )
         )["n"]
-        for row in await _last_alerts(c, tenant):
+        for row in await _last_alerts(c, tenant, settings.memory_alert_cooldown_minutes):
             ctx.last_alerts[row["name"]] = row["last_fired_at"]
     return ctx
 
 
-async def _last_alerts(conn, tenant):
-    """Most recent firing time per alert rule, for the cooldown check."""
+async def _last_alerts(conn, tenant, cooldown_minutes: int):
+    """Most recent firing time per alert rule, for the cooldown check.
+
+    Bounded to the cooldown window: rows older than that cannot change any
+    cooldown decision, and audit_records has no TTL — an unbounded scan would
+    degrade into a whole-table filter as the table grows.
+    """
     rows = await conn.execute(
         text(
             """SELECT substring(action from 'memory.alert.(.*)') AS name,
             max(created_at) AS last_fired_at
             FROM audit_records
             WHERE tenant_id=:t AND action LIKE 'memory.alert.%'
+            AND created_at>now()-:cooldown*interval '1 minute'
             GROUP BY 1"""
         ),
-        {"t": tenant},
+        {"t": tenant, "cooldown": cooldown_minutes},
     )
     return rows.mappings().all()
 
@@ -356,8 +367,6 @@ async def _last_alerts(conn, tenant):
 
 
 async def post_webhook(url: str, payload: dict, timeout: float) -> None:
-    import httpx
-
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(url, json=payload)
         response.raise_for_status()

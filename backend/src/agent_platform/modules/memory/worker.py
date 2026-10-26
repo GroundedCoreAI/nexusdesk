@@ -430,8 +430,14 @@ class MemoryWorker:
 
         The master switch off means no heartbeat record (and no R8 scan), so
         an alerting-disabled deployment stays exactly as quiet as before.
+        Scan interval 0 also suppresses the record: with the scanner off
+        nothing consumes it, and it would still add ~288 audit rows/day.
         """
-        if self.embedded or not getattr(self.settings, "memory_alert_enabled", False):
+        if (
+            self.embedded
+            or not self.settings.memory_alert_enabled
+            or self.settings.memory_alert_scan_interval_minutes <= 0
+        ):
             return False
         return (
             self.last_heartbeat_audit is None
@@ -440,7 +446,14 @@ class MemoryWorker:
 
     async def write_heartbeat_audit(self):
         """Write the deliberate liveness record (exempt from the quiet-pass
-        rule): one memory.maintenance.completed audit with job=heartbeat."""
+        rule): one memory.maintenance.completed audit with job=heartbeat.
+
+        Written from the claim loop between run_once passes, so a single task
+        running longer than the 30-minute R8 window starves the record and
+        can false-fire worker_heartbeat — an accepted edge (a liveness record
+        favouring a false alert over a missed one); the fix is a
+        task-duration bound, not a wider window.
+        """
         self.last_heartbeat_audit = time.monotonic()
         async with self.engine.begin() as c:
             await audit(

@@ -240,6 +240,22 @@ async def test_r5_maintenance_silent_fires_with_activity_and_is_exempt_when_idle
     assert "maintenance_silent" not in fired
 
 
+async def test_r5_heartbeat_rows_are_not_maintenance_evidence(platform):
+    """Regression: the standalone worker writes a heartbeat audit every 5
+    minutes; if those counted as maintenance evidence R5 could never fire in
+    exactly the topology it guards (production compose sets embedded=false)."""
+    _client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    standalone = make_worker(services, settings, embedded=False)
+    await standalone.write_heartbeat_audit()
+    await make_task(engine, tenant, status="done")  # memory-task activity
+    # Fresh heartbeat silences R8; only R5 may fire.
+    fired = await make_worker(services, settings, embedded=False).alert_scan()
+    assert fired == ["maintenance_silent"]
+    rows = await alert_audits(engine, tenant, "maintenance_silent")
+    assert len(rows) == 1
+
+
 # ---------------------------------------------------------------------------
 # R6 rule_scan_missed: exemption without overdue tickets, fires with them
 # ---------------------------------------------------------------------------
