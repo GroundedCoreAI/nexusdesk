@@ -21,12 +21,18 @@
   cadence 内（maintenance.overdue 为空，展示"全绿"卡片）；embedding_retry
   另有一条 3 天前的记录，喂 7 天重试汇总（scanned=16, succeeded=15）。
   heartbeat 不种——quickstart 是内嵌拓扑，heartbeat 记录只属于独立 worker。
-  计数非零的维护审计都带配套证据：decay{profile_pending:1,
-  preference_expired:2} 对应 3 条真实迁移后状态的条目行 + 逐条
-  memory.decay_pending/memory.decay_expired 审计（观测页 decay 计数互相
-  印证）；rule_scan{marked:1, flags_removed:0} 对应一条仍在库的 rule 源
-  complaint_risk 旗帜行 + memory.flag.upserted 审计（形状同
-  governance.upserted / decay._migrate_below_threshold）。
+  计数非零的维护审计都带配套证据：ttl_purge{expired:2} 对应 2 条
+  expires_at 已过、status=expired 的 event 行（ttl_purge 只软过期不删行）；
+  decay{profile_pending:1, preference_expired:2} 对应 3 条真实迁移后状态的
+  条目行 + 逐条 memory.decay_pending/memory.decay_expired 审计（观测页
+  decay 计数互相印证）；rule_scan{marked:1, flags_removed:0} 对应一条仍在
+  库的 rule 源 complaint_risk 旗帜行 + memory.flag.upserted 审计（形状同
+  governance.upsert_flag / decay._migrate_below_threshold）。旗帜在
+  quickstart 首次启动后的存活由一张已解决工单保证：due_at 在 10 天前
+  （30 天清除窗口内，满足 scan_overdue_tickets 清除分支的第二个
+  EXISTS——该分支不看工单状态），status=resolved 又不命中标记分支与 R6
+  的 open/in_progress 谓词（旗帜不会被清除，R6 保持豁免）；该工单同时是
+  event_write 任务 payload 与旗帜 source_ref 的真实落点。
 - embedding 积压：4 条 embedding_failed=true 的 memory_items（backlog 卡
   非零；quickstart 默认无向量库，重试跳过，积压稳定保持）。
 - 检索：30 条 memory_search.completed 运行时事件分布在 12 次 run 上，
@@ -378,7 +384,13 @@ def search_events(run_key, cid, injected, searches):
             (
                 seq,
                 "model.completed",
-                {"round": 1, "usage": {}, "tool_calls": len(searches), "duration_ms": 96},
+                {
+                    "round": 1,
+                    "usage": {},
+                    "tool_calls": len(searches),
+                    "duration_ms": 96,
+                    "gateway_call_id": uid(NS, "gw", f"{run_id}:r1"),
+                },
             )
         )
         seq += 1
@@ -707,10 +719,10 @@ async def insert_rule_flag(conn, tenant, cid, flag_id, ticket_id, marked_h):
 
     内容串与 governance.py 的硬编码完全一致（该写入方不做 i18n）；rule_scan 审计
     的 flags_removed=0 意味着旗帜仍在——active 行本体与 memory.flag.upserted 审计
-    一起入库。source_ref 指向未落库的工单 id（演示数据沿用悬空引用的既有先例，
-    与 phase5 的会话引用一致）；故意不种 tickets 行：一行逾期的 open 工单会让
-    quickstart 的 R6 在证据窗口（2x 扫描间隔）过期后真实触发 rule_scan_missed，
-    超出本数据集"只有 R2 实发"的设计。
+    一起入库。source_ref 指向真实落库的 TK-20261025 工单（见 insert_resolved_ticket）：
+    该工单 status=resolved 不命中标记分支与 R6 的 open/in_progress 谓词，但
+    due_at 在 30 天清除窗口内，命中清除分支第二个 EXISTS（不看状态），所以
+    quickstart 启动后内嵌 worker 的首次 rule_scan 不会把旗帜清成 deleted。
     """
     await conn.execute(
         text("""INSERT INTO memory_items(id,tenant_id,customer_id,type,key,content,confidence,
@@ -726,6 +738,162 @@ async def insert_rule_flag(conn, tenant, cid, flag_id, ticket_id, marked_h):
             "co": "超时未响应工单 1 条，请优先跟进",
             "ref": ticket_id,
             "ca": ts(marked_h),
+        },
+    )
+
+
+async def ensure_ticket_type(conn, tenant):
+    """确保内建 通用工单 类型（与 phase4 同一 code，跨阶段幂等）；返回类型 id。"""
+    row = (
+        (
+            await conn.execute(
+                text("SELECT id FROM ticket_types WHERE tenant_id=:t AND code='general'"),
+                {"t": tenant},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row:
+        return str(row["id"])
+    tid = uid(NS, "ticket-type", "general")
+    name = T(zh="通用工单", en="General Ticket", zh_tw="通用工單", hi="सामान्य टिकट")
+    await conn.execute(
+        text(
+            "INSERT INTO ticket_types(tenant_id,id,code,name,published_version)"
+            " VALUES(:t,:id,'general',:name,1) ON CONFLICT (tenant_id,code) DO NOTHING"
+        ),
+        {"t": tenant, "id": tid, "name": name},
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO ticket_type_versions(tenant_id,type_id,version,name,definition,created_by)"
+            " VALUES(:t,:id,1,:name,'{\"fields\":[]}','seed') ON CONFLICT DO NOTHING"
+        ),
+        {"t": tenant, "id": tid, "name": name},
+    )
+    return tid
+
+
+async def insert_resolved_ticket(conn, tenant, ticket_id, conv_id, cid, type_id):
+    """TK-20261025 已解决工单（phase4 insert_ticket 的 0008 真实形状）。
+
+    三重作用：rule_scan 旗帜的 source_ref 与 event_write 任务 payload 的
+    ticket_id 不再悬空；due_at 在 10 天前（30 天清除窗口内）保护旗帜不被
+    scan_overdue_tickets 的清除分支删除；status=resolved 不命中标记分支与
+    R6 谓词（open/in_progress），R6 保持豁免。时间线：12 天前创建、10 天前
+    到期、10 分钟前才解决——种子 rule_scan（20 分钟前）标记旗帜时工单仍处
+    逾期 open 状态，与 marked=1 的审计互相印证。
+    """
+    created_h, due_h, resolved_h = 12 * 24, 10 * 24, 1 / 6
+    title = T(
+        zh="出口冷链批次运输温控异常投诉",
+        en="Temperature-control anomaly complaint for an export cold-chain batch",
+        zh_tw="出口冷鏈批次運輸溫控異常投訴",
+        hi="एक्सपोर्ट कोल्ड-चेन बैच के ट्रांज़िट तापमान-नियंत्रण विसंगति की शिकायत",
+    )
+    await conn.execute(
+        text("""INSERT INTO tickets(id,tenant_id,conversation_id,title,status,revision,created_at,
+                updated_at,ticket_no,type_id,type_version,customer_id,created_by,due_at,resolved_at)
+                VALUES(:id,:t,:cid,:title,'resolved',1,:ca,:ua,:no,:ty,1,:cust,'seed',:due,:res)
+                ON CONFLICT DO NOTHING"""),
+        {
+            "id": ticket_id,
+            "t": tenant,
+            "cid": conv_id,
+            "title": title,
+            "ca": ts(created_h),
+            "ua": ts(resolved_h),
+            "no": TICKET_KEY,
+            "ty": type_id,
+            "cust": str(cid),
+            "due": ts(due_h),
+            "res": ts(resolved_h),
+        },
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO tickets_detail(ticket_id,tenant_id,description)"
+            " VALUES(:id,:t,:d) ON CONFLICT DO NOTHING"
+        ),
+        {
+            "id": ticket_id,
+            "t": tenant,
+            "d": T(
+                zh="客户反馈 TK-20261025 批次运输途中冷链温控异常，要求 48 小时内给出处理方案；已补发并赔付。",
+                en="Customer reported a temperature-control anomaly in transit for batch TK-20261025 and demanded a resolution plan within 48 hours; goods re-shipped and compensation paid.",
+                zh_tw="客戶反饋 TK-20261025 批次運輸途中冷鏈溫控異常，要求 48 小時內給出處理方案；已補發並賠付。",
+                hi="ग्राहक ने बैच TK-20261025 के ट्रांज़िट में तापमान-नियंत्रण विसंगति की शिकायत की और 48 घंटों में समाधान योजना माँगी; सामान दोबारा भेजा गया और मुआवज़ा दिया गया।",
+            ),
+        },
+    )
+    await conn.execute(
+        text("""INSERT INTO ticket_process_log(tenant_id,ticket_id,actor_type,actor_id,action_type,
+                content,created_at)
+                VALUES(:t,:id,'staff','seed','created',:c,:ca)"""),
+        {
+            "t": tenant,
+            "id": ticket_id,
+            "c": T(
+                zh=f"工单创建：{title}",
+                en=f"Ticket created: {title}",
+                zh_tw=f"工單建立：{title}",
+                hi=f"टिकट बनाया गया: {title}",
+            ),
+            "ca": ts(created_h),
+        },
+    )
+
+
+def _ttl_purge_companions():
+    """ttl_purge 维护审计（expired:2）的配套证据：2 条被软过期的 event 行。
+
+    形状与 worker 的 ttl_purge 完全一致（UPDATE ... SET status='expired'，
+    不删行）：type=event、expires_at 已过、updated_at=清理时刻（3 小时前，
+    即种子 ttl_purge 审计的时间）。created_at 在 TTL（180 天）之前，使
+    expires_at 自然落在过去。
+    """
+    return [
+        {
+            "key": "evt-202603-logistics-comp",
+            "content": T(
+                zh="2026-03 批次物流延误，已按合同赔付运费差额",
+                en="2026-03 batch logistics delay; freight difference compensated per contract",
+                zh_tw="2026-03 批次物流延誤，已按合同賠付運費差額",
+                hi="2026-03 बैच लॉजिस्टिक्स देरी; अनुबंध के अनुसार भाड़ा अंतर का मुआवज़ा दिया गया",
+            ),
+            "created_h": 183 * 24,
+        },
+        {
+            "key": "evt-202602-cny-shipping",
+            "content": T(
+                zh="2026-02 春节假期发货安排已确认：节前最后发货日 2 月 14 日",
+                en="2026-02 Spring Festival shipping plan confirmed: last pre-holiday shipment on Feb 14",
+                zh_tw="2026-02 春節假期發貨安排已確認：節前最後發貨日 2 月 14 日",
+                hi="2026-02 वसंत महोत्सव शिपिंग योजना की पुष्टि: छुट्टी से पहले अंतिम शिपमेंट 14 फ़रवरी",
+            ),
+            "created_h": 190 * 24,
+        },
+    ]
+
+
+async def insert_expired_event(conn, tenant, iid, cid, key, content, created_h, purged_h):
+    """一条 ttl_purge 软过期后的 event 行（insert_item 不支持 expires_at，走裸 SQL）。"""
+    await conn.execute(
+        text("""INSERT INTO memory_items(id,tenant_id,customer_id,type,key,content,confidence,status,
+                source_type,revision,last_referenced_at,reference_count,created_at,updated_at,
+                protected,expires_at)
+                VALUES(:id,:t,:c,'event',:k,:co,0.9,'expired','extracted',1,:ca,0,:ca,:ua,false,:exp)
+                ON CONFLICT DO NOTHING"""),
+        {
+            "id": iid,
+            "t": tenant,
+            "c": cid,
+            "k": key,
+            "co": content,
+            "ca": ts(created_h),
+            "ua": ts(purged_h),
+            "exp": ts(created_h) + timedelta(days=TTL_DAYS),
         },
     )
 
@@ -815,6 +983,7 @@ async def seed(runtime, settings) -> bool:
         cid = uid(NS, "customer", "zhaowenbo")
         conv_a = uid(NS, "conversation", f"{EXT}:fullchain")
         conv_b = uid(NS, "conversation", f"{EXT}:lean")
+        ticket_id = uid(NS, "ticket", TICKET_KEY)
         item_specs = _items()
         specs = {f"{i['t']}:{i['k']}": i for i in item_specs}
         iids = {
@@ -896,6 +1065,10 @@ async def seed(runtime, settings) -> bool:
             agents["lean"]["id"],
             cid=cid,
         )
+        # TK-20261025 已解决工单：rule 旗帜的存续保护 + event_write/旗帜引用落点
+        # （tickets 有 (tenant_id,conversation_id) 外键，须排在会话插入之后）。
+        type_id = await ensure_ticket_type(conn, tenant)
+        await insert_resolved_ticket(conn, tenant, ticket_id, conv_a, cid, type_id)
         for run_key, hours, agent_key, msg, searches, injected_labels in run_specs:
             conv = conv_a if agent_key == "fullchain" else conv_b
             injected = inj(injected_labels)
@@ -924,7 +1097,6 @@ async def seed(runtime, settings) -> bool:
             "old_summary": None,
         }
         ext_payload = {"conversation_id": conv_a, "customer_id": cid, "write_mode": "auto"}
-        ticket_id = uid(NS, "ticket", TICKET_KEY)
         tasks = [
             ("sum:0", "conversation_summary", "done", sum_payload, 55, 1.5, None, 1, None),
             ("sum:1", "conversation_summary", "done", sum_payload, 130, 6.5, None, 1, None),
@@ -1056,7 +1228,20 @@ async def seed(runtime, settings) -> bool:
                 hours,
             )
 
-        # --- decay / rule_scan 审计的配套证据（行本体 + 逐条审计） ------------
+        # --- ttl_purge / decay / rule_scan 审计的配套证据 -------------------
+        # ttl_purge{expired:2}：2 条 expires_at 已过、3 小时前被软过期的 event 行。
+        for comp in _ttl_purge_companions():
+            await insert_expired_event(
+                conn,
+                tenant,
+                uid(NS, "item", f"zhao:event:{comp['key']}"),
+                cid,
+                comp["key"],
+                comp["content"],
+                comp["created_h"],
+                3,
+            )
+        # decay{profile_pending:1, preference_expired:2}：迁移后状态的行本体 + 逐条审计。
         for comp in _decay_companions():
             comp_id = uid(NS, "item", f"zhao:{comp['iid_key']}")
             await insert_item(
@@ -1081,9 +1266,9 @@ async def seed(runtime, settings) -> bool:
                 },
                 5,
             )
-        # rule_scan 审计 marked=1 / flags_removed=0 ⇒ 规则源旗帜仍在库。
+        # rule_scan 审计 marked=1 / flags_removed=0 ⇒ 规则源旗帜仍在库；已解决工单
+        # （due_at 在 30 天清除窗口内）保证 quickstart 首次 rule_scan 不会清除它。
         flag_id = uid(NS, "item", "zhao:flag:complaint_risk")
-        ticket_id = uid(NS, "ticket", TICKET_KEY)
         await insert_rule_flag(conn, tenant, cid, flag_id, ticket_id, 1 / 3)
         await insert_audit(
             conn,
