@@ -352,7 +352,7 @@ class ObservabilityService:
             count(*) FILTER (WHERE status='running')::int AS running,
             count(*) FILTER (WHERE status='failed'
                 AND updated_at>now()-interval '15 minutes')::int AS failed_15m,
-            EXTRACT(EPOCH FROM min(now()-created_at)
+            EXTRACT(EPOCH FROM max(now()-created_at)
                 FILTER (WHERE status='pending'))/60 AS oldest_pending_age_minutes
             FROM memory_tasks WHERE tenant_id=:t""",
             t=tenant,
@@ -392,25 +392,15 @@ class ObservabilityService:
                 t=tenant,
             )
         )
-        modes = await one(
+        # One scan feeds both search sections: the WHERE clause is identical,
+        # and this endpoint is polled on a few-second cadence.
+        search = await one(
             c,
             """SELECT count(*) FILTER (WHERE e.data->>'mode'='vector')::int AS vector,
             count(*) FILTER (WHERE e.data->>'mode'='text')::int AS text,
             count(*) FILTER (WHERE e.data->>'mode'='keyword_fallback')::int
-                AS keyword_fallback
-            FROM runtime_events e JOIN runtime_runs r ON r.id=e.run_id
-            WHERE r.tenant_id=:t AND e.type='memory_search.completed'
-            AND e.created_at>now()-:wh*interval '1 hour'""",
-            t=tenant,
-            wh=window_hours,
-        )
-        modes["fallback_rate"] = _rate(
-            modes["keyword_fallback"],
-            modes["vector"] + modes["text"] + modes["keyword_fallback"],
-        )
-        quality = await one(
-            c,
-            """SELECT count(*)::int AS calls,
+                AS keyword_fallback,
+            count(*)::int AS calls,
             count(*) FILTER (WHERE CAST(e.data->>'hits' AS int)=0)::int AS empty,
             avg(CAST(e.data->>'returned' AS double precision)) AS avg_returned
             FROM runtime_events e JOIN runtime_runs r ON r.id=e.run_id
@@ -419,7 +409,21 @@ class ObservabilityService:
             t=tenant,
             wh=window_hours,
         )
-        quality["empty_rate"] = _rate(quality["empty"], quality["calls"])
+        modes = {
+            "vector": search["vector"],
+            "text": search["text"],
+            "keyword_fallback": search["keyword_fallback"],
+        }
+        modes["fallback_rate"] = _rate(
+            modes["keyword_fallback"],
+            modes["vector"] + modes["text"] + modes["keyword_fallback"],
+        )
+        quality = {
+            "calls": search["calls"],
+            "empty": search["empty"],
+            "empty_rate": _rate(search["empty"], search["calls"]),
+            "avg_returned": search["avg_returned"],
+        }
         maintenance = await self._maintenance_section(c, tenant, window_hours)
         agents = await many(
             c,
@@ -502,6 +506,8 @@ class ObservabilityService:
         lookback = max(window_hours, MAINTENANCE_LOOKBACK_HOURS)
         rows = await many(
             c,
+            # max(now()) piggybacks the server clock on the same query, so the
+            # overdue arithmetic below compares timestamps from one source.
             """SELECT resource AS job, max(created_at) AS last_at, max(now()) AS now
             FROM audit_records
             WHERE tenant_id=:t AND action='memory.maintenance.completed'

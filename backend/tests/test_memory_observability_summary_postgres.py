@@ -170,6 +170,16 @@ async def seed_health_dataset(engine, tenant):
         created="now()-interval '30 minutes'",
         updated="now()-interval '30 minutes'",
     )
+    # A second, younger pending task: oldest_pending_age_minutes must report
+    # the OLDEST age (~30m) — a min/max slip here once reported the newest.
+    await make_task(
+        engine,
+        tenant,
+        kind="conversation_summary",
+        status="pending",
+        created="now()-interval '5 minutes'",
+        updated="now()-interval '5 minutes'",
+    )
     await make_task(engine, tenant, kind="conversation_summary", status="running")
     await make_task(
         engine,
@@ -276,7 +286,7 @@ async def test_p7_it_memory_summary_health_sections_reconcile(platform):
         assert key in summary
 
     tasks = summary["tasks"]
-    assert tasks["pending"] == 1 and tasks["running"] == 1 and tasks["failed_15m"] == 1
+    assert tasks["pending"] == 2 and tasks["running"] == 1 and tasks["failed_15m"] == 1
     assert 29 <= tasks["oldest_pending_age_minutes"] <= 31
     by_kind = {row["kind"]: row for row in tasks["by_kind"]}
     extract = by_kind["memory_extract"]  # the 10d-old row is out of the 24h window
@@ -370,6 +380,16 @@ async def test_p7_it_memory_summary_window_hours_168(platform):
         r=run_id,
         d=json.dumps({"mode": "text", "hits": 1, "returned": 1}),
     )
+    # An injection detail row 2d old: only the wide window may count it.
+    await db_exec(
+        engine,
+        """INSERT INTO memory_injection_log(tenant_id,run_id,customer_id,item_id,section,
+        injected_at) VALUES(:t,:r,:c,:i,'profile',now()-interval '2 days')""",
+        t=tenant,
+        r=run_id,
+        c=customer_id,
+        i=uuid4(),
+    )
 
     observability = services.platform.observability
     narrow = await observability.memory_summary(tenant)
@@ -382,6 +402,10 @@ async def test_p7_it_memory_summary_window_hours_168(platform):
     assert narrow["search_modes"]["text"] == 0
     assert wide["search_modes"]["text"] == 1
     assert wide["search_quality"]["calls"] == 1
+    # The window parameter also scopes the injection section.
+    assert narrow["injection"]["by_section"]["profile"] == 0
+    assert wide["injection"]["by_section"]["profile"] == 1
+    assert wide["injection"]["avg_items"] == pytest.approx(1.0)
     # The null-agent run is only inside the wide agents window... it was
     # created 2d ago, so the narrow window sees no agents at all.
     assert narrow["agents"] == [] and len(wide["agents"]) == 1

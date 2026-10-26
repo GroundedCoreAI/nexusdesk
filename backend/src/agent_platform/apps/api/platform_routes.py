@@ -732,7 +732,7 @@ async def memory_alerts(
     window_hours: Annotated[int, Query(ge=1, le=168)] = 24,
 ):
     # Phase 7 Task 3: recent memory.alert.* firings (Task 2 audit rows),
-    # newest first, capped server-side.
+    # newest first, capped server-side at the latest 200 rows.
     return await services(request).observability.memory_alerts(user.tenant, window_hours)
 
 
