@@ -78,8 +78,9 @@ async def make_run(
     run_id = uuid4()
     await db_exec(
         engine,
-        f"""INSERT INTO runtime_runs(id,conversation_id,tenant_id,input,config,status,created_at)
-        VALUES(:id,:c,:t,'历史消息',CAST(:cfg AS jsonb),'completed',{created})""",
+        f"""INSERT INTO runtime_runs(id,conversation_id,tenant_id,input,config,status,created_at,
+        queue_expires_at)
+        VALUES(:id,:c,:t,'历史消息',CAST(:cfg AS jsonb),'completed',{created},now())""",
         id=run_id,
         c=cid,
         t=tenant,
@@ -367,8 +368,9 @@ async def test_p7_it_memory_summary_window_hours_168(platform):
     run_id = uuid4()
     await db_exec(
         engine,
-        "INSERT INTO runtime_runs(id,conversation_id,tenant_id,input,config,status,created_at)"
-        " VALUES(:id,:c,:t,'历史消息','{}','completed',now()-interval '2 days')",
+        "INSERT INTO runtime_runs(id,conversation_id,tenant_id,input,config,status,created_at,"
+        "queue_expires_at)"
+        " VALUES(:id,:c,:t,'历史消息','{}','completed',now()-interval '2 days',now())",
         id=run_id,
         c=cid,
         t=tenant,

@@ -68,13 +68,21 @@ async def make_task(engine, tenant, *, status, age_sql="now()", kind="memory_ext
 
 
 async def make_pending_item(engine, tenant, *, embedding_failed=False):
+    customer_id = uuid4()
+    await db_exec(
+        engine,
+        "INSERT INTO memory_customers(id,tenant_id) VALUES(:id,:t)",
+        id=customer_id,
+        t=tenant,
+    )
     item_id = uuid4()
     await db_exec(
         engine,
-        """INSERT INTO memory_items(id,tenant_id,type,key,content,status,source_type,
-        embedding_failed) VALUES(:id,:t,'profile',:k,'敏感内容样本',:s,'extract',:e)""",
+        """INSERT INTO memory_items(id,tenant_id,customer_id,type,key,content,status,source_type,
+        embedding_failed) VALUES(:id,:t,:c,'profile',:k,'敏感内容样本',:s,'extract',:e)""",
         id=item_id,
         t=tenant,
+        c=customer_id,
         k=f"profile:{uuid4().hex[:8]}",
         s="pending",
         e=embedding_failed,
@@ -94,8 +102,9 @@ async def make_search_events(engine, tenant, *, total, fallback):
     run_id = uuid4()
     await db_exec(
         engine,
-        "INSERT INTO runtime_runs(id,conversation_id,tenant_id,input,config,status)"
-        " VALUES(:id,:c,:t,'历史消息','{}','completed')",
+        "INSERT INTO runtime_runs(id,conversation_id,tenant_id,input,config,status,"
+        "queue_expires_at) VALUES(:id,:c,:t,'历史消息','{}','completed',"
+        "now()-interval '1 day')",
         id=run_id,
         c=cid,
         t=tenant,
