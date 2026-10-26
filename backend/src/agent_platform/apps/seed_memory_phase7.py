@@ -21,6 +21,12 @@
   cadence 内（maintenance.overdue 为空，展示"全绿"卡片）；embedding_retry
   另有一条 3 天前的记录，喂 7 天重试汇总（scanned=16, succeeded=15）。
   heartbeat 不种——quickstart 是内嵌拓扑，heartbeat 记录只属于独立 worker。
+  计数非零的维护审计都带配套证据：decay{profile_pending:1,
+  preference_expired:2} 对应 3 条真实迁移后状态的条目行 + 逐条
+  memory.decay_pending/memory.decay_expired 审计（观测页 decay 计数互相
+  印证）；rule_scan{marked:1, flags_removed:0} 对应一条仍在库的 rule 源
+  complaint_risk 旗帜行 + memory.flag.upserted 审计（形状同
+  governance.upserted / decay._migrate_below_threshold）。
 - embedding 积压：4 条 embedding_failed=true 的 memory_items（backlog 卡
   非零；quickstart 默认无向量库，重试跳过，积压稳定保持）。
 - 检索：30 条 memory_search.completed 运行时事件分布在 12 次 run 上，
@@ -359,18 +365,40 @@ def search_events(run_key, cid, injected, searches):
     evs = [
         (1, "run.queued", {}),
         (2, "run.started", {}),
-        (3, "model.started", {"round": 1}),
     ]
-    seq = 4
-    for mode, hits in searches:
-        evs.append((seq, "memory_search.completed", {"mode": mode, "hits": hits, "returned": hits}))
+    seq = 3
+    answer_round = 1
+    if searches:
+        # 真实 ReAct 形状：检索工具调用 round（model.completed 带 tool_calls=N）
+        # → 工具执行期发出检索遥测 → 回答 round（tool_calls=0，观测的 TTFC
+        # 取的就是这个 round）。
+        evs.append((seq, "model.started", {"round": 1}))
+        seq += 1
+        evs.append(
+            (
+                seq,
+                "model.completed",
+                {"round": 1, "usage": {}, "tool_calls": len(searches), "duration_ms": 96},
+            )
+        )
+        seq += 1
+        for mode, hits in searches:
+            evs.append(
+                (seq, "memory_search.completed", {"mode": mode, "hits": hits, "returned": hits})
+            )
+            seq += 1
+        evs.append((seq, "model.started", {"round": 2}))
+        seq += 1
+        answer_round = 2
+    else:
+        evs.append((seq, "model.started", {"round": 1}))
         seq += 1
     evs.append(
         (
             seq,
             "model.completed",
             {
-                "round": 1,
+                "round": answer_round,
                 "usage": {},
                 "tool_calls": 0,
                 "duration_ms": 141,
@@ -593,6 +621,115 @@ def _maintenance_audits():
     ]
 
 
+def _decay_companions():
+    """decay 维护审计（profile_pending=1 / preference_expired=2）的配套证据。
+
+    形状与 decay.py._migrate_below_threshold 完全一致：条目行本体保留在迁移
+    后状态（decay 不删行——profile 低于阈值 → pending、preference → expired），
+    每条配一行逐条审计（details={customer_id,type,key,effective_confidence}，
+    actor=memory）。effective_confidence = confidence * 0.5**(age_days/半衰期)
+    （profile 365d / preference 90d），均低于 memory_decay_min_confidence=0.3，
+    让观测页 decay 计数（7d 窗口）与维护卡片互相印证。审计时间 = decay 维护
+    审计的 5 小时前。
+    """
+    return [
+        {
+            "iid_key": "decay:profile:hq_address_2023",
+            "action": "memory.decay_pending",
+            "spec": item(
+                "profile",
+                "hq_address_2023",
+                T(
+                    zh="2023 年登记的总部地址：舟山临城新区港航路 88 号（已搬迁）",
+                    en="HQ address registered in 2023: 88 Ganghang Road, Lincheng New District, Zhoushan (relocated since)",
+                    zh_tw="2023 年登記的總部地址：舟山臨城新區港航路 88 號（已搬遷）",
+                    hi="2023 में दर्ज मुख्यालय का पता: 88 Ganghang Road, Lincheng New District, Zhoushan (तब से स्थानांतरित)",
+                ),
+                0.4,
+                status="pending",
+                st="manual",
+                ch=300 * 24,
+                uh=5,
+            ),
+            "last_ref_h": 280 * 24,
+            # 0.4 * 0.5**(280/365)
+            "effective": 0.235048,
+        },
+        {
+            "iid_key": "decay:preference:report_channel_old",
+            "action": "memory.decay_expired",
+            "spec": item(
+                "preference",
+                "report_channel_old",
+                T(
+                    zh="早期偏好：对账报表走纸质邮寄（已废弃）",
+                    en="Early preference: reconciliation reports by paper mail (deprecated)",
+                    zh_tw="早期偏好：對賬報表走紙質郵寄（已廢棄）",
+                    hi="शुरुआती प्राथमिकता: रीकंसिलिएशन रिपोर्ट पेपर मेल से (अब बंद)",
+                ),
+                0.35,
+                status="expired",
+                st="manual",
+                ch=220 * 24,
+                uh=5,
+            ),
+            "last_ref_h": 190 * 24,
+            # 0.35 * 0.5**(190/90)
+            "effective": 0.081035,
+        },
+        {
+            "iid_key": "decay:preference:settlement_note_old",
+            "action": "memory.decay_expired",
+            "spec": item(
+                "preference",
+                "settlement_note_old",
+                T(
+                    zh="早期结算备注：月结 30 天（已调整为 60 天账期）",
+                    en="Early settlement note: monthly net-30 (since adjusted to 60-day terms)",
+                    zh_tw="早期結算備註：月結 30 天（已調整為 60 天賬期）",
+                    hi="शुरुआती सेटलमेंट नोट: मासिक नेट-30 (अब 60-दिन अवधि में बदला गया)",
+                ),
+                0.42,
+                status="expired",
+                st="manual",
+                ch=200 * 24,
+                uh=5,
+            ),
+            "last_ref_h": 160 * 24,
+            # 0.42 * 0.5**(160/90)
+            "effective": 0.122517,
+        },
+    ]
+
+
+async def insert_rule_flag(conn, tenant, cid, flag_id, ticket_id, marked_h):
+    """rule_scan 标记的规则源 complaint_risk 旗帜（governance.upsert_flag 的 INSERT 形状）。
+
+    内容串与 governance.py 的硬编码完全一致（该写入方不做 i18n）；rule_scan 审计
+    的 flags_removed=0 意味着旗帜仍在——active 行本体与 memory.flag.upserted 审计
+    一起入库。source_ref 指向未落库的工单 id（演示数据沿用悬空引用的既有先例，
+    与 phase5 的会话引用一致）；故意不种 tickets 行：一行逾期的 open 工单会让
+    quickstart 的 R6 在证据窗口（2x 扫描间隔）过期后真实触发 rule_scan_missed，
+    超出本数据集"只有 R2 实发"的设计。
+    """
+    await conn.execute(
+        text("""INSERT INTO memory_items(id,tenant_id,customer_id,type,key,content,confidence,
+                status,source_type,protected,source_ref,revision,last_referenced_at,
+                reference_count,created_at,updated_at)
+                VALUES(:id,:t,:c,'flag','complaint_risk',:co,1.0,'active','rule',false,:ref,1,
+                :ca,0,:ca,:ca)
+                ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING"""),
+        {
+            "id": flag_id,
+            "t": tenant,
+            "c": cid,
+            "co": "超时未响应工单 1 条，请优先跟进",
+            "ref": ticket_id,
+            "ca": ts(marked_h),
+        },
+    )
+
+
 def _quality_audits(cid):
     """pending 质量审计（7d 窗口）：8 确认 + 2 拒绝，确认率 80%。
 
@@ -678,7 +815,8 @@ async def seed(runtime, settings) -> bool:
         cid = uid(NS, "customer", "zhaowenbo")
         conv_a = uid(NS, "conversation", f"{EXT}:fullchain")
         conv_b = uid(NS, "conversation", f"{EXT}:lean")
-        specs = {f"{i['t']}:{i['k']}": i for i in _items()}
+        item_specs = _items()
+        specs = {f"{i['t']}:{i['k']}": i for i in item_specs}
         iids = {
             k: uid(NS, "item", f"zhao:{k}") for k in (*specs, f"event:open_ticket:{TICKET_KEY}")
         }
@@ -696,7 +834,7 @@ async def seed(runtime, settings) -> bool:
         # --- 客户 + 身份 + 记忆条目 --------------------------------------
         await insert_customer(conn, tenant, cid, 30 * 24, 1)
         await insert_identity(conn, tenant, uid(NS, "identity", EXT), cid, EXT, 30 * 24)
-        for spec in _items():
+        for spec in item_specs:
             await insert_item(
                 conn,
                 tenant,
@@ -889,6 +1027,8 @@ async def seed(runtime, settings) -> bool:
             )
         # R2 演示任务：pending 约 70 分钟、run_after 在未来（不可领取），
         # quickstart 内嵌告警扫描器首个周期即真实触发 pending_task_age。
+        # duration_ms=410 与真实重试入队路径一致：失败尝试已耗时落库
+        # （worker._finish 的 COALESCE 保留每次尝试的实测耗时）。
         await insert_task(
             conn,
             tenant,
@@ -896,6 +1036,7 @@ async def seed(runtime, settings) -> bool:
             "memory_extract",
             "pending",
             ext_payload,
+            duration_ms=410,
             created_h=STUCK_CREATED_H,
             updated_h=STUCK_UPDATED_H,
             error="summary_execution_error",
@@ -915,7 +1056,54 @@ async def seed(runtime, settings) -> bool:
                 hours,
             )
 
+        # --- decay / rule_scan 审计的配套证据（行本体 + 逐条审计） ------------
+        for comp in _decay_companions():
+            comp_id = uid(NS, "item", f"zhao:{comp['iid_key']}")
+            await insert_item(
+                conn,
+                tenant,
+                comp_id,
+                cid,
+                comp["spec"],
+                last_referenced_h=comp["last_ref_h"],
+            )
+            await insert_audit(
+                conn,
+                tenant,
+                "memory",
+                comp["action"],
+                comp_id,
+                {
+                    "customer_id": cid,
+                    "type": comp["spec"]["t"],
+                    "key": comp["spec"]["k"],
+                    "effective_confidence": comp["effective"],
+                },
+                5,
+            )
+        # rule_scan 审计 marked=1 / flags_removed=0 ⇒ 规则源旗帜仍在库。
+        flag_id = uid(NS, "item", "zhao:flag:complaint_risk")
+        ticket_id = uid(NS, "ticket", TICKET_KEY)
+        await insert_rule_flag(conn, tenant, cid, flag_id, ticket_id, 1 / 3)
+        await insert_audit(
+            conn,
+            tenant,
+            "memory",
+            "memory.flag.upserted",
+            flag_id,
+            {
+                "customer_id": cid,
+                "key": "complaint_risk",
+                "source_type": "rule",
+                "source_ref": ticket_id,
+                "pii_masked": 0,
+            },
+            1 / 3,
+        )
+
         # --- 抽取审计（pending=1 与客户待确认条目呼应，actor=memory） --------
+        # conversation_id 与真实写入方一致（extraction.py）：runtime_conversations
+        # 的 UUID 主键，不是 external_id 字符串。
         await insert_audit(
             conn,
             tenant,
@@ -923,7 +1111,7 @@ async def seed(runtime, settings) -> bool:
             "memory.extract.applied",
             cid,
             {
-                "conversation_id": f"{EXT}:fullchain",
+                "conversation_id": conv_a,
                 "input_messages": 8,
                 "added": 2,
                 "updated": 1,
