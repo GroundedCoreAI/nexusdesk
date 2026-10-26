@@ -21,6 +21,7 @@ import logging
 import time
 from uuid import uuid4
 
+from agent_platform.modules.memory.alerting import HEARTBEAT_INTERVAL_SECONDS, AlertScanner
 from agent_platform.modules.memory.decay import REINFORCE_KIND, daily_migration
 from agent_platform.modules.memory.events import EVENT_KIND
 from agent_platform.modules.memory.governance import scan_overdue_tickets
@@ -57,6 +58,7 @@ class MemoryWorker:
         heartbeat_seconds=HEARTBEAT_SECONDS,
         store=None,
         scan_interval_seconds=SCAN_INTERVAL_SECONDS,
+        embedded=None,
     ):
         self.engine, self.service, self.settings = engine, service, settings
         self.poll_seconds = poll_seconds
@@ -70,6 +72,15 @@ class MemoryWorker:
         # Phase 4 (R14): the built-in rule scan runs on its own timer,
         # independent of the daily maintenance pass; first pass at startup.
         self.last_rule_scan = None
+        # Phase 7 (Task 2): alert scan on its own idle-cycle timer. Embedded
+        # vs standalone decides R8 (worker_heartbeat) and the heartbeat
+        # record: embedded => API alive implies worker alive, so both are
+        # skipped. Defaults to the deployment-wide settings flag.
+        if embedded is None:
+            embedded = getattr(settings, "embedded_worker", True)
+        self.embedded = embedded
+        self.alert_scanner = AlertScanner(engine, settings, embedded=embedded)
+        self.last_heartbeat_audit = None
         self.owner = uuid4()
         self.stopping = asyncio.Event()
 
@@ -406,6 +417,43 @@ class MemoryWorker:
             if any(stats.values()):
                 await self._maintenance_completed(job, stats)
 
+    def alert_scan_due(self):
+        """Phase 7 alert scan gate: master switch and interval 0 disable it."""
+        return self.alert_scanner.due()
+
+    async def alert_scan(self):
+        """One alert pass; failures never break the claim loop (caller logs)."""
+        return await self.alert_scanner.scan()
+
+    def heartbeat_audit_due(self):
+        """R8 liveness record: standalone only, at most once per interval.
+
+        The master switch off means no heartbeat record (and no R8 scan), so
+        an alerting-disabled deployment stays exactly as quiet as before.
+        """
+        if self.embedded or not getattr(self.settings, "memory_alert_enabled", False):
+            return False
+        return (
+            self.last_heartbeat_audit is None
+            or time.monotonic() - self.last_heartbeat_audit >= HEARTBEAT_INTERVAL_SECONDS
+        )
+
+    async def write_heartbeat_audit(self):
+        """Write the deliberate liveness record (exempt from the quiet-pass
+        rule): one memory.maintenance.completed audit with job=heartbeat."""
+        self.last_heartbeat_audit = time.monotonic()
+        async with self.engine.begin() as c:
+            await audit(
+                c,
+                self.settings.tenant_id,
+                "memory",
+                "memory.maintenance.completed",
+                "heartbeat",
+                job="heartbeat",
+                result="ok",
+                stats={},
+            )
+
     async def reset_running(self):
         """Graceful shutdown: tasks claimed by this worker become claimable again."""
         async with self.engine.begin() as c:
@@ -421,13 +469,23 @@ class MemoryWorker:
         try:
             while not self.stopping.is_set():
                 try:
+                    if self.heartbeat_audit_due():
+                        # Standalone liveness record (R8); its failure must
+                        # not break the claim loop.
+                        try:
+                            await self.write_heartbeat_audit()
+                        except Exception:
+                            logger.exception("Memory worker heartbeat audit failed")
                     if not await self.run_once():
                         # Rule scan first (R14): the cheaper, more frequent
-                        # timer; the daily maintenance pass follows.
+                        # timer; the daily maintenance pass follows, and the
+                        # alert scan (Phase 7) trails both.
                         if self.rule_scan_due():
                             await self.rule_scan()
                         if self.maintenance_due():
                             await self.maintenance()
+                        if self.alert_scan_due():
+                            await self.alert_scan()
                         await asyncio.sleep(self.poll_seconds)
                 except asyncio.CancelledError:
                     raise
