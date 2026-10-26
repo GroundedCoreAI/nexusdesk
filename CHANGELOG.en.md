@@ -4,9 +4,9 @@
 
 Versions map to `v`-prefixed Git tags and follow [Semantic Versioning](https://semver.org/). During `0.x`, releases follow feature batches: `x` is the batch and `y` is a fix.
 
-## v0.2.0 — 2026-10-24
+## v0.2.0 — 2026-10-26
 
-Second feature batch: streamed answers, the agent memory system (phases 1–6), native channel integrations, member and access management, an evaluation workbench, and a release-gated deployment pipeline.
+Second feature batch: streamed answers, the agent memory system (phases 1–6), native channel integrations, member and access management, an evaluation workbench, AI-assisted PR review, and a CI/CD pipeline that separates test deployments from formal releases.
 
 ### Added
 
@@ -43,7 +43,8 @@ Second feature batch: streamed answers, the agent memory system (phases 1–6), 
 **Engineering and release**
 
 - Branch governance: `integration` is the default branch, rulesets protect `main`/`integration`, and CODEOWNERS enforces review of sensitive paths.
-- Release-gated deployment: CD only runs on a published GitHub Release (`v*` tag) or a manual dispatch with an explicit version, gated by the `production` Environment; quickstart images are pushed to GHCR and mirrored to Docker Hub.
+- Added the AI PR review pipeline (phases 1–3): policy-driven risk checks, PR context collection, LLM review, bilingual review comments, and configurable model timeouts.
+- CI/CD V2 separates test deployments from formal releases: pushes to `integration` deploy to the test server after CI succeeds and identify images by commit SHA, while `main`, formal tags, and GitHub Releases never trigger a server deployment.
 - The quickstart defaults to the pgvector image; new AGENTS.md entry point and team-standard skills (commit standard, dev workflow, and more).
 - New brand mark (orbit logo with gradient wordmark); the quickstart pre-fills the demo sign-in form.
 
