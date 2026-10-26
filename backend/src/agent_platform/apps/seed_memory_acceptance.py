@@ -1,11 +1,12 @@
-"""Seed the phase 1-5 memory acceptance datasets; safe to run again.
+"""Seed the phase 1-5 + 7 memory acceptance datasets; safe to run again.
 
 Phase 6 has its own seeder (``seed_memory_demo``); this entrypoint runs the
-five per-phase modules built on ``seed_memory_common`` so a fresh server
-boots into a console that demonstrates every shipped memory capability:
+per-phase modules built on ``seed_memory_common`` so a fresh server boots
+into a console that demonstrates every shipped memory capability:
 conversation summaries (P1), extracted customer profiles (P2), event memory
-and search (P3), governance states (P4) and agent-level memory switches
-(P5). Each module is idempotent, so re-runs only report what already exists.
+and search (P3), governance states (P4), agent-level memory switches (P5)
+and production observability & alerting (P7). Each module is idempotent, so
+re-runs only report what already exists.
 
 Display strings follow ``Settings.seed_locale`` via ``seed_memory_i18n``;
 identity keys stay constant so the locale only affects first-time seeding.
@@ -21,6 +22,7 @@ from agent_platform.apps import (
     seed_memory_phase3,
     seed_memory_phase4,
     seed_memory_phase5,
+    seed_memory_phase7,
 )
 from agent_platform.apps.seed_memory_common import LOCK_ID
 from agent_platform.apps.seed_memory_i18n import T, set_locale
@@ -41,6 +43,9 @@ def _phases():
            zh_tw="階段4·記憶治理", hi="चरण 4 · मेमोरी गवर्नेंस"), seed_memory_phase4),
         (T(zh="阶段5·Agent记忆配置", en="Phase 5 · Agent Memory Config",
            zh_tw="階段5·Agent記憶配置", hi="चरण 5 · Agent मेमोरी कॉन्फ़िग"), seed_memory_phase5),
+        (T(zh="阶段7·生产观测与告警", en="Phase 7 · Production Observability & Alerts",
+           zh_tw="階段7·生產觀測與告警", hi="चरण 7 · प्रोडक्शन ऑब्ज़र्वेबिलिटी और अलर्ट"),
+         seed_memory_phase7),
     ]
 
 

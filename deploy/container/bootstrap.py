@@ -127,7 +127,7 @@ def seed_industry_cases(settings):
 
 
 def seed_memory_demo():
-    """Load the memory demo datasets (phase 6 visualization + phases 1-5
+    """Load the memory demo datasets (phase 6 visualization + phases 1-5 and 7
     acceptance showcases). Both idempotent."""
     subprocess.run([sys.executable, "-m", "agent_platform.apps.seed_memory_demo"], check=True)
     subprocess.run([sys.executable, "-m", "agent_platform.apps.seed_memory_acceptance"], check=True)
