@@ -45,6 +45,7 @@ Second feature batch: streamed answers, the agent memory system (phases 1–6), 
 - Branch governance: `integration` is the default branch, rulesets protect `main`/`integration`, and CODEOWNERS enforces review of sensitive paths.
 - Added the AI PR review pipeline (phases 1–3): policy-driven risk checks, PR context collection, LLM review, bilingual review comments, and configurable model timeouts.
 - CI/CD V2 separates test deployments from formal releases: pushes to `integration` deploy to the test server after CI succeeds and identify images by commit SHA, while `main`, formal tags, and GitHub Releases never trigger a server deployment.
+- Dependency update: pypdf was upgraded to 6.21.2, with the release and deployment tests updated accordingly.
 - The quickstart defaults to the pgvector image; new AGENTS.md entry point and team-standard skills (commit standard, dev workflow, and more).
 - New brand mark (orbit logo with gradient wordmark); the quickstart pre-fills the demo sign-in form.
 

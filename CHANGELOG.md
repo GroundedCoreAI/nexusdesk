@@ -45,6 +45,7 @@
 - 分支管理规范化：`integration` 为默认分支，Rulesets 保护 `main`/`integration`，CODEOWNERS 强制敏感路径复核。
 - 新增 AI PR 自动评审流水线 Phase 1–3：由策略驱动的风险检查、PR 上下文采集、LLM 评审和中英双语评论组成，模型超时支持配置。
 - CI/CD V2 将测试部署与正式发布分离：`integration` 的 Push 在 CI 成功后自动部署测试服务器，镜像以 Commit SHA 标识；`main`、正式 Tag 和 GitHub Release 均不触发服务器部署。
+- 依赖升级：pypdf 升级至 6.21.2，并同步更新发布与部署相关测试。
 - quickstart 默认使用 pgvector 镜像；新增 AGENTS.md 与团队标准 skills（提交规范、开发流程等）。
 - 新品牌标识（轨道图形 + 渐变字标）；quickstart 登录表单预填演示账号。
 
