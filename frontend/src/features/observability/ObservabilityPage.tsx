@@ -138,7 +138,7 @@ export function MemoryMetrics({ value }: { value: MemorySummary | null }) {
         { title: t("失败"), dataIndex: 'failed' },
     ];
     const agentColumns: TableColumnsType<MemoryAgentRow> = [
-        { title: 'Agent', dataIndex: 'agent_id', render: (id: string | null) => id ? <span className="mono">{id.slice(0, 8)}</span> : t("未归属 Agent") },
+        { title: t("Agent"), dataIndex: 'agent_id', render: (id: string | null) => id ? <span className="mono">{id.slice(0, 8)}</span> : t("未归属 Agent") },
         { title: t("客户运行"), dataIndex: 'customer_runs' },
         { title: t("注入运行"), dataIndex: 'injected_runs' },
         { title: t("注入率"), dataIndex: 'inject_rate', render: (v: number | null) => percent(v) },
@@ -159,7 +159,7 @@ export function MemoryMetrics({ value }: { value: MemorySummary | null }) {
         <Table<MemoryTaskKind> rowKey="kind" size="small" columns={taskKindColumns}
             dataSource={value?.tasks.by_kind || []} pagination={clientPagination} locale={{ emptyText: t("暂无数据") }}/>
 
-        <h3 className="gateway-group-title">Embedding</h3>
+        <h3 className="gateway-group-title">{t("Embedding")}</h3>
         <MetricGrid cards={[
             [t("Embedding 失败积压"), value?.embedding.failed_backlog],
             [t("重试扫描（7 天）"), value?.embedding.retry_scanned_7d],
