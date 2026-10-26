@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent_platform.modules.agent_config.memory import resolve_agent_memory
 from agent_platform.modules.customer_service.service import TicketProposal
+from agent_platform.modules.memory.store import current_search_mode
 from agent_platform.platform.persistence.store import DomainError, execute
 from agent_platform.settings import Settings
 
@@ -192,9 +193,20 @@ class PlatformTools:
                 # the model-supplied one; the store still clamps the platform
                 # ceiling (memory_search_limit_max) as a second line.
                 limit = min(params.limit, self._memory_config().search_limit)
-                hits = await self.platform.memory_store.search(
+                store = self.platform.memory_store
+                # Phase 7 telemetry seam: the store stamps the per-call
+                # retrieval mode in a task-local contextvar (race-safe for a
+                # store shared across concurrent runs); clear any stamp left
+                # by an earlier memory_search call in this same task first.
+                current_search_mode.set(None)
+                hits = await store.search(
                     self.row["tenant_id"], self.row["customer_id"], params.query, limit
                 )
+                mode = current_search_mode.get()
+                if mode is None:
+                    # Doubles outside the two built-in stores don't stamp.
+                    available = getattr(store, "available", None)
+                    mode = available() if callable(available) else "text"
                 # L2 reference signal (R11): hit ids feed the reinforce task
                 # dispatched at run finish; they stay internal and never reach
                 # the model-facing output below.
@@ -204,11 +216,15 @@ class PlatformTools:
                         hit_id = str(hit["id"])
                         reinforce[hit_id] = reinforce.get(hit_id, 0) + 1
                 # R10 telemetry: call volume and the empty-result rate
-                # (hits=0) aggregate from this event. Production always wires
-                # emit; the None guard keeps legacy ad-hoc constructions
-                # (unit tests) working.
+                # (hits=0) aggregate from this event; Phase 7 adds the
+                # retrieval mode and keeps `hits` as the backward-compatible
+                # alias of `returned`. Production always wires emit; the None
+                # guard keeps legacy ad-hoc constructions (unit tests) working.
                 if self.emit is not None:
-                    await self.emit("memory_search.completed", {"hits": len(hits)})
+                    await self.emit(
+                        "memory_search.completed",
+                        {"mode": mode, "hits": len(hits), "returned": len(hits)},
+                    )
                 data = [
                     {
                         "content": hit["content"],

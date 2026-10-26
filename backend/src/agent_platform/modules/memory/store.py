@@ -16,6 +16,7 @@ equal relevance. Decay only reorders — it never filters rows out (P3-UT-05).
 
 import logging
 import math
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Protocol, TypedDict
 from uuid import UUID
@@ -29,6 +30,15 @@ logger = logging.getLogger(__name__)
 # embedding profile must match that width exactly.
 EMBEDDING_DIMENSION = 1536
 
+# Phase 7 telemetry seam: search() stamps the per-call retrieval mode here
+# ("vector" / "text" / "keyword_fallback") and the memory_search tool emitter
+# reads it in the same task right after search() returns. A contextvar (not
+# an instance attribute) keeps a store shared across concurrent runs
+# race-safe: each asyncio task sees only its own call's stamp. Every search()
+# entry re-stamps, so a stale value from an earlier call in the same task
+# never bleeds into a later one.
+current_search_mode: ContextVar[str | None] = ContextVar("memory_search_mode", default=None)
+
 
 class MemoryHit(TypedDict):
     id: UUID
@@ -41,7 +51,14 @@ class MemoryHit(TypedDict):
 class MemoryStore(Protocol):
     def available(self) -> str: ...  # 'vector' | 'text'
 
-    async def embed_and_save(self, item_id: UUID, text: str) -> None: ...
+    async def embed_and_save(self, item_id: UUID, text: str) -> bool:
+        """Embed one item; returns True when the embedding was written.
+
+        False marks a per-item failure (the row keeps ``embedding_failed``
+        for the worker's retry pass). The worker's maintenance audit counts
+        actual retry outcomes from this return value.
+        """
+        ...
 
     async def search(
         self, tenant_id: str, customer_id: UUID, query: str, limit: int
@@ -153,10 +170,12 @@ class TsVectorStore(BaseStore):
     def available(self) -> str:
         return "text"
 
-    async def embed_and_save(self, item_id: UUID, text: str) -> None:
-        return None
+    async def embed_and_save(self, item_id: UUID, text: str) -> bool:
+        """Keyword mode keeps no embeddings; nothing to write, never failed."""
+        return True
 
     async def search(self, tenant_id, customer_id, query, limit) -> list[MemoryHit]:
+        current_search_mode.set("text")
         return await self._text_search(tenant_id, customer_id, query, self._limit(limit))
 
 
@@ -180,12 +199,13 @@ class PgVectorStore(BaseStore):
         )
         return result["payload"]["vectors"][0]["vector"]
 
-    async def embed_and_save(self, item_id: UUID, text: str) -> None:
+    async def embed_and_save(self, item_id: UUID, text: str) -> bool:
         """Embed one item's content; failures mark the row, never raise.
 
         A failed embedding leaves the row fully functional for keyword search
         and the worker's daily retry pass clears ``embedding_failed`` once a
-        later attempt succeeds.
+        later attempt succeeds. Returns True when the vector was written,
+        False when the item was marked for retry.
         """
         try:
             vector = await self._embed(item_id, text)
@@ -199,7 +219,7 @@ class PgVectorStore(BaseStore):
                     id=item_id,
                     t=self.settings.tenant_id,
                 )
-            return
+            return False
         async with self.engine.begin() as c:
             await one(
                 c,
@@ -209,8 +229,10 @@ class PgVectorStore(BaseStore):
                 t=self.settings.tenant_id,
                 v="[" + ",".join(repr(float(x)) for x in vector) + "]",
             )
+        return True
 
     async def search(self, tenant_id, customer_id, query, limit) -> list[MemoryHit]:
+        current_search_mode.set("vector")
         limit = self._limit(limit)
         try:
             vector = await self._embed("query", query)
@@ -218,6 +240,7 @@ class PgVectorStore(BaseStore):
             logger.warning(
                 "Query embedding failed; memory_search falling back to keyword mode",
             )
+            current_search_mode.set("keyword_fallback")
             return await self._text_search(tenant_id, customer_id, query, limit)
         async with self.engine.connect() as c:
             rows = await many(

@@ -1,0 +1,41 @@
+"""Phase 7 (D1 adjusted): migration 0042 adds memory_tasks.duration_ms.
+
+Online-safe single-column add; existing rows keep NULL (no backfill —
+``created_at`` turned out to exist since 0030, contradicting the design
+doc's original D1 assumption).
+"""
+
+import pytest
+from test_ticket_migrations import migrate, query
+from test_ticket_migrations import migration_database as _migration_database
+
+migration_database = _migration_database
+pytestmark = pytest.mark.postgres
+
+
+def test_0042_adds_duration_ms_and_downgrade_drops_it(migration_database):
+    url = migration_database
+    migrate(url, "0041_memory_injection_log")
+    query(
+        url,
+        "INSERT INTO memory_tasks(tenant_id,kind,payload) VALUES('t','conversation_summary','{}')",
+    )
+    migrate(url, "head")
+    assert query(
+        url,
+        "SELECT is_nullable FROM information_schema.columns"
+        " WHERE table_name='memory_tasks' AND column_name='duration_ms'",
+    ) == [("YES",)]
+    # No backfill (D1 adjusted): the pre-existing row stays NULL and
+    # duration aggregations exclude NULL.
+    assert query(url, "SELECT duration_ms FROM memory_tasks") == [(None,)]
+    # A worker-finished row carries a measurable duration.
+    query(url, "UPDATE memory_tasks SET status='done', duration_ms=12")
+    assert query(url, "SELECT status,duration_ms FROM memory_tasks") == [("done", 12)]
+    migrate(url, "0041_memory_injection_log", "downgrade")
+    assert not query(
+        url,
+        "SELECT column_name FROM information_schema.columns"
+        " WHERE table_name='memory_tasks' AND column_name='duration_ms'",
+    )
+    migrate(url, "head")

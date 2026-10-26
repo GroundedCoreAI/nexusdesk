@@ -140,16 +140,19 @@ class MemoryWorker:
             heartbeat.cancel()
             await asyncio.gather(heartbeat, return_exceptions=True)
 
-    async def _finish(self, task, status, error=None, retry_in=None):
+    async def _finish(self, task, status, error=None, retry_in=None, duration_ms=None):
         async with self.engine.begin() as c:
             # The owner guard keeps a worker whose lease was reaped from
             # clobbering a row another replica has since picked up.
+            # duration_ms (Phase 7, D1): COALESCE keeps a NULL argument from
+            # clobbering a measured attempt; rows never executed stay NULL.
             updated = await one(
                 c,
                 """UPDATE memory_tasks SET status=:status,error=:error,owner=NULL,
                 lease_expires_at=NULL,
                 run_after=CASE WHEN :retry THEN now() + :seconds * interval '1 second'
                     ELSE run_after END,
+                duration_ms=COALESCE(:d, duration_ms),
                 updated_at=now() WHERE id=:id AND owner=:owner RETURNING id""",
                 id=task["id"],
                 owner=self.owner,
@@ -157,6 +160,7 @@ class MemoryWorker:
                 error=error,
                 retry=retry_in is not None,
                 seconds=retry_in or 0,
+                d=duration_ms,
             )
             if not updated:
                 logger.warning(
@@ -181,20 +185,27 @@ class MemoryWorker:
         task = await self.claim()
         if not task:
             return False
+        started = time.monotonic()
         try:
             await self._execute(task)
         except SummaryError as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
             retryable = exc.retryable and task["attempts"] < task["max_attempts"]
             if retryable:
                 await self._finish(
-                    task, "pending", error=exc.code, retry_in=backoff_seconds(task["attempts"])
+                    task,
+                    "pending",
+                    error=exc.code,
+                    retry_in=backoff_seconds(task["attempts"]),
+                    duration_ms=duration_ms,
                 )
             else:
                 logger.warning(
                     "Memory task %s failed permanently: %s", task["id"], exc.code
                 )
-                await self._finish(task, "failed", error=exc.code)
+                await self._finish(task, "failed", error=exc.code, duration_ms=duration_ms)
         except Exception:  # isolate failures at the worker boundary
+            duration_ms = int((time.monotonic() - started) * 1000)
             logger.exception("Memory task %s crashed", task["id"])
             if task["attempts"] < task["max_attempts"]:
                 await self._finish(
@@ -202,11 +213,15 @@ class MemoryWorker:
                     "pending",
                     error="summary_execution_error",
                     retry_in=backoff_seconds(task["attempts"]),
+                    duration_ms=duration_ms,
                 )
             else:
-                await self._finish(task, "failed", error="summary_execution_error")
+                await self._finish(
+                    task, "failed", error="summary_execution_error", duration_ms=duration_ms
+                )
         else:
-            await self._finish(task, "done")
+            duration_ms = int((time.monotonic() - started) * 1000)
+            await self._finish(task, "done", duration_ms=duration_ms)
         return True
 
     def maintenance_due(self):
@@ -226,14 +241,66 @@ class MemoryWorker:
             or time.monotonic() - self.last_rule_scan >= interval * 60
         )
 
+    async def _maintenance_completed(self, job, stats):
+        """Phase 7: one completion audit for a maintenance job pass.
+
+        Every maintenance job is single-tenant — the worker is bound to
+        ``settings.tenant_id`` — so the per-tenant observability contract is
+        exactly one row per affected job pass for this tenant. Call sites
+        skip zero-affect passes to keep the audit table quiet.
+        """
+        async with self.engine.begin() as c:
+            await audit(
+                c,
+                self.settings.tenant_id,
+                "memory",
+                "memory.maintenance.completed",
+                job,
+                job=job,
+                result="ok",
+                stats=stats,
+            )
+
+    async def _maintenance_failed(self, job, exc):
+        """Failure counterpart ({job, error}); never masks the original error."""
+        try:
+            async with self.engine.begin() as c:
+                await audit(
+                    c,
+                    self.settings.tenant_id,
+                    "memory",
+                    "memory.maintenance.failed",
+                    job,
+                    job=job,
+                    error=str(exc)[:500],
+                )
+        except Exception:
+            logger.exception("Memory maintenance failure audit failed (job=%s)", job)
+
     async def rule_scan(self):
         """One built-in rule pass: overdue tickets become complaint-risk flags.
 
         Attempt-stamped up front like the maintenance pass, so a failing scan
         retries at the next interval rather than on every idle cycle.
+        Phase 7: a pass that actually marked or cleared flags writes one
+        ``memory.maintenance.completed`` audit (job=rule_scan); a failure
+        writes ``memory.maintenance.failed`` and still propagates.
         """
         self.last_rule_scan = time.monotonic()
-        await scan_overdue_tickets(self.engine, self.settings)
+        try:
+            stats = await scan_overdue_tickets(self.engine, self.settings)
+        except Exception as exc:
+            await self._maintenance_failed("rule_scan", exc)
+            raise
+        if stats["marked"] or stats["removed"]:
+            await self._maintenance_completed(
+                "rule_scan",
+                {
+                    "scanned": stats["overdue_customers"],
+                    "marked": stats["marked"],
+                    "flags_removed": stats["removed"],
+                },
+            )
 
     async def maintenance(self):
         """One maintenance pass: TTL soft-expiry plus bounded embedding retry.
@@ -244,49 +311,100 @@ class MemoryWorker:
         on every idle cycle. Phase 4 (R14): the daily decay migration and
         capacity eviction ride along, gated by ``memory_decay_enabled`` —
         with the switch off the pass is exactly the Phase 3 one (AC-13).
+        Phase 7: every job that affected rows writes one
+        ``memory.maintenance.completed`` audit ({job, result, stats}); a
+        failing job writes ``memory.maintenance.failed`` ({job, error}) and
+        the error still propagates to the dispatcher boundary.
         """
         self.last_scan = time.monotonic()
         tenant = self.settings.tenant_id
-        async with self.engine.begin() as c:
-            expired = await many(
-                c,
-                """UPDATE memory_items SET status='expired',updated_at=now()
-                WHERE tenant_id=:t AND type='event' AND status='active'
-                AND expires_at<now() RETURNING id""",
-                t=tenant,
-            )
-            if expired:
-                logger.info("Memory TTL pass expired %d event items", len(expired))
-            # Phase 6 (D3): expired injection detail rows ride the same daily
-            # pass, single DELETE in the same transaction.
-            retention = getattr(self.settings, "memory_injection_log_retention_days", 90)
-            purged = await many(
-                c,
-                """DELETE FROM memory_injection_log
-                WHERE tenant_id=:t AND injected_at<now()-:days*interval '1 day'
-                RETURNING id""",
-                t=tenant,
-                days=retention,
-            )
-            if purged:
-                logger.info("Memory TTL pass purged %d injection log rows", len(purged))
-            retry = []
-            if self.store is not None and self.store.available() == "vector":
-                retry = await many(
+        job = "ttl_purge"
+        try:
+            async with self.engine.begin() as c:
+                expired = await many(
                     c,
-                    """SELECT id,content FROM memory_items
-                    WHERE tenant_id=:t AND embedding_failed AND status='active'
-                    ORDER BY updated_at LIMIT :lim""",
+                    """UPDATE memory_items SET status='expired',updated_at=now()
+                    WHERE tenant_id=:t AND type='event' AND status='active'
+                    AND expires_at<now() RETURNING id""",
                     t=tenant,
-                    lim=EMBED_RETRY_BATCH,
                 )
+                if expired:
+                    logger.info("Memory TTL pass expired %d event items", len(expired))
+                    await audit(
+                        c,
+                        tenant,
+                        "memory",
+                        "memory.maintenance.completed",
+                        job,
+                        job=job,
+                        result="ok",
+                        stats={"expired": len(expired)},
+                    )
+                # Phase 6 (D3): expired injection detail rows ride the same daily
+                # pass, single DELETE in the same transaction.
+                job = "injection_log_purge"
+                retention = getattr(self.settings, "memory_injection_log_retention_days", 90)
+                purged = await many(
+                    c,
+                    """DELETE FROM memory_injection_log
+                    WHERE tenant_id=:t AND injected_at<now()-:days*interval '1 day'
+                    RETURNING id""",
+                    t=tenant,
+                    days=retention,
+                )
+                if purged:
+                    logger.info("Memory TTL pass purged %d injection log rows", len(purged))
+                    await audit(
+                        c,
+                        tenant,
+                        "memory",
+                        "memory.maintenance.completed",
+                        job,
+                        job=job,
+                        result="ok",
+                        stats={"purged": len(purged)},
+                    )
+                job = "embedding_retry"
+                retry = []
+                if self.store is not None and self.store.available() == "vector":
+                    retry = await many(
+                        c,
+                        """SELECT id,content FROM memory_items
+                        WHERE tenant_id=:t AND embedding_failed AND status='active'
+                        ORDER BY updated_at LIMIT :lim""",
+                        t=tenant,
+                        lim=EMBED_RETRY_BATCH,
+                    )
+        except Exception as exc:
+            await self._maintenance_failed(job, exc)
+            raise
         # Embedding runs outside the sweep transaction; per-item failures keep
         # the embedding_failed flag and wait for the next pass (P3-IT-10).
-        for row in retry:
-            await self.store.embed_and_save(row["id"], row["content"])
+        if retry:
+            try:
+                succeeded = failed = 0
+                for row in retry:
+                    if await self.store.embed_and_save(row["id"], row["content"]):
+                        succeeded += 1
+                    else:
+                        failed += 1
+            except Exception as exc:
+                await self._maintenance_failed(job, exc)
+                raise
+            await self._maintenance_completed(
+                job,
+                {"scanned": len(retry), "succeeded": succeeded, "failed": failed},
+            )
         # Phase 4 decay rides the same daily window (R14).
         if getattr(self.settings, "memory_decay_enabled", False):
-            await daily_migration(self.engine, self.settings)
+            job = "decay"
+            try:
+                stats = await daily_migration(self.engine, self.settings)
+            except Exception as exc:
+                await self._maintenance_failed(job, exc)
+                raise
+            if any(stats.values()):
+                await self._maintenance_completed(job, stats)
 
     async def reset_running(self):
         """Graceful shutdown: tasks claimed by this worker become claimable again."""
