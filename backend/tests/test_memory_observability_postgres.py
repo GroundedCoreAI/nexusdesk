@@ -35,6 +35,7 @@ from agent_platform.modules.memory.store import (
     PgVectorStore,
     TsVectorStore,
 )
+from agent_platform.modules.memory.summary import SummaryError
 from agent_platform.modules.memory.worker import MemoryWorker
 
 platform = _platform
@@ -49,6 +50,11 @@ class _DoneDispatcher:
 class _CrashDispatcher:
     async def execute(self, task):
         raise RuntimeError("boom")
+
+
+class _RetryableDispatcher:
+    async def execute(self, task):
+        raise SummaryError("gateway_timeout", retryable=True)
 
 
 async def enqueue_task(engine, tenant, *, attempts=0, max_attempts=2):
@@ -74,8 +80,8 @@ async def task_row(engine, task_id):
 
 
 async def test_p7_it_duration_ms_written_for_done_and_failed(platform):
-    """D1 adjusted: every executed attempt records its wall time; done and
-    permanently failed rows alike carry duration_ms >= 0."""
+    """D1 adjusted: every executed attempt records its wall time; done,
+    permanently failed and retry-requeued rows alike carry duration_ms >= 0."""
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
 
@@ -85,6 +91,14 @@ async def test_p7_it_duration_ms_written_for_done_and_failed(platform):
     row = await task_row(engine, done_id)
     assert row["status"] == "done"
     assert row["duration_ms"] is not None and row["duration_ms"] >= 0
+
+    # Retryable failure with attempts left: back to pending, still timed —
+    # the duration belongs to the attempt, not the final state.
+    retry_id = await enqueue_task(engine, tenant)
+    worker = MemoryWorker(engine, _RetryableDispatcher(), settings)
+    assert await worker.run_once()
+    row = await task_row(engine, retry_id)
+    assert row["status"] == "pending" and row["duration_ms"] is not None
 
     # Last-attempt crash: the generic boundary finalizes straight to failed.
     failed_id = await enqueue_task(engine, tenant, attempts=1, max_attempts=2)
@@ -160,9 +174,7 @@ async def test_p7_it_embedding_retry_audit_counts_outcomes(platform):
     )
     async with engine.begin() as c:
         await c.execute(
-            text(
-                "UPDATE memory_items SET embedding_failed=true WHERE id IN (:a,:b)"
-            ).bindparams(),
+            text("UPDATE memory_items SET embedding_failed=true WHERE id IN (:a,:b)"),
             {"a": ok_item, "b": bad_item},
         )
 
@@ -182,6 +194,46 @@ async def test_p7_it_embedding_retry_audit_counts_outcomes(platform):
     retry = [r for r in records if r["details"]["job"] == "embedding_retry"]
     assert len(retry) == 1
     assert retry[0]["details"]["stats"] == {"scanned": 2, "succeeded": 1, "failed": 1}
+
+
+async def test_p7_it_maintenance_failure_writes_failed_audit_and_reraises(platform):
+    """A job that raises writes exactly one memory.maintenance.failed row
+    ({job, error} with the error truncated to 500 chars) and the original
+    exception still propagates out of maintenance() to the dispatcher
+    boundary. Runs on plain PG: the poisoned store only needs the
+    unconditional embedding_failed column."""
+    _client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    item_id = await add_event_row(
+        engine, tenant, customer_id, "ticket:TK-903:resolved", "重试永不成功"
+    )
+    async with engine.begin() as c:
+        await c.execute(
+            text("UPDATE memory_items SET embedding_failed=true WHERE id=:id"),
+            {"id": item_id},
+        )
+
+    boom = "gateway boom " + "x" * 600
+
+    class RaisingStore:
+        def available(self):
+            return "vector"
+
+        async def embed_and_save(self, item_id, text):
+            raise RuntimeError(boom)
+
+    worker = make_maintenance_worker(services, settings, store=RaisingStore())
+    with pytest.raises(RuntimeError, match="gateway boom"):
+        await worker.maintenance()
+
+    failed = await audit_records(engine, tenant, "memory.maintenance.failed")
+    assert len(failed) == 1
+    details = failed[0]["details"]
+    assert failed[0]["actor"] == "memory"
+    assert details["job"] == "embedding_retry"
+    assert details["error"] == boom[:500]
+    assert await audit_records(engine, tenant, "memory.maintenance.completed") == []
 
 
 async def test_p7_it_rule_scan_audit(platform):
