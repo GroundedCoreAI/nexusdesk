@@ -8,8 +8,8 @@ import pytest_asyncio
 from pydantic import SecretStr
 from sqlalchemy import text
 
-from agent_platform.apps.api.main import create_app
-from agent_platform.settings import Settings
+from agent_platform.applications.customer_service.main import create_app
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
@@ -59,7 +59,7 @@ async def platform():
                 # Stop channel loops before deleting their rows. Otherwise an
                 # in-flight inbound event can insert a receipt after cleanup
                 # has removed receipts but before channels are deleted.
-                await app.state.runtime.platform.channels.stop()
+                await app.state.runtime.groups.business.channels.stop()
                 engine = app.state.runtime.repository.engine
                 async with engine.begin() as c:
                     await c.execute(
@@ -103,6 +103,7 @@ async def platform():
                         "tenant_ticket_settings",
                         "pending_actions",
                         "handoffs",
+                        "approval_requests",
                     ]:
                         if table == "channels":
                             await c.execute(
@@ -139,6 +140,7 @@ async def platform():
                             text(f"DELETE FROM {table} WHERE tenant_id=:t"),
                             {"t": settings.tenant_id},
                         )
+                    await c.execute(text("DELETE FROM plugin_config_versions"))
                     for table in ["knowledge_chunks", "knowledge_versions"]:
                         await c.execute(
                             text(
@@ -240,8 +242,8 @@ async def test_knowledge_versions_chinese_search_and_scope(platform):
         await client.get("/api/v1/knowledge/search", params={"q": "退货规则", "kb": kb["id"]})
     ).json()
     assert hits and hits[0]["version"] == 1
-    assert await services.platform.knowledge.search("another-tenant", "退货") == []
-    assert await services.platform.knowledge.search(settings.tenant_id, "退货", []) == []
+    assert await services.groups.business.knowledge.search("another-tenant", "退货") == []
+    assert await services.groups.business.knowledge.search(settings.tenant_id, "退货", []) == []
     response = await client.put(
         f"/api/v1/knowledge-bases/{kb['id']}/documents/{doc['id']}?version=1",
         json={"title": "保修规则", "content": "设备保修一年。"},
@@ -466,7 +468,7 @@ async def test_registry_host_permissions_and_live_disable(platform):
     assert (await client.post("/api/v1/tools", json=body)).status_code == 409
     agent, _ = await create_agent(client, ["order_lookup"])
     await client.patch(f"/api/v1/tools/{row['id']}", json={"enabled": False})
-    assert not await services.platform.tools.enabled(settings.tenant_id, "order_lookup")
+    assert not await services.groups.tools.tools.enabled(settings.tenant_id, "order_lookup")
     assert (
         await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
     ).status_code == 400
@@ -714,7 +716,10 @@ async def test_evaluation_case_workbook_template_and_import(platform):
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     assert "attachment" in template.headers["content-disposition"]
-    from agent_platform.modules.evaluation.workbook import build_workbook, parse_workbook
+    from agent_platform.business_capabilities.evaluation.workbook import (
+        build_workbook,
+        parse_workbook,
+    )
 
     assert len(parse_workbook(template.content)) == 2
 
@@ -762,7 +767,7 @@ async def test_evaluation_case_workbook_import_respects_the_case_limit(platform)
     client, _, _ = platform
     agent, _ = await create_agent(client)
     path = f"/api/v1/agents/{agent['id']}/evaluation-cases"
-    from agent_platform.modules.evaluation.workbook import build_workbook
+    from agent_platform.business_capabilities.evaluation.workbook import build_workbook
 
     workbook = build_workbook(
         [

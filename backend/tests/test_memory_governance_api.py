@@ -191,9 +191,9 @@ async def test_p4_api_05_cross_tenant_is_unreachable(platform):
     ).status_code == 404
 
     # Service-level cross-tenant writes raise DomainError and change nothing.
-    from agent_platform.platform.persistence.store import DomainError
+    from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     with pytest.raises(DomainError):
         await memory.customer_detail("other-tenant", customer_id)
     with pytest.raises(DomainError):

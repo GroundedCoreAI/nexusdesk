@@ -133,9 +133,14 @@ def test_backfill_constraints_and_downgrade_guards(migration_database):
         "SELECT column_name FROM information_schema.columns WHERE table_name='tickets' AND column_name IN ('description','note')",
     )
     assert not query(url, "SELECT tgname FROM pg_trigger WHERE tgname LIKE 'ticket_legacy_%'")
-    # PostgreSQL reports FK enforcement failures as 23503 (foreign_key_violation)
-    # even for ON DELETE RESTRICT constraints; 23001 is never emitted here.
-    with pytest.raises(asyncpg.ForeignKeyViolationError):
+    # PostgreSQL reports ON DELETE RESTRICT as SQLSTATE 23001
+    # (restrict_violation), while other FK checks use 23503
+    # (foreign_key_violation).  Both represent the intended protected
+    # relationship; PostgreSQL 18/asyncpg 0.31 exposes the former as its
+    # dedicated exception class.
+    with pytest.raises(
+        (asyncpg.ForeignKeyViolationError, asyncpg.RestrictViolationError)
+    ):
         query(url, "DELETE FROM runtime_conversations WHERE id=$1", cid)
     with pytest.raises(asyncpg.ForeignKeyViolationError):
         query(url, "UPDATE tickets_detail SET tenant_id='other' WHERE ticket_id=$1", tid)

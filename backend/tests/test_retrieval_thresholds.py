@@ -6,8 +6,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from agent_platform.modules.knowledge import retrieval
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.business_capabilities.knowledge import retrieval
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 
 @pytest.mark.asyncio

@@ -2,23 +2,25 @@ import hashlib
 import hmac
 import json
 import time
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from sqlalchemy import text
 from test_model_gateway import setup as setup_model
 from test_platform_postgres import conversation, create_agent
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.evaluation.scoring import (
+from agent_platform.business_capabilities.evaluation.scoring import (
     JudgeResult,
     ProfileRef,
     extract_json_object,
     verdict,
 )
-from agent_platform.modules.knowledge.chunking import ChunkingPolicy, chunk_document
-from agent_platform.modules.knowledge.vector_store import VectorIndex
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.business_capabilities.knowledge.chunking import ChunkingPolicy, chunk_document
+from agent_platform.business_capabilities.knowledge.vector_store import VectorIndex
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
+from agent_platform.extension_contracts import CapabilityManifest
 
 platform = _platform_fixture
 
@@ -93,6 +95,284 @@ async def test_named_staff_cannot_reply_as_another_assignee(platform):
 
 @pytest.mark.asyncio
 @pytest.mark.postgres
+async def test_extension_event_operations_are_admin_and_tenant_scoped(platform):
+    client, services, settings = platform
+    event_id = uuid4()
+    other_tenant = "other-" + str(uuid4())
+    payload = {
+        "event": {
+            "event_type": "ticket.updated",
+            "aggregate_type": "ticket",
+            "aggregate_id": str(uuid4()),
+            "tenant_id": settings.tenant_id,
+            "payload": {"status": "resolved"},
+            "occurred_at": "2026-10-27T00:00:00Z",
+            "idempotency_key": "test-event-" + str(event_id),
+        },
+        "idempotency_key": "test-event-" + str(event_id),
+    }
+    other_payload = {
+        **payload,
+        "event": {**payload["event"], "tenant_id": other_tenant},
+        "idempotency_key": "other-event-" + str(event_id),
+    }
+    async with services.groups.runtime.engine.begin() as conn:
+        await conn.execute(
+            text(
+                """INSERT INTO memory_tasks
+                (id,tenant_id,kind,status,payload,attempts,max_attempts,error)
+                VALUES
+                (:id,:tenant,'extension_event','failed',CAST(:payload AS jsonb),3,5,'subscriber_failed'),
+                (:pending,:tenant,'extension_event','pending',CAST(:pending_payload AS jsonb),0,5,NULL),
+                (:other,:other_tenant,'extension_event','failed',CAST(:other_payload AS jsonb),3,5,'secret')
+                """
+            ),
+            {
+                "id": event_id,
+                "tenant": settings.tenant_id,
+                "payload": json.dumps(payload),
+                "pending": uuid4(),
+                "pending_payload": json.dumps(
+                    {
+                        **payload,
+                        "idempotency_key": "pending-event-" + str(event_id),
+                        "event": {
+                            **payload["event"],
+                            "idempotency_key": "pending-event-" + str(event_id),
+                        },
+                    }
+                ),
+                "other": uuid4(),
+                "other_tenant": other_tenant,
+                "other_payload": json.dumps(other_payload),
+            },
+        )
+
+    try:
+        listing = await client.get("/api/v1/extensions/events")
+        assert listing.status_code == 200, listing.text
+        body = listing.json()
+        assert body["total"] == 2
+        pending_id = next(item["id"] for item in body["items"] if item["id"] != str(event_id))
+        assert {item["id"] for item in body["items"]} == {str(event_id), pending_id}
+        assert all("payload" not in item for item in body["items"])
+        assert all(item["event_type"] == "ticket.updated" for item in body["items"])
+
+        operator_headers = {"Authorization": "Bearer platform-operator"}
+        assert (
+            await client.get("/api/v1/extensions/events", headers=operator_headers)
+        ).status_code == 403
+        assert (
+            await client.post(
+                f"/api/v1/extensions/events/{event_id}/retry",
+                headers=operator_headers,
+            )
+        ).status_code == 403
+
+        retry = await client.post(f"/api/v1/extensions/events/{event_id}/retry")
+        assert retry.status_code == 200, retry.text
+        assert retry.json()["status"] == "pending"
+        assert retry.json()["attempts"] == 0
+
+        assert (
+            await client.post(f"/api/v1/extensions/events/{pending_id}/retry")
+        ).status_code == 409
+
+        capabilities = await client.get("/api/v1/extensions/capabilities")
+        assert capabilities.status_code == 200, capabilities.text
+        assert capabilities.json()["events"]["queue"]["pending"] == 2
+        assert capabilities.json()["events"]["queue"]["failed"] == 0
+    finally:
+        async with services.groups.runtime.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM memory_tasks WHERE tenant_id IN (:tenant, :other)"),
+                {"tenant": settings.tenant_id, "other": other_tenant},
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_capability_lifecycle_management_is_admin_only_and_reversible(platform):
+    client, _, _ = platform
+    operator_headers = {"Authorization": "Bearer platform-operator"}
+    viewer_headers = {"Authorization": "Bearer platform-viewer"}
+
+    assert (
+        await client.post(
+            "/api/v1/extensions/capabilities/approval/disable",
+            headers=operator_headers,
+        )
+    ).status_code == 403
+    assert (
+        await client.post(
+            "/api/v1/extensions/capabilities/approval/disable",
+            headers=viewer_headers,
+        )
+    ).status_code == 403
+
+    disabled = await client.post("/api/v1/extensions/capabilities/approval/disable")
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["enabled"] is False
+    assert disabled.json()["status"] == "stopped"
+    assert (await client.get("/api/v1/approvals")).status_code == 409
+
+    enabled = await client.post("/api/v1/extensions/capabilities/approval/enable")
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["enabled"] is True
+    assert enabled.json()["status"] == "ready"
+
+    upgraded = await client.post(
+        "/api/v1/extensions/capabilities/approval/upgrade",
+        json=CapabilityManifest(
+            id="approval",
+            version="2.0.0",
+            name="Approval v2",
+            description="Upgraded approval capability.",
+            permissions={"approval.read", "approval.manage"},
+            contributions={"tools", "policies", "events", "ui"},
+        ).model_dump(mode="json"),
+    )
+    assert upgraded.status_code == 200, upgraded.text
+    assert upgraded.json()["version"] == "2.0.0"
+    assert upgraded.json()["status"] == "ready"
+
+    rolled_back = await client.post("/api/v1/extensions/capabilities/approval/rollback")
+    assert rolled_back.status_code == 200, rolled_back.text
+    assert rolled_back.json()["version"] == "1.0.0"
+    assert rolled_back.json()["status"] == "ready"
+
+    config = await client.post(
+        "/api/v1/extensions/capabilities/approval/config",
+        json={"schema_version": "v1", "config": {"retention_days": 30}},
+    )
+    assert config.status_code == 200, config.text
+    assert config.json()["version"] == 1
+    assert config.json()["config"]["retention_days"] == 30
+    assert (
+        await client.get(
+            "/api/v1/extensions/capabilities/approval/config",
+            headers=operator_headers,
+        )
+    ).status_code == 403
+    versions = await client.get("/api/v1/extensions/capabilities/approval/config/versions")
+    assert versions.status_code == 200
+    assert [item["version"] for item in versions.json()["items"]] == [1]
+    config = await client.post(
+        "/api/v1/extensions/capabilities/approval/config",
+        json={"config": {"retention_days": 60}},
+    )
+    assert config.status_code == 200
+    restored = await client.post(
+        "/api/v1/extensions/capabilities/approval/config/rollback",
+        json={"version": 1},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["version"] == 3
+    assert restored.json()["rollback_of"] == 1
+    assert restored.json()["config"]["retention_days"] == 30
+    lifecycle_audit = await client.get(
+        "/api/v1/audit",
+        params={"action_type": "extension.rolled_back"},
+    )
+    assert lifecycle_audit.status_code == 200
+    assert any(item["resource"] == "approval" for item in lifecycle_audit.json()["items"])
+    config_audit = await client.get(
+        "/api/v1/audit",
+        params={"action_type": "extension.config.rolled_back"},
+    )
+    assert config_audit.status_code == 200
+    assert config_audit.json()["items"][0]["resource"] == "approval@3"
+
+    assert (
+        await client.post("/api/v1/extensions/capabilities/does-not-exist/enable")
+    ).status_code == 409
+    assert (
+        await client.post(
+            "/api/v1/extensions/capabilities/approval/upgrade",
+            json=CapabilityManifest(
+                id="approval",
+                version="1.0.0",
+                name="Approval",
+            ).model_dump(mode="json"),
+        )
+    ).status_code == 409
+    assert (
+        await client.post("/api/v1/extensions/capabilities/knowledge/disable")
+    ).status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_approval_capability_api_is_idempotent_and_revision_safe(platform):
+    client, services, _ = platform
+    operator_headers = {"Authorization": "Bearer platform-operator"}
+    body = {
+        "title": "生产变更审批",
+        "description": "验证审批领域插件",
+        "idempotency_key": "approval-test-" + str(uuid4()),
+    }
+
+    created = await client.post("/api/v1/approvals", json=body, headers=operator_headers)
+    assert created.status_code == 201, created.text
+    request = created.json()
+    assert request["status"] == "pending"
+    assert request["revision"] == 1
+
+    replay = await client.post("/api/v1/approvals", json=body, headers=operator_headers)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["id"] == request["id"]
+
+    conflict = await client.post(
+        "/api/v1/approvals",
+        json={**body, "title": "不同参数"},
+        headers=operator_headers,
+    )
+    assert conflict.status_code == 409
+
+    listed = await client.get("/api/v1/approvals?status=pending")
+    assert listed.status_code == 200, listed.text
+    assert any(item["id"] == request["id"] for item in listed.json()["items"])
+
+    wrong_revision = await client.post(
+        f"/api/v1/approvals/{request['id']}/decision",
+        json={"decision": "approve", "revision": 2},
+    )
+    assert wrong_revision.status_code == 409
+
+    decided = await client.post(
+        f"/api/v1/approvals/{request['id']}/decision",
+        json={"decision": "approve", "revision": 1},
+    )
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["status"] == "approved"
+    assert decided.json()["decision_by"] == "admin"
+
+    approval_audit = await client.get(f"/api/v1/approvals/{request['id']}/audit")
+    assert approval_audit.status_code == 200, approval_audit.text
+    audit_items = approval_audit.json()["items"]
+    assert [item["action"] for item in audit_items] == [
+        "approval.requested",
+        "approval.approved",
+    ]
+    assert audit_items[-1]["details"]["revision"] == 2
+
+    duplicate_decision = await client.post(
+        f"/api/v1/approvals/{request['id']}/decision",
+        json={"decision": "reject", "revision": 1},
+    )
+    assert duplicate_decision.status_code == 409
+
+    viewer_headers = {"Authorization": "Bearer platform-viewer"}
+    assert (
+        await client.post("/api/v1/approvals", json=body, headers=viewer_headers)
+    ).status_code == 403
+    with pytest.raises(DomainError) as error:
+        await services.groups.business.approval.get("other-tenant", UUID(request["id"]))
+    assert error.value.status == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
 async def test_conversation_transition_revision(platform):
     client, _, _ = platform
     conv = await conversation(client)
@@ -151,7 +431,7 @@ async def test_document_queue_deduplication_pages_and_cancel(platform):
     first = await client.post(url, content=content)
     assert first.status_code == 202, first.text
     assert (await client.post(url, content=content)).json()["id"] == first.json()["id"]
-    assert await services.platform.ingestion.run_next(settings.tenant_id)
+    assert await services.groups.business.ingestion.run_next(settings.tenant_id)
     rows = (await client.get(f"/api/v1/knowledge-bases/{base['id']}/jobs")).json()
     assert rows[0]["status"] == "completed", rows
     pages = (await client.get(f"/api/v1/knowledge-jobs/{rows[0]['id']}/pages")).json()
@@ -161,7 +441,7 @@ async def test_document_queue_deduplication_pages_and_cancel(platform):
     ).json()
     other = (await client.post(url, content=b"cancel me")).json()
     await client.post(f"/api/v1/knowledge-jobs/{other['id']}/cancel")
-    assert not await services.platform.ingestion.run_next(settings.tenant_id)
+    assert not await services.groups.business.ingestion.run_next(settings.tenant_id)
     assert (
         await client.post(
             f"/api/v1/knowledge-bases/{base['id']}/uploads?filename=file.caj", content=b"not text"
@@ -204,8 +484,8 @@ async def test_milvus_contract_and_postfilter(platform):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as mock:
         index = VectorIndex(
-            services.platform.engine,
-            services.platform.gateway,
+            services.groups.runtime.engine,
+            services.groups.runtime.gateway,
             settings.model_copy(update={"milvus_url": "http://localhost:19530"}),
             mock,
         )
@@ -229,8 +509,8 @@ async def test_gateway_metrics_do_not_mix_units(platform):
 
 @pytest.mark.asyncio
 async def test_judge_schema_and_evidence_contract():
-    from agent_platform.modules.evaluation.scoring import Scorer
-    from agent_platform.platform.persistence.store import DomainError
+    from agent_platform.business_capabilities.evaluation.scoring import Scorer
+    from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
     dimension = {
         "status": "scored",
@@ -265,11 +545,11 @@ async def test_judge_schema_and_evidence_contract():
 async def test_ticket_new_storage_and_lifecycle(platform):
     from sqlalchemy import text
 
-    from agent_platform.modules.customer_service.service import TicketProposal
+    from agent_platform.business_capabilities.customer_service.service import TicketProposal
 
     client, services, settings = platform
     conv = await conversation(client)
-    proposal = await services.platform.customer.propose(
+    proposal = await services.groups.business.customer.propose(
         settings.tenant_id,
         conv["id"],
         uuid4(),
@@ -300,7 +580,7 @@ async def test_ticket_new_storage_and_lifecycle(platform):
     assert (await update("closed", "Customer confirmed")).status_code == 200
     assert ticket["closed_at"]
     assert (await update("in_progress", "reopen")).status_code == 409
-    async with services.platform.engine.connect() as c:
+    async with services.groups.runtime.engine.connect() as c:
         params = {"id": ticket["id"], "t": settings.tenant_id}
         row = (
             await c.execute(

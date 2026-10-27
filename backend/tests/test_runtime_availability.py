@@ -1,8 +1,8 @@
 import httpx
 import pytest
 
-from agent_platform.apps.api.main import create_app
-from agent_platform.settings import Settings
+from agent_platform.applications.customer_service.main import create_app
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 
 @pytest.mark.asyncio

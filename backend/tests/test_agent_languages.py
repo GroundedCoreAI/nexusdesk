@@ -3,9 +3,10 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from agent_platform.apps.api.platform_services import RuntimeFactory
-from agent_platform.modules.agent_config.service import AgentConfig
-from agent_platform.settings import Settings
+from agent_platform.applications.customer_service.runtime_factory import RuntimeFactory
+from agent_platform.business_capabilities.agent_config.service import AgentConfig
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
+from agent_platform.extension_contracts import RuntimeBindings
 
 
 @pytest.mark.parametrize(
@@ -21,8 +22,10 @@ from agent_platform.settings import Settings
 def test_language_policy_reaches_runtime_without_changing_source(language, expected):
     source = "保留原始中文指令"
     config = AgentConfig(system_prompt=source, reply_language=language)
-    platform = SimpleNamespace(policy=SimpleNamespace(check_rounds=lambda rounds, settings: rounds))
-    factory = RuntimeFactory(None, platform, None, Settings(), None)
+    bindings = RuntimeBindings(
+        policy=SimpleNamespace(check_rounds=lambda rounds, settings: rounds)
+    )
+    factory = RuntimeFactory(None, bindings, None, Settings(), None)
     effective = factory.effective({"config": config.model_dump()})
     assert expected in effective.system_prompt
     assert source in effective.system_prompt

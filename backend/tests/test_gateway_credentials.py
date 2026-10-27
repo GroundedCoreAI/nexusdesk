@@ -5,8 +5,8 @@ import pytest
 from test_model_gateway import ROOT, setup
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.model_gateway.credentials import CredentialVault
-from agent_platform.platform.persistence.store import DomainError, one
+from agent_platform.core_platform.platform_services.model_gateway.credentials import CredentialVault
+from agent_platform.core_platform.platform_services.persistence.store import DomainError, one
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 gateway_platform = _platform_fixture
@@ -14,7 +14,7 @@ gateway_platform = _platform_fixture
 
 async def test_stored_credentials_rotation_clear_and_isolation(gateway_platform, tmp_path):
     client, services, settings = gateway_platform
-    gateway = services.platform.gateway
+    gateway = services.groups.runtime.gateway
     gateway.catalog.vault = CredentialVault(tmp_path / "master.key")
     connection, _, profile = await setup(client, protocol="openai_compatible")
     url = ROOT + "/connections/" + connection["id"]
@@ -84,7 +84,7 @@ async def test_stored_credentials_rotation_clear_and_isolation(gateway_platform,
 
 async def test_credentials_validation_permissions_and_missing_master(gateway_platform, tmp_path):
     client, services, settings = gateway_platform
-    catalog = services.platform.gateway.catalog
+    catalog = services.groups.runtime.gateway.catalog
     path = tmp_path / "master.key"
     catalog.vault = CredentialVault(path)
     secret = "fake-secret-must-never-echo"

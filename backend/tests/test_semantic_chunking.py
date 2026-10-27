@@ -5,8 +5,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from agent_platform.modules.knowledge.chunking import ChunkingPolicy
-from agent_platform.modules.knowledge.semantic import semantic_chunks
+from agent_platform.business_capabilities.knowledge.chunking import ChunkingPolicy
+from agent_platform.business_capabilities.knowledge.semantic import semantic_chunks
 
 
 def test_default_unchanged_and_semantic_requires_model():
