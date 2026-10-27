@@ -90,9 +90,18 @@ python scripts/commit_standard.py commit \
    等，且不写入任何本地绝对路径）
 2. 校验 message 格式、绑定 staged 内容（tree / parents / diff-base /
    diff-sha256）并 HMAC 签名，写入 `GroundedCore-Commit-*` trailers
-3. 在签名后追加 `Co-Authored-By: Claude Code <noreply@anthropic.com>`（不占
-   签名内容，校验时会自动忽略该行）
+3. 拒绝 `Claude`、`Anthropic` 或 `noreply@anthropic.com` 的
+   `Co-Authored-By` 署名
 4. `git commit -F <签名后的 message 文件>`
+
+## 作者归属
+
+本 skill **不会追加任何 AI 共同作者 trailer**。GitHub 会把
+`Co-Authored-By` 中的邮箱计入 Contributors；自动追加 AI 署名会让工具账号
+出现在贡献者统计中，并与真实人类贡献混淆。
+
+新提交如包含 Claude/Anthropic 共同作者署名会被脚本或 hook 拒绝。历史提交
+不做改写，以免破坏 tag、签名和审计链；防污染规则只对后续新提交生效。
 
 维护命令：
 
