@@ -99,7 +99,7 @@
 | 内嵌 API 模式任务可被处理（quickstart 两容器形态闭环） | **通过（静态 + 单测 + CI）** | quickstart compose 与 `ae82a65` 逐字节一致（diff 为空，postgres+app 两容器承诺未破坏）、`AGENT_EMBEDDED_WORKER=true`；lifespan 装配/拆卸顺序（`stop()→await task→serve() finally reset_running`）经代码复核正确；P1-UT-12 本机通过；P1-IT-15（内嵌形态停机重置 running）CI 通过（run 38043500062） |
 | 独立入口可启动并认领任务 | **通过（CI）** | `apps/worker/memory.py` 独立入口存在、与 `apps/worker/knowledge.py` 先例形态一致；端到端用例 P1-IT-16 已于 CI（postgres:17）执行通过（run 38043500062，见 §8.3） |
 | 租约 reaper 生效 | **通过（CI）** | claim 写 owner + 120s 租约、30s 心跳续约、claim 前置 reaper、attempts 上限分流置 failed，均经代码复核并与 `knowledge/ingestion.py` 先例（`docs/modules-delivery.md`：SKIP LOCKED + 120s 租约 + reap）逐点比对一致；P1-IT-17/18/19/20/21 已于 CI 全部通过（run 38043500062） |
-| 生产 compose 配置静态核验 | **通过** | `test_deployment.py` 本机通过（29 passed 含全部部署用例）：`memory-worker` 复用 `x-backend` 锚点（同镜像、同 env_file、同 credentials 卷）、command=`[python, -m, agent_platform.apps.worker.memory]`、`AGENT_EMBEDDED_WORKER=false`、depends_on migrate 完成；生产服务清单仅 migrate/api/runtime-worker/knowledge-worker/memory-worker/web，**无新中间件** |
+| 生产 compose 配置静态核验 | **通过** | `test_deployment.py` 本机通过（29 passed 含全部部署用例）：`memory-worker` 复用 `x-backend` 锚点（同镜像、同 env_file、同 credentials 卷）、command=`[python, -m, agent_platform.applications.worker.memory]`、`AGENT_EMBEDDED_WORKER=false`、depends_on migrate 完成；生产服务清单仅 migrate/api/runtime-worker/knowledge-worker/memory-worker/web，**无新中间件** |
 | 真实多副本部署、容器编排级验证（扩缩容、硬杀容器后的租约恢复） | **pending_env** | 所需环境：Docker/容器编排环境 + PostgreSQL。建议方式：`docker compose -f deploy/production/compose.yaml up -d --scale memory-worker=2`，`docker kill` 任一 memory-worker 容器后观察其 running 任务在租约过期（≤120s）后被其他副本重认领并执行至 done（P1-IT-20 的编排级对应）；另观察 `memory_tasks.lease_expires_at` 与 worker 日志 |
 
 ### 8.3 CI 状态（已解除阻塞，全绿）
