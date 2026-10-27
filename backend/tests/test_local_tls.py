@@ -7,7 +7,7 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from agent_platform.apps import local_tls
+from agent_platform.applications import local_tls
 
 
 def load(path: Path) -> x509.Certificate:

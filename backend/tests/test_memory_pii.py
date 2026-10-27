@@ -6,7 +6,7 @@ hit counter. Database write-path integration (extraction / event / edit /
 flag) lives in the PostgreSQL suites.
 """
 
-from agent_platform.modules.memory.pii import mask
+from agent_platform.business_capabilities.memory.pii import mask
 
 
 def test_phone_masked_keep_first3_last2():

@@ -8,8 +8,11 @@ import pytest
 from test_model_gateway import setup
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.model_gateway.governance import Governance, estimate
-from agent_platform.platform.persistence.store import DomainError, one
+from agent_platform.core_platform.platform_services.model_gateway.governance import (
+    Governance,
+    estimate,
+)
+from agent_platform.core_platform.platform_services.persistence.store import DomainError, one
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 gateway_platform = _platform_fixture
@@ -60,7 +63,7 @@ async def test_words_review_alerts_and_metadata(gateway_platform):
     summary = (await client.get(ROOT + "/statistics")).json()["summary"]
     assert summary["blocked"] == 1 and summary["failed"] == 1
     assert (await client.post(ROOT + "/invoke", json=invocation(profile))).status_code == 200
-    assert (await services.platform.gateway.governance.page("another-tenant", "sensitive_words"))[
+    assert (await services.groups.runtime.gateway.governance.page("another-tenant", "sensitive_words"))[
         "total"
     ] == 0
 
@@ -110,7 +113,7 @@ async def test_scoped_key_rotation_revocation_and_quotas(gateway_platform):
     assert (
         await client.post(ROOT + "/external/invoke", json=invocation(profile), headers=auth)
     ).status_code == 401
-    async with services.platform.engine.connect() as c:
+    async with services.groups.runtime.engine.connect() as c:
         assert (
             await one(
                 c, "SELECT count(*) n FROM gateway_leases WHERE tenant_id=:t", t=settings.tenant_id
@@ -133,7 +136,7 @@ async def test_database_quota_is_atomic_and_releases(gateway_platform):
         },
     )
     assert response.status_code == 200
-    managers = [Governance(services.platform.gateway), Governance(services.platform.gateway)]
+    managers = [Governance(services.groups.runtime.gateway), Governance(services.groups.runtime.gateway)]
     ids = [uuid4(), uuid4()]
     results = await asyncio.gather(
         *(
@@ -172,7 +175,7 @@ async def test_output_review_cost_snapshots_and_pagination(gateway_platform):
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as provider:
-        services.platform.gateway.client = provider
+        services.groups.runtime.gateway.client = provider
         response = await client.post(ROOT + "/stream", json=invocation(profile))
         assert "event: error" in response.text and "content_blocked_output" in response.text
         assert "blocked-output" not in response.text and "event: delta" not in response.text

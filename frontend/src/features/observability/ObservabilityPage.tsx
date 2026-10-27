@@ -1,9 +1,20 @@
 import { t } from '../../i18n/index';
 import { useState } from 'react';
-import { Select, Table } from 'antd';
+import { Button, Popconfirm, Select, Space, Table, Tag } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { type Audit, type MemoryExtractionDay, type MemorySummary, type Run, type Summary } from '../../shared/api/client';
-import { Alert, Badge, Panel, Trace, time, useAccess, useResource } from '../../shared/components/ui';
+import {
+    retryExtensionEvent,
+    type Audit,
+    type CapabilityObservability,
+    type CapabilityStatusItem,
+    type ExtensionEventPage,
+    type ExtensionEventStatus,
+    type MemoryExtractionDay,
+    type MemorySummary,
+    type Run,
+    type Summary,
+} from '../../shared/api/client';
+import { Alert, Badge, Panel, Trace, time, useAccess, useAction, useResource } from '../../shared/components/ui';
 
 interface Paged<T> {
     items: T[];
@@ -91,9 +102,53 @@ export function MemoryMetrics({ value }: { value: MemorySummary | null }) {
     return <div className="metrics">{cards.map(([label, count]) => <div className="metric" key={label}><span>{label}</span><strong>{count ?? '—'}</strong></div>)}</div>;
 }
 
+function capabilityStatus(status: CapabilityStatusItem['status']) {
+    const labels: Record<CapabilityStatusItem['status'], string> = {
+        registered: t("已注册"),
+        starting: t("启动中"),
+        ready: t("就绪"),
+        degraded: t("降级"),
+        stopped: t("已停止"),
+    };
+    const colors: Record<CapabilityStatusItem['status'], string> = {
+        registered: 'default',
+        starting: 'processing',
+        ready: 'success',
+        degraded: 'warning',
+        stopped: 'default',
+    };
+    return <Tag color={colors[status]}>{labels[status]}</Tag>;
+}
+
+function eventStatus(status: ExtensionEventStatus) {
+    const labels: Record<ExtensionEventStatus, string> = {
+        pending: t("待投递"),
+        running: t("投递中"),
+        done: t("已完成"),
+        failed: t("失败"),
+    };
+    const colors: Record<ExtensionEventStatus, string> = {
+        pending: 'processing',
+        running: 'processing',
+        done: 'success',
+        failed: 'error',
+    };
+    return <Tag color={colors[status]}>{labels[status]}</Tag>;
+}
+
 export function ObservabilityPage() {
     const summary = useResource<Summary>('/observability/summary', 5000);
     const { admin } = useAccess();
+    const extensions = useResource<CapabilityObservability>('/extensions/capabilities', 5000);
+    const [eventStatusFilter, setEventStatusFilter] = useState<ExtensionEventStatus>();
+    const [eventPage, setEventPage] = useState(1);
+    const [eventPageSize, setEventPageSize] = useState(20);
+    const eventQuery = eventStatusFilter ? `&status=${eventStatusFilter}` : '';
+    const extensionEvents = useResource<ExtensionEventPage>(
+        admin ? `/extensions/events?page=${eventPage}&page_size=${eventPageSize}${eventQuery}` : null,
+        5000,
+    );
+    const eventAction = useAction();
     const [runPage, setRunPage] = useState(1);
     const [runPageSize, setRunPageSize] = useState(PAGE_SIZE);
     const runs = useResource<Paged<Run>>(`/observability/runs?page=${runPage}&page_size=${runPageSize}`, 3000);
@@ -168,8 +223,46 @@ export function ObservabilityPage() {
         { title: t("数量"), dataIndex: 'amount', render: (value: number) => Number(value).toLocaleString() },
     ];
 
+    const capabilityColumns: TableColumnsType<CapabilityStatusItem> = [
+        { title: t("能力"), dataIndex: 'capability_id', render: (value: string) => <span className="mono">{value}</span> },
+        { title: t("版本"), dataIndex: 'version', render: (value: string) => <span className="mono">v{value}</span> },
+        { title: t("状态"), dataIndex: 'status', render: (value: CapabilityStatusItem['status']) => capabilityStatus(value) },
+        { title: t("失败次数"), dataIndex: 'failure_count' },
+        { title: t("最近失败"), dataIndex: 'last_failure_at', render: (value: string | null) => value ? time(value) : '—' },
+        { title: t("原因"), dataIndex: 'reason', render: (value: string | null) => value || '—' },
+    ];
+
+    const eventColumns: TableColumnsType<ExtensionEventPage['items'][number]> = [
+        { title: t("事件类型"), dataIndex: 'event_type', render: (value: string) => <span className="mono">{value}</span> },
+        {
+            title: t("聚合对象"),
+            key: 'aggregate',
+            render: (_, row) => <span className="mono">{row.aggregate_type}:{row.aggregate_id.slice(0, 12)}</span>,
+        },
+        { title: t("状态"), dataIndex: 'status', render: (value: ExtensionEventStatus) => eventStatus(value) },
+        { title: t("尝试次数"), key: 'attempts', render: (_, row) => `${row.attempts}/${row.max_attempts}` },
+        { title: t("错误"), dataIndex: 'error', render: (value: string | null) => value || '—' },
+        { title: t("创建时间"), dataIndex: 'created_at', render: (value: string) => time(value) },
+        {
+            title: t("操作"),
+            key: 'actions',
+            render: (_, row) => row.status === 'failed' ? (
+                <Popconfirm
+                    title={t("确认重新投递此事件？")}
+                    onConfirm={() => eventAction.run(async () => {
+                        await retryExtensionEvent(row.id);
+                        extensionEvents.refresh();
+                        extensions.refresh();
+                    }, t("事件已重新排队"))}
+                >
+                    <Button type="link" size="small" loading={eventAction.busy}>{t("重试")}</Button>
+                </Popconfirm>
+            ) : null,
+        },
+    ];
+
     return <>
-        <Alert error={gateways.error || correlation.error || summary.error || runs.error || audit.error || memory.error}/>
+        <Alert error={eventAction.error || extensions.error || extensionEvents.error || gateways.error || correlation.error || summary.error || runs.error || audit.error || memory.error}/>
         <Metrics value={summary.data}/>
         <Panel title={t("记忆观测")}>
             <MemoryMetrics value={memory.data}/>
@@ -184,6 +277,61 @@ export function ObservabilityPage() {
                     dataSource={memory.data.governance} pagination={clientPagination}/>
             </details>}
         </Panel>
+        <Panel title={t("扩展运行状态")}>
+            <div className="metrics">
+                {[
+                    [t("扩展总数"), extensions.data?.capabilities.summary.total],
+                    [t("就绪能力"), extensions.data?.capabilities.summary.by_status.ready],
+                    [t("降级能力"), extensions.data?.capabilities.summary.by_status.degraded],
+                    [t("待投递事件"), extensions.data?.events.queue?.pending ?? 0],
+                    [t("失败事件"), extensions.data?.events.queue?.failed ?? 0],
+                    [t("投递失败"), extensions.data?.events.failures ?? 0],
+                ].map(([label, value]) => <div className="metric" key={label}><span>{label}</span><strong>{value ?? '—'}</strong></div>)}
+            </div>
+            <Table<CapabilityStatusItem>
+                rowKey="capability_id"
+                size="small"
+                loading={extensions.loading}
+                columns={capabilityColumns}
+                dataSource={extensions.data?.capabilities.items || []}
+                locale={{ emptyText: t("暂无能力状态") }}
+                scroll={{ x: 760 }}
+            />
+        </Panel>
+        {admin && <Panel title={t("事件投递运维")} action={
+            <Space>
+                <Select
+                    aria-label={t("事件状态")}
+                    allowClear
+                    placeholder={t("全部状态")}
+                    value={eventStatusFilter}
+                    onChange={(value?: ExtensionEventStatus) => {
+                        setEventStatusFilter(value);
+                        setEventPage(1);
+                    }}
+                    options={[
+                        { value: 'pending', label: t("待投递") },
+                        { value: 'running', label: t("投递中") },
+                        { value: 'done', label: t("已完成") },
+                        { value: 'failed', label: t("失败") },
+                    ]}
+                />
+            </Space>
+        }>
+            <Table<ExtensionEventPage['items'][number]>
+                rowKey="id"
+                size="small"
+                loading={extensionEvents.loading}
+                columns={eventColumns}
+                dataSource={extensionEvents.data?.items || []}
+                locale={{ emptyText: eventStatusFilter ? t("暂无符合条件的事件") : t("暂无事件") }}
+                scroll={{ x: 1100 }}
+                pagination={serverPagination(eventPage, eventPageSize, extensionEvents.data?.total || 0, (page, size) => {
+                    setEventPage(size === eventPageSize ? page : 1);
+                    setEventPageSize(size);
+                })}
+            />
+        </Panel>}
         <div className="split">
             <Panel title={t("最近运行")}>
                 <Table<Run> rowKey="id" size="small" loading={runs.loading} columns={runColumns}

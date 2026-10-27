@@ -6,9 +6,9 @@ import pytest
 from test_platform_postgres import create_agent
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.tool_gateway.service import HttpTool, ToolGateway
-from agent_platform.platform.persistence.store import DomainError, one
-from agent_platform.platform.secrets.vault import CredentialVault
+from agent_platform.core_platform.platform_services.persistence.store import DomainError, one
+from agent_platform.core_platform.platform_services.secrets.vault import CredentialVault
+from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGateway
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -48,7 +48,7 @@ def api_definition(name="order_lookup", **kw):
 
 async def setup(platform, tmp_path):
     client, services, _ = platform
-    services.platform.tools.vault = CredentialVault(tmp_path / "master.key")
+    services.groups.tools.tools.vault = CredentialVault(tmp_path / "master.key")
     response = await client.post(ROOT + "/collections", json=collection())
     assert response.status_code == 201, response.text
     group = response.json()
@@ -61,7 +61,7 @@ async def test_inheritance_publication_snapshots_and_live_disable(platform, tmp_
     client, services, settings = platform
     group, row = await setup(platform, tmp_path)
     gid, tid = group["id"], row["id"]
-    registry = services.platform.tools
+    registry = services.groups.tools.tools
     assert row["published_version"] is None
     assert "fake-collection-key" not in json.dumps(row) + json.dumps(group)
     with pytest.raises(DomainError):
@@ -106,7 +106,7 @@ async def test_inheritance_publication_snapshots_and_live_disable(platform, tmp_
         "Authorization"
     ] == "Bearer fake-collection-key"
     async with registry.engine.connect() as c:
-        snapshot = await services.platform.agents.snapshot(settings.tenant_id, UUID(agent["id"]), c)
+        snapshot = await services.groups.business.agents.snapshot(settings.tenant_id, UUID(agent["id"]), c)
     assert snapshot["tools"][0]["version"] == 1
     seen = []
     async with httpx.AsyncClient(
@@ -151,9 +151,9 @@ async def test_override_copy_clear_and_atomic_import(platform, tmp_path):
         )
     ).status_code == 200
     spec = HttpTool.model_validate(
-        (await services.platform.tools.resolve(settings.tenant_id, ["custom_lookup"]))[0]["spec"]
+        (await services.groups.tools.tools.resolve(settings.tenant_id, ["custom_lookup"]))[0]["spec"]
     )
-    assert await services.platform.tools.credential_headers(settings.tenant_id, spec) == {
+    assert await services.groups.tools.tools.credential_headers(settings.tenant_id, spec) == {
         "X-API-Key": "fake-private-key"
     }
     response = await client.put(
@@ -224,7 +224,7 @@ async def test_permissions_validation_simulation_and_live_test(platform, tmp_pat
             )
         )
     ) as http:
-        services.platform.tool_workspace.client = http
+        services.groups.tools.tool_workspace.client = http
         body = {
             "revision": 1,
             "collection_revision": 1,
@@ -237,7 +237,7 @@ async def test_permissions_validation_simulation_and_live_test(platform, tmp_pat
         response = await client.post(ROOT + f"/apis/{tid}/test", json={**body, "mode": "live"})
         assert response.status_code == 200 and response.json()["ok"]
         assert seen == ["Bearer fake-collection-key"]
-    async with services.platform.engine.connect() as c:
+    async with services.groups.runtime.engine.connect() as c:
         assert await one(
             c,
             "SELECT id FROM audit_records WHERE tenant_id=:t AND action='tool.live_test'",
@@ -246,7 +246,7 @@ async def test_permissions_validation_simulation_and_live_test(platform, tmp_pat
     assert (
         await client.patch(ROOT + f"/collections/{gid}", json={"revision": 1, "archived": True})
     ).status_code == 200
-    assert not await services.platform.tools.enabled(settings.tenant_id, row["name"])
+    assert not await services.groups.tools.tools.enabled(settings.tenant_id, row["name"])
 
 
 async def test_openapi_preview_export_pagination_and_isolation(platform, tmp_path):
@@ -283,9 +283,9 @@ paths:
     page2 = (await client.get(ROOT + "/collections?page_size=12&page=2")).json()
     assert page1["total"] == 14 and len(page1["items"]) == 12 and len(page2["items"]) == 2
     assert not {r["id"] for r in page1["items"]} & {r["id"] for r in page2["items"]}
-    assert not (await services.platform.tool_workspace.catalog("other-tenant"))["items"]
+    assert not (await services.groups.tools.tool_workspace.catalog("other-tenant"))["items"]
     with pytest.raises(DomainError):
-        await services.platform.tool_workspace.detail("other-tenant", UUID(group["id"]))
+        await services.groups.tools.tool_workspace.detail("other-tenant", UUID(group["id"]))
 
 
 async def test_post_release_inherited_secret_and_confirmed_live_test(platform, tmp_path):
@@ -310,7 +310,7 @@ async def test_post_release_inherited_secret_and_confirmed_live_test(platform, t
     updated = await client.put(ROOT + f"/collections/{gid}/apis/{tid}", json=body)
     assert updated.status_code == 200, updated.text
     assert updated.json()["spec"]["method"] == "POST"
-    registry = services.platform.tools
+    registry = services.groups.tools.tools
     assert (await registry.resolve(settings.tenant_id, [row["name"]]))[0]["spec"]["method"] == "GET"
     assert (
         await client.post(
@@ -327,7 +327,7 @@ async def test_post_release_inherited_secret_and_confirmed_live_test(platform, t
         return httpx.Response(201, json={"created": True})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
-        services.platform.tool_workspace.client = http
+        services.groups.tools.tool_workspace.client = http
         test = {
             "revision": 2,
             "collection_revision": 1,

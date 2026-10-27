@@ -1,0 +1,17 @@
+manifest_version: "1"
+capability:
+  id: example-capability
+  version: 0.1.0
+  api_version: v1
+  name: Example Capability
+  description: Replace this description with the capability boundary.
+  dependencies: []
+  dependency_constraints: {}
+  requires_platform: ">=0.1.0,<1.0.0"
+  configuration_schema_version: v1
+  permissions:
+    - example.read
+  contributions:
+    - tools
+    - events
+  enabled_by_default: false

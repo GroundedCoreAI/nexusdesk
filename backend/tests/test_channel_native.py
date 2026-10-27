@@ -6,14 +6,19 @@ import pytest
 from test_platform_postgres import create_agent, execute_next
 from test_platform_postgres import platform as _platform
 
-from agent_platform.integrations.channels.base import DeliveryResult, IncomingEnvelope
-from agent_platform.integrations.channels.crypto import (
+from agent_platform.core_platform.platform_services.integrations.channels.base import (
+    DeliveryResult,
+    IncomingEnvelope,
+)
+from agent_platform.core_platform.platform_services.integrations.channels.crypto import (
     encrypt_wechat_payload,
     slack_signature,
     wechat_signature,
 )
-from agent_platform.integrations.channels.registry import adapter_for
-from agent_platform.platform.persistence.store import many, one
+from agent_platform.core_platform.platform_services.integrations.channels.registry import (
+    adapter_for,
+)
+from agent_platform.core_platform.platform_services.persistence.store import many, one
 
 platform = _platform
 pytestmark = pytest.mark.postgres
@@ -22,7 +27,7 @@ pytestmark = pytest.mark.postgres
 async def _wait_for_inbound_run(services, channel_id, limit=80):
     event = None
     for _ in range(limit):
-        async with services.platform.engine.connect() as connection:
+        async with services.groups.runtime.engine.connect() as connection:
             event = await one(
                 connection,
                 """SELECT status,run_id,error_code FROM channel_inbound_events
@@ -91,7 +96,7 @@ async def test_wecom_callback_runs_agent_and_delivers_reply(platform, monkeypatc
     monkeypatch.setattr(adapter_for("wecom"), "deliver", fake_deliver)
     await execute_next(services, settings)
     for _ in range(30):
-        async with services.platform.engine.connect() as connection:
+        async with services.groups.runtime.engine.connect() as connection:
             delivery = await one(
                 connection,
                 """SELECT status,attempts FROM channel_deliveries
@@ -137,7 +142,7 @@ async def test_webhook_enqueues_inbound_and_dedups(platform):
     assert first.json() == {"ok": True}
     second = await client.post(url, content=body, headers=headers)
     assert second.status_code == 200, second.text
-    async with services.platform.engine.connect() as connection:
+    async with services.groups.runtime.engine.connect() as connection:
         counted = await one(
             connection,
             "SELECT count(*) AS n FROM channel_inbound_events WHERE channel_id=:channel",
@@ -150,12 +155,12 @@ async def test_webhook_enqueues_inbound_and_dedups(platform):
 async def test_webhook_resolves_tenant_from_channel(platform):
     from uuid import uuid4
 
-    from agent_platform.platform.persistence.store import execute
+    from agent_platform.core_platform.platform_services.persistence.store import execute
 
     client, services, _settings = platform
     agent, _ = await create_agent(client)
     other_channel = str(uuid4())
-    async with services.platform.engine.begin() as connection:
+    async with services.groups.runtime.engine.begin() as connection:
         await execute(
             connection,
             """INSERT INTO channels(
@@ -179,14 +184,14 @@ async def test_webhook_resolves_tenant_from_channel(platform):
         headers={"content-type": "application/json"},
     )
     assert response.status_code == 200, response.text
-    async with services.platform.engine.connect() as connection:
+    async with services.groups.runtime.engine.connect() as connection:
         event = await one(
             connection,
             "SELECT tenant_id FROM channel_inbound_events WHERE channel_id=:channel",
             channel=other_channel,
         )
     assert event["tenant_id"] == "other-tenant"
-    async with services.platform.engine.begin() as connection:
+    async with services.groups.runtime.engine.begin() as connection:
         await execute(
             connection,
             "DELETE FROM channel_inbound_events WHERE channel_id=:channel",
@@ -247,7 +252,7 @@ async def test_channel_providers_endpoint_lists_catalog(platform):
 @pytest.mark.asyncio
 async def test_channel_work_notification_wakes_both_loops(platform):
     _client, services, _settings = platform
-    channels = services.platform.channels
+    channels = services.groups.business.channels
     channels.delivery_wakeup.clear()
     channels.inbound_wakeup.clear()
     channels._on_work({"k": "delivery"})
@@ -258,7 +263,7 @@ async def test_channel_work_notification_wakes_both_loops(platform):
 @pytest.mark.asyncio
 async def test_channel_pool_spawns_configured_number_of_loops(platform):
     _client, services, _settings = platform
-    channels = services.platform.channels
+    channels = services.groups.business.channels
     channels.concurrency = 3
     started = {"n": 0}
     gate = asyncio.Event()
@@ -359,7 +364,7 @@ async def test_wecom_kf_sync_persists_cursor_and_multiple_messages(platform, mon
         content=f"<xml><Encrypt><![CDATA[{encrypted}]]></Encrypt></xml>",
     )
     assert response.status_code == 200, response.text
-    async with services.platform.engine.connect() as connection:
+    async with services.groups.runtime.engine.connect() as connection:
         counted = await one(
             connection,
             "SELECT count(*) AS n FROM channel_inbound_events WHERE channel_id=:channel",
@@ -376,7 +381,7 @@ async def test_wecom_kf_sync_persists_cursor_and_multiple_messages(platform, mon
 
 @pytest.mark.asyncio
 async def test_outbound_long_message_is_chunked(platform):
-    from agent_platform.modules.conversation.service import add_message
+    from agent_platform.business_capabilities.conversation.service import add_message
 
     client, services, _settings = platform
     agent, _ = await create_agent(client)
@@ -404,15 +409,15 @@ async def test_outbound_long_message_is_chunked(platform):
     )
     assert response.status_code == 200, response.text
     await _wait_for_inbound_run(services, channel["id"])
-    async with services.platform.engine.connect() as connection:
+    async with services.groups.runtime.engine.connect() as connection:
         mapping = await one(
             connection,
             "SELECT conversation_id FROM channel_conversations WHERE channel_id=:channel",
             channel=channel["id"],
         )
-    async with services.platform.engine.begin() as connection:
+    async with services.groups.runtime.engine.begin() as connection:
         await add_message(connection, mapping["conversation_id"], "assistant", "x" * 5000)
-    async with services.platform.engine.connect() as connection:
+    async with services.groups.runtime.engine.connect() as connection:
         rows = await many(
             connection,
             """SELECT seq,length(content) AS length FROM channel_deliveries
@@ -536,7 +541,7 @@ async def test_feishu_message_runs_agent_and_delivers_reply(platform, monkeypatc
     monkeypatch.setattr(adapter_for("feishu"), "deliver", fake_deliver)
     await execute_next(services, settings)
     for _ in range(30):
-        async with services.platform.engine.connect() as connection:
+        async with services.groups.runtime.engine.connect() as connection:
             delivery = await one(
                 connection,
                 """SELECT status,attempts FROM channel_deliveries

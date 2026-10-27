@@ -8,14 +8,14 @@ import pytest_asyncio
 from pydantic import SecretStr
 from sqlalchemy import text
 
-from agent_platform.modules.agent_runtime.engine import RuntimeEngine
-from agent_platform.modules.agent_runtime.repository import RunRepository
-from agent_platform.modules.agent_runtime.schemas import BusyError, CapacityError, RunRequest
-from agent_platform.modules.agent_runtime.worker import RuntimeWorker
-from agent_platform.modules.model_gateway.service import DemoModel
-from agent_platform.modules.tool_gateway.service import ToolGateway
-from agent_platform.platform.persistence.database import create_engine
-from agent_platform.settings import Settings
+from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
+from agent_platform.core_platform.agent_runtime.repository import RunRepository
+from agent_platform.core_platform.agent_runtime.schemas import BusyError, CapacityError, RunRequest
+from agent_platform.core_platform.agent_runtime.worker import RuntimeWorker
+from agent_platform.core_platform.platform_services.model_gateway.service import DemoModel
+from agent_platform.core_platform.platform_services.persistence.database import create_engine
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
+from agent_platform.core_platform.tool_gateway.service import ToolGateway
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
@@ -166,7 +166,7 @@ async def test_worker_runs_real_graph_and_persists_events(database):
 
 
 async def test_http_api_authorization_conflicts_cancel_and_sse(database):
-    from agent_platform.apps.api.main import create_app
+    from agent_platform.applications.customer_service.main import create_app
 
     _repo, settings = database
     settings = settings.model_copy(update={"api_token": SecretStr("test-token")})
@@ -204,7 +204,7 @@ async def test_end_to_end_demo_uses_real_http_and_persistent_events(database, tm
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    from agent_platform.apps.api.main import create_app
+    from agent_platform.applications.customer_service.main import create_app
 
     received = []
 

@@ -26,7 +26,10 @@ from test_memory_postgres import RecordingGateway, audit_records
 from test_platform_postgres import create_agent, execute_next
 from test_platform_postgres import platform as _platform
 
-from agent_platform.integrations.business_tools.platform_tools import PlatformTools
+from agent_platform.core_platform.platform_services.integrations.business_tools.platform_tools import (
+    PlatformTools,
+)
+from agent_platform.extension_contracts import RuntimeBindings
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -72,11 +75,11 @@ def tools_for(settings, store, agent_config):
         "customer_id": str(uuid4()),
         "config": {"agent": {"config": agent_config}},
     }
-    platform_obj = SimpleNamespace(
+    bindings = RuntimeBindings(
         policy=_AllowAllPolicy(), memory_store=store, settings=settings
     )
     return PlatformTools(
-        SimpleNamespace(schemas=[], specs={}), platform_obj, row, ["memory_search"], [], None
+        SimpleNamespace(schemas=[], specs={}), bindings, row, ["memory_search"], [], None
     )
 
 
@@ -242,7 +245,7 @@ async def test_p5_it_05_inject_cap_bounds_prompt_items(platform):
 async def test_types_filter_drops_disallowed_extracted_types(platform):
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     async with engine.begin() as c:
         customer_id = await memory.resolve_customer(c, tenant, "channel", "types-cust")
         counts = await memory.apply_extracted(
@@ -395,7 +398,7 @@ async def test_p5_it_10_blacklist_handoff_sinks_to_agent_switch(platform):
     await execute_next(services, settings)
     customer_id = (await conversation_detail(client, first["conversation_id"]))["customer_id"]
     assert customer_id
-    await services.platform.memory.upsert_flag(
+    await services.groups.business.memory.upsert_flag(
         tenant, "operator", customer_id, "blacklist", "黑名单客户"
     )
     # Platform-level switch is off; only the agent opted in.

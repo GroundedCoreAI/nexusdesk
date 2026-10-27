@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from agent_platform.settings import Settings
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
@@ -75,7 +75,7 @@ def test_seed_industries_defaults_off_and_is_env_overridable(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_resolve_published_chat_selection_rules():
-    from agent_platform.apps.seed_industries import resolve_published_chat
+    from agent_platform.applications.seed_industries import resolve_published_chat
 
     class Catalog:
         def __init__(self, rows):
@@ -119,8 +119,8 @@ async def test_resolve_published_chat_selection_rules():
 
 @pytest.mark.asyncio
 async def test_unconfigured_model_never_falls_back_to_demo():
-    from agent_platform.modules.agent_runtime.schemas import RuntimeFault
-    from agent_platform.modules.model_gateway.service import build_model
+    from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
+    from agent_platform.core_platform.platform_services.model_gateway.service import build_model
 
     settings = configuration().model_copy(
         update={"model_backend": "unconfigured", "model_name": "", "model_api_key": None}
@@ -181,13 +181,13 @@ def test_deployment_topologies_and_no_secret_copy():
     assert prod["services"]["channel-worker"]["command"] == [
         "python",
         "-m",
-        "agent_platform.apps.worker.channel",
+        "agent_platform.applications.worker.channel",
     ]
     # The memory worker is a standalone claim loop reusing the backend image.
     assert prod["services"]["memory-worker"]["command"] == [
         "python",
         "-m",
-        "agent_platform.apps.worker.memory",
+        "agent_platform.applications.worker.memory",
     ]
     assert (
         "__LOCAL_TOKEN__"
@@ -265,7 +265,7 @@ def test_healthcheck_matches_the_quickstart_scheme():
 
 
 def test_tls_hosts_accepts_a_comma_separated_list(monkeypatch):
-    from agent_platform.settings import Settings
+    from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
     base = {"_env_file": None, "database_url": "postgresql+asyncpg://test:test@localhost/test"}
     monkeypatch.setenv("AGENT_TLS_HOSTS", "192.168.1.50, nexusdesk.test")

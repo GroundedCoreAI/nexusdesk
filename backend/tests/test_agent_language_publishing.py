@@ -25,8 +25,8 @@ async def test_response_language_only_changes_published_snapshot_after_publish(p
     assert published.status_code == 200, published.text
 
     async def snapshot_now():
-        async with runtime.platform.engine.connect() as connection:
-            return await runtime.platform.agents.snapshot(settings.tenant_id, UUID(aid), connection)
+        async with runtime.groups.runtime.engine.connect() as connection:
+            return await runtime.groups.business.agents.snapshot(settings.tenant_id, UUID(aid), connection)
 
     snapshot = await snapshot_now()
     assert snapshot["config"]["reply_language"] == "zh-TW"

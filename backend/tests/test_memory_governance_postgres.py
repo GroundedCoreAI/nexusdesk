@@ -24,18 +24,18 @@ import pytest
 from sqlalchemy import text
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.memory.decay import (
+from agent_platform.business_capabilities.memory.decay import (
     ReinforceService,
     daily_migration,
     enqueue_reinforce_task,
 )
-from agent_platform.modules.memory.governance import (
+from agent_platform.business_capabilities.memory.governance import (
     merge_customers,
     scan_overdue_tickets,
     upsert_flag,
 )
-from agent_platform.modules.memory.service import MemoryService
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.business_capabilities.memory.service import MemoryService
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -222,7 +222,7 @@ async def test_p4_ut_07_protected_update_parks_suggested_pending(platform):
     """Extraction update against a protected row must not overwrite; it parks
     a pending ``<key>:suggested`` suggestion instead (FR-1, R4)."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(engine, tenant, customer_id, "profile", "name", "张三")
     await memory.edit_item(tenant, "operator", item_id, "张叁")
@@ -254,7 +254,7 @@ async def test_p4_ut_08_release_restores_automatic_management(platform):
     """恢复自动管理: protected=false + source_type='extracted' (R18); later
     extraction updates overwrite normally again (FR-1)."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(engine, tenant, customer_id, "profile", "name", "张三")
     await memory.edit_item(tenant, "operator", item_id, "张叁")
@@ -280,7 +280,7 @@ async def test_p4_ut_09_flag_write_paths_reject_extracted(platform):
     """Entry layers beneath the extractor filter (P0, FR-2): apply_extracted
     drops flag ops; governance.upsert_flag hard-errors on extracted."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
 
     async with engine.begin() as c:
@@ -410,7 +410,7 @@ async def test_p4_it_01_human_edit_survives_and_suggestion_reaches_console(platf
     customer later self-reports a different name; the pending suggestion is
     visible in the console queue; confirming it merges onto the human row."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(engine, tenant, customer_id, "profile", "name", "张三")
     await memory.edit_item(tenant, "operator", item_id, "张叁")
@@ -441,7 +441,7 @@ async def test_p4_it_02_pii_masked_at_every_write_point(platform):
     content; no plaintext anywhere in the database (incl. prev_content and
     audit payloads); hit counts ride in audit details."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
 
     # 1. extraction write
@@ -465,7 +465,7 @@ async def test_p4_it_02_pii_masked_at_every_write_point(platform):
     assert "13911112222" not in row["content"] and "139******22" in row["content"]
 
     # 3. flag note
-    await services.platform.memory.upsert_flag(
+    await services.groups.business.memory.upsert_flag(
         tenant, "operator", customer_id, "vip", "回访 13700001111"
     )
     flag = next(r for r in await items_of(engine, tenant, customer_id) if r["type"] == "flag")
@@ -577,7 +577,7 @@ async def test_p4_it_05_rule_scan_never_touches_human_flag(platform):
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
-    await services.platform.memory.upsert_flag(
+    await services.groups.business.memory.upsert_flag(
         tenant, "operator", customer_id, "complaint_risk", "人工判定投诉风险"
     )
     # Overdue ticket exists but the human flag must absorb the rule write.
@@ -604,7 +604,7 @@ async def test_p4_it_06_delete_customer_cascades_and_reentry_rebuilds(platform):
     with NULL customer; ticket keeps its string reference; audit carries
     operator and counts only; the same external key re-registers fresh."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant, external_key="wx-user-1")
     await add_item(engine, tenant, customer_id, "profile", "name", "张三")
     await add_item(engine, tenant, customer_id, "preference", "language", "中文")
@@ -648,7 +648,7 @@ async def test_p4_it_07_delete_customer_performance(platform):
     """Non-functional: deleting a customer at the 200-item cap stays well
     under the 2s P99 budget (local benchmark, 3 samples)."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     durations = []
     for _ in range(3):
         customer_id = await make_customer(engine, tenant)
@@ -763,8 +763,8 @@ async def test_p4_it_08_merge_relinks_tickets_and_keeps_memory_flowing(platform)
     # (pre-R22 the _customer_exists check silently dropped it: memory loss).
     from test_memory_events_postgres import store_settings
 
-    from agent_platform.modules.memory.events import EventWriter
-    from agent_platform.modules.memory.store import TsVectorStore
+    from agent_platform.business_capabilities.memory.events import EventWriter
+    from agent_platform.business_capabilities.memory.store import TsVectorStore
 
     store = TsVectorStore(engine, store_settings(settings))
     writer = EventWriter(engine, store, store_settings(settings))
@@ -833,7 +833,7 @@ async def test_p4_it_09_daily_migration_routes_by_type_and_audits(platform):
     assert pending[0]["details"]["effective_confidence"] == pytest.approx(0.281, abs=0.01)
 
     # Immune rows keep injecting through active_items/active_flags.
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     injected = await memory.active_items(tenant, customer_id)
     assert [r["key"] for r in injected] == ["name"]
     flags = await memory.active_flags(tenant, customer_id, 3)
@@ -851,7 +851,7 @@ async def test_p4_it_10_injection_filter_applies_before_any_daily_run(platform):
     equality (>=, P4-UT-11); protected rows always pass. Event retrieval is
     NOT confidence-filtered (R7/R8): visibility stays TTL-managed."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     await add_item(engine, tenant, customer_id, "profile", "name", "张三", confidence=0.6)
     above = await add_item(engine, tenant, customer_id, "profile", "phone", "x", confidence=0.6)
@@ -871,7 +871,7 @@ async def test_p4_it_10_injection_filter_applies_before_any_daily_run(platform):
     assert row["status"] == "active"
 
     # Event retrieval ignores the confidence filter entirely (dual-mode).
-    from agent_platform.modules.memory.store import (
+    from agent_platform.business_capabilities.memory.store import (
         PgVectorStore,
         build_memory_store,
     )
@@ -923,7 +923,7 @@ async def test_p4_it_11_same_key_upsert_resets_decay_clock(platform):
     (same-key extraction update): the clock resets and the daily pass leaves
     it active; an unmentioned twin expires (AC-9)."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     mentioned = await add_item(engine, tenant, customer_id, "preference", "language", "中文",
                                confidence=0.9)
@@ -1044,7 +1044,7 @@ async def test_p4_it_15_expired_restore_refreshes_clock_and_stays_active(platfor
     """Restoring an expired row sets it active with a fresh reference clock
     (复活即满血): the very next decay round leaves it alone (R19)."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(engine, tenant, customer_id, "preference", "language", "中文",
                              confidence=0.9)
@@ -1093,7 +1093,7 @@ async def test_p4_it_18_vector_column_cleared_with_customer_delete(platform):
     await db_exec(engine, "UPDATE memory_items SET embedding=CAST(:v AS vector) WHERE id=:id",
                   v=vector, id=item_id)
 
-    await services.platform.memory.delete_customer(tenant, "operator", customer_id)
+    await services.groups.business.memory.delete_customer(tenant, "operator", customer_id)
     leftovers = await db_rows(
         engine,
         "SELECT count(*)::int AS n FROM memory_items WHERE tenant_id=:t AND embedding IS NOT NULL",
@@ -1111,7 +1111,7 @@ async def test_p4_cm_05_protected_invariant_holds_across_governance_paths(platfo
     """protected <=> source_type='human' after edit, release, flag writes,
     decay passes and merges: zero drift rows at every checkpoint."""
     _client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(engine, tenant, customer_id, "profile", "name", "张三")
     await memory.edit_item(tenant, "operator", item_id, "张叁")
@@ -1181,7 +1181,7 @@ async def test_p4_it_03_flags_inject_first_and_have_their_own_budget(platform):
     preference/pending-events; flags do not consume the 20-item profile
     budget; their own cap is configurable (memory_flag_inject_max)."""
     client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     # Fill the 20-item profile/preference budget completely.
     for i in range(20):
@@ -1233,7 +1233,7 @@ async def test_p4_it_04_blacklist_injects_instruction_no_handoff_by_default(plat
     谨慎服务，涉承诺一律转人工确认; with the default switch
     (memory_blacklist_auto_handoff=false) the run proceeds normally."""
     client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     await memory.upsert_flag(tenant, "operator", customer_id, "blacklist", "黑名单客户")
     conversation_id = await _bound_conversation(engine, tenant, customer_id)
@@ -1250,12 +1250,12 @@ async def test_p4_it_04_blacklist_auto_handoff_when_enabled(platform):
     """memory_blacklist_auto_handoff=true: a blacklisted customer's message
     is recorded and handed straight to a human — no run is submitted (R13)."""
     client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
     await memory.upsert_flag(tenant, "operator", customer_id, "blacklist", "黑名单客户")
     conversation_id = await _bound_conversation(engine, tenant, customer_id)
     # Opt the customer service into auto handoff for this test only.
-    services.platform.customer.settings = settings.model_copy(
+    services.groups.business.customer.settings = settings.model_copy(
         update={"memory_blacklist_auto_handoff": True}
     )
 
@@ -1365,7 +1365,7 @@ async def test_p4_it_13_reinforcement_never_writes_on_the_hot_path(platform):
     assert aged[0]["aged"] is True  # still backdated: no synchronous refresh
 
     # The queued task does the refresh, batched off the hot path.
-    from agent_platform.modules.memory.bootstrap import MemoryDispatcher
+    from agent_platform.business_capabilities.memory.bootstrap import MemoryDispatcher
 
     dispatcher = MemoryDispatcher(None, None, None, reinforce=ReinforceService(engine, settings))
     task = (
@@ -1403,7 +1403,7 @@ async def test_p4_it_16_decay_disabled_skips_maintenance_migration(platform):
                          confidence=0.9)
     await age_item(engine, old, 200)  # below threshold: would expire under decay
 
-    from agent_platform.modules.memory.worker import MemoryWorker
+    from agent_platform.business_capabilities.memory.worker import MemoryWorker
 
     off = MemoryWorker(engine, service=None,
                        settings=settings.model_copy(update={"memory_decay_enabled": False}),
@@ -1480,7 +1480,7 @@ async def test_p4_it_17_memory_summary_aggregates_constructed_data(platform):
     extraction volume from audit details, pending backlog, governance
     counters, decay counters, reinforcement queue stats, PII hits."""
     client, services, settings = platform
-    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    memory, engine, tenant = services.groups.business.memory, services.repository.engine, settings.tenant_id
     customer_id = await make_customer(engine, tenant)
 
     # Extraction: 1 added + 1 pii hit, audited the way the extraction service
@@ -1490,7 +1490,7 @@ async def test_p4_it_17_memory_summary_aggregates_constructed_data(platform):
             c, tenant, customer_id,
             [extract_op("phone", "13812345678", op="add")], "conv-1", 0.8, 0.5,
         )
-        from agent_platform.platform.persistence.store import audit
+        from agent_platform.core_platform.platform_services.persistence.store import audit
 
         await audit(c, tenant, "memory", "memory.extract.applied", customer_id, **counts)
 
@@ -1513,7 +1513,7 @@ async def test_p4_it_17_memory_summary_aggregates_constructed_data(platform):
     await ReinforceService(engine, settings).execute(task)
     await db_exec(engine, "UPDATE memory_tasks SET status='done' WHERE id=:id", id=task_id)
 
-    summary = await services.platform.observability.memory_summary(tenant)
+    summary = await services.groups.application.observability.memory_summary(tenant)
     today = [d for d in summary["extraction_daily"] if d["runs"] == 1]
     assert today and today[0]["added"] == 1 and today[0]["pii_masked"] == 1
     assert summary["backlog"]["pending"] >= 1
@@ -1557,7 +1557,7 @@ async def test_p4_cm_03_reinforce_task_failure_audits_kind_specific_action(platf
     item.released IT-01, decay_pending/decay_expired IT-09, evicted IT-11)."""
     from test_memory_postgres import force_claimable
 
-    from agent_platform.modules.memory.worker import MemoryWorker
+    from agent_platform.business_capabilities.memory.worker import MemoryWorker
 
     class CrashingDispatcher:
         async def execute(self, task):

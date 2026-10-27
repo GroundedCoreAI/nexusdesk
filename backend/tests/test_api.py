@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from agent_platform.apps.api.main import create_app
+from agent_platform.applications.customer_service.main import create_app
 
 client = TestClient(create_app())
 

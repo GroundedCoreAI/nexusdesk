@@ -36,28 +36,28 @@ services:
   runtime-worker:
     <<: *backend
     restart: unless-stopped
-    command: [python, -m, agent_platform.apps.worker]
+    command: [python, -m, agent_platform.applications.worker]
     depends_on:
       migrate:
         condition: service_completed_successfully
   channel-worker:
     <<: *backend
     restart: unless-stopped
-    command: [python, -m, agent_platform.apps.worker.channel]
+    command: [python, -m, agent_platform.applications.worker.channel]
     depends_on:
       migrate:
         condition: service_completed_successfully
   knowledge-worker:
     <<: *backend
     restart: unless-stopped
-    command: [python, -m, agent_platform.apps.worker.knowledge]
+    command: [python, -m, agent_platform.applications.worker.knowledge]
     depends_on:
       migrate:
         condition: service_completed_successfully
   memory-worker:
     <<: *backend
     restart: unless-stopped
-    command: [python, -m, agent_platform.apps.worker.memory]
+    command: [python, -m, agent_platform.applications.worker.memory]
     depends_on:
       migrate:
         condition: service_completed_successfully
