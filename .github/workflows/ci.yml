@@ -110,7 +110,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Architecture gates
-        run: uv run --directory backend python ../scripts/check_architecture.py
+        run: uv run --directory backend python "$GITHUB_WORKSPACE/scripts/check_architecture.py"
 
       - name: Migrate the test database
         working-directory: backend
