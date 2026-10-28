@@ -20,6 +20,9 @@ from agent_platform.business_capabilities.memory.service import MemoryService
 from agent_platform.business_capabilities.memory.summary import SummaryError, require_binding
 from agent_platform.core_platform.platform_services.model_gateway.contracts import ChatRequest
 from agent_platform.core_platform.platform_services.persistence.store import audit, many, one
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,12 +151,14 @@ async def enqueue_extract_task(
     existing = await one(
         conn,
         """SELECT id FROM memory_tasks
-        WHERE tenant_id=:t AND kind=:kind AND payload->>'conversation_id'=:cid
+        WHERE tenant_id=:t AND business_id=:business_id AND workspace_id=:workspace_id
+        AND kind=:kind AND payload->>'conversation_id'=:cid
         AND created_at > now() - :debounce * interval '1 second' LIMIT 1""",
         t=tenant,
         kind=EXTRACT_KIND,
         cid=str(conversation_id),
         debounce=debounce_seconds,
+        **resource_scope_values(),
     )
     if existing:
         return None
@@ -166,10 +171,13 @@ async def enqueue_extract_task(
         payload["types"] = [t for t in MEMORY_TYPES if t in types]
     row = await one(
         conn,
-        """INSERT INTO memory_tasks(tenant_id,kind,payload)
-        VALUES(:t,:kind,CAST(:payload AS jsonb)) RETURNING id""",
+        """INSERT INTO memory_tasks(
+            tenant_id,business_id,workspace_id,kind,payload
+        ) VALUES(:t,:business_id,:workspace_id,:kind,CAST(:payload AS jsonb))
+        RETURNING id""",
         t=tenant,
         kind=EXTRACT_KIND,
+        **resource_scope_values(),
         payload=json.dumps(payload),
     )
     return row["id"]
@@ -205,9 +213,12 @@ class ExtractionService:
             conversation = await one(
                 c,
                 """SELECT id,tenant_id,agent_id,mode,source,customer_id
-                FROM runtime_conversations WHERE id=:cid AND tenant_id=:t""",
+                FROM runtime_conversations WHERE id=:cid AND tenant_id=:t
+                  AND business_id=:business_id AND workspace_id=:workspace_id""",
                 cid=cid,
                 t=tenant,
+                business_id=task.get("business_id", "customer-service"),
+                workspace_id=task.get("workspace_id", "default"),
             )
             # Pollution guards (AC-5): playground conversations, example
             # agents and conversations whose customer link changed since
@@ -238,10 +249,13 @@ class ExtractionService:
             existing = await many(
                 c,
                 """SELECT type,key FROM memory_items
-                WHERE tenant_id=:t AND customer_id=:c AND status IN ('active','pending')
+                WHERE tenant_id=:t AND business_id=:business_id AND workspace_id=:workspace_id
+                AND customer_id=:c AND status IN ('active','pending')
                 ORDER BY type,key""",
                 t=tenant,
                 c=customer_id,
+                business_id=task.get("business_id", "customer-service"),
+                workspace_id=task.get("workspace_id", "default"),
             )
         profile_id, profile_version = require_binding(binding)
         prompt = build_extraction_prompt(messages, existing)

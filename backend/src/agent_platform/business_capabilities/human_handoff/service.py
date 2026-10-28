@@ -10,30 +10,55 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     required,
     transaction,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resolve_scope,
+    scope_predicate,
+)
+from agent_platform.extension_contracts import BusinessScope
 
 
 class HandoffService:
     def __init__(self, engine, repository):
         self.engine, self.repository = engine, repository
 
-    async def list(self, tenant):
+    async def list(self, tenant, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, "h")
         async with self.engine.connect() as c:
             return await many(
                 c,
                 """SELECT h.*,v.external_id FROM handoffs h
-                JOIN runtime_conversations v ON v.id=h.conversation_id WHERE h.tenant_id=:t
+                JOIN runtime_conversations v ON v.id=h.conversation_id
+                WHERE h.tenant_id=:t AND """
+                + scope_sql
+                + """
                 ORDER BY h.created_at DESC LIMIT 100""",
                 t=tenant,
+                **scope_params,
             )
 
-    async def request(self, tenant, actor, cid, reason, connection=None):
+    async def request(
+        self,
+        tenant,
+        actor,
+        cid,
+        reason,
+        connection=None,
+        scope: BusinessScope | None = None,
+    ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with transaction(self.engine, connection) as c:
             conv = required(
                 await one(
                     c,
-                    "SELECT * FROM runtime_conversations WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    """SELECT * FROM runtime_conversations
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if conv["mode"] == "closed":
@@ -59,10 +84,14 @@ class HandoffService:
                 summary = recent
             row = await one(
                 c,
-                """INSERT INTO handoffs(id,tenant_id,conversation_id,reason,summary)
-                VALUES(:id,:t,:cid,:reason,:summary) RETURNING *""",
+                """INSERT INTO handoffs(
+                    id,tenant_id,business_id,workspace_id,conversation_id,reason,summary
+                )
+                VALUES(:id,:t,:business,:workspace,:cid,:reason,:summary) RETURNING *""",
                 id=uuid4(),
                 t=tenant,
+                business=conv["business_id"],
+                workspace=conv["workspace_id"],
                 cid=cid,
                 reason=reason,
                 summary=summary,
@@ -101,28 +130,52 @@ class HandoffService:
             return row
 
     async def transition(
-        self, tenant, actor, hid, operation, assignee=None, revision=None, administrator=False
+        self,
+        tenant,
+        actor,
+        hid,
+        operation,
+        assignee=None,
+        revision=None,
+        administrator=False,
+        scope: BusinessScope | None = None,
     ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.begin() as c:
             ref = required(
                 await one(
                     c,
-                    "SELECT conversation_id FROM handoffs WHERE id=:id AND tenant_id=:t",
+                    (
+                        """SELECT conversation_id FROM handoffs
+                        WHERE id=:id AND tenant_id=:t AND """
+                        + scope_sql
+                    ),
                     id=hid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             await one(
                 c,
-                "SELECT id FROM runtime_conversations WHERE id=:id FOR UPDATE",
+                """SELECT id FROM runtime_conversations
+                WHERE id=:id AND tenant_id=:t AND """
+                + scope_sql
+                + " FOR UPDATE",
                 id=ref["conversation_id"],
+                t=tenant,
+                **scope_params,
             )
             handoff = required(
                 await one(
                     c,
-                    "SELECT * FROM handoffs WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    """SELECT * FROM handoffs
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=hid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if revision is not None and handoff["revision"] != revision:

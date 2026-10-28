@@ -17,7 +17,11 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     required,
     transaction,
 )
-from agent_platform.extension_contracts import EventEnvelope, EventPublisher
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resolve_scope,
+    scope_predicate,
+)
+from agent_platform.extension_contracts import BusinessScope, EventEnvelope, EventPublisher
 
 
 class TicketProposal(BaseModel):
@@ -28,11 +32,17 @@ class TicketProposal(BaseModel):
 
 TICKET_VIEW = """SELECT t.*,d.description,d.resolution,
     COALESCE((SELECT l.content FROM ticket_process_log l WHERE l.ticket_id=t.id
-        AND l.tenant_id=t.tenant_id AND l.action_type IN ('remark','legacy_note')
+        AND l.tenant_id=t.tenant_id AND l.business_id=t.business_id
+        AND l.workspace_id=t.workspace_id
+        AND l.action_type IN ('remark','legacy_note')
         ORDER BY l.id DESC LIMIT 1),'') AS note,
     EXISTS(SELECT 1 FROM memory_customers mc
-        WHERE mc.tenant_id=t.tenant_id AND mc.id::text=t.customer_id) AS customer_active
-    FROM tickets t JOIN tickets_detail d ON d.ticket_id=t.id AND d.tenant_id=t.tenant_id """
+        WHERE mc.tenant_id=t.tenant_id
+          AND mc.business_id=t.business_id AND mc.workspace_id=t.workspace_id
+          AND mc.id::text=t.customer_id) AS customer_active
+    FROM tickets t JOIN tickets_detail d
+        ON d.ticket_id=t.id AND d.tenant_id=t.tenant_id
+        AND d.business_id=t.business_id AND d.workspace_id=t.workspace_id """
 
 # Sentinel for "the caller did not mention due_at" — distinct from an
 # explicit None, which clears the column (R12).
@@ -70,37 +80,64 @@ class CustomerService:
         aggregate_id: UUID | str,
         payload: dict[str, object],
         idempotency_key: str,
+        scope: BusinessScope | None = None,
     ) -> None:
         if self.events is None:
             return
+        resolved = resolve_scope(tenant_id, scope)
         await self.events.publish(
             EventEnvelope(
                 event_type=event_type,
                 tenant_id=tenant_id,
                 aggregate_type="ticket",
                 aggregate_id=str(aggregate_id),
-                payload=payload,
+                payload={
+                    **payload,
+                    "business_id": resolved.business_id,
+                    "workspace_id": resolved.workspace_id,
+                },
                 idempotency_key=idempotency_key,
             )
         )
 
-    async def send(self, tenant, actor, cid, message, connection=None):
+    async def send(
+        self,
+        tenant,
+        actor,
+        cid,
+        message,
+        connection=None,
+        scope: BusinessScope | None = None,
+    ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with transaction(self.engine, connection) as c:
             # Admission lock precedes conversation lock everywhere to avoid inverse lock ordering.
             await execute(c, "SELECT pg_advisory_xact_lock(71432019)")
             conv = required(
                 await one(
                     c,
-                    "SELECT * FROM runtime_conversations WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    """SELECT * FROM runtime_conversations
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if conv["mode"] == "closed":
                 raise DomainError("conversation_closed", 409)
             if message.strip() in {"转人工", "人工客服"}:
                 await add_message(c, cid, "user", message)
-                handoff = await self.handoffs.request(tenant, actor, cid, "用户请求人工服务", c)
+                handoff = await self.handoffs.request(
+                    tenant,
+                    actor,
+                    cid,
+                    "用户请求人工服务",
+                    c,
+                    scope=resolved,
+                )
                 return {"conversation_id": cid, "run": None, "handoff": handoff}
             if conv["mode"] in {"human", "waiting"}:
                 await add_message(c, cid, "user", message)
@@ -144,7 +181,12 @@ class CustomerService:
                     if any(flag["key"] == "blacklist" for flag in flags):
                         await add_message(c, cid, "user", message)
                         handoff = await self.handoffs.request(
-                            tenant, actor, cid, "黑名单客户自动转人工", c
+                            tenant,
+                            actor,
+                            cid,
+                            "黑名单客户自动转人工",
+                            c,
+                            scope=resolved,
                         )
                         return {"conversation_id": cid, "run": None, "handoff": handoff}
             snapshot = dict(self.snapshot)
@@ -159,19 +201,29 @@ class CustomerService:
                 self.settings.queue_capacity,
                 self.settings.tenant_capacity,
                 self.settings.queue_timeout_seconds,
+                scope=BusinessScope(
+                    tenant_id=conv["tenant_id"],
+                    business_id=conv["business_id"],
+                    workspace_id=conv["workspace_id"],
+                ),
                 connection=c,
             )
             await audit(c, tenant, actor, "run.submitted", row["id"])
             return {"conversation_id": cid, "run": {"id": row["id"], "status": row["status"]}}
 
-    async def propose(self, tenant, cid, run_id, body):
+    async def propose(self, tenant, cid, run_id, body, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.begin() as c:
             conversation = required(
                 await one(
                     c,
-                    "SELECT id,customer_id FROM runtime_conversations WHERE id=:id AND tenant_id=:t",
+                    """SELECT id,customer_id,business_id,workspace_id FROM runtime_conversations
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql,
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             # The proposal carries the customer link forward so approving it
@@ -188,11 +240,17 @@ class CustomerService:
             key = hashlib.sha256((str(run_id) + payload).encode()).hexdigest()
             row = await one(
                 c,
-                """INSERT INTO pending_actions(id,tenant_id,conversation_id,kind,payload,dedup_key,expires_at)
-                VALUES(:id,:t,:cid,'create_ticket',CAST(:payload AS jsonb),:key,now()+interval '30 minutes')
-                ON CONFLICT(tenant_id,dedup_key) DO UPDATE SET dedup_key=EXCLUDED.dedup_key RETURNING *""",
+                """INSERT INTO pending_actions(
+                    id,tenant_id,business_id,workspace_id,conversation_id,kind,payload,dedup_key,expires_at
+                )
+                VALUES(:id,:t,:business,:workspace,:cid,'create_ticket',
+                    CAST(:payload AS jsonb),:key,now()+interval '30 minutes')
+                ON CONFLICT(tenant_id,business_id,workspace_id,dedup_key)
+                DO UPDATE SET dedup_key=EXCLUDED.dedup_key RETURNING *""",
                 id=uuid4(),
                 t=tenant,
+                business=conversation["business_id"],
+                workspace=conversation["workspace_id"],
                 cid=cid,
                 payload=payload,
                 key=key,
@@ -215,36 +273,64 @@ class CustomerService:
                 "title": body.title,
             },
             f"ticket.proposed:{tenant}:{row['id']}",
+            scope=resolved,
         )
         return result
 
-    async def decide(self, tenant, actor, aid, approve):
+    async def decide(self, tenant, actor, aid, approve, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         event_type = None
         event_payload: dict[str, object] = {}
         async with self.engine.begin() as c:
             ref = required(
                 await one(
                     c,
-                    "SELECT conversation_id FROM pending_actions WHERE id=:id AND tenant_id=:t",
+                    """SELECT conversation_id FROM pending_actions
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql,
                     id=aid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             conv = await one(
                 c,
-                "SELECT * FROM runtime_conversations WHERE id=:id FOR UPDATE",
+                """SELECT * FROM runtime_conversations
+                    WHERE id=:id AND tenant_id=:t AND """
+                + scope_sql
+                + " FOR UPDATE",
                 id=ref["conversation_id"],
+                t=tenant,
+                **scope_params,
             )
+            resolved = BusinessScope(
+                tenant_id=tenant,
+                business_id=conv["business_id"],
+                workspace_id=conv["workspace_id"],
+            )
+            scope_sql, scope_params = scope_predicate(resolved)
+            ticket_scope_sql, _ = scope_predicate(resolved, alias="t")
             action = required(
                 await one(
                     c,
-                    "SELECT *,expires_at>now() AS valid FROM pending_actions WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    """SELECT *,expires_at>now() AS valid FROM pending_actions
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=aid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             existing = await one(
-                c, TICKET_VIEW + " WHERE t.action_id=:id AND t.tenant_id=:t", id=aid, t=tenant
+                c,
+                TICKET_VIEW
+                + " WHERE t.action_id=:id AND t.tenant_id=:t AND "
+                + ticket_scope_sql,
+                id=aid,
+                t=tenant,
+                **scope_params,
             )
             if existing:
                 return existing
@@ -254,13 +340,25 @@ class CustomerService:
                 raise DomainError("action_expired", 409)
             if await one(
                 c,
-                "SELECT id FROM runtime_runs WHERE conversation_id=:id AND status IN ('queued','running')",
+                """SELECT id FROM runtime_runs
+                WHERE conversation_id=:id AND tenant_id=:t AND """
+                + scope_sql
+                + """
+                  AND status IN ('queued','running')""",
                 id=conv["id"],
+                t=tenant,
+                **scope_params,
             ):
                 raise DomainError("conversation_busy", 409)
             if not approve:
                 await execute(
-                    c, "UPDATE pending_actions SET status='rejected' WHERE id=:id", id=aid
+                    c,
+                    "UPDATE pending_actions SET status='rejected' "
+                    "WHERE id=:id AND tenant_id=:t AND "
+                    + scope_sql,
+                    id=aid,
+                    t=tenant,
+                    **scope_params,
                 )
                 await audit(c, tenant, actor, "ticket.rejected", aid)
                 result = {"id": aid, "status": "rejected"}
@@ -280,33 +378,58 @@ class CustomerService:
                 body = TicketProposal.model_validate(proposal)
                 kind = await one(
                     c,
-                    """INSERT INTO ticket_types(tenant_id,code,name)
-                    VALUES(:t,'general','通用工单') ON CONFLICT(tenant_id,code)
+                    """INSERT INTO ticket_types(
+                        tenant_id,business_id,workspace_id,code,name
+                    )
+                    VALUES(:t,:business,:workspace,'general','通用工单')
+                    ON CONFLICT(tenant_id,business_id,workspace_id,code)
                     DO UPDATE SET code=EXCLUDED.code RETURNING id,enabled""",
                     t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                 )
                 if not kind["enabled"]:
                     raise DomainError("ticket_type_disabled", 409)
                 await execute(
                     c,
-                    """INSERT INTO ticket_type_versions(tenant_id,type_id,version,name,definition,created_by)
-                    VALUES(:t,:id,1,'通用工单','{"fields":[]}',:actor) ON CONFLICT DO NOTHING""",
+                    """INSERT INTO ticket_type_versions(
+                        tenant_id,business_id,workspace_id,type_id,version,
+                        name,definition,created_by
+                    )
+                    VALUES(:t,:business,:workspace,:id,1,'通用工单','{"fields":[]}',:actor)
+                    ON CONFLICT DO NOTHING""",
                     t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                     id=kind["id"],
                     actor=actor,
                 )
                 await execute(
                     c,
-                    "UPDATE ticket_types SET published_version=1 WHERE id=:id AND published_version IS NULL",
+                    """UPDATE ticket_types SET published_version=1
+                    WHERE id=:id AND tenant_id=:t
+                      AND business_id=:business AND workspace_id=:workspace
+                      AND published_version IS NULL""",
                     id=kind["id"],
+                    t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                 )
                 tid = uuid4()
                 await execute(
                     c,
-                    """INSERT INTO tickets(id,tenant_id,conversation_id,action_id,title,ticket_no,type_id,type_version,created_by,customer_id)
-                    VALUES(:id,:t,:cid,:aid,:title,:number,:kind,1,:actor,:customer)""",
+                    """INSERT INTO tickets(
+                        id,tenant_id,business_id,workspace_id,conversation_id,action_id,
+                        title,ticket_no,type_id,type_version,created_by,customer_id
+                    )
+                    VALUES(
+                        :id,:t,:business,:workspace,:cid,:aid,:title,:number,
+                        :kind,1,:actor,:customer
+                    )""",
                     id=tid,
                     t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                     cid=conv["id"],
                     aid=aid,
                     title=body.title,
@@ -317,27 +440,46 @@ class CustomerService:
                 )
                 await execute(
                     c,
-                    "INSERT INTO tickets_detail(ticket_id,tenant_id,description) VALUES(:id,:t,:description)",
+                    """INSERT INTO tickets_detail(
+                        ticket_id,tenant_id,business_id,workspace_id,description
+                    ) VALUES(:id,:t,:business,:workspace,:description)""",
                     id=tid,
                     t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                     description=body.description,
                 )
                 await execute(
                     c,
-                    """INSERT INTO ticket_process_log(tenant_id,ticket_id,actor_type,actor_id,action_type,content)
-                    VALUES(:t,:id,'staff',:actor,'created',:title)""",
+                    """INSERT INTO ticket_process_log(
+                        tenant_id,business_id,workspace_id,ticket_id,
+                        actor_type,actor_id,action_type,content
+                    )
+                    VALUES(:t,:business,:workspace,:id,'staff',:actor,'created',:title)""",
                     t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                     id=tid,
                     actor=actor,
                     title=body.title,
                 )
                 row = required(
                     await one(
-                        c, TICKET_VIEW + " WHERE t.id=:id AND t.tenant_id=:t", id=tid, t=tenant
+                        c,
+                        TICKET_VIEW + " WHERE t.id=:id AND t.tenant_id=:t AND " + ticket_scope_sql,
+                        id=tid,
+                        t=tenant,
+                        **scope_params,
                     )
                 )
                 await execute(
-                    c, "UPDATE pending_actions SET status='confirmed' WHERE id=:id", id=aid
+                    c,
+                    "UPDATE pending_actions SET status='confirmed' "
+                    "WHERE id=:id AND tenant_id=:t AND "
+                    + scope_sql,
+                    id=aid,
+                    t=tenant,
+                    **scope_params,
                 )
                 content = f"工单 {row['id']} 已创建：{body.title}"
                 await add_message(c, conv["id"], "system", content)
@@ -352,8 +494,12 @@ class CustomerService:
                 )
                 await execute(
                     c,
-                    "UPDATE runtime_conversations SET history=CAST(:h AS jsonb) WHERE id=:id",
+                    "UPDATE runtime_conversations SET history=CAST(:h AS jsonb) "
+                    "WHERE id=:id AND tenant_id=:t AND "
+                    + scope_sql,
                     id=conv["id"],
+                    t=tenant,
+                    **scope_params,
                     h=json.dumps(history),
                 )
                 await audit(c, tenant, actor, "ticket.created", row["id"], action_id=str(aid))
@@ -381,34 +527,59 @@ class CustomerService:
                 event_id,
                 event_payload,
                 f"{event_type}:{tenant}:{event_id}",
+                scope=resolved,
             )
         return result
 
-    async def tickets(self, tenant):
+    async def tickets(self, tenant, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, alias="t")
         async with self.engine.connect() as c:
             return await many(
                 c,
                 TICKET_VIEW
-                + " WHERE t.tenant_id=:t ORDER BY t.created_at DESC,t.id DESC LIMIT 100",
+                + " WHERE t.tenant_id=:t AND "
+                + scope_sql
+                + " ORDER BY t.created_at DESC,t.id DESC LIMIT 100",
                 t=tenant,
+                **scope_params,
             )
 
-    async def lookup(self, tenant, cid, tid):
+    async def lookup(self, tenant, cid, tid, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, alias="t")
         async with self.engine.connect() as c:
             return required(
                 await one(
                     c,
-                    "SELECT t.id,t.title,d.description,t.status,t.revision,t.updated_at FROM tickets t JOIN tickets_detail d ON d.ticket_id=t.id AND d.tenant_id=t.tenant_id WHERE t.tenant_id=:t AND t.conversation_id=:cid AND t.id=:id",
+                    """SELECT t.id,t.title,d.description,t.status,t.revision,t.updated_at
+                    FROM tickets t JOIN tickets_detail d
+                      ON d.ticket_id=t.id AND d.tenant_id=t.tenant_id
+                     AND d.business_id=t.business_id AND d.workspace_id=t.workspace_id
+                    WHERE t.tenant_id=:t AND t.conversation_id=:cid AND t.id=:id AND """
+                    + scope_sql,
                     t=tenant,
                     cid=cid,
                     id=tid,
+                    **scope_params,
                 ),
                 "ticket_not_found",
             )
 
     async def update_ticket(
-        self, tenant, actor, tid, status, note, revision, is_commitment=False, due_at=UNSET
+        self,
+        tenant,
+        actor,
+        tid,
+        status,
+        note,
+        revision,
+        is_commitment=False,
+        due_at=UNSET,
+        scope: BusinessScope | None = None,
     ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         transitions = {
             "open": {"in_progress", "closed"},
             "in_progress": {"waiting_customer", "resolved", "closed"},
@@ -421,11 +592,21 @@ class CustomerService:
             row = required(
                 await one(
                     c,
-                    "SELECT * FROM tickets WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    "SELECT * FROM tickets WHERE id=:id AND tenant_id=:t AND "
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=tid,
                     t=tenant,
+                    **scope_params,
                 )
             )
+            resolved = BusinessScope(
+                tenant_id=tenant,
+                business_id=row["business_id"],
+                workspace_id=row["workspace_id"],
+            )
+            scope_sql, scope_params = scope_predicate(resolved)
+            ticket_scope_sql, _ = scope_predicate(resolved, alias="t")
             if row["revision"] != revision:
                 raise DomainError("ticket_revision_conflict", 409)
             if status != row["status"] and status not in transitions[row["status"]]:
@@ -440,24 +621,38 @@ class CustomerService:
                 resolved_at=CASE WHEN :status='resolved' THEN COALESCE(resolved_at,now())
                     WHEN :status='in_progress' THEN NULL ELSE resolved_at END,
                 closed_at=CASE WHEN :status='closed' THEN now() ELSE closed_at END
-                WHERE id=:id""",
+                WHERE id=:id AND tenant_id=:t AND """
+                + scope_sql,
                 id=tid,
+                t=tenant,
                 status=status,
+                **scope_params,
             )
             if status == "resolved":
                 await execute(
                     c,
-                    "UPDATE tickets_detail SET resolution=:note WHERE ticket_id=:id AND tenant_id=:t",
+                    "UPDATE tickets_detail SET resolution=:note "
+                    "WHERE ticket_id=:id AND tenant_id=:t AND "
+                    + scope_sql,
                     note=note,
                     id=tid,
                     t=tenant,
+                    **scope_params,
                 )
             if status != row["status"]:
                 await execute(
                     c,
-                    """INSERT INTO ticket_process_log(tenant_id,ticket_id,actor_type,actor_id,action_type,old_status,new_status,content)
-                    VALUES(:t,:id,'staff',:actor,'status_changed',:old,:new,:note)""",
+                    """INSERT INTO ticket_process_log(
+                        tenant_id,business_id,workspace_id,ticket_id,
+                        actor_type,actor_id,action_type,old_status,new_status,content
+                    )
+                    VALUES(
+                        :t,:business,:workspace,:id,'staff',:actor,
+                        'status_changed',:old,:new,:note
+                    )""",
                     t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                     id=tid,
                     actor=actor,
                     old=row["status"],
@@ -470,16 +665,23 @@ class CustomerService:
             if due_at is not UNSET and due_at != row["due_at"]:
                 await execute(
                     c,
-                    "UPDATE tickets SET due_at=:due WHERE id=:id AND tenant_id=:t",
+                    "UPDATE tickets SET due_at=:due WHERE id=:id AND tenant_id=:t AND "
+                    + scope_sql,
                     due=due_at,
                     id=tid,
                     t=tenant,
+                    **scope_params,
                 )
                 await execute(
                     c,
-                    """INSERT INTO ticket_process_log(tenant_id,ticket_id,actor_type,actor_id,action_type,content)
-                    VALUES(:t,:id,'staff',:actor,'detail_changed',:content)""",
+                    """INSERT INTO ticket_process_log(
+                        tenant_id,business_id,workspace_id,ticket_id,
+                        actor_type,actor_id,action_type,content
+                    )
+                    VALUES(:t,:business,:workspace,:id,'staff',:actor,'detail_changed',:content)""",
                     t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                     id=tid,
                     actor=actor,
                     content=(
@@ -491,16 +693,30 @@ class CustomerService:
             if note.strip():
                 remark = await one(
                     c,
-                    """INSERT INTO ticket_process_log(tenant_id,ticket_id,actor_type,actor_id,action_type,content,is_commitment)
-                    VALUES(:t,:id,'staff',:actor,'remark',:note,:commitment) RETURNING id""",
+                    """INSERT INTO ticket_process_log(
+                        tenant_id,business_id,workspace_id,ticket_id,
+                        actor_type,actor_id,action_type,content,is_commitment
+                    )
+                    VALUES(
+                        :t,:business,:workspace,:id,'staff',:actor,
+                        'remark',:note,:commitment
+                    ) RETURNING id""",
                     t=tenant,
+                    business=resolved.business_id,
+                    workspace=resolved.workspace_id,
                     id=tid,
                     actor=actor,
                     note=note,
                     commitment=bool(is_commitment),
                 )
             result = required(
-                await one(c, TICKET_VIEW + " WHERE t.id=:id AND t.tenant_id=:t", id=tid, t=tenant)
+                await one(
+                    c,
+                    TICKET_VIEW + " WHERE t.id=:id AND t.tenant_id=:t AND " + ticket_scope_sql,
+                    id=tid,
+                    t=tenant,
+                    **scope_params,
+                )
             )
             await audit(c, tenant, actor, "ticket.updated", tid, status=status)
             if status != row["status"]:
@@ -559,5 +775,6 @@ class CustomerService:
                 tid,
                 payload,
                 f"{event_type}:{tenant}:{tid}:{suffix}",
+                scope=resolved,
             )
         return result

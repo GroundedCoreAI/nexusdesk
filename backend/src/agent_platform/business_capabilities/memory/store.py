@@ -22,6 +22,9 @@ from uuid import UUID
 
 from agent_platform.core_platform.platform_services.model_gateway.contracts import EmbedRequest
 from agent_platform.core_platform.platform_services.persistence.store import many, one
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,11 +137,12 @@ class BaseStore:
         # so a pure tsvector match would miss almost everything (R9).
         return await many(
             c,
-            _TEXT_MATCH,
+            _TEXT_MATCH + resource_scope_clause()[0],
             t=tenant_id,
             c=customer_id,
             q=query,
             pattern=escape_like(query),
+            **resource_scope_clause()[1],
         )
 
     async def _text_search(self, tenant_id, customer_id, query, limit) -> list[MemoryHit]:
@@ -191,23 +195,31 @@ class PgVectorStore(BaseStore):
             vector = await self._embed(item_id, text)
         except Exception:  # noqa: BLE001 - per-item degradation, never task failure
             logger.warning("Embedding failed for memory item %s; marked for retry", item_id)
+            scope_sql, scope_params = resource_scope_clause()
             async with self.engine.begin() as c:
                 await one(
                     c,
                     """UPDATE memory_items SET embedding_failed=true
-                    WHERE id=:id AND tenant_id=:t RETURNING id""",
+                    WHERE id=:id AND tenant_id=:t"""
+                    + scope_sql
+                    + " RETURNING id",
                     id=item_id,
                     t=self.settings.tenant_id,
+                    **scope_params,
                 )
             return
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             await one(
                 c,
                 """UPDATE memory_items SET embedding=CAST(:v AS vector),embedding_failed=false
-                WHERE id=:id AND tenant_id=:t RETURNING id""",
+                WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " RETURNING id",
                 id=item_id,
                 t=self.settings.tenant_id,
                 v="[" + ",".join(repr(float(x)) for x in vector) + "]",
+                **scope_params,
             )
 
     async def search(self, tenant_id, customer_id, query, limit) -> list[MemoryHit]:
@@ -219,6 +231,7 @@ class PgVectorStore(BaseStore):
                 "Query embedding failed; memory_search falling back to keyword mode",
             )
             return await self._text_search(tenant_id, customer_id, query, limit)
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             rows = await many(
                 c,
@@ -226,10 +239,12 @@ class PgVectorStore(BaseStore):
                 1 - (embedding <=> CAST(:v AS vector)) AS relevance
                 FROM memory_items
                 WHERE tenant_id=:t AND customer_id=:c AND status='active' AND type='event'
-                AND embedding IS NOT NULL""",
+                AND embedding IS NOT NULL"""
+                + scope_sql,
                 t=tenant_id,
                 c=customer_id,
                 v="[" + ",".join(repr(float(x)) for x in vector) + "]",
+                **scope_params,
             )
         return rank_hits(rows, self.settings.memory_search_half_life_days, limit)
 

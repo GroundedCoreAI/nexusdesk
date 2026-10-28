@@ -13,7 +13,12 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     one,
     required,
 )
-from agent_platform.extension_contracts import EventEnvelope, EventPublisher
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    persisted_scope,
+    resolve_scope,
+    scope_predicate,
+)
+from agent_platform.extension_contracts import BusinessScope, EventEnvelope, EventPublisher
 
 
 class ApprovalService:
@@ -40,7 +45,10 @@ class ApprovalService:
         title: str,
         description: str,
         idempotency_key: str | None = None,
+        scope: BusinessScope | None = None,
     ) -> dict[str, object]:
+        resolved = persisted_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         fingerprint = self._fingerprint(title, description)
         async with self.engine.begin() as connection:
             existing = None
@@ -48,8 +56,9 @@ class ApprovalService:
                 existing = await one(
                     connection,
                     "SELECT * FROM approval_requests "
-                    "WHERE tenant_id=:tenant AND idempotency_key=:key",
+                    "WHERE tenant_id=:tenant AND " + scope_sql + " AND idempotency_key=:key",
                     tenant=tenant,
+                    **scope_params,
                     key=idempotency_key,
                 )
                 if existing is not None:
@@ -61,15 +70,17 @@ class ApprovalService:
                 connection,
                 """
                 INSERT INTO approval_requests
-                    (tenant_id,title,description,requested_by,status,revision,
+                    (tenant_id,business_id,workspace_id,title,description,requested_by,status,revision,
                      idempotency_key,request_fingerprint)
                 VALUES
-                    (:tenant,:title,:description,:actor,'pending',1,
+                    (:tenant,:business,:workspace,:title,:description,:actor,'pending',1,
                      :idempotency_key,:fingerprint)
-                ON CONFLICT (tenant_id,idempotency_key) DO NOTHING
+                ON CONFLICT (tenant_id,business_id,workspace_id,idempotency_key) DO NOTHING
                 RETURNING *
                 """,
                 tenant=tenant,
+                business=resolved.business_id,
+                workspace=resolved.workspace_id,
                 title=title,
                 description=description,
                 actor=actor,
@@ -80,8 +91,9 @@ class ApprovalService:
                 row = await one(
                     connection,
                     "SELECT * FROM approval_requests "
-                    "WHERE tenant_id=:tenant AND idempotency_key=:key",
+                    "WHERE tenant_id=:tenant AND " + scope_sql + " AND idempotency_key=:key",
                     tenant=tenant,
+                    **scope_params,
                     key=idempotency_key,
                 )
                 if row is None:
@@ -105,17 +117,27 @@ class ApprovalService:
             tenant,
             row,
             {"requested_by": actor, "revision": row["revision"]},
+            scope=resolved,
         )
         return row
 
-    async def get(self, tenant: str, approval_id: UUID) -> dict[str, object]:
+    async def get(
+        self,
+        tenant: str,
+        approval_id: UUID,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, object]:
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.connect() as connection:
             return required(
                 await one(
                     connection,
-                    "SELECT * FROM approval_requests WHERE id=:id AND tenant_id=:tenant",
+                    "SELECT * FROM approval_requests WHERE id=:id AND tenant_id=:tenant AND "
+                    + scope_sql,
                     id=approval_id,
                     tenant=tenant,
+                    **scope_params,
                 )
             )
 
@@ -125,9 +147,12 @@ class ApprovalService:
         status: Literal["all", "draft", "pending", "approved", "rejected", "cancelled"] = "all",
         page: int = 1,
         page_size: int = 20,
+        scope: BusinessScope | None = None,
     ) -> dict[str, object]:
-        where = "tenant_id=:tenant"
-        params: dict[str, object] = {"tenant": tenant}
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
+        where = "tenant_id=:tenant AND " + scope_sql
+        params: dict[str, object] = {"tenant": tenant, **scope_params}
         if status != "all":
             where += " AND status=:status"
             params["status"] = status
@@ -156,10 +181,11 @@ class ApprovalService:
         tenant: str,
         approval_id: UUID,
         limit: int = 100,
+        scope: BusinessScope | None = None,
     ) -> dict[str, object]:
         """Return the tenant-scoped operation history for one approval."""
 
-        await self.get(tenant, approval_id)
+        await self.get(tenant, approval_id, scope=scope)
         async with self.engine.connect() as connection:
             items = await many(
                 connection,
@@ -184,16 +210,22 @@ class ApprovalService:
         approval_id: UUID,
         decision: Literal["approve", "reject"],
         revision: int,
+        scope: BusinessScope | None = None,
     ) -> dict[str, object]:
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         next_status = "approved" if decision == "approve" else "rejected"
         now = datetime.now(UTC)
         async with self.engine.begin() as connection:
             row = required(
                 await one(
                     connection,
-                    "SELECT * FROM approval_requests WHERE id=:id AND tenant_id=:tenant FOR UPDATE",
+                    "SELECT * FROM approval_requests WHERE id=:id AND tenant_id=:tenant AND "
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=approval_id,
                     tenant=tenant,
+                    **scope_params,
                 )
             )
             if row["revision"] != revision:
@@ -209,6 +241,9 @@ class ApprovalService:
                 SET status=:status,revision=revision+1,decision_by=:actor,
                     decided_at=:now,updated_at=:now
                 WHERE id=:id AND tenant_id=:tenant AND status='pending'
+                  AND """
+                + scope_sql
+                + """
                   AND revision=:revision
                 RETURNING *
                 """,
@@ -218,6 +253,7 @@ class ApprovalService:
                 id=approval_id,
                 tenant=tenant,
                 revision=revision,
+                **scope_params,
             )
             if result is None:
                 raise DomainError("approval_revision_conflict", 409)
@@ -236,6 +272,7 @@ class ApprovalService:
             tenant,
             result,
             {"decision_by": actor, "revision": result["revision"]},
+            scope=resolved,
         )
         return result
 
@@ -245,14 +282,20 @@ class ApprovalService:
         actor: str,
         approval_id: UUID,
         revision: int,
+        scope: BusinessScope | None = None,
     ) -> dict[str, object]:
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.begin() as connection:
             row = required(
                 await one(
                     connection,
-                    "SELECT * FROM approval_requests WHERE id=:id AND tenant_id=:tenant FOR UPDATE",
+                    "SELECT * FROM approval_requests WHERE id=:id AND tenant_id=:tenant AND "
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=approval_id,
                     tenant=tenant,
+                    **scope_params,
                 )
             )
             if row["revision"] != revision:
@@ -266,12 +309,15 @@ class ApprovalService:
                 """
                 UPDATE approval_requests
                 SET status='cancelled',revision=revision+1,updated_at=now()
-                WHERE id=:id AND tenant_id=:tenant AND revision=:revision
+                WHERE id=:id AND tenant_id=:tenant AND """
+                + scope_sql
+                + """ AND revision=:revision
                 RETURNING *
                 """,
                 id=approval_id,
                 tenant=tenant,
                 revision=revision,
+                **scope_params,
             )
             if result is None:
                 raise DomainError("approval_revision_conflict", 409)
@@ -290,6 +336,7 @@ class ApprovalService:
             tenant,
             result,
             {"cancelled_by": actor, "revision": result["revision"]},
+            scope=resolved,
         )
         return result
 
@@ -299,16 +346,22 @@ class ApprovalService:
         tenant: str,
         row: dict[str, object],
         payload: dict[str, object],
+        scope: BusinessScope | None = None,
     ) -> None:
         if self.events is None:
             return
+        resolved = resolve_scope(tenant, scope)
         await self.events.publish(
             EventEnvelope(
                 event_type=event_type,
                 tenant_id=tenant,
                 aggregate_type="approval",
                 aggregate_id=str(row["id"]),
-                payload=payload,
+                payload={
+                    **payload,
+                    "business_id": resolved.business_id,
+                    "workspace_id": resolved.workspace_id,
+                },
                 idempotency_key=f"{event_type}:{tenant}:{row['id']}:{row['revision']}",
             )
         )

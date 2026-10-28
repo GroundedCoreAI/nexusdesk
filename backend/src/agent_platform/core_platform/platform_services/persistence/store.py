@@ -35,11 +35,22 @@ async def execute(conn, sql, **params):
 
 
 async def audit(conn, tenant, actor, action, resource, **details):
+    from agent_platform.core_platform.platform_services.tenant_isolation.context import (
+        current_scope,
+    )
+
+    scope = current_scope()
     await execute(
         conn,
-        """INSERT INTO audit_records(tenant_id,actor,action,resource,details,ip)
-        VALUES (:tenant,:actor,:action,:resource,CAST(:details AS jsonb),:ip)""",
+        """INSERT INTO audit_records(
+            tenant_id,business_id,workspace_id,actor,action,resource,details,ip
+        ) VALUES(
+            :tenant,:business_id,:workspace_id,:actor,:action,:resource,
+            CAST(:details AS jsonb),:ip
+        )""",
         tenant=tenant,
+        business_id=scope.business_id if scope and scope.business_id else "customer-service",
+        workspace_id=scope.workspace_id if scope and scope.workspace_id else "default",
         actor=actor,
         action=action,
         resource=str(resource),

@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field
 
 from agent_platform.core_platform.platform_services.persistence.store import DomainError
 from agent_platform.extension_contracts import (
+    BusinessScope,
     ToolDefinition,
     ToolExecutionRequest,
     ToolExecutionResult,
@@ -118,7 +119,15 @@ class ApprovalToolContribution:
 
     async def _lookup(self, request: ToolExecutionRequest) -> ToolExecutionResult:
         params = ApprovalLookupInput.model_validate(request.arguments)
-        row = await self.service.get(request.context.tenant_id, params.request_id)
+        row = await self.service.get(
+            request.context.tenant_id,
+            params.request_id,
+            scope=BusinessScope(
+                tenant_id=request.context.tenant_id,
+                business_id=request.context.business_id,
+                workspace_id=request.context.workspace_id,
+            ),
+        )
         return ToolExecutionResult(status="succeeded", data=self._public(row))
 
     async def _submit(self, request: ToolExecutionRequest) -> ToolExecutionResult:
@@ -129,6 +138,11 @@ class ApprovalToolContribution:
             params.title,
             params.description,
             request.idempotency_key,
+            scope=BusinessScope(
+                tenant_id=request.context.tenant_id,
+                business_id=request.context.business_id,
+                workspace_id=request.context.workspace_id,
+            ),
         )
         return ToolExecutionResult(status="succeeded", data=self._public(row))
 
@@ -143,5 +157,10 @@ class ApprovalToolContribution:
             params.request_id,
             params.decision,
             params.revision,
+            scope=BusinessScope(
+                tenant_id=request.context.tenant_id,
+                business_id=request.context.business_id,
+                workspace_id=request.context.workspace_id,
+            ),
         )
         return ToolExecutionResult(status="succeeded", data=self._public(row))

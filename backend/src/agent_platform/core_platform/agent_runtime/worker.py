@@ -12,6 +12,11 @@ from agent_platform.business_capabilities.memory.service import (
 )
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL
 from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
+from agent_platform.core_platform.platform_services.tenant_isolation.context import (
+    bind_scope,
+    reset_scope,
+)
+from agent_platform.extension_contracts import BusinessScope
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,13 @@ class RuntimeWorker:
 
     async def _execute(self, row):
         monitor_failure = False
+        scope_token = bind_scope(
+            BusinessScope(
+                tenant_id=row["tenant_id"],
+                business_id=row.get("business_id") or "customer-service",
+                workspace_id=row.get("workspace_id") or "default",
+            )
+        )
 
         async def emit(kind, data):
             if kind == "model.delta":
@@ -107,6 +119,7 @@ class RuntimeWorker:
                 await asyncio.gather(watcher, return_exceptions=True)
             if execution:
                 await asyncio.gather(execution, return_exceptions=True)
+            reset_scope(scope_token)
 
     async def _customer_memory(self, row):
         """Fetch and render the customer's active memories for injection (FR-3).

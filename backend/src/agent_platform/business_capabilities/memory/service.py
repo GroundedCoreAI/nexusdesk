@@ -30,6 +30,10 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     one,
     required,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+    resource_scope_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +205,7 @@ async def _memory_stats(c, tenant, customer_ids):
     service badges, and the latest item update. Returns ``{customer_id:
     stats}``; customers without any items are simply absent.
     """
+    scope_sql, scope_params = resource_scope_clause(alias="m")
     rows = await many(
         c,
         """SELECT customer_id,
@@ -214,11 +219,14 @@ async def _memory_stats(c, tenant, customer_ids):
             AS event,
         COALESCE(array_agg(key) FILTER (WHERE status='active' AND type='flag'), '{}') AS flags,
         max(updated_at) AS last_updated_at
-        FROM memory_items
-        WHERE tenant_id=:t AND customer_id=ANY(:ids) AND status<>'deleted'
+        FROM memory_items m
+        WHERE m.tenant_id=:t AND m.customer_id=ANY(:ids) AND m.status<>'deleted'"""
+        + scope_sql
+        + """
         GROUP BY customer_id""",
         t=tenant,
         ids=list(customer_ids),
+        **scope_params,
     )
     return {row.pop("customer_id"): row for row in rows}
 
@@ -243,32 +251,40 @@ class MemoryService:
         race on the identity unique key: ``ON CONFLICT DO NOTHING`` never
         aborts the transaction, and the loser re-reads the winner's row.
         """
+        scope_sql, scope_params = resource_scope_clause()
         row = await one(
             c,
             """SELECT customer_id FROM memory_identities
-            WHERE tenant_id=:t AND source=:s AND external_key=:k""",
+            WHERE tenant_id=:t AND source=:s AND external_key=:k"""
+            + scope_sql,
             t=tenant,
             s=source,
             k=external_key,
+            **scope_params,
         )
         if row:
             return row["customer_id"]
         customer = await one(
             c,
-            "INSERT INTO memory_customers(id,tenant_id) VALUES(:id,:t) RETURNING id",
+            "INSERT INTO memory_customers(id,tenant_id,business_id,workspace_id) "
+            "VALUES(:id,:t,:business_id,:workspace_id) RETURNING id",
             id=uuid4(),
             t=tenant,
+            **resource_scope_values(),
         )
         inserted = await one(
             c,
-            """INSERT INTO memory_identities(id,tenant_id,customer_id,source,external_key)
-            VALUES(:id,:t,:cid,:s,:k)
-            ON CONFLICT (tenant_id,source,external_key) DO NOTHING RETURNING customer_id""",
+            """INSERT INTO memory_identities(
+                id,tenant_id,business_id,workspace_id,customer_id,source,external_key
+            ) VALUES(:id,:t,:business_id,:workspace_id,:cid,:s,:k)
+            ON CONFLICT (tenant_id,business_id,workspace_id,source,external_key)
+            DO NOTHING RETURNING customer_id""",
             id=uuid4(),
             t=tenant,
             cid=customer["id"],
             s=source,
             k=external_key,
+            **resource_scope_values(),
         )
         if inserted:
             return customer["id"]
@@ -277,18 +293,22 @@ class MemoryService:
         row = await one(
             c,
             """SELECT customer_id FROM memory_identities
-            WHERE tenant_id=:t AND source=:s AND external_key=:k""",
+            WHERE tenant_id=:t AND source=:s AND external_key=:k"""
+            + scope_sql,
             t=tenant,
             s=source,
             k=external_key,
+            **scope_params,
         )
         if not row:
             return customer["id"]
         # Our customer row never got an identity; remove the orphan.
         await execute(
             c,
-            "DELETE FROM memory_customers WHERE id=:id",
+            "DELETE FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
             id=customer["id"],
+            t=tenant,
+            **scope_params,
         )
         return row["customer_id"]
 
@@ -308,6 +328,7 @@ class MemoryService:
         if self._decay_enabled():
             clause, decay_params = injection_filter_sql(self.settings)
             score_sql = injection_score_sql()
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             return await many(
                 c,
@@ -316,27 +337,33 @@ class MemoryService:
                 + score_sql
                 + """ AS effective_confidence FROM memory_items
                 WHERE tenant_id=:t AND customer_id=:c AND status='active' AND type=ANY(:types)"""
+                + scope_sql
                 + clause
                 + " ORDER BY updated_at DESC,id DESC LIMIT :lim",
                 t=tenant,
                 c=customer_id,
                 types=list(types),
                 lim=limit,
+                **scope_params,
                 **decay_params,
             )
 
     async def active_flags(self, tenant, customer_id, limit):
         """Active flag items for injection (FR-2), newest first."""
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             return await many(
                 c,
                 """SELECT id,customer_id,type,key,content,source_type,source_ref,updated_at
                 FROM memory_items
-                WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND status='active'
+                WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND status='active'"""
+                + scope_sql
+                + """
                 ORDER BY updated_at DESC,id DESC LIMIT :lim""",
                 t=tenant,
                 c=customer_id,
                 lim=limit,
+                **scope_params,
             )
 
     async def injection_items(
@@ -386,7 +413,10 @@ class MemoryService:
             "content": content,
             "ref": source_ref,
             "exp": expires_at,
+            **resource_scope_values(),
         }
+        scope_sql, scope_params = resource_scope_clause()
+        params.update(scope_params)
         row = await one(
             c,
             """UPDATE memory_items SET content=:content,prev_content=content,
@@ -394,17 +424,24 @@ class MemoryService:
             expires_at=:exp,revision=revision+1,last_referenced_at=now(),updated_at=now()
             """
             + (",embedding=NULL,embedding_failed=false\n            " if clear_embedding else "")
-            + """WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key
+            + """WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key"""
+            + scope_sql
+            + """
             AND source_type<>'human' AND status<>'deleted' RETURNING id""",
             **params,
         )
         if not row:
             row = await one(
                 c,
-                """INSERT INTO memory_items(tenant_id,customer_id,type,key,content,confidence,
-                status,source_type,source_ref,expires_at)
-                VALUES(:t,:c,'event',:key,:content,1.0,'active','ticket',:ref,:exp)
-                ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING RETURNING id""",
+                """INSERT INTO memory_items(
+                    tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                    status,source_type,source_ref,expires_at
+                ) VALUES(
+                    :t,:business_id,:workspace_id,:c,'event',:key,:content,1.0,
+                    'active','ticket',:ref,:exp
+                )
+                ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+                DO NOTHING RETURNING id""",
                 **params,
             )
         return row["id"] if row else None
@@ -415,30 +452,37 @@ class MemoryService:
         The row is kept (not deleted) so the audit trail survives; returns the
         expired row id or ``None`` when there was nothing to expire.
         """
+        scope_sql, scope_params = resource_scope_clause()
         row = await one(
             c,
             """UPDATE memory_items SET status='expired',updated_at=now()
             WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key
-            AND status='active' RETURNING id""",
+            AND status='active'"""
+            + scope_sql
+            + " RETURNING id",
             t=tenant,
             c=customer_id,
             key=OPEN_TICKET_PREFIX + ticket_no,
+            **scope_params,
         )
         return row["id"] if row else None
 
     async def pending_event_items(self, tenant, customer_id, limit):
         """In-flight injection items: open tickets and pending commitments,
         newest first (FR-3)."""
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             return await many(
                 c,
                 """SELECT id,type,key,content,updated_at FROM memory_items
                 WHERE tenant_id=:t AND customer_id=:c AND type='event' AND status='active'
-                AND (key LIKE 'open_ticket:%' OR key LIKE 'commitment:%')
-                ORDER BY updated_at DESC,id DESC LIMIT :lim""",
+                AND (key LIKE 'open_ticket:%' OR key LIKE 'commitment:%')"""
+                + scope_sql
+                + " ORDER BY updated_at DESC,id DESC LIMIT :lim",
                 t=tenant,
                 c=customer_id,
                 lim=limit,
+                **scope_params,
             )
 
     async def _upsert_suggestion(self, c, tenant, customer_id, op, content, source_ref):
@@ -459,22 +503,33 @@ class MemoryService:
             "content": content,
             "confidence": op["confidence"],
             "ref": source_ref,
+            **resource_scope_values(),
         }
+        scope_sql, scope_params = resource_scope_clause()
+        params.update(scope_params)
         row = await one(
             c,
             """UPDATE memory_items SET content=:content,confidence=:confidence,
             source_type='extracted',source_ref=:ref,updated_at=now()
             WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key
+            """
+            + scope_sql
+            + """
             AND status='pending' RETURNING id""",
             **params,
         )
         if not row:
             row = await one(
                 c,
-                """INSERT INTO memory_items(tenant_id,customer_id,type,key,content,confidence,
-                status,source_type,source_ref)
-                VALUES(:t,:c,:type,:key,:content,:confidence,'pending','extracted',:ref)
-                ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING RETURNING id""",
+                """INSERT INTO memory_items(
+                    tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                    status,source_type,source_ref
+                ) VALUES(
+                    :t,:business_id,:workspace_id,:c,:type,:key,:content,:confidence,
+                    'pending','extracted',:ref
+                )
+                ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+                DO NOTHING RETURNING id""",
                 **params,
             )
         return row
@@ -531,22 +586,31 @@ class MemoryService:
                 "confidence": op["confidence"],
                 "status": status,
                 "ref": source_ref,
+                **resource_scope_values(),
             }
+            scope_sql, scope_params = resource_scope_clause()
+            params.update(scope_params)
             if op["op"] == "add":
                 row = await one(
                     c,
-                    """INSERT INTO memory_items(tenant_id,customer_id,type,key,content,confidence,
-                    status,source_type,source_ref)
-                    VALUES(:t,:c,:type,:key,:content,:confidence,:status,'extracted',:ref)
-                    ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING RETURNING id""",
+                    """INSERT INTO memory_items(
+                        tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                        status,source_type,source_ref
+                    ) VALUES(
+                        :t,:business_id,:workspace_id,:c,:type,:key,:content,:confidence,
+                        :status,'extracted',:ref
+                    )
+                    ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+                    DO NOTHING RETURNING id""",
                     **params,
                 )
             else:  # update: overwrite, or insert when the key is new
                 existing = await one(
                     c,
                     """SELECT id,protected,status FROM memory_items
-                    WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key""",
-                    **{k: params[k] for k in ("t", "c", "type", "key")},
+                    WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key"""
+                    + scope_sql,
+                    **params,
                 )
                 if existing and existing["protected"] and existing["status"] != "deleted":
                     row = await self._upsert_suggestion(
@@ -560,6 +624,9 @@ class MemoryService:
                     confidence=:confidence,status=:status,source_type='extracted',source_ref=:ref,
                     revision=revision+1,last_referenced_at=now(),updated_at=now()
                     WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key
+                    """
+                    + scope_sql
+                    + """
                     AND source_type<>'human' AND status<>'deleted' RETURNING id""",
                     **params,
                 )
@@ -568,10 +635,15 @@ class MemoryService:
                     continue
                 row = await one(
                     c,
-                    """INSERT INTO memory_items(tenant_id,customer_id,type,key,content,confidence,
-                    status,source_type,source_ref)
-                    VALUES(:t,:c,:type,:key,:content,:confidence,:status,'extracted',:ref)
-                    ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING RETURNING id""",
+                    """INSERT INTO memory_items(
+                        tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                        status,source_type,source_ref
+                    ) VALUES(
+                        :t,:business_id,:workspace_id,:c,:type,:key,:content,:confidence,
+                        :status,'extracted',:ref
+                    )
+                    ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+                    DO NOTHING RETURNING id""",
                     **params,
                 )
             if row:
@@ -603,22 +675,35 @@ class MemoryService:
             raise DomainError("memory_flag_key_invalid")
         page = max(page, 1)
         page_size = max(1, min(page_size, 100))
-        where = "c.tenant_id=:t"
+        customer_scope_sql, scope_params = resource_scope_clause(alias="c")
+        scope_sql, _ = resource_scope_clause()
+        where = "c.tenant_id=:t" + customer_scope_sql
         params = {"t": tenant, "lim": page_size, "off": (page - 1) * page_size}
+        params.update(scope_params)
         if q:
-            where += """ AND EXISTS (SELECT 1 FROM memory_identities x
-                WHERE x.customer_id=c.id AND x.tenant_id=c.tenant_id AND x.external_key ILIKE :pattern)"""
+            where += (
+                """ AND EXISTS (SELECT 1 FROM memory_identities x
+                WHERE x.customer_id=c.id AND x.tenant_id=c.tenant_id"""
+                + scope_sql
+                + " AND x.external_key ILIKE :pattern)"
+            )
             params["pattern"] = "%" + q + "%"
         if flag:
-            where += """ AND EXISTS (SELECT 1 FROM memory_items f
+            where += (
+                """ AND EXISTS (SELECT 1 FROM memory_items f
                 WHERE f.customer_id=c.id AND f.tenant_id=c.tenant_id
-                AND f.type='flag' AND f.status='active' AND f.key=:flag)"""
+                """
+                + scope_sql
+                + " AND f.type='flag' AND f.status='active' AND f.key=:flag)"
+            )
             params["flag"] = flag
         order = "c.updated_at DESC,c.id DESC"
         if sort == "pending":
             order = (
                 """(SELECT count(*) FROM memory_items m
-                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id AND m.status='pending'
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id"""
+                + scope_sql
+                + """ AND m.status='pending'
                 ) DESC,"""
                 + order
             )
@@ -626,7 +711,9 @@ class MemoryService:
             order = (
                 """(SELECT count(*) FROM memory_items m
                  WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id
-                 AND m.status IN ('active','pending')) DESC,"""
+                 """
+                + scope_sql
+                + """ AND m.status IN ('active','pending')) DESC,"""
                 + order
             )
         async with self.engine.connect() as c:
@@ -639,13 +726,18 @@ class MemoryService:
                 c,
                 """SELECT c.id,c.created_at,c.updated_at,
                 (SELECT COALESCE(array_agg(i.external_key ORDER BY i.created_at),'{}')
-                 FROM memory_identities i WHERE i.customer_id=c.id AND i.tenant_id=c.tenant_id
-                ) AS external_keys,
+                 FROM memory_identities i WHERE i.customer_id=c.id AND i.tenant_id=c.tenant_id"""
+                 + scope_sql
+                 + """) AS external_keys,
                 (SELECT count(*)::int FROM memory_items m
-                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id AND m.status<>'deleted'
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id"""
+                 + scope_sql
+                 + """ AND m.status<>'deleted'
                 ) AS item_count,
                 (SELECT max(m.updated_at) FROM memory_items m
-                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id AND m.status<>'deleted'
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id"""
+                 + scope_sql
+                 + """ AND m.status<>'deleted'
                 ) AS last_active_at
                 FROM memory_customers c WHERE """
                 + where
@@ -677,31 +769,40 @@ class MemoryService:
             }
 
     async def customer_detail(self, tenant, customer_id):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             customer = required(
                 await one(
                     c,
-                    "SELECT id,created_at,updated_at FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                    "SELECT id,created_at,updated_at FROM memory_customers "
+                    "WHERE id=:id AND tenant_id=:t" + scope_sql,
                     id=customer_id,
                     t=tenant,
+                    **scope_params,
                 ),
                 "memory_customer_not_found",
             )
             customer["identities"] = await many(
                 c,
                 """SELECT id,source,external_key,created_at FROM memory_identities
-                WHERE customer_id=:id AND tenant_id=:t ORDER BY created_at""",
+                WHERE customer_id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " ORDER BY created_at",
                 id=customer_id,
                 t=tenant,
+                **scope_params,
             )
             customer["items"] = await many(
                 c,
                 """SELECT id,customer_id,type,key,content,confidence,status,source_type,source_ref,
                 prev_content,revision,protected,last_referenced_at,reference_count,updated_at
                 FROM memory_items
-                WHERE customer_id=:id AND tenant_id=:t ORDER BY type,key""",
+                WHERE customer_id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " ORDER BY type,key",
                 id=customer_id,
                 t=tenant,
+                **scope_params,
             )
             # Phase 4 (FR-6.4): the console shows the live decayed score; the
             # formula matches the injection filter and the daily migration.
@@ -724,24 +825,34 @@ class MemoryService:
     async def pending_items(self, tenant, page=1, page_size=20):
         page = max(page, 1)
         page_size = max(1, min(page_size, 100))
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             total = await one(
                 c,
-                "SELECT count(*) AS total FROM memory_items WHERE tenant_id=:t AND status='pending'",
+                "SELECT count(*) AS total FROM memory_items WHERE tenant_id=:t AND status='pending'"
+                + scope_sql,
                 t=tenant,
+                **scope_params,
             )
             items = await many(
                 c,
                 """SELECT m.id,m.customer_id,m.type,m.key,m.content,m.confidence,m.status,
                 m.source_type,m.source_ref,m.prev_content,m.revision,m.updated_at,
                 (SELECT COALESCE(array_agg(i.external_key ORDER BY i.created_at),'{}')
-                 FROM memory_identities i WHERE i.customer_id=m.customer_id AND i.tenant_id=m.tenant_id
+                 FROM memory_identities i WHERE i.customer_id=m.customer_id AND i.tenant_id=m.tenant_id"""
+                + scope_sql
+                + """
                 ) AS customer_external_keys
-                FROM memory_items m WHERE m.tenant_id=:t AND m.status='pending'
+                FROM memory_items m WHERE m.tenant_id=:t AND m.status='pending'"""
+                + scope_sql.replace("business_id", "m.business_id").replace(
+                    "workspace_id", "m.workspace_id"
+                )
+                + """
                 ORDER BY m.updated_at DESC,m.id DESC LIMIT :lim OFFSET :off""",
                 t=tenant,
                 lim=page_size,
                 off=(page - 1) * page_size,
+                **scope_params,
             )
             return {
                 "items": items,
@@ -751,13 +862,16 @@ class MemoryService:
             }
 
     async def _item(self, c, tenant, item_id, lock=False):
+        scope_sql, scope_params = resource_scope_clause()
         return required(
             await one(
                 c,
                 "SELECT * FROM memory_items WHERE id=:id AND tenant_id=:t"
+                + scope_sql
                 + (" FOR UPDATE" if lock else ""),
                 id=item_id,
                 t=tenant,
+                **scope_params,
             ),
             "memory_item_not_found",
         )
@@ -776,16 +890,20 @@ class MemoryService:
             item = await self._item(c, tenant, item_id, lock=True)
             if item["status"] == "deleted":
                 raise DomainError("memory_item_deleted", 409)
+            scope_sql, scope_params = resource_scope_clause()
             row = await one(
                 c,
                 """UPDATE memory_items SET content=:content,prev_content=content,
                 source_type='human',protected=true,confidence=1.0,source_ref=:actor,
                 revision=revision+1,updated_at=now()
-                WHERE id=:id AND tenant_id=:t RETURNING *""",
+                WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " RETURNING *",
                 id=item_id,
                 t=tenant,
                 content=content,
                 actor=actor,
+                **scope_params,
             )
             await audit(
                 c,
@@ -813,12 +931,16 @@ class MemoryService:
                 raise DomainError("memory_item_deleted", 409)
             if not item["protected"]:
                 raise DomainError("memory_item_not_protected", 409)
+            scope_sql, scope_params = resource_scope_clause()
             row = await one(
                 c,
                 """UPDATE memory_items SET protected=false,source_type='extracted',
-                updated_at=now() WHERE id=:id AND tenant_id=:t RETURNING *""",
+                updated_at=now() WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " RETURNING *",
                 id=item_id,
                 t=tenant,
+                **scope_params,
             )
             await audit(
                 c,
@@ -836,6 +958,7 @@ class MemoryService:
         self, tenant, actor, item_id, action, allowed, target, conflict, repeat_ok=False,
         refresh_on=(),
     ):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             item = await self._item(c, tenant, item_id, lock=True)
             if item["status"] == target:
@@ -852,10 +975,13 @@ class MemoryService:
                 # R19: reviving an expired row resets its reference clock so
                 # the daily pass does not immediately re-expire it.
                 + (",last_referenced_at=now()" if item["status"] in refresh_on else "")
-                + " WHERE id=:id AND tenant_id=:t RETURNING *",
+                + " WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + " RETURNING *",
                 id=item_id,
                 t=tenant,
                 status=target,
+                **scope_params,
             )
             await audit(
                 c,
@@ -905,6 +1031,7 @@ class MemoryService:
         the suggestion. When the base row no longer exists the confirm
         degrades to an ordinary activation.
         """
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             item = await self._item(c, tenant, item_id, lock=True)
             if item["status"] != "pending":
@@ -915,23 +1042,35 @@ class MemoryService:
                     c,
                     """SELECT * FROM memory_items
                     WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key
-                    AND status<>'deleted' FOR UPDATE""",
+                    AND status<>'deleted'"""
+                    + scope_sql
+                    + " FOR UPDATE",
                     t=tenant,
                     c=item["customer_id"],
                     type=item["type"],
                     key=base_key,
+                    **scope_params,
                 )
                 if base:
                     row = await one(
                         c,
                         """UPDATE memory_items SET content=:content,prev_content=:prev,
                         revision=revision+1,last_referenced_at=now(),updated_at=now()
-                        WHERE id=:id RETURNING *""",
+                        WHERE id=:id"""
+                        + scope_sql
+                        + " RETURNING *",
                         id=base["id"],
                         content=item["content"],
                         prev=base["content"],
+                        **scope_params,
                     )
-                    await execute(c, "DELETE FROM memory_items WHERE id=:id", id=item["id"])
+                    await execute(
+                        c,
+                        "DELETE FROM memory_items WHERE id=:id AND tenant_id=:t" + scope_sql,
+                        id=item["id"],
+                        t=tenant,
+                        **scope_params,
+                    )
                     await audit(
                         c,
                         tenant,
@@ -949,9 +1088,12 @@ class MemoryService:
             row = await one(
                 c,
                 """UPDATE memory_items SET status='active',last_referenced_at=now(),
-                updated_at=now() WHERE id=:id AND tenant_id=:t RETURNING *""",
+                updated_at=now() WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " RETURNING *",
                 id=item_id,
                 t=tenant,
+                **scope_params,
             )
             await audit(
                 c,
@@ -985,13 +1127,15 @@ class MemoryService:
 
     async def upsert_flag(self, tenant, actor, customer_id, key, content):
         """Create or update one human-sourced flag (FR-2)."""
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
                     id=customer_id,
                     t=tenant,
+                    **scope_params,
                 ),
                 "memory_customer_not_found",
             )
@@ -1014,10 +1158,12 @@ class MemoryService:
                     await one(
                         c,
                         """SELECT id FROM memory_items
-                        WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key""",
+                        WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key"""
+                        + scope_sql,
                         t=tenant,
                         c=customer_id,
                         key=key,
+                        **scope_params,
                     )
                 )["id"]
             return {"id": str(flag_id)}
@@ -1066,13 +1212,16 @@ class MemoryService:
     async def list_injections(self, tenant, customer_id, limit=50):
         """Run-dimension injection history for one customer, newest first (FR-4)."""
         limit = max(1, min(limit, 200))
+        scope_sql, scope_params = resource_scope_clause(alias="l")
         async with self.engine.connect() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t"
+                    + scope_sql.replace("l.", ""),
                     id=customer_id,
                     t=tenant,
+                    **scope_params,
                 ),
                 "memory_customer_not_found",
             )
@@ -1081,13 +1230,15 @@ class MemoryService:
                 """SELECT l.run_id, max(l.injected_at) AS injected_at,
                 count(*)::int AS item_count, r.conversation_id
                 FROM memory_injection_log l
-                LEFT JOIN runtime_runs r ON r.id=l.run_id
-                WHERE l.tenant_id=:t AND l.customer_id=:c
-                GROUP BY l.run_id, r.conversation_id
-                ORDER BY max(l.injected_at) DESC,l.run_id DESC LIMIT :lim""",
+                LEFT JOIN runtime_runs r ON r.id=l.run_id AND r.tenant_id=l.tenant_id
+                WHERE l.tenant_id=:t AND l.customer_id=:c"""
+                + scope_sql
+                + " GROUP BY l.run_id, r.conversation_id"
+                + " ORDER BY max(l.injected_at) DESC,l.run_id DESC LIMIT :lim",
                 t=tenant,
                 c=customer_id,
                 lim=limit,
+                **scope_params,
             )
             return {"items": rows}
 
@@ -1100,13 +1251,15 @@ class MemoryService:
         injection surface as ``item_deleted`` markers with no key/type —
         content is never reconstructed (C3).
         """
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM runtime_runs WHERE id=:id AND tenant_id=:t",
+                    "SELECT id FROM runtime_runs WHERE id=:id AND tenant_id=:t" + scope_sql,
                     id=run_id,
                     t=tenant,
+                    **scope_params,
                 ),
                 "run_not_found",
             )
@@ -1116,27 +1269,36 @@ class MemoryService:
                 m.key, m.type, m.status, (m.id IS NULL) AS item_deleted
                 FROM memory_injection_log l
                 LEFT JOIN memory_items m ON m.id=l.item_id AND m.tenant_id=l.tenant_id
-                WHERE l.tenant_id=:t AND l.run_id=:r
-                ORDER BY l.id""",
+                WHERE l.tenant_id=:t AND l.run_id=:r"""
+                + scope_sql.replace("business_id", "l.business_id").replace(
+                    "workspace_id", "l.workspace_id"
+                )
+                + " ORDER BY l.id",
                 t=tenant,
                 r=run_id,
+                **scope_params,
             )
             return {"run_id": str(run_id), "items": rows}
 
     async def item_injections(self, tenant, item_id, limit=20):
         """Reverse lookup: the recent runs one item was injected into (FR-4)."""
         limit = max(1, min(limit, 100))
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             rows = await many(
                 c,
                 """SELECT l.run_id, l.section, l.score, l.injected_at, r.conversation_id
                 FROM memory_injection_log l
-                LEFT JOIN runtime_runs r ON r.id=l.run_id
-                WHERE l.tenant_id=:t AND l.item_id=:i
-                ORDER BY l.injected_at DESC,l.id DESC LIMIT :lim""",
+                LEFT JOIN runtime_runs r ON r.id=l.run_id AND r.tenant_id=l.tenant_id
+                WHERE l.tenant_id=:t AND l.item_id=:i"""
+                + scope_sql.replace("business_id", "l.business_id").replace(
+                    "workspace_id", "l.workspace_id"
+                )
+                + " ORDER BY l.injected_at DESC,l.id DESC LIMIT :lim",
                 t=tenant,
                 i=item_id,
                 lim=limit,
+                **scope_params,
             )
             if not rows:
                 # An unknown (or cross-tenant) item id is a 404; an existing
@@ -1144,9 +1306,10 @@ class MemoryService:
                 required(
                     await one(
                         c,
-                        "SELECT id FROM memory_items WHERE id=:id AND tenant_id=:t",
+                        "SELECT id FROM memory_items WHERE id=:id AND tenant_id=:t" + scope_sql,
                         id=item_id,
                         t=tenant,
+                        **scope_params,
                     ),
                     "memory_item_not_found",
                 )
@@ -1162,12 +1325,14 @@ class MemoryService:
         404 — its history is exactly what the operator came for.
         """
         limit = max(1, min(limit, 500))
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             item = await one(
                 c,
-                "SELECT * FROM memory_items WHERE id=:id AND tenant_id=:t",
+                "SELECT * FROM memory_items WHERE id=:id AND tenant_id=:t" + scope_sql,
                 id=item_id,
                 t=tenant,
+                **scope_params,
             )
             timeline = await many(
                 c,
@@ -1181,9 +1346,11 @@ class MemoryService:
             injection = await one(
                 c,
                 """SELECT count(*)::int AS injection_count, max(injected_at) AS last_injected_at
-                FROM memory_injection_log WHERE tenant_id=:t AND item_id=:i""",
+                FROM memory_injection_log WHERE tenant_id=:t AND item_id=:i"""
+                + scope_sql,
                 t=tenant,
                 i=item_id,
+                **scope_params,
             )
             if item is None and not timeline and not injection["injection_count"]:
                 raise DomainError("memory_item_not_found", 404)
@@ -1205,13 +1372,15 @@ class MemoryService:
         no new disclosure surface.
         """
         limit = max(1, min(limit, 500))
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
                     id=customer_id,
                     t=tenant,
+                    **scope_params,
                 ),
                 "memory_customer_not_found",
             )
@@ -1219,10 +1388,12 @@ class MemoryService:
                 c,
                 """SELECT id,actor,action,resource,details,created_at FROM audit_records
                 WHERE tenant_id=:t AND action LIKE 'memory.%'
-                AND (resource=:cid OR details->>'customer_id'=:cid)
-                ORDER BY id DESC LIMIT :lim""",
+                AND (resource=:cid OR details->>'customer_id'=:cid)"""
+                + scope_sql
+                + " ORDER BY id DESC LIMIT :lim",
                 t=tenant,
                 cid=str(customer_id),
                 lim=limit,
+                **scope_params,
             )
             return {"items": rows}

@@ -147,7 +147,17 @@ def create_app(
         except ValidationError:
             return JSONResponse(status_code=422, content={"detail": "invalid_business_scope"})
         catalog = getattr(request.app.state, "scope_catalog", None)
-        if catalog is not None and scope.business_id is not None:
+        # Authenticated requests validate the requested business scope after
+        # the identity dependency has run.  This preserves the normal
+        # authentication precedence: a session issued for another tenant must
+        # fail with 401 instead of being masked by a 403 for the current
+        # tenant's business catalog.  Anonymous/public requests still validate
+        # at the application boundary.
+        if (
+            catalog is not None
+            and scope.business_id is not None
+            and not request.headers.get("Authorization")
+        ):
             try:
                 scope = await catalog.validate(scope)
             except ScopeError as exc:

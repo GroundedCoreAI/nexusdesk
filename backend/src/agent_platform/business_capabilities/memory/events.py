@@ -15,6 +15,10 @@ from uuid import UUID
 
 from agent_platform.business_capabilities.memory.service import MemoryService
 from agent_platform.core_platform.platform_services.persistence.store import audit, one
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+    resource_scope_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +58,13 @@ async def enqueue_event_task(conn, tenant, ticket_id, event, log_id=None):
     """
     row = await one(
         conn,
-        """INSERT INTO memory_tasks(tenant_id,kind,payload)
-        VALUES(:t,:kind,CAST(:payload AS jsonb)) RETURNING id""",
+        """INSERT INTO memory_tasks(
+            tenant_id,business_id,workspace_id,kind,payload
+        ) VALUES(:t,:business_id,:workspace_id,:kind,CAST(:payload AS jsonb))
+        RETURNING id""",
         t=tenant,
         kind=EVENT_KIND,
+        **resource_scope_values(),
         payload=json.dumps(
             {"ticket_id": str(ticket_id), "event": event, "log_id": log_id}
         ),
@@ -73,13 +80,17 @@ class EventWriter:
         self.memory = memory or MemoryService(engine, settings)
 
     async def _ticket(self, c, tenant, ticket_id):
+        scope_sql, scope_params = resource_scope_clause()
         return await one(
             c,
             """SELECT t.id,t.ticket_no,t.customer_id,d.description,d.resolution
             FROM tickets t JOIN tickets_detail d ON d.ticket_id=t.id AND d.tenant_id=t.tenant_id
-            WHERE t.id=:id AND t.tenant_id=:t""",
+            WHERE t.id=:id AND t.tenant_id=:t"""
+            + scope_sql
+            + " FOR SHARE",
             id=ticket_id,
             t=tenant,
+            **scope_params,
         )
 
     async def _customer_exists(self, c, tenant, customer_id):
@@ -87,35 +98,44 @@ class EventWriter:
             customer_uuid = UUID(str(customer_id))
         except ValueError:
             return False
+        scope_sql, scope_params = resource_scope_clause()
         return bool(
             await one(
                 c,
-                "SELECT 1 FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                "SELECT 1 FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
                 id=customer_uuid,
                 t=tenant,
+                **scope_params,
             )
         )
 
     async def _closed_note(self, c, tenant, ticket_id):
         """The close reason rides in the status_changed process log entry."""
+        scope_sql, scope_params = resource_scope_clause()
         row = await one(
             c,
             """SELECT content FROM ticket_process_log
             WHERE tenant_id=:t AND ticket_id=:id AND action_type='status_changed'
-            AND new_status='closed' ORDER BY id DESC LIMIT 1""",
+            AND new_status='closed'"""
+            + scope_sql
+            + " ORDER BY id DESC LIMIT 1",
             t=tenant,
             id=ticket_id,
+            **scope_params,
         )
         return row["content"] if row else None
 
     async def _commitment_note(self, c, tenant, ticket_id, log_id):
+        scope_sql, scope_params = resource_scope_clause()
         row = await one(
             c,
             """SELECT content FROM ticket_process_log
-            WHERE id=:log AND tenant_id=:t AND ticket_id=:id AND is_commitment""",
+            WHERE id=:log AND tenant_id=:t AND ticket_id=:id AND is_commitment"""
+            + scope_sql,
             log=log_id,
             t=tenant,
             id=ticket_id,
+            **scope_params,
         )
         return row["content"] if row else None
 

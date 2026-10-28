@@ -12,6 +12,9 @@ import logging
 
 from agent_platform.core_platform.platform_services.model_gateway.contracts import ChatRequest
 from agent_platform.core_platform.platform_services.persistence.store import audit, execute, one
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,10 +114,12 @@ async def enqueue_summary_task(conn, tenant, conversation_id, dropped, old_summa
         conn,
         """SELECT id,payload FROM memory_tasks
         WHERE tenant_id=:t AND kind=:kind AND status='pending'
+        AND business_id=:business_id AND workspace_id=:workspace_id
         AND payload->>'conversation_id'=:cid
         ORDER BY created_at LIMIT 1 FOR UPDATE""",
         t=tenant,
         kind=SUMMARY_KIND,
+        **resource_scope_values(),
         cid=str(conversation_id),
     )
     if existing:
@@ -130,10 +135,30 @@ async def enqueue_summary_task(conn, tenant, conversation_id, dropped, old_summa
         return existing["id"]
     row = await one(
         conn,
-        """INSERT INTO memory_tasks(tenant_id,kind,payload)
-        VALUES(:t,:kind,CAST(:payload AS jsonb)) RETURNING id""",
+        """INSERT INTO memory_tasks(
+            tenant_id,business_id,workspace_id,kind,payload,created_at
+        ) VALUES(
+            :t,:business_id,:workspace_id,CAST(:kind AS varchar),
+            CAST(:payload AS jsonb),
+            GREATEST(
+                clock_timestamp(),
+                COALESCE(
+                    (
+                        SELECT max(created_at) + interval '1 microsecond'
+                        FROM memory_tasks
+                        WHERE tenant_id=:t
+                          AND business_id=:business_id
+                          AND workspace_id=:workspace_id
+                          AND kind=CAST(:kind AS varchar)
+                    ),
+                    '-infinity'::timestamptz
+                )
+            )
+        )
+        RETURNING id""",
         t=tenant,
         kind=SUMMARY_KIND,
+        **resource_scope_values(),
         payload=json.dumps(
             {
                 "conversation_id": str(conversation_id),

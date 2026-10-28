@@ -16,6 +16,22 @@ def identity_bindings(request: Request) -> IdentityBindings:
     return request.app.state.runtime.identity
 
 
+async def _validate_business_scope(request: Request) -> None:
+    """Validate an authenticated request's business/workspace scope.
+
+    The application middleware intentionally defers this check when an
+    Authorization header is present so invalid credentials are reported as
+    authentication failures first.  Once the principal is authenticated, the
+    scope is checked before the principal is exposed to route handlers.
+    """
+
+    scope = getattr(request.state, "business_scope", None)
+    catalog = getattr(request.app.state, "scope_catalog", None)
+    if catalog is None or scope is None or scope.business_id is None:
+        return
+    await catalog.validate(scope)
+
+
 @dataclass(frozen=True)
 class Principal:
     tenant: str
@@ -73,7 +89,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 )
             if session["must_change_password"] and settings.require_password_change:
                 raise DomainError("default_password_change_required", 403)
-            return Principal(
+            principal_value = Principal(
                 settings.tenant_id,
                 session["role"],
                 "enterprise:" + str(session["user_id"]),
@@ -83,6 +99,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 business_id=business_id,
                 workspace_id=workspace_id,
             )
+            await _validate_business_scope(request)
+            return principal_value
         except DomainError as exc:
             raise HTTPException(exc.status, exc.code) from None
     if (authorization or "").startswith("Bearer ssow_"):
@@ -107,7 +125,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 )
             if session["app_id"]:
                 raise DomainError("invalid_enterprise_session", 401)
-            return Principal(
+            principal_value = Principal(
                 settings.tenant_id,
                 session["role"],
                 "enterprise:" + str(session["user_id"]),
@@ -117,6 +135,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 workspace_id=workspace_id,
                 session_id=str(session["id"]),
             )
+            await _validate_business_scope(request)
+            return principal_value
         except DomainError as exc:
             raise HTTPException(exc.status, exc.code) from None
     for role, token in [
@@ -127,7 +147,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
         if token and hmac.compare_digest(
             (authorization or "").encode(), ("Bearer " + token.get_secret_value()).encode()
         ):
-            return Principal(
+            principal_value = Principal(
                 settings.tenant_id,
                 role,
                 role,
@@ -135,6 +155,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 business_id=business_id,
                 workspace_id=workspace_id,
             )
+            await _validate_business_scope(request)
+            return principal_value
     if (authorization or "").startswith("Bearer staff_"):
         digest = hashlib.sha256(authorization[7:].encode()).hexdigest()
         async with identity_bindings(request).engine.connect() as c:
@@ -145,7 +167,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 hash=digest,
             )
         if staff:
-            return Principal(
+            principal_value = Principal(
                 settings.tenant_id,
                 staff["role"],
                 "staff:" + str(staff["id"]),
@@ -153,6 +175,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 business_id=business_id,
                 workspace_id=workspace_id,
             )
+            await _validate_business_scope(request)
+            return principal_value
         raise HTTPException(401, "invalid_api_token")
     if not settings.api_token and settings.environment == "development" and not authorization:
         async with identity_bindings(request).engine.connect() as c:
@@ -162,7 +186,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 t=settings.tenant_id,
             )
         if not initialized:
-            return Principal(
+            principal_value = Principal(
                 settings.tenant_id,
                 "admin",
                 "local-development",
@@ -170,6 +194,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 business_id=business_id,
                 workspace_id=workspace_id,
             )
+            await _validate_business_scope(request)
+            return principal_value
     raise HTTPException(401, "invalid_api_token")
 
 
