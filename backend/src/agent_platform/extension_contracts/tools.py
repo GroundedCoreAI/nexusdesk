@@ -61,6 +61,8 @@ class ToolExecutionContext(ContractModel):
     conversation_id: UUID | None = None
     actor_id: str | None = Field(default=None, min_length=1, max_length=200)
     source: Literal["runtime", "application", "worker", "system"]
+    business_id: str | None = Field(default=None, min_length=1, max_length=100)
+    workspace_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ToolExecutionRequest(ContractModel):

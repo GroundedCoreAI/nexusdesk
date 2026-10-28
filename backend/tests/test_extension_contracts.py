@@ -7,8 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 from agent_platform.applications.customer_service.platform_routes import _ui_manifest_payload
-from agent_platform.applications.customer_service.runtime_composition import RuntimeServices
-from agent_platform.applications.customer_service.runtime_factory import RuntimeFactory
+from agent_platform.applications.platform_runtime.runtime_composition import RuntimeServices
+from agent_platform.applications.platform_runtime.runtime_factory import RuntimeFactory
 from agent_platform.business_capabilities.approval.capability import ApprovalCapability
 from agent_platform.business_capabilities.approval.domain import (
     ApprovalRequest,
@@ -424,8 +424,8 @@ async def test_execution_harness_applies_confirmation_and_idempotency_constraint
     assert proposal.status == "requires_confirmation"
 
 
-def test_runtime_factory_has_a_dedicated_application_adapter_module():
-    assert RuntimeFactory.__module__ == "agent_platform.applications.customer_service.runtime_factory"
+def test_runtime_factory_lives_in_shared_platform_runtime_module():
+    assert RuntimeFactory.__module__ == "agent_platform.applications.platform_runtime.runtime_factory"
 
 
 def test_ui_manifest_contains_serializable_contributions():

@@ -269,6 +269,8 @@ async def me(user: Reader):
         "user_id": user.user_id,
         "auth_source": user.auth_source,
         "session_id": user.session_id,
+        "business_id": user.business_id,
+        "workspace_id": user.workspace_id,
         "permissions": sorted(user.permissions),
     }
 
@@ -395,6 +397,7 @@ async def upgrade_capability(
     user: ExtensionAdmin,
 ):
     try:
+
         async def upgrade():
             request.app.state.runtime.contributions.validate_manifest_change(capability_id, body)
             return await request.app.state.runtime.extensions.upgrade(capability_id, body)
@@ -424,6 +427,7 @@ async def upgrade_capability(
 @router.post("/extensions/capabilities/{capability_id}/rollback")
 async def rollback_capability(capability_id: str, request: Request, user: ExtensionAdmin):
     try:
+
         async def rollback():
             target = request.app.state.runtime.extensions.rollback_manifest(capability_id)
             if target is not None:

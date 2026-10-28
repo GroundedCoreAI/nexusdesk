@@ -13,6 +13,8 @@ class ExecutionContext:
     trace_id: str = field(default_factory=lambda: str(uuid4()))
     conversation_id: str | None = None
     run_id: str | None = None
+    business_id: str | None = None
+    workspace_id: str | None = None
 
     def __post_init__(self):
         if not self.tenant_id or not self.actor_id:

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from agent_platform.applications.customer_service.runtime_factory import RuntimeFactory
+from agent_platform.applications.platform_runtime.runtime_factory import RuntimeFactory
 from agent_platform.business_capabilities.agent_config.service import AgentConfig
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 from agent_platform.extension_contracts import RuntimeBindings

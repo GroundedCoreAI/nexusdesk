@@ -35,9 +35,12 @@ This is a **large internal refactor of a modular monolith**. It does not change 
 | `05-migration-plan.md` | Migration order and operating principles | Created |
 | `06-acceptance-plan.md` | Code, test, and documentation acceptance criteria | Created |
 | `07-acceptance-report.md` | Current acceptance results and open items | Initial record |
+| `08-group-application-and-business-registry.md` | Phase 2 group entrypoint and business registry | Complete |
+| `09-business-scope-context.md` | Phase 3 tenant, business, and workspace context | Complete |
+| `10-resource-scope-data-plane.en.md` | Phase 3 core resource data-plane filtering | Complete |
 
 ## 4. Current conclusion
 
-The main physical directory migration has been completed. `agent_platform/modules`, `apps`, `integrations`, and `platform` are no longer retained as runtime directories. Final regression testing, legacy documentation cleanup, and architecture-gate confirmation remain.
+The main physical directory migration has been completed. `agent_platform/modules`, `apps`, `integrations`, and `platform` are no longer retained as runtime directories. Phase 2 is complete, and Phase 3 has completed the context boundary plus data-plane filtering for the main Agent, knowledge-base, and channel configuration resources.
 
 See `07-acceptance-report.md` for the current status.

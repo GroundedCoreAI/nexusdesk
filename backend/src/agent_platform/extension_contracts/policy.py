@@ -20,6 +20,8 @@ class PolicyContext(ContractModel):
     run_id: UUID | None = None
     conversation_id: UUID | None = None
     source: Literal["runtime", "application", "worker", "system"]
+    business_id: str | None = Field(default=None, min_length=1, max_length=100)
+    workspace_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ConfirmationRequirement(ContractModel):

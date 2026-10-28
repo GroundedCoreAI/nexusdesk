@@ -15,6 +15,9 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     one,
     required,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+)
 
 
 class VectorIndex:
@@ -60,19 +63,28 @@ class VectorIndex:
             raise DomainError("embedding_profile_required")
         if not self.settings.milvus_url:
             raise DomainError("milvus_not_configured", 503)
+        base_scope_sql, base_scope_params = resource_scope_clause()
+        document_scope_sql, document_scope_params = resource_scope_clause(alias="d")
+        scope_params = {**base_scope_params, **document_scope_params}
         async with self.engine.connect() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM knowledge_bases WHERE tenant_id=:t AND id=:id AND enabled",
+                    "SELECT id FROM knowledge_bases WHERE tenant_id=:t AND id=:id AND enabled"
+                    + base_scope_sql,
                     t=tenant,
                     id=kid,
+                    **scope_params,
                 )
             )
             rows = await many(
                 c,
-                "SELECT ch.id,ch.content,ch.version,d.id document_id FROM knowledge_chunks ch JOIN knowledge_documents d ON d.id=ch.document_id WHERE d.kb_id=:kid AND d.enabled AND ch.version=d.current_version ORDER BY ch.id LIMIT 10001",
+                "SELECT ch.id,ch.content,ch.version,d.id document_id FROM knowledge_chunks ch "
+                "JOIN knowledge_documents d ON d.id=ch.document_id WHERE d.kb_id=:kid"
+                + document_scope_sql
+                + " AND d.enabled AND ch.version=d.current_version ORDER BY ch.id LIMIT 10001",
                 kid=kid,
+                **scope_params,
             )
         if workspace_rows is not None:
             rows = workspace_rows
@@ -150,9 +162,12 @@ class VectorIndex:
             required(
                 await one(
                     c,
-                    "SELECT id FROM knowledge_bases WHERE tenant_id=:t AND id=:id AND enabled FOR UPDATE",
+                    "SELECT id FROM knowledge_bases WHERE tenant_id=:t AND id=:id AND enabled"
+                    + base_scope_sql
+                    + " FOR UPDATE",
                     t=tenant,
                     id=kid,
+                    **scope_params,
                 )
             )
             await execute(
@@ -174,12 +189,17 @@ class VectorIndex:
         }
 
     async def search(self, tenant, kid, query, limit=5):
+        base_scope_sql, base_scope_params = resource_scope_clause(alias="k")
         async with self.engine.connect() as c:
             index = await one(
                 c,
-                "SELECT i.* FROM knowledge_vector_indexes i JOIN knowledge_bases k ON k.id=i.kb_id WHERE i.tenant_id=:t AND i.kb_id=:kid AND k.enabled",
+                "SELECT i.* FROM knowledge_vector_indexes i JOIN knowledge_bases k ON k.id=i.kb_id "
+                "WHERE i.tenant_id=:t AND i.kb_id=:kid"
+                + base_scope_sql
+                + " AND k.enabled",
                 t=tenant,
                 kid=kid,
+                **base_scope_params,
             )
             if index is None:
                 raise DomainError("knowledge_index_not_ready", 409)
@@ -207,13 +227,25 @@ class VectorIndex:
         if not isinstance(hits, list):
             raise DomainError("invalid_milvus_response", 502)
         ids = [h["id"] for h in hits]
+        document_scope_sql, document_scope_params = resource_scope_clause(alias="d")
+        scope_params = {**base_scope_params, **document_scope_params}
         async with self.engine.connect() as c:
             rows = await many(
                 c,
-                "SELECT ch.id chunk_id,d.id document_id,d.title,ch.version,ch.content excerpt,ch.source,k.id knowledge_base_id FROM knowledge_chunks ch JOIN knowledge_documents d ON d.id=ch.document_id JOIN knowledge_links l ON l.document_id=d.id JOIN knowledge_bases k ON k.id=l.kb_id WHERE k.tenant_id=:t AND k.id=:kid AND k.enabled AND d.enabled AND l.enabled AND ch.enabled AND ch.version=l.published_version AND ch.id=ANY(CAST(:ids AS uuid[]))",
+                "SELECT ch.id chunk_id,d.id document_id,d.title,ch.version,ch.content excerpt,"
+                "ch.source,k.id knowledge_base_id FROM knowledge_chunks ch "
+                "JOIN knowledge_documents d ON d.id=ch.document_id "
+                "JOIN knowledge_links l ON l.document_id=d.id "
+                "JOIN knowledge_bases k ON k.id=l.kb_id "
+                "WHERE k.tenant_id=:t AND k.id=:kid"
+                + base_scope_sql
+                + document_scope_sql
+                + " AND k.enabled AND d.enabled AND l.enabled AND ch.enabled "
+                "AND ch.version=l.published_version AND ch.id=ANY(CAST(:ids AS uuid[]))",
                 t=tenant,
                 kid=kid,
                 ids=ids,
+                **scope_params,
             )
         found = {str(r["chunk_id"]): r for r in rows}
         return [

@@ -58,6 +58,8 @@ class ExecutionPolicy:
             run_id=context.run_id,
             conversation_id=context.conversation_id,
             source=context.source,
+            business_id=context.business_id,
+            workspace_id=context.workspace_id,
         )
         internal_context = ExecutionContext(
             policy_context.tenant_id,
@@ -68,6 +70,8 @@ class ExecutionPolicy:
             if policy_context.conversation_id
             else None,
             run_id=str(policy_context.run_id) if policy_context.run_id else None,
+            business_id=policy_context.business_id,
+            workspace_id=policy_context.workspace_id,
         )
         facts = ResourceFacts(
             context.tenant_id,

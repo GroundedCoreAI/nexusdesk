@@ -12,6 +12,10 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     one,
     required,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+    resource_scope_values,
+)
 
 from .classification import INDUSTRIES, TAGS
 
@@ -114,21 +118,32 @@ class AgentService:
                 raise DomainError("agent_model_capability_mismatch")
 
     async def list(self, tenant, q="", include_archived=False):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             return await many(
                 c,
-                "SELECT * FROM agents WHERE tenant_id=:t AND (:archived OR NOT archived) AND (:q='' OR name ILIKE :pattern) ORDER BY created_at DESC LIMIT 200",
+                "SELECT * FROM agents WHERE tenant_id=:t"
+                + scope_sql
+                + " AND (:archived OR NOT archived) AND (:q='' OR name ILIKE :pattern) ORDER BY created_at DESC LIMIT 200",
                 t=tenant,
                 archived=include_archived,
                 q=q,
                 pattern="%" + q + "%",
+                **scope_params,
             )
 
     async def get(self, tenant, aid):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             return required(
                 await one(
-                    c, "SELECT * FROM agents WHERE tenant_id=:t AND id=:id", t=tenant, id=aid
+                    c,
+                    "SELECT * FROM agents WHERE tenant_id=:t"
+                    + scope_sql
+                    + " AND id=:id",
+                    t=tenant,
+                    id=aid,
+                    **scope_params,
                 ),
                 "agent_not_found",
             )
@@ -146,6 +161,7 @@ class AgentService:
         examples_only=False,
         created_by=None,
     ):
+        scope_sql, scope_params = resource_scope_clause()
         where = """tenant_id=:t AND (:archived OR NOT archived)
             AND (:q='' OR name ILIKE :pattern)
             AND (:status='all' OR (:status='published' AND published_version IS NOT NULL)
@@ -153,7 +169,7 @@ class AgentService:
             AND (:all_industries OR industry=ANY(CAST(:industries AS text[])))
             AND (:all_tags OR tags && CAST(:tags AS text[]))
             AND (NOT :examples_only OR is_example)
-            AND (:all_creators OR created_by=:creator)"""
+            AND (:all_creators OR created_by=:creator)""" + scope_sql
         params = {
             "t": tenant,
             "archived": include_archived,
@@ -167,6 +183,7 @@ class AgentService:
             "examples_only": examples_only,
             "all_creators": created_by is None,
             "creator": created_by or "",
+            **scope_params,
         }
         async with self.engine.connect() as c:
             total = await one(c, "SELECT count(*) AS total FROM agents WHERE " + where, **params)
@@ -182,13 +199,20 @@ class AgentService:
             return {"items": items, "total": total["total"], "page": page, "page_size": page_size}
 
     async def create(self, tenant, actor, body):
+        scope_values = resource_scope_values()
         async with self.engine.begin() as c:
             row = await one(
                 c,
-                """INSERT INTO agents(id,tenant_id,name,description,draft,industry,tags,is_example,created_by)
-                VALUES(:id,:t,:name,:description,CAST(:draft AS jsonb),:industry,:tags,:is_example,:creator) RETURNING *""",
+                """INSERT INTO agents(
+                    id,tenant_id,business_id,workspace_id,name,description,draft,industry,tags,is_example,created_by
+                )
+                VALUES(
+                    :id,:t,:business_id,:workspace_id,:name,:description,CAST(:draft AS jsonb),
+                    :industry,:tags,:is_example,:creator
+                ) RETURNING *""",
                 id=uuid4(),
                 t=tenant,
+                **scope_values,
                 name=body.name,
                 description=body.description,
                 draft=body.config.model_dump_json(),
@@ -201,6 +225,7 @@ class AgentService:
             return row
 
     async def update(self, tenant, actor, aid, body, revision):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             # The FROM subquery snapshots the pre-update draft so the audit
             # record can carry the before/after values (FR-6/AC-11); it never
@@ -213,8 +238,8 @@ class AgentService:
                 is_example=CASE WHEN :set_example THEN :is_example ELSE is_example END,
                 draft_revision=draft_revision+1,updated_at=now()
                 FROM (SELECT draft AS old_draft,name AS old_name,description AS old_description
-                      FROM agents WHERE id=:id) old
-                WHERE id=:id AND tenant_id=:t
+                      FROM agents WHERE id=:id AND tenant_id=:t""" + scope_sql + """) old
+                WHERE id=:id AND tenant_id=:t""" + scope_sql + """
                 AND draft_revision=:revision RETURNING *, old.old_draft, old.old_name, old.old_description""",
                 id=aid,
                 t=tenant,
@@ -228,6 +253,7 @@ class AgentService:
                 set_tags="tags" in body.model_fields_set,
                 set_example="is_example" in body.model_fields_set,
                 revision=revision,
+                **scope_params,
             )
             if not row:
                 raise DomainError("agent_missing_or_revision_conflict", 409)
@@ -264,10 +290,15 @@ class AgentService:
             return row
 
     async def versions(self, tenant, aid):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             required(
                 await one(
-                    c, "SELECT id FROM agents WHERE id=:id AND tenant_id=:t", id=aid, t=tenant
+                    c,
+                    "SELECT id FROM agents WHERE id=:id AND tenant_id=:t" + scope_sql,
+                    id=aid,
+                    t=tenant,
+                    **scope_params,
                 )
             )
             return await many(
@@ -275,13 +306,17 @@ class AgentService:
             )
 
     async def publish(self, tenant, actor, aid, revision):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             agent = required(
                 await one(
                     c,
-                    "SELECT * FROM agents WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    "SELECT * FROM agents WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=aid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if agent["draft_revision"] != revision:
@@ -294,9 +329,12 @@ class AgentService:
             for kid in config.knowledge_base_ids:
                 if not await one(
                     c,
-                    "SELECT id FROM knowledge_bases WHERE id=:id AND tenant_id=:t AND enabled",
+                    "SELECT id FROM knowledge_bases WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " AND enabled",
                     id=kid,
                     t=tenant,
+                    **scope_params,
                 ):
                     raise DomainError("knowledge_base_unavailable")
             version = (
@@ -324,13 +362,17 @@ class AgentService:
             return {"agent_id": aid, "version": version}
 
     async def rollback(self, tenant, actor, aid, version):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM agents WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    "SELECT id FROM agents WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=aid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             target = required(
@@ -352,15 +394,17 @@ class AgentService:
             return {"agent_id": aid, "version": version}
 
     async def snapshot(self, tenant, aid, c, version=None):
+        scope_sql, scope_params = resource_scope_clause(alias="a")
         row = required(
             await one(
                 c,
                 """SELECT a.id,v.version AS published_version,a.archived,a.is_example,v.config,v.tool_snapshot FROM agents a
             LEFT JOIN agent_versions v ON v.agent_id=a.id AND v.version=COALESCE(CAST(:version AS integer),a.published_version)
-            WHERE a.id=:id AND a.tenant_id=:t""",
+            WHERE a.id=:id AND a.tenant_id=:t""" + scope_sql,
                 id=aid,
                 t=tenant,
                 version=version,
+                **scope_params,
             ),
             "agent_not_found",
         )
@@ -382,14 +426,19 @@ class AgentService:
         }
 
     async def archive(self, tenant, actor, aid, archived, revision):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             row = await one(
                 c,
-                "UPDATE agents SET archived=:a,draft_revision=draft_revision+1,updated_at=now() WHERE id=:id AND tenant_id=:t AND draft_revision=:r RETURNING *",
+                "UPDATE agents SET archived=:a,draft_revision=draft_revision+1,updated_at=now() "
+                "WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + " AND draft_revision=:r RETURNING *",
                 id=aid,
                 t=tenant,
                 a=archived,
                 r=revision,
+                **scope_params,
             )
             if not row:
                 raise DomainError("agent_revision_conflict", 409)
@@ -397,15 +446,19 @@ class AgentService:
             return row
 
     async def delete(self, tenant, actor, aid, revision):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             # Same admission/conversation lock order as customer message submission.
             await execute(c, "SELECT pg_advisory_xact_lock(71432019)")
             agent = required(
                 await one(
                     c,
-                    "SELECT * FROM agents WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    "SELECT * FROM agents WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=aid,
                     t=tenant,
+                    **scope_params,
                 ),
                 "agent_not_found",
             )
@@ -413,7 +466,12 @@ class AgentService:
                 raise DomainError("agent_revision_conflict", 409)
             if not agent["archived"]:
                 raise DomainError("agent_must_be_archived", 409)
-            if await one(c, "SELECT id FROM channels WHERE agent_id=:id LIMIT 1", id=aid):
+            if await one(
+                c,
+                "SELECT id FROM channels WHERE agent_id=:id" + scope_sql + " LIMIT 1",
+                id=aid,
+                **scope_params,
+            ):
                 raise DomainError("agent_referenced_by_channels", 409)
             if await one(
                 c, "SELECT id FROM evaluation_cases WHERE agent_id=:id LIMIT 1", id=aid
@@ -476,14 +534,17 @@ class AgentService:
             return {"deleted": True, "id": aid, "preserved_conversations": len(conversations)}
 
     async def diff(self, tenant, aid, version):
+        scope_sql, scope_params = resource_scope_clause(alias="a")
         async with self.engine.connect() as c:
             row = required(
                 await one(
                     c,
-                    "SELECT a.draft,v.config FROM agents a JOIN agent_versions v ON v.agent_id=a.id AND v.version=:v WHERE a.id=:id AND a.tenant_id=:t",
+                    "SELECT a.draft,v.config FROM agents a JOIN agent_versions v ON v.agent_id=a.id AND v.version=:v WHERE a.id=:id AND a.tenant_id=:t"
+                    + scope_sql,
                     id=aid,
                     t=tenant,
                     v=version,
+                    **scope_params,
                 )
             )
             return {

@@ -1,184 +1,23 @@
-import asyncio
-from contextlib import asynccontextmanager
+"""Backward-compatible customer-service application entrypoint."""
 
-from asyncpg import PostgresError
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
+from fastapi import FastAPI
 
-from agent_platform.applications.customer_service.platform_routes import ingress
-from agent_platform.applications.customer_service.platform_routes import router as platform_router
-from agent_platform.applications.customer_service.routes import router
-from agent_platform.applications.customer_service.runtime_composition import runtime_services
-from agent_platform.applications.customer_service.runtime_routes import router as runtime_router
-from agent_platform.business_capabilities.approval.routes import router as approval_router
-from agent_platform.business_capabilities.knowledge.routes import router as knowledge_router
-from agent_platform.business_capabilities.memory.bootstrap import embedded_memory_worker
-from agent_platform.business_capabilities.memory.routes import router as memory_router
-from agent_platform.business_capabilities.open_platform.routes import management as open_management
-from agent_platform.business_capabilities.open_platform.routes import public as open_public
-from agent_platform.core_platform.agent_runtime.schemas import BusyError, CapacityError
-from agent_platform.core_platform.platform_services.access_control.routes import (
-    router as access_control_router,
-)
-from agent_platform.core_platform.platform_services.identity.local_routes import (
-    router as local_auth_router,
-)
-from agent_platform.core_platform.platform_services.model_gateway.management_routes import (
-    router as gateway_management_router,
-)
-from agent_platform.core_platform.platform_services.model_gateway.routes import (
-    router as model_router,
-)
-from agent_platform.core_platform.platform_services.persistence.audit_context import (
-    AuditContextMiddleware,
-)
-from agent_platform.core_platform.platform_services.persistence.store import DomainError
+from agent_platform.applications.application_factory import create_app as _create_app
+from agent_platform.applications.business_registry import BusinessRegistry
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
-from agent_platform.core_platform.tool_gateway.routes import router as tool_workspace_router
+
+from .application import customer_service_application
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    settings = settings or Settings()
+    """Create the historical single-business API without changing its paths."""
 
-    @asynccontextmanager
-    async def lifespan(app):
-        async with runtime_services(settings) as services:
-            app.state.runtime = services
-            application = services.groups.application
-            business = services.groups.business
-            task = (
-                asyncio.create_task(services.worker.serve()) if settings.embedded_worker else None
-            )
-            # Quickstart/development embed the memory claim loop in this process;
-            # production runs it as the standalone memory-worker container.
-            memory_worker = embedded_memory_worker(services.groups, settings)
-            memory_task = asyncio.create_task(memory_worker.serve()) if memory_worker else None
-            webhook_task = asyncio.create_task(application.open_platform.webhooks.serve())
-            # Channel inbound/outbound loops follow settings.channel_worker_embedded:
-            # quickstart/development run them in-process; production runs the
-            # standalone channel-worker container instead.
-            channel_task = (
-                asyncio.create_task(business.channels.serve_deliveries())
-                if settings.channel_worker_embedded
-                else None
-            )
-            channel_inbound_task = (
-                asyncio.create_task(business.channels.serve_inbound())
-                if settings.channel_worker_embedded
-                else None
-            )
-            try:
-                yield
-            finally:
-                application.open_platform.webhooks.stopping.set()
-                webhook_task.cancel()
-                await asyncio.gather(webhook_task, return_exceptions=True)
-                if channel_task is not None:
-                    channel_task.cancel()
-                    await asyncio.gather(channel_task, return_exceptions=True)
-                if channel_inbound_task is not None:
-                    channel_inbound_task.cancel()
-                    await asyncio.gather(channel_inbound_task, return_exceptions=True)
-                await business.channels.stop()
-                services.worker.stop()
-                if memory_worker:
-                    memory_worker.stop()
-                if memory_task:
-                    await memory_task
-                if task:
-                    await task
-
-    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
-    app.state.settings = settings
-    app.add_middleware(AuditContextMiddleware)
-
-    @app.middleware("http")
-    async def private_identity_responses(request: Request, call_next):
-        response = await call_next(request)
-        if request.url.path.startswith(
-            (
-                "/api/v1/auth/local/",
-                "/api/v1/sso/",
-                "/api/v1/open-platform/identity/",
-                "/api/v1/members/",
-                "/api/v1/sessions",
-                "/api/v1/roles",
-                "/api/v1/permissions",
-                "/openapi/v1/chat/",
-            )
-        ):
-            response.headers["Cache-Control"] = "no-store"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Referrer-Policy"] = "no-referrer"
-        return response
-
-    app.include_router(router, prefix="/api/v1")
-    app.include_router(local_auth_router, prefix="/api/v1")
-    app.include_router(tool_workspace_router, prefix="/api/v1")
-    app.include_router(knowledge_router, prefix="/api/v1")
-    app.include_router(runtime_router, prefix="/api/v1")
-    app.include_router(memory_router, prefix="/api/v1")
-    app.include_router(platform_router, prefix="/api/v1")
-    app.include_router(access_control_router, prefix="/api/v1")
-    app.include_router(approval_router, prefix="/api/v1")
-    app.include_router(ingress, prefix="/api/v1")
-    app.include_router(gateway_management_router, prefix="/api/v1")
-    app.include_router(model_router, prefix="/api/v1")
-    app.include_router(open_management, prefix="/api/v1")
-    app.include_router(open_public, prefix="/openapi/v1")
-    from agent_platform.business_capabilities.open_platform.enterprise_routes import (
-        management as enterprise_management,
+    return _create_app(
+        settings,
+        business_registry=BusinessRegistry((customer_service_application(),)),
     )
-    from agent_platform.business_capabilities.open_platform.enterprise_routes import (
-        public as sso_public,
-    )
-    from agent_platform.business_capabilities.open_platform.enterprise_routes import (
-        tokens as chat_tokens,
-    )
-
-    app.include_router(enterprise_management, prefix="/api/v1")
-    app.include_router(sso_public, prefix="/api/v1")
-    app.include_router(chat_tokens, prefix="/openapi/v1")
-
-    @app.exception_handler(RequestValidationError)
-    async def invalid_request(request, exc):
-        # Validation responses must not echo write-only credentials or the request body.
-        return JSONResponse(
-            status_code=422,
-            content={
-                "detail": [
-                    {key: error[key] for key in ("type", "loc", "msg")} for error in exc.errors()
-                ]
-            },
-        )
-
-    @app.exception_handler(SQLAlchemyError)
-    async def database_error(request: Request, exc: SQLAlchemyError):
-        return JSONResponse(status_code=503, content={"detail": "database_unavailable"})
-
-    app.add_exception_handler(PostgresError, database_error)
-    app.add_exception_handler(OSError, database_error)
-    app.add_exception_handler(TimeoutError, database_error)
-
-    @app.exception_handler(DomainError)
-    async def domain_error(request, exc):
-        return JSONResponse(status_code=exc.status, content={"detail": exc.code})
-
-    @app.exception_handler(BusyError)
-    async def busy_error(request, exc):
-        return JSONResponse(status_code=409, content={"detail": "conversation_busy"})
-
-    @app.exception_handler(CapacityError)
-    async def capacity_error(request, exc):
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "runtime_capacity_exceeded"},
-            headers={"Retry-After": "2"},
-        )
-
-    return app
 
 
 app = create_app()
+
+__all__ = ["app", "create_app"]

@@ -85,6 +85,8 @@ class PlatformTools:
             conversation_id=UUID(str(self.row["conversation_id"])),
             actor_id=f"runtime:{self.row['id']}",
             source="runtime",
+            business_id=self.row.get("business_id"),
+            workspace_id=self.row.get("workspace_id"),
         )
 
     def _idempotency_key(self, name, args):
