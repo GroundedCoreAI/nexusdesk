@@ -15,6 +15,12 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     DomainError,
     transaction,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    persisted_scope,
+    resolve_scope,
+    scope_predicate,
+)
+from agent_platform.extension_contracts import BusinessScope
 
 
 class RunRepository:
@@ -44,13 +50,20 @@ class RunRepository:
         if kind == "run.queued":
             # Wake an idle worker so the run does not wait for its next poll. Same
             # transaction, so it fires exactly when the run becomes claimable.
-            await conn.execute(
-                text("SELECT pg_notify(:ch, '')"), {"ch": QUEUE_CHANNEL}
-            )
+            await conn.execute(text("SELECT pg_notify(:ch, '')"), {"ch": QUEUE_CHANNEL})
 
     async def submit(
-        self, tenant, request, config, capacity, tenant_capacity, queue_timeout, connection=None
+        self,
+        tenant,
+        request,
+        config,
+        capacity,
+        tenant_capacity,
+        queue_timeout,
+        connection=None,
+        scope: BusinessScope | None = None,
     ):
+        resolved_scope = persisted_scope(tenant, scope)
         try:
             async with transaction(self.engine, connection) as conn:
                 # Serialize only short admission transactions, across API replicas.
@@ -71,16 +84,31 @@ class RunRepository:
                     raise CapacityError()
                 cid = await conn.scalar(
                     text("""INSERT INTO runtime_conversations
-                    (id,tenant_id,external_id) VALUES (:id,:tenant,:external)
-                    ON CONFLICT(tenant_id,external_id) DO NOTHING RETURNING id"""),
-                    {"id": uuid4(), "tenant": tenant, "external": request.conversation_id},
+                    (id,tenant_id,business_id,workspace_id,external_id)
+                    VALUES (:id,:tenant,:business,:workspace,:external)
+                    ON CONFLICT(tenant_id,business_id,workspace_id,external_id)
+                    DO NOTHING RETURNING id"""),
+                    {
+                        "id": uuid4(),
+                        "tenant": tenant,
+                        "business": resolved_scope.business_id,
+                        "workspace": resolved_scope.workspace_id,
+                        "external": request.conversation_id,
+                    },
                 )
                 if cid is None:
                     cid = await conn.scalar(
                         text(
-                            "SELECT id FROM runtime_conversations WHERE tenant_id=:tenant AND external_id=:external"
+                            """SELECT id FROM runtime_conversations
+                            WHERE tenant_id=:tenant AND business_id=:business
+                              AND workspace_id=:workspace AND external_id=:external"""
                         ),
-                        {"tenant": tenant, "external": request.conversation_id},
+                        {
+                            "tenant": tenant,
+                            "business": resolved_scope.business_id,
+                            "workspace": resolved_scope.workspace_id,
+                            "external": request.conversation_id,
+                        },
                     )
                 mode = await conn.scalar(
                     text("SELECT mode FROM runtime_conversations WHERE id=:id FOR UPDATE"),
@@ -93,13 +121,16 @@ class RunRepository:
                     (
                         await conn.execute(
                             text("""INSERT INTO runtime_runs
-                    (id,conversation_id,tenant_id,input,config,status,queue_expires_at)
-                    VALUES (:id,:cid,:tenant,:input,CAST(:config AS jsonb),'queued',
+                    (id,conversation_id,tenant_id,business_id,workspace_id,input,config,status,queue_expires_at)
+                    VALUES (:id,:cid,:tenant,:business,:workspace,:input,
+                    CAST(:config AS jsonb),'queued',
                     now() + :seconds * interval '1 second') RETURNING *"""),
                             {
                                 "id": run_id,
                                 "cid": cid,
                                 "tenant": tenant,
+                                "business": resolved_scope.business_id,
+                                "workspace": resolved_scope.workspace_id,
                                 "input": request.message,
                                 "config": json.dumps(config),
                                 "seconds": queue_timeout,
@@ -117,14 +148,23 @@ class RunRepository:
                 raise BusyError() from exc
             raise
 
-    async def get(self, run_id: UUID, tenant: str):
+    async def get(self, run_id: UUID, tenant: str, scope: BusinessScope | None = None):
+        resolved_scope = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved_scope)
         async with self.engine.connect() as conn:
             row = (
                 (
                     await conn.execute(
-                        text("""SELECT *, lease_until>now() AS lease_valid FROM runtime_runs
-                WHERE id=:id AND tenant_id=:tenant"""),
-                        {"id": run_id, "tenant": tenant},
+                        text(
+                            """SELECT *, lease_until>now() AS lease_valid FROM runtime_runs
+                            WHERE id=:id AND tenant_id=:tenant AND """
+                            + scope_sql
+                        ),
+                        {
+                            "id": run_id,
+                            "tenant": tenant,
+                            **scope_params,
+                        },
                     )
                 )
                 .mappings()
@@ -132,16 +172,27 @@ class RunRepository:
             )
             return dict(row) if row else None
 
-    async def events(self, run_id, tenant, after=0):
+    async def events(self, run_id, tenant, after=0, scope: BusinessScope | None = None):
+        resolved_scope = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved_scope, "r")
         async with self.engine.connect() as conn:
             rows = (
                 (
                     await conn.execute(
-                        text("""SELECT e.* FROM runtime_events e
+                        text(
+                            """SELECT e.* FROM runtime_events e
                 JOIN runtime_runs r ON r.id=e.run_id
-                WHERE e.run_id=:id AND r.tenant_id=:tenant AND e.seq>:after
-                ORDER BY e.seq LIMIT 200"""),
-                        {"id": run_id, "tenant": tenant, "after": after},
+                WHERE e.run_id=:id AND r.tenant_id=:tenant AND """
+                            + scope_sql
+                            + """ AND e.seq>:after
+                ORDER BY e.seq LIMIT 200"""
+                        ),
+                        {
+                            "id": run_id,
+                            "tenant": tenant,
+                            **scope_params,
+                            "after": after,
+                        },
                     )
                 )
                 .mappings()
@@ -240,7 +291,8 @@ class RunRepository:
                 (
                     await conn.execute(
                         text(
-                            "SELECT summary,customer_id,source FROM runtime_conversations WHERE id=:id FOR UPDATE"
+                            """SELECT summary,customer_id,source,business_id,workspace_id
+                            FROM runtime_conversations WHERE id=:id FOR UPDATE"""
                         ),
                         {"id": cid},
                     )
@@ -340,8 +392,8 @@ class RunRepository:
                     if log_rows and conversation["customer_id"]:
                         await conn.execute(
                             text("""INSERT INTO memory_injection_log
-                            (tenant_id,run_id,customer_id,item_id,section,score)
-                            SELECT :tenant,:run,:customer,item_id,section,score
+                            (tenant_id,business_id,workspace_id,run_id,customer_id,item_id,section,score)
+                            SELECT :tenant,:business_id,:workspace_id,:run,:customer,item_id,section,score
                             FROM unnest(
                                 CAST(:item_ids AS uuid[]),
                                 CAST(:sections AS varchar[]),
@@ -349,6 +401,8 @@ class RunRepository:
                             ) AS detail(item_id,section,score)"""),
                             {
                                 "tenant": row["tenant_id"],
+                                "business_id": row["business_id"],
+                                "workspace_id": row["workspace_id"],
                                 "run": run_id,
                                 "customer": conversation["customer_id"],
                                 "item_ids": [entry["item_id"] for entry in log_rows],
@@ -360,14 +414,24 @@ class RunRepository:
                 conn, run_id, "run." + status, {"output": output, "error_code": error}
             )
 
-    async def cancel(self, run_id, tenant):
+    async def cancel(self, run_id, tenant, scope: BusinessScope | None = None):
+        resolved_scope = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved_scope)
         async with self.engine.begin() as conn:
             row = (
                 (
                     await conn.execute(
-                        text("""SELECT *, lease_until>now() AS lease_valid FROM runtime_runs
-                WHERE id=:id AND tenant_id=:tenant FOR UPDATE"""),
-                        {"id": run_id, "tenant": tenant},
+                        text(
+                            """SELECT *, lease_until>now() AS lease_valid FROM runtime_runs
+                            WHERE id=:id AND tenant_id=:tenant AND """
+                            + scope_sql
+                            + " FOR UPDATE"
+                        ),
+                        {
+                            "id": run_id,
+                            "tenant": tenant,
+                            **scope_params,
+                        },
                     )
                 )
                 .mappings()
@@ -389,7 +453,7 @@ class RunRepository:
                     await self._event(conn, run_id, "run.cancelled", {})
                 else:
                     await self._event(conn, run_id, "run.cancel_requested", {})
-        return await self.get(run_id, tenant)
+        return await self.get(run_id, tenant, resolved_scope)
 
     async def reap(self, tenant):
         async with self.engine.begin() as conn:

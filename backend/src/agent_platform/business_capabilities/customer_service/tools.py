@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from agent_platform.core_platform.platform_services.persistence.store import DomainError
 from agent_platform.extension_contracts import (
+    BusinessScope,
     ToolDefinition,
     ToolExecutionRequest,
     ToolExecutionResult,
@@ -80,6 +81,11 @@ class CustomerServiceToolContribution:
             request.context.tenant_id,
             conversation_id,
             params.ticket_id,
+            scope=BusinessScope(
+                tenant_id=request.context.tenant_id,
+                business_id=request.context.business_id,
+                workspace_id=request.context.workspace_id,
+            ),
         )
         return ToolExecutionResult(status="succeeded", data=result)
 
@@ -94,6 +100,11 @@ class CustomerServiceToolContribution:
             conversation_id,
             run_id,
             proposal,
+            scope=BusinessScope(
+                tenant_id=request.context.tenant_id,
+                business_id=request.context.business_id,
+                workspace_id=request.context.workspace_id,
+            ),
         )
         confirmation_ref = UUID(str(result["action_id"])) if result.get("action_id") else None
         return ToolExecutionResult(

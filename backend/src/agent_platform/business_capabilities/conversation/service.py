@@ -18,6 +18,12 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     required,
     transaction,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    persisted_scope,
+    resolve_scope,
+    scope_predicate,
+)
+from agent_platform.extension_contracts import BusinessScope
 
 logger = logging.getLogger(__name__)
 
@@ -80,13 +86,20 @@ class ConversationService:
         self.history_limit = history_turns * 2
         self.memory = memory
 
-    async def list(self, tenant, limit=50, offset=0):
+    async def list(self, tenant, limit=50, offset=0, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.connect() as c:
             return await many(
                 c,
                 """SELECT id,external_id,mode,agent_id,deleted_agent,assigned_to,created_at,updated_at
-                FROM runtime_conversations WHERE tenant_id=:t ORDER BY updated_at DESC LIMIT :lim OFFSET :off""",
+                FROM runtime_conversations
+                WHERE tenant_id=:t AND """
+                + scope_sql
+                + """
+                ORDER BY updated_at DESC LIMIT :lim OFFSET :off""",
                 t=tenant,
+                **scope_params,
                 lim=limit,
                 off=offset,
             )
@@ -98,11 +111,19 @@ class ConversationService:
         page_size=10,
         agent_id: str | None = None,
         status: str = "all",
+        scope: BusinessScope | None = None,
     ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         page = max(page, 1)
         page_size = max(1, min(page_size, 100))
-        where = "tenant_id=:t"
-        params = {"t": tenant, "lim": page_size, "off": (page - 1) * page_size}
+        where = "tenant_id=:t AND " + scope_sql
+        params = {
+            "t": tenant,
+            **scope_params,
+            "lim": page_size,
+            "off": (page - 1) * page_size,
+        }
         if agent_id:
             where += " AND agent_id=:aid"
             params["aid"] = agent_id
@@ -118,7 +139,9 @@ class ConversationService:
             items = await many(
                 c,
                 """SELECT id,external_id,mode,agent_id,deleted_agent,assigned_to,created_at,updated_at
-                FROM runtime_conversations WHERE """ + where + " ORDER BY updated_at DESC,id DESC LIMIT :lim OFFSET :off",
+                FROM runtime_conversations WHERE """
+                + where
+                + " ORDER BY updated_at DESC,id DESC LIMIT :lim OFFSET :off",
                 **params,
             )
             return {
@@ -128,9 +151,16 @@ class ConversationService:
                 "page_size": page_size,
             }
 
-    async def agent_counts(self, tenant, agent_id: str | None = None):
-        where = "tenant_id=:t"
-        params = {"t": tenant}
+    async def agent_counts(
+        self, tenant, agent_id: str | None = None, scope: BusinessScope | None = None
+    ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
+        where = "tenant_id=:t AND " + scope_sql
+        params = {
+            "t": tenant,
+            **scope_params,
+        }
         if agent_id:
             where += " AND agent_id=:aid"
             params["aid"] = agent_id
@@ -143,12 +173,15 @@ class ConversationService:
                     count(*) FILTER (WHERE mode='waiting')::int AS waiting,
                     count(*) FILTER (WHERE mode='human')::int AS human,
                     count(*) FILTER (WHERE mode='closed')::int AS closed
-                FROM runtime_conversations WHERE """ + where,
+                FROM runtime_conversations WHERE """
+                + where,
                 **params,
             )
             return row
 
-    async def counts_by_agent(self, tenant):
+    async def counts_by_agent(self, tenant, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, "r")
         async with self.engine.connect() as c:
             rows = await many(
                 c,
@@ -162,21 +195,52 @@ class ConversationService:
                     count(*) FILTER (WHERE r.mode='closed')::int AS closed
                 FROM runtime_conversations r
                 LEFT JOIN agents a ON a.id = r.agent_id AND a.tenant_id = r.tenant_id
-                WHERE r.tenant_id=:t
+                    AND a.business_id=r.business_id AND a.workspace_id=r.workspace_id
+                WHERE r.tenant_id=:t AND """
+                + scope_sql
+                + """
                 GROUP BY r.agent_id, a.name
                 ORDER BY total DESC, r.agent_id""",
                 t=tenant,
+                **scope_params,
             )
             return {"items": rows, "total": len(rows)}
 
-    async def agent_records(self, tenant, aid, source="all", q="", page=1, page_size=12):
-        where = """tenant_id=:t AND agent_id=:aid AND (:source='all' OR source=:source)
+    async def agent_records(
+        self,
+        tenant,
+        aid,
+        source="all",
+        q="",
+        page=1,
+        page_size=12,
+        scope: BusinessScope | None = None,
+    ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
+        where = (
+            """tenant_id=:t AND """
+            + scope_sql
+            + """ AND agent_id=:aid
+                   AND (:source='all' OR source=:source)
                    AND (:q='' OR external_id ILIKE :pattern)"""
-        params = {"t": tenant, "aid": aid, "source": source, "q": q, "pattern": "%" + q + "%"}
+        )
+        params = {
+            "t": tenant,
+            **scope_params,
+            "aid": aid,
+            "source": source,
+            "q": q,
+            "pattern": "%" + q + "%",
+        }
         async with self.engine.connect() as c:
             required(
                 await one(
-                    c, "SELECT id FROM agents WHERE id=:aid AND tenant_id=:t", t=tenant, aid=aid
+                    c,
+                    """SELECT id FROM agents
+                    WHERE id=:aid AND tenant_id=:t AND """
+                    + scope_sql,
+                    **{**params, "aid": aid},
                 ),
                 "agent_not_found",
             )
@@ -197,14 +261,19 @@ class ConversationService:
             )
             return {"items": items, "total": total["total"], "page": page, "page_size": page_size}
 
-    async def history(self, tenant, cid, before=None, limit=50):
+    async def history(self, tenant, cid, before=None, limit=50, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.connect() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM runtime_conversations WHERE id=:id AND tenant_id=:t",
+                    """SELECT id FROM runtime_conversations
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql,
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             rows = await many(
@@ -226,7 +295,11 @@ class ConversationService:
         connection=None,
         source="business",
         identity=None,
+        scope: BusinessScope | None = None,
     ):
+        query_scope = resolve_scope(tenant, scope)
+        resolved = persisted_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(query_scope)
         if source not in {"business", "playground"}:
             raise DomainError("invalid_conversation_source", 422)
         if source == "playground" and not agent_id:
@@ -237,9 +310,13 @@ class ConversationService:
                 agent = required(
                     await one(
                         c,
-                        "SELECT published_version,archived FROM agents WHERE id=:id AND tenant_id=:t FOR SHARE",
+                        """SELECT published_version,archived FROM agents
+                        WHERE id=:id AND tenant_id=:t AND """
+                        + scope_sql
+                        + " FOR SHARE",
                         id=agent_id,
                         t=tenant,
+                        **scope_params,
                     ),
                     "agent_not_found",
                 )
@@ -249,9 +326,13 @@ class ConversationService:
                 agent = required(
                     await one(
                         c,
-                        "SELECT id,is_example FROM agents WHERE id=:id AND tenant_id=:t FOR KEY SHARE",
+                        """SELECT id,is_example FROM agents
+                        WHERE id=:id AND tenant_id=:t AND """
+                        + scope_sql
+                        + " FOR KEY SHARE",
                         id=agent_id,
                         t=tenant,
+                        **scope_params,
                     ),
                     "agent_not_found",
                 )
@@ -276,10 +357,16 @@ class ConversationService:
                     customer_id = None
             row = await one(
                 c,
-                """INSERT INTO runtime_conversations(id,tenant_id,external_id,agent_id,source,customer_id)
-                VALUES(:id,:t,:external,:aid,:source,:customer) ON CONFLICT(tenant_id,external_id) DO NOTHING RETURNING *""",
+                """INSERT INTO runtime_conversations(
+                    id,tenant_id,business_id,workspace_id,external_id,agent_id,source,customer_id
+                )
+                VALUES(:id,:t,:business,:workspace,:external,:aid,:source,:customer)
+                ON CONFLICT(tenant_id,business_id,workspace_id,external_id)
+                DO NOTHING RETURNING *""",
                 id=uuid4(),
                 t=tenant,
+                business=resolved.business_id,
+                workspace=resolved.workspace_id,
                 external=external_id,
                 aid=agent_id,
                 source=source,
@@ -290,14 +377,19 @@ class ConversationService:
             await audit(c, tenant, actor, "conversation.created", row["id"])
             return row
 
-    async def detail(self, tenant, cid, after=0):
+    async def detail(self, tenant, cid, after=0, scope: BusinessScope | None = None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.connect() as c:
             row = required(
                 await one(
                     c,
-                    "SELECT * FROM runtime_conversations WHERE id=:id AND tenant_id=:t",
+                    """SELECT * FROM runtime_conversations
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql,
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             row["messages"] = await many(
@@ -315,25 +407,49 @@ class ConversationService:
             row["runs"] = await many(
                 c,
                 """SELECT id,status,output,error_code,created_at,cancel_requested FROM runtime_runs
-                WHERE conversation_id=:id ORDER BY created_at DESC LIMIT 20""",
+                WHERE conversation_id=:id AND tenant_id=:t AND """
+                + scope_sql
+                + """
+                ORDER BY created_at DESC LIMIT 20""",
                 id=cid,
+                t=tenant,
+                **scope_params,
             )
             row["actions"] = await many(
                 c,
                 """SELECT * FROM pending_actions WHERE conversation_id=:id
+                AND tenant_id=:t AND """
+                + scope_sql
+                + """
                 ORDER BY created_at DESC LIMIT 30""",
                 id=cid,
+                t=tenant,
+                **scope_params,
             )
             return row
 
-    async def human_reply(self, tenant, actor, cid, content, administrator=False):
+    async def human_reply(
+        self,
+        tenant,
+        actor,
+        cid,
+        content,
+        administrator=False,
+        scope: BusinessScope | None = None,
+    ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.begin() as c:
             row = required(
                 await one(
                     c,
-                    "SELECT * FROM runtime_conversations WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    """SELECT * FROM runtime_conversations
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if row["mode"] != "human":
@@ -359,14 +475,22 @@ class ConversationService:
             await audit(c, tenant, actor, "conversation.human_reply", cid)
             return {"sent": True}
 
-    async def transition(self, tenant, actor, cid, operation, revision):
+    async def transition(
+        self, tenant, actor, cid, operation, revision, scope: BusinessScope | None = None
+    ):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.begin() as c:
             row = required(
                 await one(
                     c,
-                    "SELECT * FROM runtime_conversations WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    """SELECT * FROM runtime_conversations
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if row.get("deleted_agent"):
@@ -382,14 +506,27 @@ class ConversationService:
                 raise DomainError("invalid_conversation_transition", 409)
             if await one(
                 c,
-                "SELECT id FROM runtime_runs WHERE conversation_id=:id AND status IN ('queued','running')",
+                """SELECT id FROM runtime_runs
+                WHERE conversation_id=:id AND tenant_id=:t AND """
+                + scope_sql
+                + """
+                  AND status IN ('queued','running')""",
                 id=cid,
+                t=tenant,
+                **scope_params,
             ):
                 raise DomainError("conversation_busy", 409)
             updated = await one(
                 c,
-                "UPDATE runtime_conversations SET mode=:mode,updated_at=now() WHERE id=:id RETURNING *",
+                """UPDATE runtime_conversations
+                SET mode=:mode,updated_at=now()
+                WHERE id=:id AND tenant_id=:t AND """
+                + scope_sql
+                + """
+                RETURNING *""",
                 id=cid,
+                t=tenant,
+                **scope_params,
                 mode="closed" if operation == "close" else "bot",
             )
             await add_message(

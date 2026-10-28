@@ -228,18 +228,28 @@ def _pending_items() -> dict:
 async def ensure_ticket_type(conn, tenant) -> str:
     """Ensure the built-in 通用工单 type; return its id (published version 1)."""
     row = await one(
-        conn, "SELECT id FROM ticket_types WHERE tenant_id=:t AND code='general'", t=tenant
+        conn,
+        """SELECT id FROM ticket_types
+        WHERE tenant_id=:t AND business_id='customer-service'
+          AND workspace_id='default' AND code='general'""",
+        t=tenant,
     )
     if row:
         return str(row["id"])
     tid = uid4("ticket-type", "general")
     name = T(zh="通用工单", en="General Ticket", zh_tw="通用工單", hi="सामान्य टिकट")
     await conn.execute(
-        text("INSERT INTO ticket_types(tenant_id,id,code,name,published_version) VALUES(:t,:id,'general',:name,1) ON CONFLICT (tenant_id,code) DO NOTHING"),
+        text("""INSERT INTO ticket_types(
+                tenant_id,business_id,workspace_id,id,code,name,published_version
+            ) VALUES(:t,'customer-service','default',:id,'general',:name,1)
+            ON CONFLICT DO NOTHING"""),
         {"t": tenant, "id": tid, "name": name},
     )
     await conn.execute(
-        text("INSERT INTO ticket_type_versions(tenant_id,type_id,version,name,definition,created_by) VALUES(:t,:id,1,:name,'{\"fields\":[]}', 'seed') ON CONFLICT DO NOTHING"),
+        text("""INSERT INTO ticket_type_versions(
+                tenant_id,business_id,workspace_id,type_id,version,name,definition,created_by
+            ) VALUES(:t,'customer-service','default',:id,1,:name,'{\"fields\":[]}', 'seed')
+            ON CONFLICT DO NOTHING"""),
         {"t": tenant, "id": tid, "name": name},
     )
     return tid

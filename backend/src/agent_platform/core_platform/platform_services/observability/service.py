@@ -1,4 +1,8 @@
 from agent_platform.core_platform.platform_services.persistence.store import many, one, required
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resolve_scope,
+    scope_predicate,
+)
 
 # The answer round is the one that did not end in tool calls: the ReAct loop stops
 # there, so its text is what the customer sees. Its model.started marks when the
@@ -32,7 +36,10 @@ class ObservabilityService:
     def __init__(self, engine):
         self.engine = engine
 
-    async def summary(self, tenant):
+    async def summary(self, tenant, scope=None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
+        run_scope_sql, run_scope_params = scope_predicate(resolved, "r")
         async with self.engine.connect() as c:
             result = await one(
                 c,
@@ -44,16 +51,22 @@ class ObservabilityService:
                 count(*) FILTER(WHERE status='queued') AS queued,
                 avg(extract(epoch FROM finished_at-started_at)) FILTER(WHERE finished_at IS NOT NULL) AS average_seconds,
                 percentile_cont(0.95) WITHIN GROUP(ORDER BY extract(epoch FROM finished_at-started_at)) FILTER(WHERE finished_at IS NOT NULL) AS p95_seconds
-                FROM runtime_runs WHERE tenant_id=:t AND created_at>now()-interval '24 hours'""",
+                FROM runtime_runs WHERE tenant_id=:t AND """
+                + scope_sql
+                + """ AND created_at>now()-interval '24 hours'""",
                 t=tenant,
+                **scope_params,
             )
             result["tool_failures"] = (
                 await one(
                     c,
                     """SELECT count(*) AS n FROM runtime_events e JOIN runtime_runs r ON r.id=e.run_id
-                WHERE r.tenant_id=:t AND e.created_at>now()-interval '24 hours' AND e.type='tool.completed'
+                WHERE r.tenant_id=:t AND """
+                    + run_scope_sql
+                    + """ AND e.created_at>now()-interval '24 hours' AND e.type='tool.completed'
                 AND e.data->>'ok'='false'""",
                     t=tenant,
+                    **run_scope_params,
                 )
             )["n"]
             result["tokens"] = (
@@ -61,8 +74,12 @@ class ObservabilityService:
                     c,
                     """SELECT COALESCE(sum(CAST(e.data->'usage'->>'total_tokens' AS bigint)),0) AS n
                 FROM runtime_events e JOIN runtime_runs r ON r.id=e.run_id WHERE r.tenant_id=:t
+                AND """
+                    + run_scope_sql
+                    + """
                 AND e.created_at>now()-interval '24 hours' AND e.type='model.completed'""",
                     t=tenant,
+                    **run_scope_params,
                 )
             )["n"]
             # Time to the first character of the answer. Derived from the persisted
@@ -73,33 +90,53 @@ class ObservabilityService:
                 """SELECT percentile_cont(0.5) WITHIN GROUP(ORDER BY ttfc_ms) AS p50_ms,
                 percentile_cont(0.95) WITHIN GROUP(ORDER BY ttfc_ms) AS p95_ms,
                 count(*) AS samples
-                FROM (""" + TTFC_ROWS + """ AND r.created_at>now()-interval '24 hours') t
+                FROM ("""
+                + TTFC_ROWS
+                + " AND "
+                + run_scope_sql
+                + """ AND r.created_at>now()-interval '24 hours') t
                 WHERE ttfc_ms IS NOT NULL""",
                 t=tenant,
+                **run_scope_params,
             )
             return result
 
-    async def runs(self, tenant, page=1, page_size=10):
+    async def runs(self, tenant, page=1, page_size=10, scope=None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, "r")
         async with self.engine.connect() as c:
             total = await one(
-                c, "SELECT count(*) AS total FROM runtime_runs WHERE tenant_id=:t", t=tenant
+                c,
+                "SELECT count(*) AS total FROM runtime_runs r WHERE r.tenant_id=:t AND "
+                + scope_sql,
+                t=tenant,
+                **scope_params,
             )
             items = await many(
                 c,
                 """SELECT r.id,r.conversation_id,r.status,r.error_code,r.created_at,r.started_at,
-                r.finished_at,""" + TTFC_EXPRESSION + """ AS ttfc_ms
-                FROM runtime_runs r LEFT JOIN LATERAL (""" + ANSWER_ROUND + """) a ON true
-                WHERE r.tenant_id=:t ORDER BY r.created_at DESC LIMIT :lim OFFSET :off""",
+                r.finished_at,"""
+                + TTFC_EXPRESSION
+                + """ AS ttfc_ms
+                FROM runtime_runs r LEFT JOIN LATERAL ("""
+                + ANSWER_ROUND
+                + """) a ON true
+                WHERE r.tenant_id=:t AND """
+                + scope_sql
+                + """ ORDER BY r.created_at DESC LIMIT :lim OFFSET :off""",
                 t=tenant,
+                **scope_params,
                 lim=page_size,
                 off=(page - 1) * page_size,
             )
             return {"items": items, "total": total["total"], "page": page, "page_size": page_size}
 
-    async def audit(self, tenant, page=1, page_size=10, action_type=None):
+    async def audit(self, tenant, page=1, page_size=10, action_type=None, scope=None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.connect() as c:
-            where = "tenant_id=:t"
-            params = {"t": tenant}
+            where = "tenant_id=:t AND " + scope_sql
+            params = {"t": tenant, **scope_params}
             if action_type:
                 where += " AND action=:action_type"
                 params["action_type"] = action_type
@@ -117,8 +154,11 @@ class ObservabilityService:
             action_types = await many(
                 c,
                 """SELECT action, count(*)::int AS count FROM audit_records
-                WHERE tenant_id=:t GROUP BY action ORDER BY action""",
+                WHERE tenant_id=:t AND """
+                + scope_sql
+                + " GROUP BY action ORDER BY action",
                 t=tenant,
+                **scope_params,
             )
             return {
                 "items": items,
@@ -253,14 +293,18 @@ class ObservabilityService:
                 "search": search,
             }
 
-    async def trace(self, tenant, rid):
+    async def trace(self, tenant, rid, scope=None):
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
         async with self.engine.connect() as c:
             row = required(
                 await one(
                     c,
-                    "SELECT id,conversation_id,status,error_code,config FROM runtime_runs WHERE id=:id AND tenant_id=:t",
+                    "SELECT id,conversation_id,status,error_code,config FROM runtime_runs "
+                    "WHERE id=:id AND tenant_id=:t AND " + scope_sql,
                     id=rid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             row["model_calls"] = await many(

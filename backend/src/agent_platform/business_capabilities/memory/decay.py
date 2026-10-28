@@ -28,6 +28,9 @@ from datetime import UTC
 from uuid import UUID
 
 from agent_platform.core_platform.platform_services.persistence.store import audit, many, one
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +136,7 @@ async def _migrate_below_threshold(c, tenant, settings, item_type, target, actio
     """Move active rows of one type under the threshold; audit each row (R8)."""
     candidates = await many(
         c,
-        f"""SELECT id,customer_id,key,{_EFFECTIVE_SQL} AS effective
+        f"""SELECT id,business_id,workspace_id,customer_id,key,{_EFFECTIVE_SQL} AS effective
         FROM memory_items
         WHERE tenant_id=:t AND type=:type AND status='active' AND NOT protected
         AND {_EFFECTIVE_SQL} < CAST(:min_confidence AS numeric)
@@ -148,9 +151,14 @@ async def _migrate_below_threshold(c, tenant, settings, item_type, target, actio
         updated = await one(
             c,
             """UPDATE memory_items SET status=:status,updated_at=now()
-            WHERE id=:id AND status='active' RETURNING id""",
+            WHERE id=:id AND tenant_id=:t
+              AND business_id=:business_id AND workspace_id=:workspace_id
+              AND status='active' RETURNING id""",
             status=target,
             id=row["id"],
+            t=tenant,
+            business_id=row["business_id"],
+            workspace_id=row["workspace_id"],
         )
         if not updated:
             continue
@@ -181,9 +189,10 @@ async def _evict_over_capacity(c, tenant, settings):
     limit = settings.memory_max_items_per_customer
     over = await many(
         c,
-        """SELECT customer_id, count(*)::int AS n FROM memory_items
+        """SELECT business_id,workspace_id,customer_id, count(*)::int AS n FROM memory_items
         WHERE tenant_id=:t AND status='active'
-        GROUP BY tenant_id,customer_id HAVING count(*)>:lim ORDER BY customer_id""",
+        GROUP BY tenant_id,business_id,workspace_id,customer_id
+        HAVING count(*)>:lim ORDER BY business_id,workspace_id,customer_id""",
         t=tenant,
         lim=limit,
     )
@@ -193,10 +202,13 @@ async def _evict_over_capacity(c, tenant, settings):
             c,
             f"""SELECT id,key,type,{_EFFECTIVE_SQL} AS effective
             FROM memory_items
-            WHERE tenant_id=:t AND customer_id=:c AND status='active'
+            WHERE tenant_id=:t AND business_id=:business_id AND workspace_id=:workspace_id
+            AND customer_id=:c AND status='active'
             AND NOT protected AND type<>'flag'
             ORDER BY {_EFFECTIVE_SQL} ASC, updated_at ASC, id ASC""",
             t=tenant,
+            business_id=group["business_id"],
+            workspace_id=group["workspace_id"],
             c=group["customer_id"],
             **_half_life_params(settings),
         )
@@ -204,8 +216,13 @@ async def _evict_over_capacity(c, tenant, settings):
             updated = await one(
                 c,
                 """UPDATE memory_items SET status='expired',updated_at=now()
-                WHERE id=:id AND status='active' RETURNING id""",
+                WHERE id=:id AND tenant_id=:t
+                  AND business_id=:business_id AND workspace_id=:workspace_id
+                  AND status='active' RETURNING id""",
                 id=row["id"],
+                t=tenant,
+                business_id=group["business_id"],
+                workspace_id=group["workspace_id"],
             )
             if not updated:
                 continue
@@ -262,10 +279,13 @@ async def enqueue_reinforce_task(conn, tenant, hits):
     capped = list(hits.items())[:MAX_REINFORCE_IDS]
     row = await one(
         conn,
-        """INSERT INTO memory_tasks(tenant_id,kind,payload)
-        VALUES(:t,:kind,CAST(:payload AS jsonb)) RETURNING id""",
+        """INSERT INTO memory_tasks(
+            tenant_id,business_id,workspace_id,kind,payload
+        ) VALUES(:t,:business_id,:workspace_id,:kind,CAST(:payload AS jsonb))
+        RETURNING id""",
         t=tenant,
         kind=REINFORCE_KIND,
+        **resource_scope_values(),
         payload=json.dumps({"hits": {str(k): int(v) for k, v in capped}}),
     )
     return row["id"]
@@ -299,9 +319,13 @@ class ReinforceService:
                     c,
                     """UPDATE memory_items SET last_referenced_at=now(),
                     reference_count=reference_count+:n
-                    WHERE id=:id AND tenant_id=:t AND status<>'deleted' RETURNING id""",
+                    WHERE id=:id AND tenant_id=:t
+                      AND business_id=:business_id AND workspace_id=:workspace_id
+                      AND status<>'deleted' RETURNING id""",
                     id=item_id,
                     t=task["tenant_id"],
+                    business_id=task.get("business_id", "customer-service"),
+                    workspace_id=task.get("workspace_id", "default"),
                     n=count,
                 )
                 if row:

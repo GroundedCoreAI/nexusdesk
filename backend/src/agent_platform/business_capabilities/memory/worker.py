@@ -32,6 +32,11 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     many,
     one,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.context import (
+    bind_scope,
+    reset_scope,
+)
+from agent_platform.extension_contracts import BusinessScope
 
 logger = logging.getLogger(__name__)
 
@@ -137,12 +142,20 @@ class MemoryWorker:
 
     async def _execute(self, task):
         """Run the service with a heartbeat renewing the lease in the background."""
+        scope_token = bind_scope(
+            BusinessScope(
+                tenant_id=task["tenant_id"],
+                business_id=task.get("business_id", "customer-service"),
+                workspace_id=task.get("workspace_id", "default"),
+            )
+        )
         heartbeat = asyncio.create_task(self._heartbeat(task))
         try:
             return await self.service.execute(task)
         finally:
             heartbeat.cancel()
             await asyncio.gather(heartbeat, return_exceptions=True)
+            reset_scope(scope_token)
 
     async def _finish(self, task, status, error=None, retry_in=None):
         async with self.engine.begin() as c:
@@ -285,7 +298,7 @@ class MemoryWorker:
             if self.store is not None and self.store.available() == "vector":
                 retry = await many(
                     c,
-                    """SELECT id,content FROM memory_items
+                    """SELECT id,content,business_id,workspace_id FROM memory_items
                     WHERE tenant_id=:t AND embedding_failed AND status='active'
                     ORDER BY updated_at LIMIT :lim""",
                     t=tenant,
@@ -294,7 +307,17 @@ class MemoryWorker:
         # Embedding runs outside the sweep transaction; per-item failures keep
         # the embedding_failed flag and wait for the next pass (P3-IT-10).
         for row in retry:
-            await self.store.embed_and_save(row["id"], row["content"])
+            token = bind_scope(
+                BusinessScope(
+                    tenant_id=tenant,
+                    business_id=row["business_id"],
+                    workspace_id=row["workspace_id"],
+                )
+            )
+            try:
+                await self.store.embed_and_save(row["id"], row["content"])
+            finally:
+                reset_scope(token)
         # Phase 4 decay rides the same daily window (R14).
         if getattr(self.settings, "memory_decay_enabled", False):
             await daily_migration(self.engine, self.settings)

@@ -36,6 +36,7 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
     resource_scope_clause,
     resource_scope_values,
 )
+from agent_platform.extension_contracts import BusinessScope
 
 logger = logging.getLogger(__name__)
 
@@ -192,16 +193,12 @@ class ChannelService:
                 raise DomainError("channel_generic_config_not_supported", 422)
             merged_config = {**(row["config"] or {}), **(config or {})}
             old_credentials = (
-                self._decrypt_credentials(row, tenant)
-                if row["encrypted_credentials"]
-                else {}
+                self._decrypt_credentials(row, tenant) if row["encrypted_credentials"] else {}
             )
             merged_credentials = {**old_credentials, **(credentials or {})}
             adapter_for(row["provider"]).validate(merged_config, merged_credentials)
             encrypted = (
-                self._encrypt_credentials(
-                    tenant, row["id"], row["provider"], merged_credentials
-                )
+                self._encrypt_credentials(tenant, row["id"], row["provider"], merged_credentials)
                 if merged_credentials
                 else None
             )
@@ -209,7 +206,9 @@ class ChannelService:
                 c,
                 """UPDATE channels SET config=CAST(:config AS jsonb),
                 encrypted_credentials=:credentials
-                WHERE id=:id AND tenant_id=:t""" + scope_sql + """
+                WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + """
                 RETURNING id,name,agent_id,enabled,provider,config,
                     encrypted_credentials IS NOT NULL AS credentials_configured""",
                 id=cid,
@@ -237,9 +236,7 @@ class ChannelService:
                     **scope_params,
                 )
             )
-            await audit(
-                c, tenant, actor, "channel.enabled" if enabled else "channel.disabled", cid
-            )
+            await audit(c, tenant, actor, "channel.enabled" if enabled else "channel.disabled", cid)
             return row
 
     async def rotate(self, tenant, actor, cid):
@@ -528,7 +525,12 @@ class ChannelService:
             )
             return row
 
-    async def _accept_envelope(self, channel, envelope: IncomingEnvelope):
+    async def _accept_envelope(
+        self,
+        channel,
+        envelope: IncomingEnvelope,
+        scope: BusinessScope | None = None,
+    ):
         digest = hashlib.sha256(
             json.dumps(
                 {
@@ -545,12 +547,22 @@ class ChannelService:
                 "SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))",
                 key="channel-inbound:" + str(channel["id"]),
             )
+            scope_clause, scope_params = (
+                (
+                    " AND business_id=:scope_business AND workspace_id=:scope_workspace",
+                    {
+                        "scope_business": scope.business_id,
+                        "scope_workspace": scope.workspace_id,
+                    },
+                )
+                if scope is not None
+                else resource_scope_clause()
+            )
             current = await one(
                 c,
-                "SELECT * FROM channels WHERE id=:id AND enabled"
-                + resource_scope_clause()[0],
+                "SELECT * FROM channels WHERE id=:id AND enabled" + scope_clause,
                 id=channel["id"],
-                **resource_scope_clause()[1],
+                **scope_params,
             )
             if not current:
                 raise DomainError("channel_not_found", 404)
@@ -587,8 +599,11 @@ class ChannelService:
                 conv = await one(
                     c,
                     """SELECT * FROM runtime_conversations
-                    WHERE tenant_id=:t AND external_id=:external""",
+                    WHERE tenant_id=:t AND business_id=:business
+                      AND workspace_id=:workspace AND external_id=:external""",
                     t=current["tenant_id"],
+                    business=current["business_id"],
+                    workspace=current["workspace_id"],
                     external=external,
                 )
                 if not conv:
@@ -604,10 +619,13 @@ class ChannelService:
                         c,
                         identity={
                             "source": "channel",
-                            "external_key": session_id_hash(
-                                envelope.external_conversation_id
-                            ),
+                            "external_key": session_id_hash(envelope.external_conversation_id),
                         },
+                        scope=BusinessScope(
+                            tenant_id=current["tenant_id"],
+                            business_id=current["business_id"],
+                            workspace_id=current["workspace_id"],
+                        ),
                     )
                 await execute(
                     c,
@@ -641,7 +659,16 @@ class ChannelService:
                     target=json.dumps(envelope.target),
                 )
             result = await self.customer.send(
-                current["tenant_id"], "channel", conv["id"], envelope.text, c
+                current["tenant_id"],
+                "channel",
+                conv["id"],
+                envelope.text,
+                c,
+                scope=BusinessScope(
+                    tenant_id=current["tenant_id"],
+                    business_id=current["business_id"],
+                    workspace_id=current["workspace_id"],
+                ),
             )
             run_id = result["run"]["id"] if result["run"] else None
             await execute(
@@ -703,12 +730,12 @@ class ChannelService:
         async with self.engine.begin() as c:
             row = await one(
                 c,
-                """SELECT e.*,ch.enabled
+                """SELECT e.*,ch.enabled,ch.business_id,ch.workspace_id
                 FROM channel_inbound_events e
                 JOIN channels ch ON ch.id=e.channel_id
                 WHERE ((e.status='pending' AND e.next_attempt_at<=now())
                     OR (e.status='running' AND e.lease_until<now()))
-                ORDER BY e.next_attempt_at FOR UPDATE OF e SKIP LOCKED LIMIT 1"""
+                ORDER BY e.next_attempt_at FOR UPDATE OF e SKIP LOCKED LIMIT 1""",
             )
             if not row:
                 return False
@@ -747,7 +774,15 @@ class ChannelService:
         error_code = None
         result = None
         try:
-            result = await self._accept_envelope({"id": row["channel_id"]}, envelope)
+            result = await self._accept_envelope(
+                {"id": row["channel_id"]},
+                envelope,
+                BusinessScope(
+                    tenant_id=row["tenant_id"],
+                    business_id=row["business_id"],
+                    workspace_id=row["workspace_id"],
+                ),
+            )
         except DomainError as exc:
             error_code = exc.code
         except Exception as exc:  # noqa: BLE001
@@ -807,7 +842,7 @@ class ChannelService:
                         AND e.seq<d.seq AND e.status<>'delivered'
                 )
                 ORDER BY d.next_attempt_at,d.channel_id,d.message_id,d.seq
-                FOR UPDATE OF d SKIP LOCKED LIMIT 1"""
+                FOR UPDATE OF d SKIP LOCKED LIMIT 1""",
             )
             if not row:
                 return False

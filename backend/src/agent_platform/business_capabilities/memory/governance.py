@@ -26,6 +26,15 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     one,
     required,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.context import (
+    bind_scope,
+    reset_scope,
+)
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+    resource_scope_values,
+)
+from agent_platform.extension_contracts import BusinessScope
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +54,15 @@ def _masking_enabled(settings):
 
 
 async def upsert_flag(
-    c, tenant, customer_id, key, content, source_type, source_ref=None, actor="memory", settings=None
+    c,
+    tenant,
+    customer_id,
+    key,
+    content,
+    source_type,
+    source_ref=None,
+    actor="memory",
+    settings=None,
 ):
     """Insert or refresh one flag inside the caller's transaction.
 
@@ -70,13 +87,16 @@ async def upsert_flag(
     if _masking_enabled(settings):
         content, pii_hits = mask(content)
     protected = source_type == "human"
+    scope_sql, scope_params = resource_scope_clause()
     existing = await one(
         c,
         """SELECT id,status,source_type,content,source_ref FROM memory_items
-        WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key""",
+        WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key"""
+        + scope_sql,
         t=tenant,
         c=customer_id,
         key=key,
+        **scope_params,
     )
     if (
         existing
@@ -98,23 +118,32 @@ async def upsert_flag(
         "st": source_type,
         "prot": protected,
         "ref": source_ref,
+        **resource_scope_values(),
     }
+    params.update(scope_params)
     row = await one(
         c,
         """UPDATE memory_items SET content=:content,prev_content=content,
         confidence=1.0,status='active',source_type=:st,protected=:prot,source_ref=:ref,
         revision=revision+1,updated_at=now()
         WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key
-        AND (source_type<>'human' OR :st='human') RETURNING id""",
+        AND (source_type<>'human' OR :st='human')"""
+        + scope_sql
+        + " RETURNING id",
         **params,
     )
     if not row:
         row = await one(
             c,
-            """INSERT INTO memory_items(tenant_id,customer_id,type,key,content,confidence,
-            status,source_type,protected,source_ref)
-            VALUES(:t,:c,'flag',:key,:content,1.0,'active',:st,:prot,:ref)
-            ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING RETURNING id""",
+            """INSERT INTO memory_items(
+                tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                status,source_type,protected,source_ref
+            ) VALUES(
+                :t,:business_id,:workspace_id,:c,'flag',:key,:content,1.0,
+                'active',:st,:prot,:ref
+            )
+            ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+            DO NOTHING RETURNING id""",
             **params,
         )
     if not row:
@@ -145,17 +174,20 @@ async def remove_flag(engine, tenant, actor, customer_id, key, source="human"):
         raise DomainError("memory_flag_key_invalid")
     if source not in FLAG_SOURCES:
         raise DomainError("memory_flag_source_invalid")
+    scope_sql, scope_params = resource_scope_clause()
     async with engine.begin() as c:
         row = await one(
             c,
             """UPDATE memory_items SET status='deleted',updated_at=now()
             WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key
-            AND status='active' AND (:source='human' OR source_type='rule')
-            RETURNING id,source_type""",
+            AND status='active' AND (:source='human' OR source_type='rule')"""
+            + scope_sql
+            + " RETURNING id,source_type",
             t=tenant,
             c=customer_id,
             key=key,
             source=source,
+            **scope_params,
         )
         if not row:
             raise DomainError("memory_flag_not_found", 404)
@@ -183,49 +215,66 @@ async def delete_customer(engine, tenant, actor, customer_id, store=None):
     disappear with their row); a future Milvus store deletes collection data
     there.
     """
+    scope_sql, scope_params = resource_scope_clause()
     async with engine.begin() as c:
         required(
             await one(
                 c,
-                "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + " FOR UPDATE",
                 id=customer_id,
                 t=tenant,
+                **scope_params,
             ),
             "memory_customer_not_found",
         )
         items = await many(
             c,
-            "DELETE FROM memory_items WHERE tenant_id=:t AND customer_id=:c RETURNING id",
+            "DELETE FROM memory_items WHERE tenant_id=:t AND customer_id=:c"
+            + scope_sql
+            + " RETURNING id",
             t=tenant,
             c=customer_id,
+            **scope_params,
         )
         identities = await many(
             c,
-            "DELETE FROM memory_identities WHERE tenant_id=:t AND customer_id=:c RETURNING id",
+            "DELETE FROM memory_identities WHERE tenant_id=:t AND customer_id=:c"
+            + scope_sql
+            + " RETURNING id",
             t=tenant,
             c=customer_id,
+            **scope_params,
         )
         conversations = await many(
             c,
             """UPDATE runtime_conversations SET customer_id=NULL
-            WHERE tenant_id=:t AND customer_id=:c RETURNING id""",
+            WHERE tenant_id=:t AND customer_id=:c"""
+            + scope_sql
+            + " RETURNING id",
             t=tenant,
             c=customer_id,
+            **scope_params,
         )
         # Phase 6 (FR-1, AC-12/C2): injection detail rows have no FK (D1), so
         # the cascade is explicit here, same transaction — a deleted customer
         # leaves no traceable injection history behind.
         injection_logs = await many(
             c,
-            "DELETE FROM memory_injection_log WHERE tenant_id=:t AND customer_id=:c RETURNING id",
+            "DELETE FROM memory_injection_log WHERE tenant_id=:t AND customer_id=:c"
+            + scope_sql
+            + " RETURNING id",
             t=tenant,
             c=customer_id,
+            **scope_params,
         )
         await execute(
             c,
-            "DELETE FROM memory_customers WHERE id=:id AND tenant_id=:t",
+            "DELETE FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
             id=customer_id,
             t=tenant,
+            **scope_params,
         )
         await audit(
             c,
@@ -270,32 +319,42 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
     """
     if str(source_id) == str(target_id):
         raise DomainError("memory_merge_same_customer")
+    scope_sql, scope_params = resource_scope_clause()
     async with engine.begin() as c:
         required(
             await one(
                 c,
-                "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + " FOR UPDATE",
                 id=source_id,
                 t=tenant,
+                **scope_params,
             ),
             "memory_customer_not_found",
         )
         required(
             await one(
                 c,
-                "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + " FOR UPDATE",
                 id=target_id,
                 t=tenant,
+                **scope_params,
             ),
             "memory_customer_not_found",
         )
         identities = await many(
             c,
             """UPDATE memory_identities SET customer_id=:target
-            WHERE tenant_id=:t AND customer_id=:source RETURNING id""",
+            WHERE tenant_id=:t AND customer_id=:source"""
+            + scope_sql
+            + " RETURNING id",
             target=target_id,
             t=tenant,
             source=source_id,
+            **scope_params,
         )
         # Phase 6 (FR-1): the source's injection detail rows re-point to the
         # surviving customer in this same transaction, keeping the injection
@@ -303,34 +362,48 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
         injection_logs = await many(
             c,
             """UPDATE memory_injection_log SET customer_id=:target
-            WHERE tenant_id=:t AND customer_id=:source RETURNING id""",
+            WHERE tenant_id=:t AND customer_id=:source"""
+            + scope_sql
+            + " RETURNING id",
             target=target_id,
             t=tenant,
             source=source_id,
+            **scope_params,
         )
         source_items = await many(
             c,
             """SELECT id,type,key,protected,status,updated_at FROM memory_items
-            WHERE tenant_id=:t AND customer_id=:source AND status IN ('active','pending')
+            WHERE tenant_id=:t AND customer_id=:source AND status IN ('active','pending')"""
+            + scope_sql
+            + """
             ORDER BY updated_at,id""",
             t=tenant,
             source=source_id,
+            **scope_params,
         )
         moved, conflicts = 0, []
         for item in source_items:
             conflict = await one(
                 c,
                 """SELECT id,protected,updated_at FROM memory_items
-                WHERE tenant_id=:t AND customer_id=:target AND type=:type AND key=:key""",
+                WHERE tenant_id=:t AND customer_id=:target AND type=:type AND key=:key"""
+                + scope_sql,
                 t=tenant,
                 target=target_id,
                 type=item["type"],
                 key=item["key"],
+                **scope_params,
             )
             if conflict:
                 keep_source = _keep_source(item, conflict)
                 loser = conflict["id"] if keep_source else item["id"]
-                await execute(c, "DELETE FROM memory_items WHERE id=:id", id=loser)
+                await execute(
+                    c,
+                    "DELETE FROM memory_items WHERE id=:id AND tenant_id=:t" + scope_sql,
+                    id=loser,
+                    t=tenant,
+                    **scope_params,
+                )
                 conflicts.append(
                     {
                         "type": item["type"],
@@ -342,18 +415,24 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
                     continue
             await execute(
                 c,
-                "UPDATE memory_items SET customer_id=:target WHERE id=:id",
+                "UPDATE memory_items SET customer_id=:target WHERE id=:id AND tenant_id=:t"
+                + scope_sql,
                 target=target_id,
                 id=item["id"],
+                t=tenant,
+                **scope_params,
             )
             moved += 1
         conversations = await many(
             c,
             """UPDATE runtime_conversations SET customer_id=:target
-            WHERE tenant_id=:t AND customer_id=:source RETURNING id""",
+            WHERE tenant_id=:t AND customer_id=:source"""
+            + scope_sql
+            + " RETURNING id",
             target=target_id,
             t=tenant,
             source=source_id,
+            **scope_params,
         )
         # R22: merge re-points the source's tickets (VARCHAR, no FK, so a
         # plain string compare in the str(UUID) shape) — otherwise the
@@ -365,16 +444,20 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
         tickets = await many(
             c,
             """UPDATE tickets SET customer_id=:target
-            WHERE tenant_id=:t AND customer_id=:source RETURNING id""",
+            WHERE tenant_id=:t AND customer_id=:source"""
+            + scope_sql
+            + " RETURNING id",
             target=str(target_id),
             t=tenant,
             source=str(source_id),
+            **scope_params,
         )
         await execute(
             c,
-            "DELETE FROM memory_customers WHERE id=:id AND tenant_id=:t",
+            "DELETE FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
             id=source_id,
             t=tenant,
+            **scope_params,
         )
         await audit(
             c,
@@ -415,12 +498,12 @@ async def scan_overdue_tickets(engine, settings):
     async with engine.begin() as c:
         overdue = await many(
             c,
-            """SELECT customer_id, count(*)::int AS overdue_count,
+            """SELECT business_id,workspace_id,customer_id, count(*)::int AS overdue_count,
             (array_agg(id ORDER BY due_at))[1] AS oldest_ticket
             FROM tickets
             WHERE tenant_id=:t AND due_at<now() AND status IN ('open','in_progress')
             AND customer_id IS NOT NULL
-            GROUP BY customer_id""",
+            GROUP BY business_id,workspace_id,customer_id""",
             t=tenant,
         )
         for row in overdue:
@@ -430,24 +513,38 @@ async def scan_overdue_tickets(engine, settings):
                 continue
             exists = await one(
                 c,
-                "SELECT 1 FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                """SELECT 1 FROM memory_customers
+                WHERE id=:id AND tenant_id=:t
+                  AND business_id=:business_id AND workspace_id=:workspace_id""",
                 id=customer_id,
                 t=tenant,
+                business_id=row["business_id"],
+                workspace_id=row["workspace_id"],
             )
             if not exists:
                 continue
             content = f"超时未响应工单 {row['overdue_count']} 条，请优先跟进"
-            flag_id = await upsert_flag(
-                c,
-                tenant,
-                customer_id,
-                RULE_FLAG_KEY,
-                content,
-                "rule",
-                source_ref=str(row["oldest_ticket"]),
-                actor="memory",
-                settings=settings,
+            token = bind_scope(
+                BusinessScope(
+                    tenant_id=tenant,
+                    business_id=row["business_id"],
+                    workspace_id=row["workspace_id"],
+                )
             )
+            try:
+                flag_id = await upsert_flag(
+                    c,
+                    tenant,
+                    customer_id,
+                    RULE_FLAG_KEY,
+                    content,
+                    "rule",
+                    source_ref=str(row["oldest_ticket"]),
+                    actor="memory",
+                    settings=settings,
+                )
+            finally:
+                reset_scope(token)
             if flag_id:
                 marked += 1
         removed = await many(
@@ -458,10 +555,14 @@ async def scan_overdue_tickets(engine, settings):
             AND NOT EXISTS (
                 SELECT 1 FROM tickets tk
                 WHERE tk.tenant_id=:t AND tk.customer_id=memory_items.customer_id::text
+                AND tk.business_id=memory_items.business_id
+                AND tk.workspace_id=memory_items.workspace_id
                 AND tk.due_at<now() AND tk.status IN ('open','in_progress'))
             AND NOT EXISTS (
                 SELECT 1 FROM tickets tk
                 WHERE tk.tenant_id=:t AND tk.customer_id=memory_items.customer_id::text
+                AND tk.business_id=memory_items.business_id
+                AND tk.workspace_id=memory_items.workspace_id
                 AND tk.due_at<now() AND tk.due_at>now()-:days*interval '1 day')
             RETURNING id,customer_id""",
             t=tenant,

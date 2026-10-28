@@ -45,8 +45,9 @@ async def ready(request: Request):
 )
 async def start_run(body: RunRequest, request: Request, tenant: Annotated[str, Depends(authorize)]):
     services = request.app.state.runtime
+    scope = request.state.business_scope
     try:
-        return await services.admission.submit(tenant, body)
+        return await services.admission.submit(tenant, body, scope)
     except BusyError:
         raise HTTPException(409, "conversation_busy") from None
     except CapacityError:
@@ -57,7 +58,9 @@ async def start_run(body: RunRequest, request: Request, tenant: Annotated[str, D
 
 @router.get("/runs/{run_id}", response_model=RunView)
 async def get_run(run_id: UUID, request: Request, tenant: Annotated[str, Depends(authorize)]):
-    row = await request.app.state.runtime.repository.get(run_id, tenant)
+    row = await request.app.state.runtime.repository.get(
+        run_id, tenant, request.state.business_scope
+    )
     if row is None:
         raise HTTPException(404, "run_not_found")
     return row
@@ -69,7 +72,9 @@ async def get_run(run_id: UUID, request: Request, tenant: Annotated[str, Depends
     dependencies=[Depends(require("admin", "operator"))],
 )
 async def cancel_run(run_id: UUID, request: Request, tenant: Annotated[str, Depends(authorize)]):
-    row = await request.app.state.runtime.repository.cancel(run_id, tenant)
+    row = await request.app.state.runtime.repository.cancel(
+        run_id, tenant, request.state.business_scope
+    )
     if row is None:
         raise HTTPException(404, "run_not_found")
     return row
@@ -94,7 +99,8 @@ async def stream_events(
             raise HTTPException(400, "invalid_last_event_id") from None
         if after < 0:
             raise HTTPException(400, "invalid_last_event_id")
-    if await repository.get(run_id, tenant) is None:
+    scope = request.state.business_scope
+    if await repository.get(run_id, tenant, scope) is None:
         raise HTTPException(404, "run_not_found")
     listener = request.app.state.runtime.listener
 
@@ -105,8 +111,8 @@ async def stream_events(
             while not await request.is_disconnected():
                 # Durable events come from the log (replayable); deltas arrive
                 # transiently via LISTEN/NOTIFY and never touch the log.
-                run = await repository.get(run_id, tenant)
-                events = await repository.events(run_id, tenant, cursor)
+                run = await repository.get(run_id, tenant, scope)
+                events = await repository.events(run_id, tenant, cursor, scope)
                 for event in events:
                     cursor = event["seq"]
                     if event["type"] == "tool.replay":

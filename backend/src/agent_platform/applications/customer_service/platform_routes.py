@@ -574,7 +574,12 @@ async def conversation_transition(
     cid: UUID, body: ConversationTransition, request: Request, user: Operator
 ):
     return await business(request).conversations.transition(
-        user.tenant, user.actor, cid, body.operation, body.revision
+        user.tenant,
+        user.actor,
+        cid,
+        body.operation,
+        body.revision,
+        scope=request.state.business_scope,
     )
 
 
@@ -590,7 +595,9 @@ async def agents(
 
 @router.get("/agents/counts")
 async def agent_counts(request: Request, user: Reader):
-    return await business(request).conversations.counts_by_agent(user.tenant)
+    return await business(request).conversations.counts_by_agent(
+        user.tenant, scope=request.state.business_scope
+    )
 
 
 @router.get("/agents/catalog")
@@ -651,7 +658,9 @@ async def agent_detail(aid: UUID, request: Request, user: Reader):
 
 @router.get("/agents/{aid}/conversations/counts")
 async def agent_conversation_counts(aid: UUID, request: Request, user: Reader):
-    return await business(request).conversations.agent_counts(user.tenant, str(aid))
+    return await business(request).conversations.agent_counts(
+        user.tenant, str(aid), scope=request.state.business_scope
+    )
 
 
 @router.get("/agents/{aid}/conversations")
@@ -665,7 +674,13 @@ async def agent_conversations(
     page_size: int = Query(default=12, ge=1, le=100),
 ):
     return await business(request).conversations.agent_records(
-        user.tenant, aid, source, q, page, page_size
+        user.tenant,
+        aid,
+        source,
+        q,
+        page,
+        page_size,
+        scope=request.state.business_scope,
     )
 
 
@@ -887,13 +902,19 @@ async def conversations(
         page_size,
         agent_id=str(agent_id) if agent_id else None,
         status=status,
+        scope=request.state.business_scope,
     )
 
 
 @router.post("/conversations", status_code=201)
 async def create_conversation(body: ConversationInput, request: Request, user: Operator):
     return await business(request).conversations.create(
-        user.tenant, user.actor, body.external_id, body.agent_id, source=body.source
+        user.tenant,
+        user.actor,
+        body.external_id,
+        body.agent_id,
+        source=body.source,
+        scope=request.state.business_scope,
     )
 
 
@@ -901,7 +922,9 @@ async def create_conversation(body: ConversationInput, request: Request, user: O
 async def conversation(
     cid: UUID, request: Request, user: Reader, after: Annotated[int, Query(ge=0)] = 0
 ):
-    return await business(request).conversations.detail(user.tenant, cid, after)
+    return await business(request).conversations.detail(
+        user.tenant, cid, after, scope=request.state.business_scope
+    )
 
 
 @router.get("/conversations/{cid}/history")
@@ -912,29 +935,48 @@ async def conversation_history(
     before: int | None = Query(default=None, ge=1),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    return await business(request).conversations.history(user.tenant, cid, before, limit)
+    return await business(request).conversations.history(
+        user.tenant, cid, before, limit, scope=request.state.business_scope
+    )
 
 
 @router.post("/conversations/{cid}/messages", status_code=202)
 async def message(cid: UUID, body: MessageInput, request: Request, user: Operator):
-    return await business(request).customer.send(user.tenant, user.actor, cid, body.content)
+    return await business(request).customer.send(
+        user.tenant,
+        user.actor,
+        cid,
+        body.content,
+        scope=request.state.business_scope,
+    )
 
 
 @router.post("/conversations/{cid}/human-replies")
 async def human_reply(cid: UUID, body: MessageInput, request: Request, user: Operator):
     return await business(request).conversations.human_reply(
-        user.tenant, user.actor, cid, body.content, administrator=user.role == "admin"
+        user.tenant,
+        user.actor,
+        cid,
+        body.content,
+        administrator=user.role == "admin",
+        scope=request.state.business_scope,
     )
 
 
 @router.post("/conversations/{cid}/handoffs")
 async def request_handoff(cid: UUID, body: HandoffInput, request: Request, user: Operator):
-    return await business(request).handoffs.request(user.tenant, user.actor, cid, body.reason)
+    return await business(request).handoffs.request(
+        user.tenant,
+        user.actor,
+        cid,
+        body.reason,
+        scope=request.state.business_scope,
+    )
 
 
 @router.get("/handoffs")
 async def handoffs(request: Request, user: Reader):
-    return await business(request).handoffs.list(user.tenant)
+    return await business(request).handoffs.list(user.tenant, scope=request.state.business_scope)
 
 
 @router.post("/handoffs/{hid}/transition")
@@ -947,6 +989,7 @@ async def transition(hid: UUID, body: HandoffTransition, request: Request, user:
         body.assignee,
         body.revision,
         administrator=user.role == "admin",
+        scope=request.state.business_scope,
     )
 
 
@@ -957,12 +1000,15 @@ async def decision(aid: UUID, body: DecisionInput, request: Request, user: Opera
         user.actor,
         aid,
         body.approve,
+        scope=request.state.business_scope,
     )
 
 
 @router.get("/tickets")
 async def tickets(request: Request, user: Reader):
-    return await business(request).customer.tickets(user.tenant)
+    return await business(request).customer.tickets(
+        user.tenant, scope=request.state.business_scope
+    )
 
 
 @router.patch("/tickets/{tid}")
@@ -979,6 +1025,7 @@ async def ticket(tid: UUID, body: TicketUpdate, request: Request, user: Operator
         body.revision,
         body.is_commitment,
         due_at=due_at,
+        scope=request.state.business_scope,
     )
 
 
@@ -1098,7 +1145,9 @@ async def channel_webhook(cid: UUID, provider: str, request: Request):
 
 @router.get("/observability/summary")
 async def summary(request: Request, user: Reader):
-    return await application(request).observability.summary(user.tenant)
+    return await application(request).observability.summary(
+        user.tenant, scope=request.state.business_scope
+    )
 
 
 @router.get("/observability/gateways")
@@ -1115,7 +1164,9 @@ async def memory_metrics(request: Request, user: Reader):
 
 @router.get("/observability/runs/{rid}/trace")
 async def unified_trace(rid: UUID, request: Request, user: Reader):
-    return await application(request).observability.trace(user.tenant, rid)
+    return await application(request).observability.trace(
+        user.tenant, rid, scope=request.state.business_scope
+    )
 
 
 @router.get("/observability/runs")
@@ -1125,7 +1176,9 @@ async def runs(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 10,
 ):
-    return await application(request).observability.runs(user.tenant, page, page_size)
+    return await application(request).observability.runs(
+        user.tenant, page, page_size, scope=request.state.business_scope
+    )
 
 
 @router.get("/audit")
@@ -1136,7 +1189,13 @@ async def audit(
     page_size: Annotated[int, Query(ge=1, le=100)] = 10,
     action_type: Annotated[str | None, Query(max_length=160)] = None,
 ):
-    return await application(request).observability.audit(user.tenant, page, page_size, action_type)
+    return await application(request).observability.audit(
+        user.tenant,
+        page,
+        page_size,
+        action_type,
+        scope=request.state.business_scope,
+    )
 
 
 @router.get("/agents/{aid}/evaluation-cases")

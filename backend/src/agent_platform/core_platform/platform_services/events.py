@@ -171,10 +171,13 @@ class DurableEventBus(InProcessEventBus):
             existing = await one(
                 conn,
                 """SELECT id,status FROM memory_tasks
-                WHERE tenant_id=:tenant AND kind=:kind
+                WHERE tenant_id=:tenant AND business_id=:business_id
+                  AND workspace_id=:workspace_id AND kind=:kind
                   AND payload->>'idempotency_key'=:key
                 ORDER BY created_at LIMIT 1""",
                 tenant=event.tenant_id,
+                business_id=payload.get("business_id", "customer-service"),
+                workspace_id=payload.get("workspace_id", "default"),
                 kind=EVENT_TASK_KIND,
                 key=event.idempotency_key,
             )
@@ -183,10 +186,12 @@ class DurableEventBus(InProcessEventBus):
             return await one(
                 conn,
                 """INSERT INTO memory_tasks
-                (tenant_id,kind,payload,max_attempts)
-                VALUES(:tenant,:kind,CAST(:payload AS jsonb),:max_attempts)
+                (tenant_id,business_id,workspace_id,kind,payload,max_attempts)
+                VALUES(:tenant,:business_id,:workspace_id,:kind,CAST(:payload AS jsonb),:max_attempts)
                 RETURNING id,status""",
                 tenant=event.tenant_id,
+                business_id=payload.get("business_id", "customer-service"),
+                workspace_id=payload.get("workspace_id", "default"),
                 kind=EVENT_TASK_KIND,
                 payload=json.dumps(payload, ensure_ascii=False),
                 max_attempts=self.max_attempts,

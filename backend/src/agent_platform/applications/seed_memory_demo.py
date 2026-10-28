@@ -314,10 +314,12 @@ async def seed_customer(c, engine, model_backend, tenant, agent, audit_actor):
             history.append({"role": "user", "content": msg})
             history.append({"role": "assistant", "content": default_reply()})
         await conn.execute(
-            text("""INSERT INTO runtime_conversations(id,tenant_id,external_id,history,created_at,mode,agent_id,
+            text("""INSERT INTO runtime_conversations(
+                    id,tenant_id,business_id,workspace_id,external_id,history,created_at,mode,agent_id,
                     updated_at,revision,source,summary,customer_id)
-                    VALUES(:id,:t,:ext,CAST(:hist AS jsonb),:ca,'bot',:aid,:ua,1,'business',:sum,:cid)
-                    ON CONFLICT (tenant_id,external_id) DO NOTHING"""),
+                    VALUES(:id,:t,'customer-service','default',:ext,CAST(:hist AS jsonb),:ca,'bot',:aid,
+                    :ua,1,'business',:sum,:cid)
+                    ON CONFLICT (tenant_id,business_id,workspace_id,external_id) DO NOTHING"""),
             {"id": conv_id, "t": tenant, "ext": ext, "hist": json.dumps(history, ensure_ascii=False),
                  "ca": ts(c["runs"][0][0] + 0.1), "aid": agent["id"], "ua": ts(last_run_h),
                  "sum": c["summary"], "cid": cid},

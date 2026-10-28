@@ -17,6 +17,7 @@ from agent_platform.core_platform.platform_services.persistence.store import (
 )
 from agent_platform.core_platform.platform_services.tenant_isolation.service import (
     resource_scope_clause,
+    resource_scope_values,
 )
 
 
@@ -172,8 +173,21 @@ class VectorIndex:
             )
             await execute(
                 c,
-                "INSERT INTO knowledge_vector_indexes(tenant_id,kb_id,collection_name,profile_id,profile_version,dimension) VALUES(:t,:kid,:name,:p,:v,:dim) ON CONFLICT(kb_id) DO UPDATE SET collection_name=EXCLUDED.collection_name,profile_id=EXCLUDED.profile_id,profile_version=EXCLUDED.profile_version,dimension=EXCLUDED.dimension,created_at=now()",
+                """INSERT INTO knowledge_vector_indexes(
+                    tenant_id,business_id,workspace_id,kb_id,collection_name,
+                    profile_id,profile_version,dimension
+                ) VALUES(
+                    :t,:business_id,:workspace_id,:kid,:name,:p,:v,:dim
+                ) ON CONFLICT(kb_id) DO UPDATE SET
+                    business_id=EXCLUDED.business_id,
+                    workspace_id=EXCLUDED.workspace_id,
+                    collection_name=EXCLUDED.collection_name,
+                    profile_id=EXCLUDED.profile_id,
+                    profile_version=EXCLUDED.profile_version,
+                    dimension=EXCLUDED.dimension,
+                    created_at=now()""",
                 t=tenant,
+                **resource_scope_values(),
                 kid=kid,
                 name=collection,
                 p=profile.id,
@@ -196,7 +210,7 @@ class VectorIndex:
                 "SELECT i.* FROM knowledge_vector_indexes i JOIN knowledge_bases k ON k.id=i.kb_id "
                 "WHERE i.tenant_id=:t AND i.kb_id=:kid"
                 + base_scope_sql
-                + " AND k.enabled",
+                + " AND i.business_id=k.business_id AND i.workspace_id=k.workspace_id AND k.enabled",
                 t=tenant,
                 kid=kid,
                 **base_scope_params,
@@ -283,9 +297,12 @@ class VectorIndex:
                 async with self.engine.begin() as c:
                     await execute(
                         c,
-                        "INSERT INTO knowledge_collection_cleanup(collection_name,tenant_id,delete_after) VALUES(:n,:t,now()+interval '1 hour')",
+                        """INSERT INTO knowledge_collection_cleanup(
+                            collection_name,tenant_id,business_id,workspace_id,delete_after
+                        ) VALUES(:n,:t,:business_id,:workspace_id,now()+interval '1 hour')""",
                         n=collection,
                         t=tenant,
+                        **resource_scope_values(),
                     )
                 counts = {
                     str(row["document_id"]): {"version": row["version"], "completed": 0, "total": 0}
@@ -337,15 +354,24 @@ class VectorIndex:
                 if old:
                     await execute(
                         c,
-                        "INSERT INTO knowledge_collection_cleanup(collection_name,tenant_id,delete_after) VALUES(:n,:t,now()+interval '5 minutes') ON CONFLICT(collection_name) DO NOTHING",
+                        """INSERT INTO knowledge_collection_cleanup(
+                            collection_name,tenant_id,business_id,workspace_id,delete_after
+                        ) VALUES(:n,:t,:business_id,:workspace_id,now()+interval '5 minutes')
+                        ON CONFLICT(tenant_id,business_id,workspace_id,collection_name)
+                        DO NOTHING""",
                         n=old["collection_name"],
                         t=tenant,
+                        **resource_scope_values(),
                     )
                 if collection:
                     await execute(
                         c,
-                        "DELETE FROM knowledge_collection_cleanup WHERE collection_name=:n",
+                        """DELETE FROM knowledge_collection_cleanup
+                        WHERE collection_name=:n AND tenant_id=:t
+                          AND business_id=:business_id AND workspace_id=:workspace_id""",
                         n=collection,
+                        t=tenant,
+                        **resource_scope_values(),
                     )
                 for did, version in manifest.items():
                     await execute(
@@ -358,8 +384,17 @@ class VectorIndex:
                 if collection:
                     await execute(
                         c,
-                        "INSERT INTO knowledge_vector_indexes(tenant_id,kb_id,collection_name,profile_id,profile_version,dimension) VALUES(:t,:k,:n,:p,:v,:dim) ON CONFLICT(kb_id) DO UPDATE SET collection_name=:n,profile_id=:p,profile_version=:v,dimension=:dim,created_at=now()",
+                        """INSERT INTO knowledge_vector_indexes(
+                            tenant_id,business_id,workspace_id,kb_id,collection_name,
+                            profile_id,profile_version,dimension
+                        ) VALUES(
+                            :t,:business_id,:workspace_id,:k,:n,:p,:v,:dim
+                        ) ON CONFLICT(kb_id) DO UPDATE SET
+                            business_id=:business_id,workspace_id=:workspace_id,
+                            collection_name=:n,profile_id=:p,
+                            profile_version=:v,dimension=:dim,created_at=now()""",
                         t=tenant,
+                        **resource_scope_values(),
                         k=kid,
                         n=collection,
                         p=profile.id,
@@ -395,8 +430,12 @@ class VectorIndex:
                     async with self.engine.begin() as c:
                         await execute(
                             c,
-                            "DELETE FROM knowledge_collection_cleanup WHERE collection_name=:n",
+                            """DELETE FROM knowledge_collection_cleanup
+                            WHERE collection_name=:n AND tenant_id=:t
+                              AND business_id=:business_id AND workspace_id=:workspace_id""",
                             n=collection,
+                            t=tenant,
+                            **resource_scope_values(),
                         )
             raise
 
@@ -404,7 +443,17 @@ class VectorIndex:
         async with self.engine.connect() as c:
             rows = await many(
                 c,
-                "SELECT collection_name FROM knowledge_collection_cleanup g WHERE tenant_id=:t AND delete_after<now() AND NOT EXISTS(SELECT 1 FROM knowledge_vector_indexes i WHERE i.collection_name=g.collection_name) LIMIT 5",
+                """SELECT collection_name,tenant_id,business_id,workspace_id
+                FROM knowledge_collection_cleanup g
+                WHERE tenant_id=:t AND delete_after<now()
+                  AND NOT EXISTS(
+                    SELECT 1 FROM knowledge_vector_indexes i
+                    WHERE i.collection_name=g.collection_name
+                      AND i.tenant_id=g.tenant_id
+                      AND i.business_id=g.business_id
+                      AND i.workspace_id=g.workspace_id
+                  )
+                LIMIT 5""",
                 t=tenant,
             )
         for row in rows:
@@ -414,13 +463,24 @@ class VectorIndex:
                 async with self.engine.begin() as c:
                     await execute(
                         c,
-                        "UPDATE knowledge_collection_cleanup SET attempts=attempts+1,delete_after=now()+interval '10 minutes' WHERE collection_name=:n",
+                        """UPDATE knowledge_collection_cleanup
+                        SET attempts=attempts+1,delete_after=now()+interval '10 minutes'
+                        WHERE collection_name=:n AND tenant_id=:t
+                          AND business_id=:business_id AND workspace_id=:workspace_id""",
                         n=row["collection_name"],
+                        t=row["tenant_id"],
+                        business_id=row["business_id"],
+                        workspace_id=row["workspace_id"],
                     )
             else:
                 async with self.engine.begin() as c:
                     await execute(
                         c,
-                        "DELETE FROM knowledge_collection_cleanup WHERE collection_name=:n",
+                        """DELETE FROM knowledge_collection_cleanup
+                        WHERE collection_name=:n AND tenant_id=:t
+                          AND business_id=:business_id AND workspace_id=:workspace_id""",
                         n=row["collection_name"],
+                        t=row["tenant_id"],
+                        business_id=row["business_id"],
+                        workspace_id=row["workspace_id"],
                     )

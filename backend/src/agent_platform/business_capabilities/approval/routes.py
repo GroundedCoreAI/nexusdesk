@@ -52,6 +52,7 @@ async def list_approvals(
         status,
         page,
         page_size,
+        scope=request.state.business_scope,
     )
 
 
@@ -61,6 +62,7 @@ async def approval_detail(approval_id: UUID, request: Request, user: Reader):
     return await request.app.state.runtime.groups.business.approval.get(
         user.tenant,
         approval_id,
+        scope=request.state.business_scope,
     )
 
 
@@ -76,6 +78,7 @@ async def approval_audit(
         user.tenant,
         approval_id,
         limit,
+        scope=request.state.business_scope,
     )
 
 
@@ -88,6 +91,7 @@ async def create_approval(body: ApprovalInput, request: Request, user: Operator)
         body.title,
         body.description,
         body.idempotency_key,
+        scope=request.state.business_scope,
     )
 
 
@@ -105,6 +109,7 @@ async def decide_approval(
         approval_id,
         body.decision,
         body.revision,
+        scope=request.state.business_scope,
     )
 
 
@@ -121,4 +126,5 @@ async def cancel_approval(
         user.actor,
         approval_id,
         body.revision,
+        scope=request.state.business_scope,
     )

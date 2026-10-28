@@ -167,10 +167,12 @@ async def insert_item(conn, tenant, iid, cid, spec, last_referenced_h=None):
 async def insert_conversation(conn, tenant, conv_id, external_id, history, created_h, updated_h,
                               agent_id, summary=None, cid=None, source="business"):
     await conn.execute(
-        text("""INSERT INTO runtime_conversations(id,tenant_id,external_id,history,created_at,mode,agent_id,
+        text("""INSERT INTO runtime_conversations(
+                id,tenant_id,business_id,workspace_id,external_id,history,created_at,mode,agent_id,
                 updated_at,revision,source,summary,customer_id)
-                VALUES(:id,:t,:ext,CAST(:hist AS jsonb),:ca,'bot',:aid,:ua,1,:src,:sum,:cid)
-                ON CONFLICT (tenant_id,external_id) DO NOTHING"""),
+                VALUES(:id,:t,'customer-service','default',:ext,CAST(:hist AS jsonb),:ca,'bot',:aid,
+                :ua,1,:src,:sum,:cid)
+                ON CONFLICT (tenant_id,business_id,workspace_id,external_id) DO NOTHING"""),
         {"id": conv_id, "t": tenant, "ext": external_id, "hist": json.dumps(history, ensure_ascii=False),
          "ca": ts(created_h), "aid": agent_id, "ua": ts(updated_h), "src": source, "sum": summary, "cid": cid},
     )

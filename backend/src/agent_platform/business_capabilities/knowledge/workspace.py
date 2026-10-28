@@ -15,10 +15,16 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     required,
     transaction,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.context import (
+    bind_scope,
+    reset_scope,
+)
 from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    persisted_scope,
     resource_scope_clause,
     resource_scope_values,
 )
+from agent_platform.extension_contracts import BusinessScope
 
 from .chunking import ChunkingPolicy, chunk_pages
 from .parsers import LOCAL_FORMATS, parse_file
@@ -179,8 +185,13 @@ class Workspace:
             )
             links = await many(
                 c,
-                "SELECT l.*,k.name FROM knowledge_links l JOIN knowledge_bases k ON k.id=l.kb_id WHERE l.document_id=:d",
+                """SELECT l.*,k.name FROM knowledge_links l
+                JOIN knowledge_bases k ON k.id=l.kb_id
+                WHERE l.document_id=:d AND k.tenant_id=:t"""
+                + resource_scope_clause(alias="k")[0],
                 d=did,
+                t=tenant,
+                **resource_scope_clause(alias="k")[1],
             )
             return {
                 **doc,
@@ -208,14 +219,20 @@ class Workspace:
             )
             return {**row, "offset": offset, "limit": 10000, "revision": doc["current_version"]}
 
-    async def enqueue(self, c, tenant, kind, resource, config):
+    async def enqueue(self, c, tenant, kind, resource, config, scope=None):
+        resolved = persisted_scope(tenant, scope)
         row = await one(
             c,
-            """INSERT INTO knowledge_tasks(id,tenant_id,kind,resource_id,config)
-            VALUES(:id,:t,:k,:r,CAST(:config AS jsonb)) ON CONFLICT(tenant_id,kind,resource_id)
+            """INSERT INTO knowledge_tasks(
+                id,tenant_id,business_id,workspace_id,kind,resource_id,config
+            )
+            VALUES(:id,:t,:business_id,:workspace_id,:k,:r,CAST(:config AS jsonb))
+            ON CONFLICT(tenant_id,business_id,workspace_id,kind,resource_id)
             WHERE status IN ('queued','running') DO NOTHING RETURNING *""",
             id=uuid4(),
             t=tenant,
+            business_id=resolved.business_id,
+            workspace_id=resolved.workspace_id,
             k=kind,
             r=resource,
             config=json.dumps(config, default=str),
@@ -439,8 +456,12 @@ class Workspace:
             )
             row = await one(
                 cache,
-                "SELECT chunks FROM knowledge_semantic_cache WHERE document_id=:d AND cache_key=:key",
+                """SELECT chunks FROM knowledge_semantic_cache
+                WHERE document_id=:d AND cache_key=:key
+                  AND tenant_id=:t AND business_id=:business_id AND workspace_id=:workspace_id""",
                 d=did,
+                t=tenant,
+                **resource_scope_values(),
                 key=key,
             )
             if row:
@@ -450,8 +471,12 @@ class Workspace:
                 raise DomainError("document_too_many_chunks", 413)
             await execute(
                 cache,
-                "INSERT INTO knowledge_semantic_cache(document_id,cache_key,chunks) VALUES(:d,:key,CAST(:chunks AS jsonb))",
+                """INSERT INTO knowledge_semantic_cache(
+                    document_id,tenant_id,business_id,workspace_id,cache_key,chunks
+                ) VALUES(:d,:t,:business_id,:workspace_id,:key,CAST(:chunks AS jsonb))""",
                 d=did,
+                t=tenant,
+                **resource_scope_values(),
                 key=key,
                 chunks=json.dumps(chunks),
             )
@@ -527,13 +552,17 @@ class Workspace:
             await self.finish(c, task)
 
     async def preview_result(self, tenant, tid, offset, limit):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             task = required(
                 await one(
                     c,
-                    "SELECT resource_id,status,config FROM knowledge_tasks WHERE id=:id AND tenant_id=:t AND kind='preview'",
+                    "SELECT resource_id,status,config FROM knowledge_tasks WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " AND kind='preview'",
                     id=tid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if task["status"] != "completed":
@@ -543,15 +572,22 @@ class Workspace:
                 raise DomainError("document_version_conflict", 409)
             total = await one(
                 c,
-                "SELECT jsonb_array_length(result) AS total FROM knowledge_tasks WHERE id=:id",
+                "SELECT jsonb_array_length(result) AS total FROM knowledge_tasks WHERE id=:id AND tenant_id=:t"
+                + scope_sql,
                 id=tid,
+                t=tenant,
+                **scope_params,
             )
             rows = await many(
                 c,
-                "SELECT value FROM knowledge_tasks, jsonb_array_elements(result) WITH ORDINALITY AS item(value,n) WHERE id=:id AND n>:o AND n<=:end ORDER BY n",
+                "SELECT value FROM knowledge_tasks, jsonb_array_elements(result) WITH ORDINALITY AS item(value,n) WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + " AND n>:o AND n<=:end ORDER BY n",
                 id=tid,
+                t=tenant,
                 o=offset,
                 end=offset + limit,
+                **scope_params,
             )
             return {
                 "chunks": [r["value"] for r in rows],
@@ -657,33 +693,62 @@ class Workspace:
             return {"version": doc["current_version"]}
 
     async def library(self, tenant, kid):
+        base_scope_sql, base_scope_params = resource_scope_clause(alias="k")
         document_scope_sql, document_scope_params = resource_scope_clause(alias="d")
+        task_scope_sql, task_scope_params = resource_scope_clause()
+        index_scope_sql, index_scope_params = resource_scope_clause(alias="i")
+        document_params = {**base_scope_params, **document_scope_params}
+        readiness_params = {
+            **index_scope_params,
+            **base_scope_params,
+            **document_scope_params,
+        }
         async with self.engine.connect() as c:
             base = await self.base(c, tenant, kid)
             documents = await many(
                 c,
                 """SELECT l.*,d.title,d.current_version,d.processing,d.enabled document_enabled,
                 (SELECT count(*) FROM knowledge_chunks ch WHERE ch.document_id=d.id AND ch.version=l.draft_version AND ch.enabled) chunk_count
-                FROM knowledge_links l JOIN knowledge_documents d ON d.id=l.document_id WHERE l.kb_id=:k"""
+                 FROM knowledge_links l
+                 JOIN knowledge_documents d ON d.id=l.document_id
+                 JOIN knowledge_bases k ON k.id=l.kb_id
+                 WHERE l.kb_id=:k AND k.tenant_id=:t"""
+                + base_scope_sql
                 + document_scope_sql
                 + " ORDER BY d.title",
                 k=kid,
-                **document_scope_params,
+                t=tenant,
+                **document_params,
             )
             tasks = await many(
                 c,
-                "SELECT id,status,error_code,created_at,updated_at,progress FROM knowledge_tasks WHERE tenant_id=:t AND kind='index' AND resource_id=:k ORDER BY created_at DESC LIMIT 10",
+                "SELECT id,status,error_code,created_at,updated_at,progress FROM knowledge_tasks WHERE tenant_id=:t"
+                + task_scope_sql
+                + " AND kind='index' AND resource_id=:k ORDER BY created_at DESC LIMIT 10",
                 t=tenant,
                 k=kid,
+                **task_scope_params,
             )
             readiness = await one(
                 c,
                 """SELECT
-                EXISTS(SELECT 1 FROM knowledge_vector_indexes WHERE kb_id=:k AND tenant_id=:t) vector_ready,
-                (SELECT count(*) FROM knowledge_links l JOIN knowledge_documents d ON d.id=l.document_id
-                 WHERE l.kb_id=:k AND l.enabled AND d.enabled AND l.published_version IS NOT NULL) published_document_count""",
+                EXISTS(
+                    SELECT 1 FROM knowledge_vector_indexes i
+                    WHERE i.kb_id=:k AND i.tenant_id=:t"""
+                + index_scope_sql
+                + """
+                ) vector_ready,
+                (SELECT count(*) FROM knowledge_links l
+                 JOIN knowledge_documents d ON d.id=l.document_id
+                 JOIN knowledge_bases k ON k.id=l.kb_id
+                 WHERE l.kb_id=:k AND k.tenant_id=:t"""
+                + base_scope_sql
+                + document_scope_sql
+                + """ AND l.enabled AND d.enabled AND l.published_version IS NOT NULL
+                ) published_document_count""",
                 k=kid,
                 t=tenant,
+                **readiness_params,
             )
             active = next((task for task in tasks if task["status"] in {"queued", "running"}), None)
             for doc in documents:
@@ -789,22 +854,30 @@ class Workspace:
             return {"ok": True}
 
     async def tasks(self, tenant, document_id=None):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             return await many(
                 c,
-                "SELECT id,kind,resource_id,status,attempts,error_code,cancel_requested,progress,updated_at FROM knowledge_tasks WHERE tenant_id=:t AND (CAST(:d AS uuid) IS NULL OR resource_id=CAST(:d AS uuid)) ORDER BY created_at DESC LIMIT 100",
+                "SELECT id,kind,resource_id,status,attempts,error_code,cancel_requested,progress,updated_at FROM knowledge_tasks WHERE tenant_id=:t"
+                + scope_sql
+                + " AND (CAST(:d AS uuid) IS NULL OR resource_id=CAST(:d AS uuid)) ORDER BY created_at DESC LIMIT 100",
                 t=tenant,
                 d=document_id,
+                **scope_params,
             )
 
     async def task_action(self, tenant, actor, tid, action):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             task = required(
                 await one(
                     c,
-                    "SELECT * FROM knowledge_tasks WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    "SELECT * FROM knowledge_tasks WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=tid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if action == "retry":
@@ -816,22 +889,30 @@ class Workspace:
                         raise DomainError("document_deleted", 409)
                     await execute(
                         c,
-                        "UPDATE knowledge_documents SET processing='queued',error_code=NULL WHERE id=:d",
+                        "UPDATE knowledge_documents SET processing='queued',error_code=NULL WHERE id=:d"
+                        + scope_sql,
                         d=doc["id"],
+                        **scope_params,
                     )
                 return await self.enqueue(
                     c, tenant, task["kind"], task["resource_id"], task["config"]
                 )
             await execute(
                 c,
-                "UPDATE knowledge_tasks SET cancel_requested=true,updated_at=now(),status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END WHERE id=:id AND status IN ('queued','running')",
+                "UPDATE knowledge_tasks SET cancel_requested=true,updated_at=now(),status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END WHERE id=:id"
+                + scope_sql
+                + " AND status IN ('queued','running')",
                 id=tid,
+                **scope_params,
             )
             if task["kind"] == "parse" and task["status"] == "queued":
                 await execute(
                     c,
-                    "UPDATE knowledge_documents SET processing='cancelled' WHERE id=:d AND processing<>'deleted'",
+                    "UPDATE knowledge_documents SET processing='cancelled' WHERE id=:d"
+                    + scope_sql
+                    + " AND processing<>'deleted'",
                     d=task["resource_id"],
+                    **scope_params,
                 )
             await audit(c, tenant, actor, "knowledge.task_cancelled", tid)
             return {"ok": True}
@@ -841,11 +922,28 @@ class Workspace:
         async with self.engine.begin() as c:
             pending = await many(
                 c,
-                "SELECT id FROM knowledge_bases k WHERE tenant_id=:t AND index_requested AND NOT EXISTS(SELECT 1 FROM knowledge_tasks j WHERE j.resource_id=k.id AND j.kind='index' AND j.status IN ('queued','running')) FOR UPDATE SKIP LOCKED",
+                """SELECT id,business_id,workspace_id FROM knowledge_bases k
+                WHERE tenant_id=:t AND index_requested
+                  AND NOT EXISTS(
+                    SELECT 1 FROM knowledge_tasks j
+                    WHERE j.resource_id=k.id AND j.kind='index'
+                      AND j.status IN ('queued','running')
+                  ) FOR UPDATE SKIP LOCKED""",
                 t=tenant,
             )
             for base in pending:
-                await self.enqueue(c, tenant, "index", base["id"], {})
+                await self.enqueue(
+                    c,
+                    tenant,
+                    "index",
+                    base["id"],
+                    {},
+                    BusinessScope(
+                        tenant_id=tenant,
+                        business_id=base["business_id"],
+                        workspace_id=base["workspace_id"],
+                    ),
+                )
                 await execute(
                     c, "UPDATE knowledge_bases SET index_requested=false WHERE id=:k", k=base["id"]
                 )
@@ -873,6 +971,14 @@ class Workspace:
         if not task:
             await self.vector.cleanup(tenant)
             return False
+
+        scope_token = bind_scope(
+            BusinessScope(
+                tenant_id=tenant,
+                business_id=task["business_id"],
+                workspace_id=task["workspace_id"],
+            )
+        )
 
         async def heartbeat():
             while True:
@@ -916,6 +1022,7 @@ class Workspace:
         finally:
             heart.cancel()
             await asyncio.gather(heart, return_exceptions=True)
+            reset_scope(scope_token)
         return True
 
     async def live_task(self, c, task):

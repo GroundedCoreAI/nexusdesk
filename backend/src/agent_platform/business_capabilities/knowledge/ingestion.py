@@ -15,6 +15,15 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     required,
 )
 from agent_platform.core_platform.platform_services.storage.objects import S3Archive
+from agent_platform.core_platform.platform_services.tenant_isolation.context import (
+    bind_scope,
+    reset_scope,
+)
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+    resource_scope_values,
+)
+from agent_platform.extension_contracts import BusinessScope
 
 from .service import DocumentInput
 
@@ -67,20 +76,32 @@ class IngestionService:
         if extension not in {".txt", ".md"} and not self.settings.knowledge_parser_url:
             raise DomainError("parser_not_configured", 503)
         digest = hashlib.sha256(content).hexdigest()
+        base_scope_sql, base_scope_params = resource_scope_clause(alias="k")
+        job_scope_sql, job_scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM knowledge_bases WHERE tenant_id=:t AND id=:id AND enabled FOR UPDATE",
+                    "SELECT id FROM knowledge_bases k WHERE k.tenant_id=:t AND k.id=:id AND k.enabled"
+                    + base_scope_sql
+                    + " FOR UPDATE",
                     t=tenant,
                     id=kid,
+                    **base_scope_params,
                 )
             )
             row = await one(
                 c,
-                "INSERT INTO knowledge_jobs(id,tenant_id,kb_id,filename,content,content_hash,config) VALUES(:id,:t,:kid,:name,:content,:hash,CAST(:config AS jsonb)) ON CONFLICT(tenant_id,kb_id,content_hash) DO NOTHING RETURNING id,status,created_at",
+                """INSERT INTO knowledge_jobs(
+                id,tenant_id,business_id,workspace_id,kb_id,filename,content,content_hash,config
+            ) VALUES(
+                :id,:t,:business_id,:workspace_id,:kid,:name,:content,:hash,CAST(:config AS jsonb)
+            )
+            ON CONFLICT(tenant_id,business_id,workspace_id,kb_id,content_hash)
+            DO NOTHING RETURNING id,status,created_at""",
                 id=uuid4(),
                 t=tenant,
+                **resource_scope_values(),
                 kid=kid,
                 name=filename,
                 content=content,
@@ -92,43 +113,58 @@ class IngestionService:
             if row is None:
                 return await one(
                     c,
-                    "SELECT id,status,created_at FROM knowledge_jobs WHERE tenant_id=:t AND kb_id=:kid AND content_hash=:hash",
+                    "SELECT id,status,created_at FROM knowledge_jobs "
+                    "WHERE tenant_id=:t AND kb_id=:kid AND content_hash=:hash " + job_scope_sql,
                     t=tenant,
                     kid=kid,
                     hash=digest,
+                    **job_scope_params,
                 )
             await audit(c, tenant, actor, "knowledge.job_created", row["id"])
             return row
 
     async def list(self, tenant, kid):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             return await many(
                 c,
-                "SELECT id,filename,status,attempts,error_code,document_id,created_at FROM knowledge_jobs WHERE tenant_id=:t AND kb_id=:kid ORDER BY created_at DESC LIMIT 100",
+                "SELECT id,filename,status,attempts,error_code,document_id,created_at "
+                "FROM knowledge_jobs WHERE tenant_id=:t AND kb_id=:kid"
+                + scope_sql
+                + " ORDER BY created_at DESC LIMIT 100",
                 t=tenant,
                 kid=kid,
+                **scope_params,
             )
 
     async def cancel(self, tenant, actor, jid):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             row = required(
                 await one(
                     c,
-                    "UPDATE knowledge_jobs SET cancel_requested=true,status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END,updated_at=now() WHERE id=:id AND tenant_id=:t RETURNING id,status",
+                    "UPDATE knowledge_jobs SET cancel_requested=true,status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END,updated_at=now() WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " RETURNING id,status",
                     id=jid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             await audit(c, tenant, actor, "knowledge.job_cancel_requested", jid)
             return row
 
     async def retry(self, tenant, actor, jid):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             row = await one(
                 c,
-                "UPDATE knowledge_jobs SET status='queued',cancel_requested=false,error_code=NULL,owner=NULL,lease_until=NULL,updated_at=now() WHERE id=:id AND tenant_id=:t AND status IN ('failed','cancelled') RETURNING id,status",
+                "UPDATE knowledge_jobs SET status='queued',cancel_requested=false,error_code=NULL,owner=NULL,lease_until=NULL,updated_at=now() WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + " AND status IN ('failed','cancelled') RETURNING id,status",
                 id=jid,
                 t=tenant,
+                **scope_params,
             )
             if not row:
                 raise DomainError("job_not_retryable", 409)
@@ -136,13 +172,15 @@ class IngestionService:
             return row
 
     async def pages(self, tenant, jid):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM knowledge_jobs WHERE id=:id AND tenant_id=:t",
+                    "SELECT id FROM knowledge_jobs WHERE id=:id AND tenant_id=:t" + scope_sql,
                     id=jid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             return await many(
@@ -167,6 +205,13 @@ class IngestionService:
             )
         if not job:
             return False
+        scope_token = bind_scope(
+            BusinessScope(
+                tenant_id=tenant,
+                business_id=job["business_id"],
+                workspace_id=job["workspace_id"],
+            )
+        )
         error = None
         try:
             async with asyncio.timeout(90):
@@ -270,4 +315,5 @@ class IngestionService:
                         owner=owner,
                         error=error,
                     )
+            reset_scope(scope_token)
         return True

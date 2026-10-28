@@ -12,6 +12,53 @@ from agent_platform.extension_contracts import BusinessScope
 
 from .context import current_scope
 
+DEFAULT_BUSINESS_ID = "customer-service"
+DEFAULT_WORKSPACE_ID = "default"
+
+
+def resolve_scope(tenant_id: str, scope: BusinessScope | None = None) -> BusinessScope:
+    """Return a complete scope for a service call.
+
+    HTTP callers pass the scope resolved by the application boundary.  Older
+    service/seed callers may omit it and are deliberately mapped to the
+    customer-service/default compatibility scope.  A scope from another
+    tenant is never silently accepted.
+    """
+
+    candidate = scope or current_scope()
+    if candidate is not None and candidate.tenant_id != tenant_id:
+        raise ScopeError("tenant_scope_mismatch", 403)
+    return BusinessScope(
+        tenant_id=tenant_id,
+        business_id=(
+            candidate.business_id if candidate and candidate.business_id else DEFAULT_BUSINESS_ID
+        ),
+        workspace_id=candidate.workspace_id if candidate else DEFAULT_WORKSPACE_ID,
+    )
+
+
+def persisted_scope(tenant_id: str, scope: BusinessScope | None = None) -> BusinessScope:
+    """Return a complete scope for creating a persisted row."""
+
+    resolved = resolve_scope(tenant_id, scope)
+    return BusinessScope(
+        tenant_id=resolved.tenant_id,
+        business_id=resolved.business_id,
+        workspace_id=resolved.workspace_id or DEFAULT_WORKSPACE_ID,
+    )
+
+
+def scope_predicate(scope: BusinessScope, alias: str = "") -> tuple[str, dict[str, str]]:
+    """Return SQL for a scope, omitting workspace when it was not selected."""
+
+    prefix = f"{alias}." if alias else ""
+    clause = f"{prefix}business_id=:scope_business"
+    params = {"scope_business": scope.business_id or DEFAULT_BUSINESS_ID}
+    if scope.workspace_id is not None:
+        clause += f" AND {prefix}workspace_id=:scope_workspace"
+        params["scope_workspace"] = scope.workspace_id
+    return clause, params
+
 
 class ScopeError(DomainError):
     """A requested business scope is not available to the current tenant."""
@@ -148,15 +195,18 @@ def resource_scope_values(
     scope = current_scope()
     return {
         "business_id": scope.business_id if scope and scope.business_id else default_business,
-        "workspace_id": (
-            scope.workspace_id if scope and scope.workspace_id else default_workspace
-        ),
+        "workspace_id": (scope.workspace_id if scope and scope.workspace_id else default_workspace),
     }
 
 
 __all__ = [
+    "DEFAULT_BUSINESS_ID",
+    "DEFAULT_WORKSPACE_ID",
     "ScopeError",
     "TenantScopeService",
+    "persisted_scope",
+    "resolve_scope",
     "resource_scope_clause",
     "resource_scope_values",
+    "scope_predicate",
 ]
