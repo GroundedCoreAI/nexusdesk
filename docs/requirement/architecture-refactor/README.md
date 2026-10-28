@@ -35,9 +35,12 @@ NexusDesk
 | `05-migration-plan.md` | 分批落地顺序和操作原则 | 已建立 |
 | `06-acceptance-plan.md` | 代码、测试、文档验收标准 | 已建立 |
 | `07-acceptance-report.md` | 当前实际验收结果和遗留项 | 初始记录 |
+| `08-group-application-and-business-registry.md` | 阶段二统一入口与业务注册机制 | 已完成 |
+| `09-business-scope-context.md` | 阶段三租户、业务与工作空间上下文 | 已完成 |
+| `10-resource-scope-data-plane.md` | 阶段三核心资源数据面过滤 | 已完成 |
 
 ## 4. 当前结论
 
-代码目录已完成主要物理迁移，`agent_platform/modules`、`apps`、`integrations`、`platform` 不再作为运行时目录保留。当前仍需完成最终测试回归、文档旧路径清理和架构门禁确认。
+代码目录已完成主要物理迁移，`agent_platform/modules`、`apps`、`integrations`、`platform` 不再作为运行时目录保留。阶段二已完成，阶段三已完成上下文边界和 Agent、知识库、渠道等主要配置资源的数据面过滤。
 
 详细状态以 `07-acceptance-report.md` 为准。

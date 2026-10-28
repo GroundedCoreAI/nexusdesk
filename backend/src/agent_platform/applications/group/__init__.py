@@ -1,0 +1,1 @@
+"""Unified group application entrypoint."""

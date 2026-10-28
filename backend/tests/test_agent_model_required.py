@@ -7,7 +7,7 @@ from test_model_gateway import setup
 from test_platform_postgres import conversation
 from test_platform_postgres import platform as _platform
 
-from agent_platform.applications.customer_service.runtime_factory import RuntimeFactory
+from agent_platform.applications.platform_runtime.runtime_factory import RuntimeFactory
 from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
 
 platform = _platform

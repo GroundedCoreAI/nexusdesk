@@ -1,8 +1,9 @@
 """Reference external capability used by lifecycle acceptance tests.
 
 The manifest for this capability lives outside the Python package. The
-implementation is deliberately bound by ``applications.customer_service.trusted_extensions`` so
-the manifest cannot import or execute arbitrary code.
+implementation is deliberately bound by an application-owned
+``trusted_extensions`` module so the manifest cannot import or execute
+arbitrary code.
 """
 
 from dataclasses import dataclass

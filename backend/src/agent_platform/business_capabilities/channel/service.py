@@ -32,6 +32,10 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     required,
 )
 from agent_platform.core_platform.platform_services.secrets.vault import CredentialVault
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+    resource_scope_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +96,18 @@ class ChannelService:
         return provider_catalog()
 
     async def list(self, tenant):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             return await many(
                 c,
                 """SELECT id,name,agent_id,enabled,provider,config,last_error_code,
                 last_activity_at,created_at,
                 encrypted_credentials IS NOT NULL AS credentials_configured
-                FROM channels WHERE tenant_id=:t ORDER BY created_at DESC LIMIT 100""",
+                FROM channels c WHERE tenant_id=:t"""
+                + scope_sql
+                + " ORDER BY created_at DESC LIMIT 100",
                 t=tenant,
+                **scope_params,
             )
 
     async def create(
@@ -122,6 +130,7 @@ class ChannelService:
                 raise DomainError("channel_generic_config_not_supported", 422)
         else:
             adapter_for(provider).validate(config, credentials)
+        scope_values = resource_scope_values()
         async with self.engine.begin() as c:
             await self.agents.snapshot(tenant, agent_id, c)
             channel_id = uuid4()
@@ -133,16 +142,18 @@ class ChannelService:
             row = await one(
                 c,
                 """INSERT INTO channels(
-                    id,tenant_id,name,agent_id,token_hash,signing_secret_ref,provider,config,
-                    encrypted_credentials
+                    id,tenant_id,business_id,workspace_id,name,agent_id,token_hash,
+                    signing_secret_ref,provider,config,encrypted_credentials
                 )
                 VALUES(
-                    :id,:t,:name,:aid,:hash,:ref,:provider,CAST(:config AS jsonb),:credentials
+                    :id,:t,:business_id,:workspace_id,:name,:aid,:hash,:ref,:provider,
+                    CAST(:config AS jsonb),:credentials
                 )
                 RETURNING id,name,agent_id,enabled,provider,config,signing_secret_ref,
                     encrypted_credentials IS NOT NULL AS credentials_configured""",
                 id=channel_id,
                 t=tenant,
+                **scope_values,
                 name=name,
                 aid=agent_id,
                 hash=hashlib.sha256(token.encode()).hexdigest(),
@@ -163,13 +174,17 @@ class ChannelService:
         config: dict[str, Any] | None = None,
         credentials: dict[str, Any] | None = None,
     ):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             row = required(
                 await one(
                     c,
-                    "SELECT * FROM channels WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    "SELECT * FROM channels c WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 ),
                 "channel_not_found",
             )
@@ -194,27 +209,32 @@ class ChannelService:
                 c,
                 """UPDATE channels SET config=CAST(:config AS jsonb),
                 encrypted_credentials=:credentials
-                WHERE id=:id AND tenant_id=:t
+                WHERE id=:id AND tenant_id=:t""" + scope_sql + """
                 RETURNING id,name,agent_id,enabled,provider,config,
                     encrypted_credentials IS NOT NULL AS credentials_configured""",
                 id=cid,
                 t=tenant,
                 config=json.dumps(merged_config),
                 credentials=encrypted,
+                **scope_params,
             )
             await audit(c, tenant, actor, "channel.configured", cid, provider=row["provider"])
             return updated
 
     async def toggle(self, tenant, actor, cid, enabled):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             row = required(
                 await one(
                     c,
-                    """UPDATE channels SET enabled=:enabled WHERE id=:id AND tenant_id=:t
+                    """UPDATE channels SET enabled=:enabled WHERE id=:id AND tenant_id=:t"""
+                    + scope_sql
+                    + """
                     RETURNING id,name,enabled,provider""",
                     id=cid,
                     t=tenant,
                     enabled=enabled,
+                    **scope_params,
                 )
             )
             await audit(
@@ -224,34 +244,44 @@ class ChannelService:
 
     async def rotate(self, tenant, actor, cid):
         token = secrets.token_urlsafe(32)
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             row = required(
                 await one(
                     c,
-                    "SELECT provider FROM channels WHERE id=:id AND tenant_id=:t FOR UPDATE",
+                    "SELECT provider FROM channels WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " FOR UPDATE",
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 )
             )
             if row["provider"] != "generic_webhook":
                 raise DomainError("channel_token_not_supported", 422)
             row = await one(
                 c,
-                """UPDATE channels SET token_hash=:hash WHERE id=:id AND tenant_id=:t
+                """UPDATE channels SET token_hash=:hash WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + """
                 RETURNING id,name,enabled,provider""",
                 id=cid,
                 t=tenant,
                 hash=hashlib.sha256(token.encode()).hexdigest(),
+                **scope_params,
             )
             await audit(c, tenant, actor, "channel.token_rotated", cid)
             return {**row, "token": token}
 
     async def verify_signature(self, cid, raw, timestamp, signature):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             row = await one(
                 c,
-                "SELECT signing_secret_ref,provider FROM channels WHERE id=:id AND enabled",
+                "SELECT signing_secret_ref,provider FROM channels WHERE id=:id AND enabled"
+                + scope_sql,
                 id=cid,
+                **scope_params,
             )
         if not row or not row["signing_secret_ref"]:
             return
@@ -274,12 +304,15 @@ class ChannelService:
             raise DomainError("invalid_channel_signature", 401)
 
     async def ingest(self, cid, token, body):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             channel = await one(
                 c,
                 """SELECT * FROM channels
-                WHERE id=:id AND enabled AND provider='generic_webhook'""",
+                WHERE id=:id AND enabled AND provider='generic_webhook'"""
+                + scope_sql,
                 id=cid,
+                **scope_params,
             )
         if not channel or not hmac.compare_digest(
             channel["token_hash"], hashlib.sha256(token.encode()).hexdigest()
@@ -304,13 +337,16 @@ class ChannelService:
         headers: dict[str, str],
     ):
         adapter = adapter_for(provider)
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             channel = await one(
                 c,
                 """SELECT * FROM channels
-                WHERE id=:id AND enabled AND provider=:provider""",
+                WHERE id=:id AND enabled AND provider=:provider"""
+                + scope_sql,
                 id=cid,
                 provider=provider,
+                **scope_params,
             )
         if not channel:
             raise DomainError("channel_not_found", 404)
@@ -405,12 +441,15 @@ class ChannelService:
         await self._enqueue_inbound_batch(channel, [envelope])
 
     async def replies(self, cid, token, session_id, after):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             channel = await one(
                 c,
                 """SELECT * FROM channels
-                WHERE id=:id AND enabled AND provider='generic_webhook'""",
+                WHERE id=:id AND enabled AND provider='generic_webhook'"""
+                + scope_sql,
                 id=cid,
+                **scope_params,
             )
             if not channel or not hmac.compare_digest(
                 channel["token_hash"], hashlib.sha256(token.encode()).hexdigest()
@@ -430,13 +469,15 @@ class ChannelService:
             )
 
     async def deliveries(self, tenant, cid, page=1):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.connect() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM channels WHERE id=:id AND tenant_id=:t",
+                    "SELECT id FROM channels WHERE id=:id AND tenant_id=:t" + scope_sql,
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 ),
                 "channel_not_found",
             )
@@ -457,13 +498,15 @@ class ChannelService:
             return {"items": items, "total": total["total"]}
 
     async def retry_delivery(self, tenant, actor, cid, did):
+        scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             required(
                 await one(
                     c,
-                    "SELECT id FROM channels WHERE id=:id AND tenant_id=:t",
+                    "SELECT id FROM channels WHERE id=:id AND tenant_id=:t" + scope_sql,
                     id=cid,
                     t=tenant,
+                    **scope_params,
                 ),
                 "channel_not_found",
             )
@@ -504,8 +547,10 @@ class ChannelService:
             )
             current = await one(
                 c,
-                "SELECT * FROM channels WHERE id=:id AND enabled",
+                "SELECT * FROM channels WHERE id=:id AND enabled"
+                + resource_scope_clause()[0],
                 id=channel["id"],
+                **resource_scope_clause()[1],
             )
             if not current:
                 raise DomainError("channel_not_found", 404)

@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent_platform.business_capabilities.evaluation.scoring import ProfileRef
 from agent_platform.core_platform.platform_services.model_gateway.contracts import RerankRequest
 from agent_platform.core_platform.platform_services.persistence.store import DomainError, many
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+)
 
 from .chunking import ChunkingPolicy
 
@@ -54,12 +57,16 @@ class Retrieval:
 
     async def search(self, tenant, body):
         start = time.monotonic()
+        scope_sql, scope_params = resource_scope_clause(alias="k")
         async with self.engine.connect() as c:
             bases = await many(
                 c,
-                "SELECT id,published_settings FROM knowledge_bases WHERE tenant_id=:t AND enabled AND id=ANY(CAST(:ids AS uuid[]))",
+                "SELECT id,published_settings FROM knowledge_bases k WHERE tenant_id=:t"
+                + scope_sql
+                + " AND enabled AND id=ANY(CAST(:ids AS uuid[]))",
                 t=tenant,
                 ids=body.kb_ids,
+                **scope_params,
             )
         if {b["id"] for b in bases} != set(body.kb_ids):
             raise DomainError("knowledge_base_not_found", 404)

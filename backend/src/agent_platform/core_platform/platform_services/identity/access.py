@@ -24,6 +24,8 @@ class Principal:
     user_id: str | None = None
     auth_source: str = "service"
     session_id: str | None = None
+    business_id: str | None = None
+    workspace_id: str | None = None
 
     @property
     def permissions(self) -> frozenset[str]:
@@ -32,12 +34,21 @@ class Principal:
     def can(self, permission: str) -> bool:
         return permission in self.permissions
 
-    def execution_context(self):
-        return ExecutionContext(self.tenant, self.actor, frozenset({self.role}))
+    def execution_context(self) -> ExecutionContext:
+        return ExecutionContext(
+            self.tenant,
+            self.actor,
+            frozenset({self.role}),
+            business_id=self.business_id,
+            workspace_id=self.workspace_id,
+        )
 
 
 async def principal(request: Request, authorization: Annotated[str | None, Header()] = None):
     settings = request.app.state.settings
+    scope = getattr(request.state, "business_scope", None)
+    business_id = scope.business_id if scope else None
+    workspace_id = scope.workspace_id if scope else None
     if (authorization or "").startswith("Bearer local_"):
         from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
@@ -69,6 +80,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 user_id=str(session["user_id"]),
                 auth_source="local",
                 session_id=str(session["session_id"]),
+                business_id=business_id,
+                workspace_id=workspace_id,
             )
         except DomainError as exc:
             raise HTTPException(exc.status, exc.code) from None
@@ -100,6 +113,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 "enterprise:" + str(session["user_id"]),
                 user_id=str(session["user_id"]),
                 auth_source="sso",
+                business_id=business_id,
+                workspace_id=workspace_id,
                 session_id=str(session["id"]),
             )
         except DomainError as exc:
@@ -112,7 +127,14 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
         if token and hmac.compare_digest(
             (authorization or "").encode(), ("Bearer " + token.get_secret_value()).encode()
         ):
-            return Principal(settings.tenant_id, role, role, auth_source="service_token")
+            return Principal(
+                settings.tenant_id,
+                role,
+                role,
+                auth_source="service_token",
+                business_id=business_id,
+                workspace_id=workspace_id,
+            )
     if (authorization or "").startswith("Bearer staff_"):
         digest = hashlib.sha256(authorization[7:].encode()).hexdigest()
         async with identity_bindings(request).engine.connect() as c:
@@ -128,6 +150,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 staff["role"],
                 "staff:" + str(staff["id"]),
                 auth_source="service_credential",
+                business_id=business_id,
+                workspace_id=workspace_id,
             )
         raise HTTPException(401, "invalid_api_token")
     if not settings.api_token and settings.environment == "development" and not authorization:
@@ -143,6 +167,8 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 "admin",
                 "local-development",
                 auth_source="development",
+                business_id=business_id,
+                workspace_id=workspace_id,
             )
     raise HTTPException(401, "invalid_api_token")
 

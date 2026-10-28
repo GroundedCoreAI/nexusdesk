@@ -15,6 +15,10 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     required,
     transaction,
 )
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+    resource_scope_values,
+)
 
 from .chunking import ChunkingPolicy, chunk_pages
 from .parsers import LOCAL_FORMATS, parse_file
@@ -43,49 +47,68 @@ class Workspace:
         self.vector, self.gateway = vector, gateway
 
     async def document(self, c, tenant, did, lock=False):
+        scope_sql, scope_params = resource_scope_clause(alias="d")
         return required(
             await one(
                 c,
-                "SELECT * FROM knowledge_documents WHERE id=:id AND tenant_id=:t"
+                "SELECT * FROM knowledge_documents d WHERE id=:id AND tenant_id=:t"
+                + scope_sql
                 + (" FOR UPDATE" if lock else ""),
                 id=did,
                 t=tenant,
+                **scope_params,
             )
         )
 
     async def base(self, c, tenant, kid, lock=False):
+        scope_sql, scope_params = resource_scope_clause(alias="k")
         return required(
             await one(
                 c,
-                "SELECT * FROM knowledge_bases WHERE id=:id AND tenant_id=:t"
+                "SELECT * FROM knowledge_bases k WHERE id=:id AND tenant_id=:t"
+                + scope_sql
                 + (" FOR UPDATE" if lock else ""),
                 id=kid,
                 t=tenant,
+                **scope_params,
             )
         )
 
     async def folders(self, tenant):
+        scope_sql, scope_params = resource_scope_clause(alias="f")
         async with self.engine.connect() as c:
             return await many(
-                c, "SELECT * FROM knowledge_folders WHERE tenant_id=:t ORDER BY name", t=tenant
+                c,
+                "SELECT * FROM knowledge_folders f WHERE tenant_id=:t"
+                + scope_sql
+                + " ORDER BY name",
+                t=tenant,
+                **scope_params,
             )
 
     async def create_folder(self, tenant, actor, name, parent):
+        scope_sql, scope_params = resource_scope_clause(alias="f")
+        scope_values = resource_scope_values()
         async with self.engine.begin() as c:
             if parent:
                 required(
                     await one(
                         c,
-                        "SELECT id FROM knowledge_folders WHERE id=:id AND tenant_id=:t",
+                        "SELECT id FROM knowledge_folders f WHERE id=:id AND tenant_id=:t"
+                        + scope_sql,
                         id=parent,
                         t=tenant,
+                        **scope_params,
                     )
                 )
             row = await one(
                 c,
-                "INSERT INTO knowledge_folders(id,tenant_id,name,parent_id) VALUES(:id,:t,:n,:p) RETURNING *",
+                """INSERT INTO knowledge_folders(
+                    id,tenant_id,business_id,workspace_id,name,parent_id
+                ) VALUES(:id,:t,:business_id,:workspace_id,:n,:p) RETURNING *""",
                 id=uuid4(),
                 t=tenant,
+                **scope_values,
                 n=name,
                 p=parent,
             )
@@ -93,13 +116,21 @@ class Workspace:
             return row
 
     async def list_documents(self, tenant, query="", folder=None, offset=0, kind=None, status=None):
-        filters = "d.tenant_id=:t AND d.title ILIKE :q AND (CAST(:folder AS uuid) IS NULL OR d.folder_id=CAST(:folder AS uuid)) AND (CAST(:kind AS text) IS NULL OR lower(d.filename) LIKE :kind) AND (CAST(:status AS text) IS NULL OR d.processing=:status)"
+        scope_sql, scope_params = resource_scope_clause(alias="d")
+        filters = (
+            "d.tenant_id=:t"
+            + scope_sql
+            + " AND d.title ILIKE :q AND (CAST(:folder AS uuid) IS NULL OR d.folder_id=CAST(:folder AS uuid)) "
+            "AND (CAST(:kind AS text) IS NULL OR lower(d.filename) LIKE :kind) "
+            "AND (CAST(:status AS text) IS NULL OR d.processing=:status)"
+        )
         params = {
             "t": tenant,
             "q": "%" + query + "%",
             "folder": str(folder) if folder else None,
             "kind": "%." + kind.lower() if kind else None,
             "status": status,
+            **scope_params,
         }
         async with self.engine.connect() as c:
             total = await one(
@@ -224,9 +255,11 @@ class Workspace:
                 required(
                     await one(
                         c,
-                        "SELECT id FROM knowledge_folders WHERE id=:id AND tenant_id=:t",
+                        "SELECT id FROM knowledge_folders f WHERE id=:id AND tenant_id=:t"
+                        + resource_scope_clause(alias="f")[0],
                         id=folder,
                         t=tenant,
+                        **resource_scope_clause(alias="f")[1],
                     )
                 )
             policy = ChunkingPolicy()
@@ -239,19 +272,29 @@ class Workspace:
             )
             existing = await one(
                 c,
-                "SELECT id FROM knowledge_documents WHERE tenant_id=:t AND content_hash=:hash AND processing<>'deleted'",
+                "SELECT id FROM knowledge_documents d WHERE tenant_id=:t"
+                + resource_scope_clause(alias="d")[0]
+                + " AND content_hash=:hash AND processing<>'deleted'",
                 t=tenant,
                 hash=digest,
+                **resource_scope_clause(alias="d")[1],
             )
             if existing:
                 raise DomainError("document_already_uploaded:" + str(existing["id"]), 409)
             did = uuid4()
             await execute(
                 c,
-                """INSERT INTO knowledge_documents(id,tenant_id,title,folder_id,filename,file_size,original,processing,created_by,content_hash)
-                VALUES(:id,:t,:name,:folder,:name,:size,:raw,'queued',:actor,:hash)""",
+                """INSERT INTO knowledge_documents(
+                    id,tenant_id,business_id,workspace_id,title,folder_id,filename,file_size,
+                    original,processing,created_by,content_hash
+                )
+                VALUES(
+                    :id,:t,:business_id,:workspace_id,:name,:folder,:name,:size,:raw,
+                    'queued',:actor,:hash
+                )""",
                 id=did,
                 t=tenant,
+                **resource_scope_values(),
                 name=filename,
                 folder=folder,
                 size=len(content),
@@ -320,6 +363,7 @@ class Workspace:
         if not content or len(content) > self.settings.knowledge_upload_bytes:
             raise DomainError("document_size_exceeded", 413)
         digest = hashlib.sha256(content).hexdigest()
+        scope_sql, scope_params = resource_scope_clause(alias="d")
         async with self.engine.begin() as c:
             await execute(
                 c, "SELECT pg_advisory_xact_lock(hashtextextended(:key,0))", key=tenant + digest
@@ -329,9 +373,12 @@ class Workspace:
                 raise DomainError("document_not_replaceable", 409)
             if await one(
                 c,
-                "SELECT id FROM knowledge_documents WHERE tenant_id=:t AND content_hash=:hash AND processing<>'deleted'",
+                "SELECT id FROM knowledge_documents d WHERE tenant_id=:t"
+                + scope_sql
+                + " AND content_hash=:hash AND processing<>'deleted'",
                 t=tenant,
                 hash=digest,
+                **scope_params,
             ):
                 raise DomainError("document_already_uploaded", 409)
             current = await one(
@@ -610,14 +657,18 @@ class Workspace:
             return {"version": doc["current_version"]}
 
     async def library(self, tenant, kid):
+        document_scope_sql, document_scope_params = resource_scope_clause(alias="d")
         async with self.engine.connect() as c:
             base = await self.base(c, tenant, kid)
             documents = await many(
                 c,
                 """SELECT l.*,d.title,d.current_version,d.processing,d.enabled document_enabled,
                 (SELECT count(*) FROM knowledge_chunks ch WHERE ch.document_id=d.id AND ch.version=l.draft_version AND ch.enabled) chunk_count
-                FROM knowledge_links l JOIN knowledge_documents d ON d.id=l.document_id WHERE l.kb_id=:k ORDER BY d.title""",
+                FROM knowledge_links l JOIN knowledge_documents d ON d.id=l.document_id WHERE l.kb_id=:k"""
+                + document_scope_sql
+                + " ORDER BY d.title",
                 k=kid,
+                **document_scope_params,
             )
             tasks = await many(
                 c,
@@ -691,15 +742,18 @@ class Workspace:
             return {"task_id": task["id"], "status": task["status"]}
 
     async def mutate_document(self, tenant, actor, did, folder=None, enabled=None, delete=False):
+        folder_scope_sql, folder_scope_params = resource_scope_clause(alias="f")
         async with self.engine.begin() as c:
             await self.document(c, tenant, did, True)
             if folder:
                 required(
                     await one(
                         c,
-                        "SELECT id FROM knowledge_folders WHERE id=:id AND tenant_id=:t",
+                        "SELECT id FROM knowledge_folders f WHERE id=:id AND tenant_id=:t"
+                        + folder_scope_sql,
                         id=folder,
                         t=tenant,
+                        **folder_scope_params,
                     )
                 )
             if delete:

@@ -2,12 +2,23 @@ import ast
 import re
 from pathlib import Path
 
-from agent_platform.applications.customer_service.platform_services import PlatformServices
-from agent_platform.applications.customer_service.service_groups import (
+from agent_platform.applications.platform_runtime.platform_services import PlatformServices
+from agent_platform.applications.platform_runtime.service_groups import (
     build_runtime_bindings,
     build_service_groups,
 )
 from agent_platform.extension_contracts import RuntimeBindings
+
+
+def imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module)
+    return modules
 
 
 def test_agent_runtime_does_not_import_application_composition():
@@ -41,7 +52,7 @@ def test_platform_services_does_not_own_runtime_implementation():
         / "src"
         / "agent_platform"
         / "applications"
-        / "customer_service"
+        / "platform_runtime"
         / "platform_services.py"
     )
     tree = ast.parse(source.read_text(encoding="utf-8"))
@@ -61,6 +72,26 @@ def test_platform_services_does_not_own_runtime_implementation():
         )
         for name in imported_modules
     )
+
+
+def test_shared_platform_runtime_does_not_import_customer_application():
+    root = (
+        Path(__file__).parents[1]
+        / "src"
+        / "agent_platform"
+        / "applications"
+        / "platform_runtime"
+    )
+    offenders = [
+        str(path.relative_to(root))
+        for path in root.glob("*.py")
+        if any(
+            module.startswith("agent_platform.applications.customer_service")
+            for module in imported_modules(path)
+        )
+    ]
+
+    assert offenders == []
 
 
 def test_business_tool_adapter_does_not_write_tool_ledger_sql():
@@ -178,7 +209,7 @@ def test_runtime_composition_uses_explicit_runtime_bindings():
         / "src"
         / "agent_platform"
         / "applications"
-        / "customer_service"
+        / "platform_runtime"
         / "runtime_composition.py"
     )
     tree = ast.parse(source.read_text(encoding="utf-8"))
