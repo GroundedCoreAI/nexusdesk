@@ -43,6 +43,7 @@ sh nexusdesk quickstart
 | [groundedcoreai-shell-infra-standards](.agents/skills/groundedcoreai-shell-infra-standards/SKILL.md) | 编写/修改/审查 Shell/PowerShell 脚本、Dockerfile、docker compose 及 `deploy/` 配置 |
 | [groundedcoreai-commit-standard](.agents/skills/groundedcoreai-commit-standard/SKILL.md) | 提交代码、生成/校验 commit message、安装 commit 校验 hook 时（Conventional Commits + GitHub issue 引用 + 签名提交） |
 | [groundedcoreai-dev-workflow](.agents/skills/groundedcoreai-dev-workflow/SKILL.md) | 创建分支、开 PR、发布版本、hotfix、部署等开发流程操作（提到哪个分支、合并方式、何时发布/部署；commit message 写法归 commit-standard） |
+| [groundedcoreai-requirement-lifecycle](.agents/skills/groundedcoreai-requirement-lifecycle/SKILL.md) | 接到新需求/新阶段任务时的全流程文档驱动：需求分析产业务目标/需求/技术设计/测试方案/验收方案五件套，开发对照执行，测试与验收结束产测试报告/验收报告（模板参考 `docs/requirement/agent-memory/` 各阶段套件） |
 
 如果你的运行环境支持 Agent Skills 自动发现（如 Codex 扫 `.agents/skills/`、Claude Code 扫 `.claude/skills/`），直接按 skill 的 description 自动触发即可；否则按上表手动加载。
 
