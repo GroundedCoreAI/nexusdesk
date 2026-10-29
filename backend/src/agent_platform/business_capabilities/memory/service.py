@@ -1,0 +1,1399 @@
+"""Customer identity resolution, memory item storage and console management.
+
+Phase 2 of agent memory: one customer entity per recognised real-world
+customer, identity bindings per source, and profile/preference items with
+same-key upsert semantics (``prev_content`` single-level history). Pure
+helpers (``trim_items``/``render_memory_injection``/``route_confidence``) are
+kept separate from :class:`MemoryService` so they are unit-testable without a
+database.
+"""
+
+import logging
+import re
+from datetime import UTC, datetime
+from uuid import uuid4
+
+from agent_platform.business_capabilities.memory import governance
+from agent_platform.business_capabilities.memory.decay import (
+    DEFAULT_HALF_LIVES,
+    effective_confidence,
+    half_lives,
+    injection_filter_sql,
+    injection_score_sql,
+)
+from agent_platform.business_capabilities.memory.pii import mask
+from agent_platform.core_platform.platform_services.persistence.store import (
+    DomainError,
+    audit,
+    execute,
+    many,
+    one,
+    required,
+)
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resource_scope_clause,
+    resource_scope_values,
+)
+
+logger = logging.getLogger(__name__)
+
+# Rough characters-per-token estimate, same convention as the summary module.
+CHARS_PER_TOKEN = 2
+# Injected memory is capped at 1000 tokens (FR-3); the item cap comes from
+# settings.memory_inject_max_items.
+INJECT_MAX_TOKENS = 1000
+PROFILE_HEADER = "【客户画像】"
+PREFERENCE_HEADER = "【客户偏好】"
+
+# Phase 4 flag memories (FR-2): injected ahead of the profile section under
+# their own cap (settings.memory_flag_inject_max), outside the token budget.
+FLAG_HEADER = "【服务标记】"
+FLAG_LABELS = {"vip": "VIP 客户", "complaint_risk": "投诉风险", "blacklist": "黑名单"}
+# Fixed instruction appended whenever a blacklist flag is present (R15).
+BLACKLIST_INSTRUCTION = "谨慎服务，涉承诺一律转人工确认"
+
+# Human-protection suggestion rows (R4): an extraction update against a
+# protected row becomes a pending "<key>:suggested" item instead of an
+# overwrite. The key column is VARCHAR(100); the base key is truncated to 89
+# characters so the 10-character suffix always fits (collisions are absorbed
+# by the same-key unique constraint, keeping the upsert idempotent).
+SUGGESTED_SUFFIX = ":suggested"
+SUGGESTED_BASE_MAX = 89
+
+# Phase 3 event items. The in-flight injection keys (open tickets and pending
+# commitments) share the items table with plain event records; the key prefix
+# is what makes an item appear in the 【待跟进事项】 section.
+EVENT_HEADER = "【待跟进事项】"
+OPEN_TICKET_PREFIX = "open_ticket:"
+COMMITMENT_PREFIX = "commitment:"
+
+# Confidence routing (FR-2): high confidence takes effect immediately, medium
+# waits for human confirmation, low is dropped. Thresholds are settings.
+# Phase 5 (C-4): ``write_mode="review"`` bypasses the thresholds and routes
+# every extraction into the pending queue for human confirmation.
+def route_confidence(confidence, auto_threshold, pending_threshold, write_mode="auto"):
+    if write_mode == "review":
+        return "pending"
+    if confidence >= auto_threshold:
+        return "active"
+    if confidence >= pending_threshold:
+        return "pending"
+    return None
+
+
+def trim_items(items, max_items, max_tokens=INJECT_MAX_TOKENS):
+    """Keep the most recently updated items within count and token budgets (P2-UT-11).
+
+    ``items`` must already be ordered by ``updated_at`` descending. The first
+    item is always kept, even when it alone exceeds the token budget.
+    """
+    budget = max_tokens * CHARS_PER_TOKEN
+    kept, used = [], 0
+    for item in items[:max_items]:
+        line = len(item["key"]) + len(item["content"]) + 4  # "- key: content\n"
+        if kept and used + line > budget:
+            break
+        kept.append(item)
+        used += line
+    return kept
+
+
+def render_memory_injection(items):
+    """Render active items as the injected system message body (P2-UT-12).
+
+    Returns ``(text, injected)``: the text is byte-identical to the pre-
+    Phase-6 rendering (empty groups omitted, ``None`` meaning "inject
+    nothing"), and ``injected`` lists the rendered entries as
+    ``(item_id, section, score)`` triples in render order for the Phase 6
+    injection log (FR-1). The score is the row's effective confidence when
+    the caller selected it (``active_items`` does), otherwise ``None``.
+    """
+    groups = {"profile": [], "preference": []}
+    for item in items:
+        if item["type"] in groups:
+            groups[item["type"]].append(item)
+    sections = []
+    injected = []
+    for item_type, header in (("profile", PROFILE_HEADER), ("preference", PREFERENCE_HEADER)):
+        if groups[item_type]:
+            lines = "\n".join(f"- {item['key']}: {item['content']}" for item in groups[item_type])
+            sections.append(f"{header}\n{lines}")
+            injected.extend(
+                (item.get("id"), item_type, item.get("effective_confidence"))
+                for item in groups[item_type]
+            )
+    return ("\n\n".join(sections) if sections else None), injected
+
+
+def render_event_injection(items):
+    """Render the high-priority event section (FR-3), appended after the
+    profile/preference rendering so the injection order stays
+    summary → profile/preference → pending events.
+
+    Returns ``(text, injected)`` like :func:`render_memory_injection`;
+    ``None`` text means "inject nothing". Event rows carry no ranking score
+    (they are ordered by recency, not confidence), so their score is
+    ``None``.
+    """
+    lines = []
+    injected = []
+    for item in items:
+        key = item["key"]
+        if key.startswith(OPEN_TICKET_PREFIX):
+            lines.append(f"- 工单 {key[len(OPEN_TICKET_PREFIX):]} 处理中：{item['content']}")
+        elif key.startswith(COMMITMENT_PREFIX):
+            lines.append(f"- 承诺待兑现：{item['content']}")
+        else:
+            continue
+        injected.append((item.get("id"), "event", None))
+    return (f"{EVENT_HEADER}\n" + "\n".join(lines) if lines else None), injected
+
+
+def render_flag_injection(flags):
+    """Render the flag section (FR-2), placed ahead of the profile section
+    (R15). Returns ``(text, injected)`` like :func:`render_memory_injection`;
+    ``None`` text means "inject nothing" — with no flags the message body
+    stays byte-identical to Phase 3. A blacklist flag appends the fixed
+    instruction line. Flags are decay-immune and unranked, so their score is
+    ``None``.
+    """
+    if not flags:
+        return None, []
+    lines = [f"- {FLAG_LABELS.get(flag['key'], flag['key'])}：{flag['content']}" for flag in flags]
+    if any(flag["key"] == "blacklist" for flag in flags):
+        lines.append(f"- {BLACKLIST_INSTRUCTION}")
+    injected = [(flag.get("id"), "flag", None) for flag in flags]
+    return f"{FLAG_HEADER}\n" + "\n".join(lines), injected
+
+
+# L3 reference signal (R11): an injected item counts as referenced when its
+# key/content shares a token with the current user input. Latin/digit words
+# plus CJK bigrams keep the tokenizer language-neutral and unit-testable.
+_WORD_TOKEN = re.compile(r"[A-Za-z0-9_]+")
+_CJK_CHAR = re.compile(r"[一-鿿]")
+
+
+def text_tokens(text):
+    """Token set for overlap detection: lowercase words plus CJK bigrams."""
+    if not text:
+        return set()
+    tokens = {word.lower() for word in _WORD_TOKEN.findall(text)}
+    cjk = "".join(_CJK_CHAR.findall(text))
+    tokens.update(cjk[i : i + 2] for i in range(len(cjk) - 1))
+    if len(cjk) == 1:
+        tokens.add(cjk)
+    return tokens
+
+
+def overlap_ids(items, input_text):
+    """Ids of injected items whose key/content overlaps the user input (L3)."""
+    query = text_tokens(input_text)
+    if not query:
+        return []
+    return [
+        item["id"]
+        for item in items
+        if item.get("id") and text_tokens(f"{item['key']} {item['content']}") & query
+    ]
+
+
+async def _memory_stats(c, tenant, customer_ids):
+    """Batched per-customer memory stats for the list layer (Phase 6, FR-2).
+
+    One GROUP BY query for the whole page (no N+1): non-deleted totals per
+    type (active+pending), the pending count, the active flag keys for the
+    service badges, and the latest item update. Returns ``{customer_id:
+    stats}``; customers without any items are simply absent.
+    """
+    scope_sql, scope_params = resource_scope_clause(alias="m")
+    rows = await many(
+        c,
+        """SELECT customer_id,
+        (count(*) FILTER (WHERE status IN ('active','pending')))::int AS total,
+        (count(*) FILTER (WHERE status='pending'))::int AS pending,
+        (count(*) FILTER (WHERE status IN ('active','pending') AND type='profile'))::int
+            AS profile,
+        (count(*) FILTER (WHERE status IN ('active','pending') AND type='preference'))::int
+            AS preference,
+        (count(*) FILTER (WHERE status IN ('active','pending') AND type='event'))::int
+            AS event,
+        COALESCE(array_agg(key) FILTER (WHERE status='active' AND type='flag'), '{}') AS flags,
+        max(updated_at) AS last_updated_at
+        FROM memory_items m
+        WHERE m.tenant_id=:t AND m.customer_id=ANY(:ids) AND m.status<>'deleted'"""
+        + scope_sql
+        + """
+        GROUP BY customer_id""",
+        t=tenant,
+        ids=list(customer_ids),
+        **scope_params,
+    )
+    return {row.pop("customer_id"): row for row in rows}
+
+
+class MemoryService:
+    def __init__(self, engine, settings=None):
+        self.engine, self.settings = engine, settings
+
+    def _masking_enabled(self):
+        # Default-on when no settings object is wired (safe direction: the
+        # original value never persists).
+        return getattr(self.settings, "memory_pii_masking_enabled", True)
+
+    def _decay_enabled(self):
+        return getattr(self.settings, "memory_decay_enabled", False)
+
+    async def resolve_customer(self, c, tenant, source, external_key):
+        """Resolve (or create) the customer for one external identity (P2-UT-01/02/03).
+
+        Runs inside the caller's transaction so the conversation and its
+        customer link commit atomically. Concurrent first-time resolutions
+        race on the identity unique key: ``ON CONFLICT DO NOTHING`` never
+        aborts the transaction, and the loser re-reads the winner's row.
+        """
+        scope_sql, scope_params = resource_scope_clause()
+        row = await one(
+            c,
+            """SELECT customer_id FROM memory_identities
+            WHERE tenant_id=:t AND source=:s AND external_key=:k"""
+            + scope_sql,
+            t=tenant,
+            s=source,
+            k=external_key,
+            **scope_params,
+        )
+        if row:
+            return row["customer_id"]
+        customer = await one(
+            c,
+            "INSERT INTO memory_customers(id,tenant_id,business_id,workspace_id) "
+            "VALUES(:id,:t,:business_id,:workspace_id) RETURNING id",
+            id=uuid4(),
+            t=tenant,
+            **resource_scope_values(),
+        )
+        inserted = await one(
+            c,
+            """INSERT INTO memory_identities(
+                id,tenant_id,business_id,workspace_id,customer_id,source,external_key
+            ) VALUES(:id,:t,:business_id,:workspace_id,:cid,:s,:k)
+            ON CONFLICT (tenant_id,business_id,workspace_id,source,external_key)
+            DO NOTHING RETURNING customer_id""",
+            id=uuid4(),
+            t=tenant,
+            cid=customer["id"],
+            s=source,
+            k=external_key,
+            **resource_scope_values(),
+        )
+        if inserted:
+            return customer["id"]
+        # Lost the race: the winner committed (or rolled back, in which case
+        # our insert would have succeeded). The row must exist now.
+        row = await one(
+            c,
+            """SELECT customer_id FROM memory_identities
+            WHERE tenant_id=:t AND source=:s AND external_key=:k"""
+            + scope_sql,
+            t=tenant,
+            s=source,
+            k=external_key,
+            **scope_params,
+        )
+        if not row:
+            return customer["id"]
+        # Our customer row never got an identity; remove the orphan.
+        await execute(
+            c,
+            "DELETE FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
+            id=customer["id"],
+            t=tenant,
+            **scope_params,
+        )
+        return row["customer_id"]
+
+    async def active_items(self, tenant, customer_id, types=("profile", "preference"), limit=20):
+        """Active items for injection, newest first, count-capped by the caller.
+
+        Phase 4 (R7): with decay enabled the profile/preference rows also
+        pass the inline effective-confidence threshold; event search never
+        gets this filter. With decay off the query is exactly the Phase 3
+        one. Phase 6 (FR-1): each row also carries ``effective_confidence``
+        — the SQL-computed decayed score with decay on (same formula as the
+        filter), the stored confidence with decay off — so the injection log
+        can persist the ranking score without a second query.
+        """
+        clause, decay_params = "", {}
+        score_sql = "confidence"
+        if self._decay_enabled():
+            clause, decay_params = injection_filter_sql(self.settings)
+            score_sql = injection_score_sql()
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            return await many(
+                c,
+                """SELECT id,customer_id,type,key,content,confidence,status,source_type,source_ref,
+                prev_content,revision,updated_at,"""
+                + score_sql
+                + """ AS effective_confidence FROM memory_items
+                WHERE tenant_id=:t AND customer_id=:c AND status='active' AND type=ANY(:types)"""
+                + scope_sql
+                + clause
+                + " ORDER BY updated_at DESC,id DESC LIMIT :lim",
+                t=tenant,
+                c=customer_id,
+                types=list(types),
+                lim=limit,
+                **scope_params,
+                **decay_params,
+            )
+
+    async def active_flags(self, tenant, customer_id, limit):
+        """Active flag items for injection (FR-2), newest first."""
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            return await many(
+                c,
+                """SELECT id,customer_id,type,key,content,source_type,source_ref,updated_at
+                FROM memory_items
+                WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND status='active'"""
+                + scope_sql
+                + """
+                ORDER BY updated_at DESC,id DESC LIMIT :lim""",
+                t=tenant,
+                c=customer_id,
+                lim=limit,
+                **scope_params,
+            )
+
+    async def injection_items(
+        self, tenant, customer_id, max_items, types=("profile", "preference"), max_tokens=INJECT_MAX_TOKENS
+    ):
+        """Service-layer trimming: count and token budgets applied here (FR-3).
+
+        Phase 5 (C-4/C-5): ``types`` narrows the injected profile/preference
+        subset to the agent's allowed types; ``flag`` is never routed through
+        here and is unaffected by the filter.
+        """
+        items = await self.active_items(tenant, customer_id, types=types, limit=max_items)
+        return trim_items(items, max_items, max_tokens)
+
+    # ------------------------------------------------------------------
+    # Phase 3 event items (FR-1/FR-3/FR-4). Event rows are written by the
+    # event_write worker, never by the synchronous ticket path.
+    # ------------------------------------------------------------------
+
+    async def add_event_item(
+        self, c, tenant, customer_id, key, content, source_ref, expires_at=None,
+        clear_embedding=False, pii_hits=None,
+    ):
+        """Insert or overwrite one event item inside the caller's transaction.
+
+        Same-key upsert semantics mirror extraction: the previous content is
+        stashed in ``prev_content`` and human-maintained or deleted rows absorb
+        the write (returns ``None``) so staff corrections are never clobbered.
+        With ``clear_embedding`` (vector mode only — the column does not exist
+        otherwise) a content overwrite also clears the stale embedding so the
+        follow-up ``embed_and_save`` regenerates it instead of ranking on the
+        previous content's vector.
+
+        Phase 4 (R6): event content is PII-masked here — callers summarize
+        first, then this masks, so a truncated half-number cannot slip past
+        the patterns. When ``pii_hits`` (a list) is passed, the mask hit
+        count is appended so the caller can fold it into its audit details.
+        """
+        if self._masking_enabled():
+            content, hits = mask(content)
+            if pii_hits is not None:
+                pii_hits.append(hits)
+        params = {
+            "t": tenant,
+            "c": customer_id,
+            "key": key,
+            "content": content,
+            "ref": source_ref,
+            "exp": expires_at,
+            **resource_scope_values(),
+        }
+        scope_sql, scope_params = resource_scope_clause()
+        params.update(scope_params)
+        row = await one(
+            c,
+            """UPDATE memory_items SET content=:content,prev_content=content,
+            confidence=1.0,status='active',source_type='ticket',source_ref=:ref,
+            expires_at=:exp,revision=revision+1,last_referenced_at=now(),updated_at=now()
+            """
+            + (",embedding=NULL,embedding_failed=false\n            " if clear_embedding else "")
+            + """WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key"""
+            + scope_sql
+            + """
+            AND source_type<>'human' AND status<>'deleted' RETURNING id""",
+            **params,
+        )
+        if not row:
+            row = await one(
+                c,
+                """INSERT INTO memory_items(
+                    tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                    status,source_type,source_ref,expires_at
+                ) VALUES(
+                    :t,:business_id,:workspace_id,:c,'event',:key,:content,1.0,
+                    'active','ticket',:ref,:exp
+                )
+                ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+                DO NOTHING RETURNING id""",
+                **params,
+            )
+        return row["id"] if row else None
+
+    async def expire_open_ticket(self, c, tenant, customer_id, ticket_no):
+        """Soft-expire the in-flight injection row for one ticket (AC-6).
+
+        The row is kept (not deleted) so the audit trail survives; returns the
+        expired row id or ``None`` when there was nothing to expire.
+        """
+        scope_sql, scope_params = resource_scope_clause()
+        row = await one(
+            c,
+            """UPDATE memory_items SET status='expired',updated_at=now()
+            WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key
+            AND status='active'"""
+            + scope_sql
+            + " RETURNING id",
+            t=tenant,
+            c=customer_id,
+            key=OPEN_TICKET_PREFIX + ticket_no,
+            **scope_params,
+        )
+        return row["id"] if row else None
+
+    async def pending_event_items(self, tenant, customer_id, limit):
+        """In-flight injection items: open tickets and pending commitments,
+        newest first (FR-3)."""
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            return await many(
+                c,
+                """SELECT id,type,key,content,updated_at FROM memory_items
+                WHERE tenant_id=:t AND customer_id=:c AND type='event' AND status='active'
+                AND (key LIKE 'open_ticket:%' OR key LIKE 'commitment:%')"""
+                + scope_sql
+                + " ORDER BY updated_at DESC,id DESC LIMIT :lim",
+                t=tenant,
+                c=customer_id,
+                lim=limit,
+                **scope_params,
+            )
+
+    async def _upsert_suggestion(self, c, tenant, customer_id, op, content, source_ref):
+        """Park an extraction update as a pending suggestion row (FR-1, R4).
+
+        Human-maintained rows are never overwritten by the model; the update
+        becomes a ``<key>:suggested`` pending item instead, upserted so a
+        repeated extraction refreshes the same suggestion in place (the
+        same-key unique constraint keeps it idempotent). A previously
+        rejected (deleted) suggestion is not resurrected.
+        """
+        suggested_key = op["key"][:SUGGESTED_BASE_MAX] + SUGGESTED_SUFFIX
+        params = {
+            "t": tenant,
+            "c": customer_id,
+            "type": op["type"],
+            "key": suggested_key,
+            "content": content,
+            "confidence": op["confidence"],
+            "ref": source_ref,
+            **resource_scope_values(),
+        }
+        scope_sql, scope_params = resource_scope_clause()
+        params.update(scope_params)
+        row = await one(
+            c,
+            """UPDATE memory_items SET content=:content,confidence=:confidence,
+            source_type='extracted',source_ref=:ref,updated_at=now()
+            WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key
+            """
+            + scope_sql
+            + """
+            AND status='pending' RETURNING id""",
+            **params,
+        )
+        if not row:
+            row = await one(
+                c,
+                """INSERT INTO memory_items(
+                    tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                    status,source_type,source_ref
+                ) VALUES(
+                    :t,:business_id,:workspace_id,:c,:type,:key,:content,:confidence,
+                    'pending','extracted',:ref
+                )
+                ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+                DO NOTHING RETURNING id""",
+                **params,
+            )
+        return row
+
+    async def apply_extracted(
+        self, c, tenant, customer_id, ops, source_ref, auto, pending, write_mode="auto", types=None
+    ):
+        """Apply validated extraction ops inside the caller's transaction.
+
+        - op=add never overwrites: the same-key unique constraint absorbs
+          duplicates (P2-UT-09).
+        - op=update overwrites content, stashing the old value in
+          ``prev_content`` and bumping ``revision``; the shared-key mention
+          also refreshes ``last_referenced_at`` (P2-UT-08).
+        - Human-edited or deleted rows are protected from extraction updates:
+          a human correction must never be silently clobbered by the model.
+          Phase 4 (FR-1, R4): an update against a protected row is parked as
+          a pending ``:suggested`` item instead of vanishing.
+        - Phase 4 (R5): content is PII-masked before it persists; the batch
+          hit count rides back in ``counts['pii_masked']`` for the audit.
+        - Phase 5 (C-4/C-5): ``write_mode`` (auto/review) is routed through
+          ``route_confidence``; ``types`` drops any profile/preference item
+          outside the agent's allowed set (counted in ``dropped``). ``flag``
+          can never be written by extraction and is already excluded above.
+        """
+        allowed_types = set(types) if types else {"profile", "preference"}
+        counts = {"added": 0, "updated": 0, "pending": 0, "dropped": 0, "noop": 0, "pii_masked": 0}
+        for op in ops:
+            if op["op"] == "noop":
+                counts["noop"] += 1
+                continue
+            # Defence in depth (P0): only profile/preference may ever be
+            # written by extraction; validate_item already enforces this.
+            if op["type"] not in ("profile", "preference"):
+                counts["dropped"] += 1
+                continue
+            if op["type"] not in allowed_types:
+                counts["dropped"] += 1
+                continue
+            status = route_confidence(op["confidence"], auto, pending, write_mode)
+            if status is None:
+                counts["dropped"] += 1
+                continue
+            content = op["content"]
+            if self._masking_enabled():
+                content, hits = mask(content)
+                counts["pii_masked"] += hits
+            params = {
+                "t": tenant,
+                "c": customer_id,
+                "type": op["type"],
+                "key": op["key"],
+                "content": content,
+                "confidence": op["confidence"],
+                "status": status,
+                "ref": source_ref,
+                **resource_scope_values(),
+            }
+            scope_sql, scope_params = resource_scope_clause()
+            params.update(scope_params)
+            if op["op"] == "add":
+                row = await one(
+                    c,
+                    """INSERT INTO memory_items(
+                        tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                        status,source_type,source_ref
+                    ) VALUES(
+                        :t,:business_id,:workspace_id,:c,:type,:key,:content,:confidence,
+                        :status,'extracted',:ref
+                    )
+                    ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+                    DO NOTHING RETURNING id""",
+                    **params,
+                )
+            else:  # update: overwrite, or insert when the key is new
+                existing = await one(
+                    c,
+                    """SELECT id,protected,status FROM memory_items
+                    WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key"""
+                    + scope_sql,
+                    **params,
+                )
+                if existing and existing["protected"] and existing["status"] != "deleted":
+                    row = await self._upsert_suggestion(
+                        c, tenant, customer_id, op, content, source_ref
+                    )
+                    counts["pending" if row else "noop"] += 1
+                    continue
+                row = await one(
+                    c,
+                    """UPDATE memory_items SET content=:content,prev_content=content,
+                    confidence=:confidence,status=:status,source_type='extracted',source_ref=:ref,
+                    revision=revision+1,last_referenced_at=now(),updated_at=now()
+                    WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key
+                    """
+                    + scope_sql
+                    + """
+                    AND source_type<>'human' AND status<>'deleted' RETURNING id""",
+                    **params,
+                )
+                if row:
+                    counts["updated"] += 1
+                    continue
+                row = await one(
+                    c,
+                    """INSERT INTO memory_items(
+                        tenant_id,business_id,workspace_id,customer_id,type,key,content,confidence,
+                        status,source_type,source_ref
+                    ) VALUES(
+                        :t,:business_id,:workspace_id,:c,:type,:key,:content,:confidence,
+                        :status,'extracted',:ref
+                    )
+                    ON CONFLICT (tenant_id,business_id,workspace_id,customer_id,type,key)
+                    DO NOTHING RETURNING id""",
+                    **params,
+                )
+            if row:
+                counts["added" if status == "active" else "pending"] += 1
+            else:  # conflict on add, or a human/deleted row absorbed the update
+                counts["noop"] += 1
+        return counts
+
+    # ------------------------------------------------------------------
+    # Console management (FR-4). Every query is tenant-scoped; mutations
+    # write audit records without memory content (keys and counts only).
+    # ------------------------------------------------------------------
+
+    async def list_customers(
+        self, tenant, q="", page=1, page_size=20, with_stats=False, sort="updated", flag=None
+    ):
+        """Customer list; Phase 6 (FR-2) adds optional memory stats columns.
+
+        ``with_stats`` attaches one stats dict per row (totals per type,
+        pending count, active flag keys, last update) fetched in a single
+        batched GROUP BY query for the page — no N+1. ``sort`` orders by
+        pending or total memory counts (default: customer recency, the
+        Phase 2 behaviour); ``flag`` filters to customers carrying one
+        active service flag.
+        """
+        if sort not in ("updated", "pending", "total"):
+            raise DomainError("memory_sort_invalid")
+        if flag is not None and flag not in governance.FLAG_KEYS:
+            raise DomainError("memory_flag_key_invalid")
+        page = max(page, 1)
+        page_size = max(1, min(page_size, 100))
+        customer_scope_sql, scope_params = resource_scope_clause(alias="c")
+        scope_sql, _ = resource_scope_clause()
+        where = "c.tenant_id=:t" + customer_scope_sql
+        params = {"t": tenant, "lim": page_size, "off": (page - 1) * page_size}
+        params.update(scope_params)
+        if q:
+            where += (
+                """ AND EXISTS (SELECT 1 FROM memory_identities x
+                WHERE x.customer_id=c.id AND x.tenant_id=c.tenant_id"""
+                + scope_sql
+                + " AND x.external_key ILIKE :pattern)"
+            )
+            params["pattern"] = "%" + q + "%"
+        if flag:
+            where += (
+                """ AND EXISTS (SELECT 1 FROM memory_items f
+                WHERE f.customer_id=c.id AND f.tenant_id=c.tenant_id
+                """
+                + scope_sql
+                + " AND f.type='flag' AND f.status='active' AND f.key=:flag)"
+            )
+            params["flag"] = flag
+        order = "c.updated_at DESC,c.id DESC"
+        if sort == "pending":
+            order = (
+                """(SELECT count(*) FROM memory_items m
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id"""
+                + scope_sql
+                + """ AND m.status='pending'
+                ) DESC,"""
+                + order
+            )
+        elif sort == "total":
+            order = (
+                """(SELECT count(*) FROM memory_items m
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id
+                 """
+                + scope_sql
+                + """ AND m.status IN ('active','pending')) DESC,"""
+                + order
+            )
+        async with self.engine.connect() as c:
+            total = await one(
+                c,
+                "SELECT count(*) AS total FROM memory_customers c WHERE " + where,
+                **{k: v for k, v in params.items() if k not in ("lim", "off")},
+            )
+            items = await many(
+                c,
+                """SELECT c.id,c.created_at,c.updated_at,
+                (SELECT COALESCE(array_agg(i.external_key ORDER BY i.created_at),'{}')
+                 FROM memory_identities i WHERE i.customer_id=c.id AND i.tenant_id=c.tenant_id"""
+                 + scope_sql
+                 + """) AS external_keys,
+                (SELECT count(*)::int FROM memory_items m
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id"""
+                 + scope_sql
+                 + """ AND m.status<>'deleted'
+                ) AS item_count,
+                (SELECT max(m.updated_at) FROM memory_items m
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id"""
+                 + scope_sql
+                 + """ AND m.status<>'deleted'
+                ) AS last_active_at
+                FROM memory_customers c WHERE """
+                + where
+                + " ORDER BY "
+                + order
+                + " LIMIT :lim OFFSET :off",
+                **params,
+            )
+            if with_stats and items:
+                stats = await _memory_stats(c, tenant, [row["id"] for row in items])
+                for row in items:
+                    row["memory_stats"] = stats.get(
+                        row["id"],
+                        {
+                            "total": 0,
+                            "pending": 0,
+                            "profile": 0,
+                            "preference": 0,
+                            "event": 0,
+                            "flags": [],
+                            "last_updated_at": None,
+                        },
+                    )
+            return {
+                "items": items,
+                "total": total["total"],
+                "page": page,
+                "page_size": page_size,
+            }
+
+    async def customer_detail(self, tenant, customer_id):
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            customer = required(
+                await one(
+                    c,
+                    "SELECT id,created_at,updated_at FROM memory_customers "
+                    "WHERE id=:id AND tenant_id=:t" + scope_sql,
+                    id=customer_id,
+                    t=tenant,
+                    **scope_params,
+                ),
+                "memory_customer_not_found",
+            )
+            customer["identities"] = await many(
+                c,
+                """SELECT id,source,external_key,created_at FROM memory_identities
+                WHERE customer_id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " ORDER BY created_at",
+                id=customer_id,
+                t=tenant,
+                **scope_params,
+            )
+            customer["items"] = await many(
+                c,
+                """SELECT id,customer_id,type,key,content,confidence,status,source_type,source_ref,
+                prev_content,revision,protected,last_referenced_at,reference_count,updated_at
+                FROM memory_items
+                WHERE customer_id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " ORDER BY type,key",
+                id=customer_id,
+                t=tenant,
+                **scope_params,
+            )
+            # Phase 4 (FR-6.4): the console shows the live decayed score; the
+            # formula matches the injection filter and the daily migration.
+            table = half_lives(self.settings) if self.settings else DEFAULT_HALF_LIVES
+            now = datetime.now(UTC)
+            for item in customer["items"]:
+                item["effective_confidence"] = round(
+                    effective_confidence(
+                        item["confidence"],
+                        item["type"],
+                        item["protected"],
+                        item["last_referenced_at"],
+                        now,
+                        table,
+                    ),
+                    6,
+                )
+            return customer
+
+    async def pending_items(self, tenant, page=1, page_size=20):
+        page = max(page, 1)
+        page_size = max(1, min(page_size, 100))
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            total = await one(
+                c,
+                "SELECT count(*) AS total FROM memory_items WHERE tenant_id=:t AND status='pending'"
+                + scope_sql,
+                t=tenant,
+                **scope_params,
+            )
+            items = await many(
+                c,
+                """SELECT m.id,m.customer_id,m.type,m.key,m.content,m.confidence,m.status,
+                m.source_type,m.source_ref,m.prev_content,m.revision,m.updated_at,
+                (SELECT COALESCE(array_agg(i.external_key ORDER BY i.created_at),'{}')
+                 FROM memory_identities i WHERE i.customer_id=m.customer_id AND i.tenant_id=m.tenant_id"""
+                + scope_sql
+                + """
+                ) AS customer_external_keys
+                FROM memory_items m WHERE m.tenant_id=:t AND m.status='pending'"""
+                + scope_sql.replace("business_id", "m.business_id").replace(
+                    "workspace_id", "m.workspace_id"
+                )
+                + """
+                ORDER BY m.updated_at DESC,m.id DESC LIMIT :lim OFFSET :off""",
+                t=tenant,
+                lim=page_size,
+                off=(page - 1) * page_size,
+                **scope_params,
+            )
+            return {
+                "items": items,
+                "total": total["total"],
+                "page": page,
+                "page_size": page_size,
+            }
+
+    async def _item(self, c, tenant, item_id, lock=False):
+        scope_sql, scope_params = resource_scope_clause()
+        return required(
+            await one(
+                c,
+                "SELECT * FROM memory_items WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + (" FOR UPDATE" if lock else ""),
+                id=item_id,
+                t=tenant,
+                **scope_params,
+            ),
+            "memory_item_not_found",
+        )
+
+    async def edit_item(self, tenant, actor, item_id, content):
+        """Human edit: content replaced, previous value kept in prev_content.
+
+        Phase 4 (R5/R18): the edit goes through PII masking (hit count in the
+        audit details) and marks the row ``protected`` alongside
+        ``source_type='human'``, keeping the two in lockstep.
+        """
+        pii_hits = 0
+        if self._masking_enabled():
+            content, pii_hits = mask(content)
+        async with self.engine.begin() as c:
+            item = await self._item(c, tenant, item_id, lock=True)
+            if item["status"] == "deleted":
+                raise DomainError("memory_item_deleted", 409)
+            scope_sql, scope_params = resource_scope_clause()
+            row = await one(
+                c,
+                """UPDATE memory_items SET content=:content,prev_content=content,
+                source_type='human',protected=true,confidence=1.0,source_ref=:actor,
+                revision=revision+1,updated_at=now()
+                WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " RETURNING *",
+                id=item_id,
+                t=tenant,
+                content=content,
+                actor=actor,
+                **scope_params,
+            )
+            await audit(
+                c,
+                tenant,
+                actor,
+                "memory.item.edited",
+                item_id,
+                customer_id=str(item["customer_id"]),
+                type=item["type"],
+                key=item["key"],
+                pii_masked=pii_hits,
+            )
+            return row
+
+    async def release_item(self, tenant, actor, item_id):
+        """Release a protected row back to automatic management (FR-1).
+
+        The row keeps its content and status; only the ownership markers flip
+        (``protected=false, source_type='extracted'`` — R18's invariant), so
+        extraction updates apply to it again and decay treats it normally.
+        """
+        async with self.engine.begin() as c:
+            item = await self._item(c, tenant, item_id, lock=True)
+            if item["status"] == "deleted":
+                raise DomainError("memory_item_deleted", 409)
+            if not item["protected"]:
+                raise DomainError("memory_item_not_protected", 409)
+            scope_sql, scope_params = resource_scope_clause()
+            row = await one(
+                c,
+                """UPDATE memory_items SET protected=false,source_type='extracted',
+                updated_at=now() WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " RETURNING *",
+                id=item_id,
+                t=tenant,
+                **scope_params,
+            )
+            await audit(
+                c,
+                tenant,
+                actor,
+                "memory.item.released",
+                item_id,
+                customer_id=str(item["customer_id"]),
+                type=item["type"],
+                key=item["key"],
+            )
+            return row
+
+    async def _set_status(
+        self, tenant, actor, item_id, action, allowed, target, conflict, repeat_ok=False,
+        refresh_on=(),
+    ):
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.begin() as c:
+            item = await self._item(c, tenant, item_id, lock=True)
+            if item["status"] == target:
+                # Only deletion may be safely retried; repeating a restore or a
+                # pending-queue decision is a conflict, not a no-op.
+                if repeat_ok:
+                    return item
+                raise DomainError(conflict, 409)
+            if item["status"] not in allowed:
+                raise DomainError(conflict, 409)
+            row = await one(
+                c,
+                "UPDATE memory_items SET status=:status,updated_at=now()"
+                # R19: reviving an expired row resets its reference clock so
+                # the daily pass does not immediately re-expire it.
+                + (",last_referenced_at=now()" if item["status"] in refresh_on else "")
+                + " WHERE id=:id AND tenant_id=:t"
+                + scope_sql
+                + " RETURNING *",
+                id=item_id,
+                t=tenant,
+                status=target,
+                **scope_params,
+            )
+            await audit(
+                c,
+                tenant,
+                actor,
+                action,
+                item_id,
+                customer_id=str(item["customer_id"]),
+                type=item["type"],
+                key=item["key"],
+                old_status=item["status"],
+                new_status=target,
+            )
+            return row
+
+    async def delete_item(self, tenant, actor, item_id):
+        return await self._set_status(
+            tenant,
+            actor,
+            item_id,
+            "memory.item.deleted",
+            {"pending", "active"},
+            "deleted",
+            "memory_item_not_active",
+            repeat_ok=True,
+        )
+
+    async def restore_item(self, tenant, actor, item_id):
+        # R19: expired rows restore to active as well, with a fresh clock.
+        return await self._set_status(
+            tenant,
+            actor,
+            item_id,
+            "memory.item.restored",
+            {"deleted", "expired"},
+            "active",
+            "memory_item_not_deleted",
+            refresh_on={"expired"},
+        )
+
+    async def confirm_item(self, tenant, actor, item_id):
+        """Confirm a pending item; refreshes the reference clock (R19).
+
+        R4 merge semantics: confirming a ``:suggested`` row applies the
+        suggested content onto the human-maintained base row (prev_content
+        stashed, revision bumped, ownership untouched) and physically removes
+        the suggestion. When the base row no longer exists the confirm
+        degrades to an ordinary activation.
+        """
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.begin() as c:
+            item = await self._item(c, tenant, item_id, lock=True)
+            if item["status"] != "pending":
+                raise DomainError("memory_item_not_pending", 409)
+            if item["key"].endswith(SUGGESTED_SUFFIX):
+                base_key = item["key"][: -len(SUGGESTED_SUFFIX)]
+                base = await one(
+                    c,
+                    """SELECT * FROM memory_items
+                    WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key
+                    AND status<>'deleted'"""
+                    + scope_sql
+                    + " FOR UPDATE",
+                    t=tenant,
+                    c=item["customer_id"],
+                    type=item["type"],
+                    key=base_key,
+                    **scope_params,
+                )
+                if base:
+                    row = await one(
+                        c,
+                        """UPDATE memory_items SET content=:content,prev_content=:prev,
+                        revision=revision+1,last_referenced_at=now(),updated_at=now()
+                        WHERE id=:id"""
+                        + scope_sql
+                        + " RETURNING *",
+                        id=base["id"],
+                        content=item["content"],
+                        prev=base["content"],
+                        **scope_params,
+                    )
+                    await execute(
+                        c,
+                        "DELETE FROM memory_items WHERE id=:id AND tenant_id=:t" + scope_sql,
+                        id=item["id"],
+                        t=tenant,
+                        **scope_params,
+                    )
+                    await audit(
+                        c,
+                        tenant,
+                        actor,
+                        "memory.item.confirmed",
+                        base["id"],
+                        customer_id=str(item["customer_id"]),
+                        type=item["type"],
+                        key=base_key,
+                        old_status="pending",
+                        new_status="active",
+                        merged_from=str(item["id"]),
+                    )
+                    return row
+            row = await one(
+                c,
+                """UPDATE memory_items SET status='active',last_referenced_at=now(),
+                updated_at=now() WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + " RETURNING *",
+                id=item_id,
+                t=tenant,
+                **scope_params,
+            )
+            await audit(
+                c,
+                tenant,
+                actor,
+                "memory.item.confirmed",
+                item_id,
+                customer_id=str(item["customer_id"]),
+                type=item["type"],
+                key=item["key"],
+                old_status="pending",
+                new_status="active",
+            )
+            return row
+
+    async def reject_item(self, tenant, actor, item_id):
+        return await self._set_status(
+            tenant,
+            actor,
+            item_id,
+            "memory.item.rejected",
+            {"pending"},
+            "deleted",
+            "memory_item_not_pending",
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 4 governance (FR-2/FR-4/FR-5). Thin wrappers owning the
+    # transaction boundary; the logic lives in governance.py.
+    # ------------------------------------------------------------------
+
+    async def upsert_flag(self, tenant, actor, customer_id, key, content):
+        """Create or update one human-sourced flag (FR-2)."""
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.begin() as c:
+            required(
+                await one(
+                    c,
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
+                    id=customer_id,
+                    t=tenant,
+                    **scope_params,
+                ),
+                "memory_customer_not_found",
+            )
+            flag_id = await governance.upsert_flag(
+                c,
+                tenant,
+                customer_id,
+                key,
+                content,
+                "human",
+                source_ref=actor,
+                actor=actor,
+                settings=self.settings,
+            )
+            if flag_id is None:
+                # D5: governance returns None for no-op writes (identical
+                # active flag); the row exists, so re-read it for the
+                # response instead of reporting a phantom id.
+                flag_id = required(
+                    await one(
+                        c,
+                        """SELECT id FROM memory_items
+                        WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key"""
+                        + scope_sql,
+                        t=tenant,
+                        c=customer_id,
+                        key=key,
+                        **scope_params,
+                    )
+                )["id"]
+            return {"id": str(flag_id)}
+
+    async def remove_flag(self, tenant, actor, customer_id, key):
+        return await governance.remove_flag(self.engine, tenant, actor, customer_id, key)
+
+    async def delete_customer(self, tenant, actor, customer_id, store=None):
+        return await governance.delete_customer(
+            self.engine, tenant, actor, customer_id, store=store
+        )
+
+    async def merge_customers(self, tenant, actor, source_id, target_id):
+        return await governance.merge_customers(self.engine, tenant, actor, source_id, target_id)
+
+    # ------------------------------------------------------------------
+    # Phase 6 injection explainability and lifecycle queries (FR-2/FR-4/
+    # FR-5). Every query is tenant-scoped; detail rows carry ids, sections
+    # and scores only — item content is joined from the current row at
+    # query time and physically deleted items surface as "已删除" markers,
+    # never reconstructed content (C3/C4).
+    # ------------------------------------------------------------------
+
+    def _effective_now(self, item):
+        """Live effective confidence for one console row (same formula as FR-6.4)."""
+        table = half_lives(self.settings) if self.settings else DEFAULT_HALF_LIVES
+        return round(
+            effective_confidence(
+                item["confidence"],
+                item["type"],
+                item["protected"],
+                item["last_referenced_at"],
+                datetime.now(UTC),
+                table,
+            ),
+            6,
+        )
+
+    async def customer_memory_stats(self, tenant, customer_ids):
+        """Batched list-layer stats for a set of customers (FR-2)."""
+        if not customer_ids:
+            return {}
+        async with self.engine.connect() as c:
+            return await _memory_stats(c, tenant, customer_ids)
+
+    async def list_injections(self, tenant, customer_id, limit=50):
+        """Run-dimension injection history for one customer, newest first (FR-4)."""
+        limit = max(1, min(limit, 200))
+        scope_sql, scope_params = resource_scope_clause(alias="l")
+        async with self.engine.connect() as c:
+            required(
+                await one(
+                    c,
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t"
+                    + scope_sql.replace("l.", ""),
+                    id=customer_id,
+                    t=tenant,
+                    **scope_params,
+                ),
+                "memory_customer_not_found",
+            )
+            rows = await many(
+                c,
+                """SELECT l.run_id, max(l.injected_at) AS injected_at,
+                count(*)::int AS item_count, r.conversation_id
+                FROM memory_injection_log l
+                LEFT JOIN runtime_runs r ON r.id=l.run_id AND r.tenant_id=l.tenant_id
+                WHERE l.tenant_id=:t AND l.customer_id=:c"""
+                + scope_sql
+                + " GROUP BY l.run_id, r.conversation_id"
+                + " ORDER BY max(l.injected_at) DESC,l.run_id DESC LIMIT :lim",
+                t=tenant,
+                c=customer_id,
+                lim=limit,
+                **scope_params,
+            )
+            return {"items": rows}
+
+    async def injection_detail(self, tenant, run_id):
+        """Item-level detail of one run's injection (FR-4; shared by the
+        conversation view and the injection-log drill-down).
+
+        Historical runs without detail rows (pre-Phase-6 data) return an
+        empty list, not an error (AC-8). Items physically deleted since the
+        injection surface as ``item_deleted`` markers with no key/type —
+        content is never reconstructed (C3).
+        """
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            required(
+                await one(
+                    c,
+                    "SELECT id FROM runtime_runs WHERE id=:id AND tenant_id=:t" + scope_sql,
+                    id=run_id,
+                    t=tenant,
+                    **scope_params,
+                ),
+                "run_not_found",
+            )
+            rows = await many(
+                c,
+                """SELECT l.item_id, l.customer_id, l.section, l.score, l.injected_at,
+                m.key, m.type, m.status, (m.id IS NULL) AS item_deleted
+                FROM memory_injection_log l
+                LEFT JOIN memory_items m ON m.id=l.item_id AND m.tenant_id=l.tenant_id
+                WHERE l.tenant_id=:t AND l.run_id=:r"""
+                + scope_sql.replace("business_id", "l.business_id").replace(
+                    "workspace_id", "l.workspace_id"
+                )
+                + " ORDER BY l.id",
+                t=tenant,
+                r=run_id,
+                **scope_params,
+            )
+            return {"run_id": str(run_id), "items": rows}
+
+    async def item_injections(self, tenant, item_id, limit=20):
+        """Reverse lookup: the recent runs one item was injected into (FR-4)."""
+        limit = max(1, min(limit, 100))
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            rows = await many(
+                c,
+                """SELECT l.run_id, l.section, l.score, l.injected_at, r.conversation_id
+                FROM memory_injection_log l
+                LEFT JOIN runtime_runs r ON r.id=l.run_id AND r.tenant_id=l.tenant_id
+                WHERE l.tenant_id=:t AND l.item_id=:i"""
+                + scope_sql.replace("business_id", "l.business_id").replace(
+                    "workspace_id", "l.workspace_id"
+                )
+                + " ORDER BY l.injected_at DESC,l.id DESC LIMIT :lim",
+                t=tenant,
+                i=item_id,
+                lim=limit,
+                **scope_params,
+            )
+            if not rows:
+                # An unknown (or cross-tenant) item id is a 404; an existing
+                # item that was simply never injected is an empty list.
+                required(
+                    await one(
+                        c,
+                        "SELECT id FROM memory_items WHERE id=:id AND tenant_id=:t" + scope_sql,
+                        id=item_id,
+                        t=tenant,
+                        **scope_params,
+                    ),
+                    "memory_item_not_found",
+                )
+            return {"items": rows}
+
+    async def item_timeline(self, tenant, item_id, limit=100):
+        """Single-item lifecycle (FR-5): full current fields, the audit
+        timeline and an injection summary.
+
+        The timeline renders from ``audit_records`` whose payloads never
+        carry memory content (Phase 4 C4). A physically deleted item keeps
+        its timeline and injection summary with ``item=None`` instead of a
+        404 — its history is exactly what the operator came for.
+        """
+        limit = max(1, min(limit, 500))
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            item = await one(
+                c,
+                "SELECT * FROM memory_items WHERE id=:id AND tenant_id=:t" + scope_sql,
+                id=item_id,
+                t=tenant,
+                **scope_params,
+            )
+            timeline = await many(
+                c,
+                """SELECT id,actor,action,resource,details,created_at FROM audit_records
+                WHERE tenant_id=:t AND action LIKE 'memory.%' AND resource=:rid
+                ORDER BY id DESC LIMIT :lim""",
+                t=tenant,
+                rid=str(item_id),
+                lim=limit,
+            )
+            injection = await one(
+                c,
+                """SELECT count(*)::int AS injection_count, max(injected_at) AS last_injected_at
+                FROM memory_injection_log WHERE tenant_id=:t AND item_id=:i"""
+                + scope_sql,
+                t=tenant,
+                i=item_id,
+                **scope_params,
+            )
+            if item is None and not timeline and not injection["injection_count"]:
+                raise DomainError("memory_item_not_found", 404)
+            if item is not None:
+                item["effective_confidence"] = self._effective_now(item)
+            return {
+                "item": item,
+                "timeline": timeline,
+                "injection_count": injection["injection_count"],
+                "last_injected_at": injection["last_injected_at"],
+            }
+
+    async def customer_audit_timeline(self, tenant, customer_id, limit=100):
+        """Customer-dimension ``memory.*`` audit timeline, newest first (FR-3).
+
+        Matches the customer-level audits (resource = customer id) and every
+        item-level audit carrying ``details.customer_id``; payloads are
+        content-free by the Phase 4 C4 invariant, so the response introduces
+        no new disclosure surface.
+        """
+        limit = max(1, min(limit, 500))
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.connect() as c:
+            required(
+                await one(
+                    c,
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t" + scope_sql,
+                    id=customer_id,
+                    t=tenant,
+                    **scope_params,
+                ),
+                "memory_customer_not_found",
+            )
+            rows = await many(
+                c,
+                """SELECT id,actor,action,resource,details,created_at FROM audit_records
+                WHERE tenant_id=:t AND action LIKE 'memory.%'
+                AND (resource=:cid OR details->>'customer_id'=:cid)"""
+                + scope_sql
+                + " ORDER BY id DESC LIMIT :lim",
+                t=tenant,
+                cid=str(customer_id),
+                lim=limit,
+                **scope_params,
+            )
+            return {"items": rows}

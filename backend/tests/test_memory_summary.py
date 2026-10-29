@@ -5,14 +5,15 @@ Database-bound cases with UT numbers (task merge, retry transitions) live in
 test_memory_postgres.py.
 """
 
+from types import SimpleNamespace
+
 import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent_platform.modules.agent_config.service import AgentConfig
-from agent_platform.modules.agent_runtime.engine import RuntimeEngine
-from agent_platform.modules.memory.bootstrap import embedded_memory_worker
-from agent_platform.modules.memory.summary import (
+from agent_platform.business_capabilities.agent_config.service import AgentConfig
+from agent_platform.business_capabilities.memory.bootstrap import embedded_memory_worker
+from agent_platform.business_capabilities.memory.summary import (
     INJECTION_HEADER,
     SummaryError,
     backoff_seconds,
@@ -22,9 +23,10 @@ from agent_platform.modules.memory.summary import (
     require_binding,
     trim_dropped,
 )
-from agent_platform.modules.memory.worker import MemoryWorker
-from agent_platform.modules.tool_gateway.service import ToolGateway
-from agent_platform.settings import Settings
+from agent_platform.business_capabilities.memory.worker import MemoryWorker
+from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
+from agent_platform.core_platform.tool_gateway.service import ToolGateway
 
 asyncio_mark = pytest.mark.asyncio
 
@@ -119,15 +121,14 @@ def test_p1_ut_10_backoff_grows_exponentially_and_is_capped():
 class _DummyServices:
     """Assembly only stores engine/gateway; no database is touched."""
 
-    class repository:
-        engine = None
-
-    class platform:
-        gateway = None
+    groups = SimpleNamespace(
+        runtime=SimpleNamespace(engine=None, gateway=None),
+        business=SimpleNamespace(memory_store=None),
+    )
 
 
 def test_p1_ut_12_embedded_worker_assembly_follows_deployment_flags():
-    services = _DummyServices()
+    services = _DummyServices().groups
     # All four embedded_worker × summary_enabled combinations.
     both_off = Settings(_env_file=None, embedded_worker=False, summary_enabled=False)
     assert embedded_memory_worker(services, both_off) is None
@@ -271,7 +272,7 @@ async def test_engine_reports_no_dropped_messages_inside_window():
 async def test_demo_model_never_calls_tools_the_caller_did_not_offer():
     # Regression: a summary prompt quoting an earlier demo reply (which mentions
     # "查询演示") must get plain text back when the request carries no tools.
-    from agent_platform.modules.model_gateway.service import DemoModel
+    from agent_platform.core_platform.platform_services.model_gateway.service import DemoModel
 
     reply = await DemoModel([]).ainvoke([HumanMessage(content="此前回复提到查询演示链路")])
     assert not reply.tool_calls and reply.content.strip()

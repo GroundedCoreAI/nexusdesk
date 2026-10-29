@@ -31,9 +31,9 @@ from test_memory_governance_postgres import (
 )
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.memory.decay import daily_migration
-from agent_platform.modules.memory.governance import delete_customer, merge_customers
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.business_capabilities.memory.decay import daily_migration
+from agent_platform.business_capabilities.memory.governance import delete_customer, merge_customers
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -290,7 +290,7 @@ async def test_p6_it_04_detail_insert_failure_rolls_back_whole_finish(platform):
 async def test_p6_it_05_three_entry_points_agree_and_deleted_items_degrade(platform):
     client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     customer_id = await make_customer(engine, tenant)
     item1 = await add_item(engine, tenant, customer_id, "profile", "name", "张三")
     item2 = await add_item(engine, tenant, customer_id, "preference", "style", "简洁")
@@ -389,7 +389,7 @@ async def test_p6_it_07_customer_delete_cascades_detail_rows(platform):
 async def test_p6_it_08_merge_repoints_detail_rows_to_target(platform):
     client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     source_id = await make_customer(engine, tenant)
     target_id = await make_customer(engine, tenant)
     await add_item(engine, tenant, source_id, "profile", "name", "张三")
@@ -419,7 +419,7 @@ async def test_p6_it_08_merge_repoints_detail_rows_to_target(platform):
 async def test_p6_it_09_item_timeline_replays_full_lifecycle(platform):
     client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(
         engine, tenant, customer_id, "preference", "style", "简洁", status="pending"
@@ -461,7 +461,7 @@ async def test_p6_it_09_item_timeline_replays_full_lifecycle(platform):
 async def test_p6_ut_03_customer_memory_stats_matches_direct_counts(platform):
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     c1 = await make_customer(engine, tenant)
     await add_item(engine, tenant, c1, "profile", "name", "张三")
     await add_item(engine, tenant, c1, "profile", "company", "某公司")
@@ -522,7 +522,7 @@ async def test_p6_ut_03_customer_memory_stats_matches_direct_counts(platform):
 async def test_p6_ut_04_timeline_payload_exposes_prev_content_for_diff(platform):
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(engine, tenant, customer_id, "profile", "name", "张三")
 
@@ -544,7 +544,7 @@ async def test_p6_ut_04_timeline_payload_exposes_prev_content_for_diff(platform)
 async def test_p6_it_10_audit_and_injection_payloads_carry_no_content_or_pii(platform):
     client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(
         engine, tenant, customer_id, "profile", "name", "张三 电话13812345678"
@@ -587,7 +587,7 @@ async def test_p6_it_10_audit_and_injection_payloads_carry_no_content_or_pii(pla
 async def test_p6_it_11_switch_off_writes_counts_only_and_queries_degrade_empty(platform):
     client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     customer_id = await make_customer(engine, tenant)
     await add_item(engine, tenant, customer_id, "profile", "name", "张三")
     conversation_id = await _bound_conversation(engine, tenant, customer_id)
@@ -707,7 +707,7 @@ async def test_p6_api_02_with_stats_columns_and_constant_query_count(platform):
 async def test_p6_api_03_timeline_endpoints_return_ordered_payloads(platform):
     client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     customer_id = await make_customer(engine, tenant)
     item_id = await add_item(
         engine, tenant, customer_id, "profile", "name", "张三", status="pending"
@@ -808,7 +808,7 @@ async def test_p6_api_04_cross_tenant_injection_views_are_404(platform):
 async def test_p6_api_05_historical_run_without_detail_returns_empty(platform):
     client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     customer_id = await make_customer(engine, tenant)
     conversation_id = await _bound_conversation(engine, tenant, customer_id)
     historical_run = await insert_run(engine, tenant, conversation_id)

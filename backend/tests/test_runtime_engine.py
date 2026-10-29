@@ -5,10 +5,10 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from agent_platform.modules.agent_runtime.engine import RuntimeEngine
-from agent_platform.modules.agent_runtime.schemas import RuntimeFault
-from agent_platform.modules.tool_gateway.service import HttpTool, ToolGateway
-from agent_platform.settings import Settings
+from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
+from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
+from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGateway
 
 pytestmark = pytest.mark.asyncio
 

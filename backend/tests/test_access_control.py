@@ -2,7 +2,7 @@
 import pytest
 from test_platform_postgres import platform  # noqa: F401
 
-from agent_platform.platform.identity.permissions import (
+from agent_platform.core_platform.platform_services.identity.permissions import (
     ROLE_PERMISSIONS,
     permissions_for,
 )
@@ -114,8 +114,8 @@ async def test_member_invite_role_sessions_and_audit(platform):
     assert revoked.status_code == 200 and revoked.json()["revoked"] == 1
     assert (await client.get("/api/v1/me", headers=headers)).status_code == 401
 
-    async with runtime.platform.engine.connect() as c:
-        from agent_platform.platform.persistence.store import many
+    async with runtime.groups.runtime.engine.connect() as c:
+        from agent_platform.core_platform.platform_services.persistence.store import many
 
         actions = {
             row["action"]

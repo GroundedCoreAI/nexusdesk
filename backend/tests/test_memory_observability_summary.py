@@ -7,7 +7,7 @@ pinned here, along with the shared rate convention (None on a zero
 denominator).
 """
 
-from agent_platform.modules.observability.service import (
+from agent_platform.core_platform.platform_services.observability.service import (
     _injection_from_detail,
     _injection_from_events,
     _rate,

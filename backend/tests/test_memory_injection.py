@@ -12,8 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from agent_platform.modules.agent_runtime.worker import RuntimeWorker
-from agent_platform.modules.memory.service import (
+from agent_platform.business_capabilities.memory.service import (
     BLACKLIST_INSTRUCTION,
     EVENT_HEADER,
     FLAG_HEADER,
@@ -23,7 +22,8 @@ from agent_platform.modules.memory.service import (
     render_flag_injection,
     render_memory_injection,
 )
-from agent_platform.settings import Settings
+from agent_platform.core_platform.agent_runtime.worker import RuntimeWorker
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 asyncio_mark = pytest.mark.asyncio
 

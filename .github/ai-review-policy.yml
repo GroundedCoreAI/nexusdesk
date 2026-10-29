@@ -43,10 +43,10 @@ review:
     - "backend/migrations/**"
     - "backend/alembic.ini"
     # Authentication, authorization, secrets, permission boundaries.
-    - "backend/src/agent_platform/platform/identity/**"
-    - "backend/src/agent_platform/platform/secrets/**"
-    - "backend/src/agent_platform/modules/access_control/**"
-    - "backend/src/agent_platform/modules/policy/**"
+    - "backend/src/agent_platform/core_platform/platform_services/identity/**"
+    - "backend/src/agent_platform/core_platform/platform_services/secrets/**"
+    - "backend/src/agent_platform/core_platform/platform_services/access_control/**"
+    - "backend/src/agent_platform/core_platform/policy_harness/**"
     # Infrastructure, deployment, CI/CD.
     - "deploy/**"
     - "Dockerfile"

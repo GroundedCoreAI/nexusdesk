@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 platform = _platform_fixture
 
@@ -14,7 +14,7 @@ ROOT = "/api/v1/knowledge-workspace"
 @pytest.mark.postgres
 async def test_preview_task_progress_cancel_and_paging(platform):
     client, services, settings = platform
-    w = services.platform.knowledge_workspace
+    w = services.groups.business.knowledge_workspace
     upload = await client.post(
         ROOT + "/uploads?filename=task.md", content=("段落内容。" * 500).encode()
     )

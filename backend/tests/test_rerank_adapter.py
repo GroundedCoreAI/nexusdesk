@@ -3,8 +3,8 @@ import json
 import httpx
 import pytest
 
-from agent_platform.modules.model_gateway.adapters import invoke_http
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.model_gateway.adapters import invoke_http
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 
 @pytest.mark.asyncio

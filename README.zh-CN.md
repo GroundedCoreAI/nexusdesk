@@ -175,7 +175,7 @@ flowchart LR
 | 了解架构和扩展模块 | [模块架构](docs/architecture.md) |
 | 理解 Agent 执行机制 | [Runtime 文档](docs/runtime.md) |
 | 配置知识库 | [知识库工作台](docs/knowledge-workspace.md) |
-| 接入模型服务 | [模型网关协议](backend/src/agent_platform/modules/model_gateway/PROTOCOL.md) |
+| 接入模型服务 | [模型网关协议](backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md) |
 | 接入业务应用 | [API 说明](docs/api.md) · [开放平台](docs/open-platform.md) |
 | 查看版本更新 | [更新日志](CHANGELOG.md) |
 

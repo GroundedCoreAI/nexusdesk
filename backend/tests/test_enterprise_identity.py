@@ -10,8 +10,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from test_open_platform import PUBLIC, ROOT, application
 from test_platform_postgres import create_agent, execute_next, platform  # noqa: F401
 
-from agent_platform.modules.open_platform.idp import IdentityProviders
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.business_capabilities.open_platform.idp import IdentityProviders
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 IDENTITY = "/api/v1/open-platform/identity"
@@ -55,7 +55,7 @@ async def mock_flow(
     async def exchange(*args):
         return subject, "Employee"
 
-    e = services.platform.open_platform.enterprise
+    e = services.groups.application.open_platform.enterprise
     monkeypatch.setattr(e.idp, "authorize", authorize)
     monkeypatch.setattr(e.idp, "exchange", exchange)
     params = {"channel": "a" * 40}

@@ -10,9 +10,9 @@ from langchain_core.messages import HumanMessage
 from test_platform_postgres import conversation, execute_next
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.model_gateway.contracts import ChatRequest
-from agent_platform.modules.model_gateway.gateway import GatewayChatModel
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.model_gateway.contracts import ChatRequest
+from agent_platform.core_platform.platform_services.model_gateway.gateway import GatewayChatModel
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 gateway_platform = _platform_fixture
@@ -115,9 +115,9 @@ async def test_six_operations_and_metadata_only_logs(gateway_platform, op):
         with wave.open(io.BytesIO(output.content)) as decoded:
             assert decoded.getnframes() > 0
     with pytest.raises(DomainError):
-        await services.platform.gateway.catalog.resolve("another-tenant", profile["id"], 1)
+        await services.groups.runtime.gateway.catalog.resolve("another-tenant", profile["id"], 1)
     with pytest.raises(DomainError):
-        await services.platform.gateway.media("another-tenant", audio["id"])
+        await services.groups.runtime.gateway.media("another-tenant", audio["id"])
 
 
 async def test_version_freeze_conflicts_role_and_disable(gateway_platform):
@@ -137,8 +137,8 @@ async def test_version_freeze_conflicts_role_and_disable(gateway_platform):
     assert (
         await client.post(ROOT + f"/profiles/{profile['id']}/publish", json={"revision": 1})
     ).json()["version"] == 2
-    original = await services.platform.gateway.catalog.resolve(settings.tenant_id, profile["id"], 1)
-    latest = await services.platform.gateway.catalog.resolve(settings.tenant_id, profile["id"], 2)
+    original = await services.groups.runtime.gateway.catalog.resolve(settings.tenant_id, profile["id"], 1)
+    latest = await services.groups.runtime.gateway.catalog.resolve(settings.tenant_id, profile["id"], 2)
     assert original["routes"][0]["model"]["model_name"] == "demo"
     assert latest["routes"][0]["model"]["model_name"] == "changed"
     assert (
@@ -182,7 +182,7 @@ async def test_runtime_binding_and_capability_validation(gateway_platform):
     assert (
         await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
     ).status_code == 200
-    model = GatewayChatModel(services.platform.gateway, settings.tenant_id, profile["id"], 1, [])
+    model = GatewayChatModel(services.groups.runtime.gateway, settings.tenant_id, profile["id"], 1, [])
     assert "演示" in (await model.ainvoke([HumanMessage(content="hello")])).content
     conv = await conversation(client, agent["id"])
     submitted = await client.post(
@@ -192,7 +192,7 @@ async def test_runtime_binding_and_capability_validation(gateway_platform):
     assert submitted.status_code in (200, 202), submitted.text
     run = await execute_next(services, settings)
     assert run["status"] == "completed"
-    records = await services.platform.gateway.records(settings.tenant_id)
+    records = await services.groups.runtime.gateway.records(settings.tenant_id)
     assert any(str(r["run_id"]) == str(run["id"]) for r in records)
     _, _, embed = await setup(client, "embed")
     body["config"]["model_profile_id"] = embed["id"]
@@ -205,7 +205,7 @@ async def test_runtime_binding_and_capability_validation(gateway_platform):
 async def test_ainvoke_stream_emits_deltas_and_returns_full_message(gateway_platform):
     client, services, settings = gateway_platform
     _, _, profile = await setup(client)
-    model = GatewayChatModel(services.platform.gateway, settings.tenant_id, profile["id"], 1, [])
+    model = GatewayChatModel(services.groups.runtime.gateway, settings.tenant_id, profile["id"], 1, [])
     deltas = []
 
     async def on_delta(delta):
@@ -244,7 +244,7 @@ async def test_http_retry_redaction_and_usage(gateway_platform):
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         response = await client.post(
             ROOT + "/invoke",
             json={
@@ -294,7 +294,7 @@ async def test_malformed_provider_results_rejected(gateway_platform, op, raw, pa
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=raw))
     ) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         response = await client.post(
             ROOT + "/invoke",
             json={
@@ -319,7 +319,7 @@ async def test_timeout_and_cancellation_release_slots(gateway_platform):
         await asyncio.sleep(10)
         return httpx.Response(200)
 
-    gateway = services.platform.gateway
+    gateway = services.groups.runtime.gateway
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
         gateway.client = mock
         request = ChatRequest(messages=[{"role": "user", "content": "hello"}])
@@ -390,7 +390,7 @@ async def test_streaming_output_and_no_retry_after_delta(gateway_platform, compl
         return httpx.Response(200, content=body, headers={"Content-Type": "text/event-stream"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         response = await client.post(
             ROOT + "/stream",
             json={
@@ -460,7 +460,7 @@ async def test_provider_wire_contracts(gateway_platform, op):
         return httpx.Response(200, json={"payload": {"results": [{"id": "a", "score": 0.7}]}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         response = await client.post(
             ROOT + "/invoke",
             json={
@@ -487,7 +487,7 @@ async def test_credentials_rotation_and_connection_probe(gateway_platform, monke
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         body = {
             "profile_id": profile["id"],
             "version": 2,
@@ -525,7 +525,7 @@ async def test_fallback_records_actual_model(gateway_platform):
         return httpx.Response(200, json={"choices": [{"message": {"content": "fallback result"}}]})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         response = await client.post(
             ROOT + "/invoke",
             json={
@@ -543,7 +543,7 @@ async def test_embedding_queue_does_not_block_chat(gateway_platform):
     client, services, settings = gateway_platform
     _, _, embed = await setup(client, "embed", protocol="openai_compatible")
     _, _, chat = await setup(client)
-    gateway = services.platform.gateway
+    gateway = services.groups.runtime.gateway
     gateway.limits["embed"] = asyncio.Semaphore(1)
     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -552,7 +552,7 @@ async def test_embedding_queue_does_not_block_chat(gateway_platform):
         await release.wait()
         return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1] * 8}]})
 
-    from agent_platform.modules.model_gateway.contracts import EmbedRequest
+    from agent_platform.core_platform.platform_services.model_gateway.contracts import EmbedRequest
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
         gateway.client = mock

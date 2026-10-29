@@ -10,7 +10,7 @@ from sqlalchemy import text
 from test_open_platform import PUBLIC, ROOT, application, headers, session
 from test_platform_postgres import create_agent, execute_next, platform  # noqa: F401
 
-from agent_platform.platform.secrets.vault import CredentialVault
+from agent_platform.core_platform.platform_services.secrets.vault import CredentialVault
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
@@ -52,7 +52,7 @@ async def test_pinned_agent_version_and_grant_validation(platform):
         json={"message": "pin", "wait_seconds": 0},
     )
     assert r.status_code == 202, r.text
-    run = await services.repository.get(UUID(r.json()["id"]), services.platform.settings.tenant_id)
+    run = await services.repository.get(UUID(r.json()["id"]), services.groups.runtime.settings.tenant_id)
     assert run["config"]["agent"]["version"] == 1
     assert (await client.get(PUBLIC + "/agents", headers=headers(key["key"]))).json()[0][
         "effective_version"
@@ -114,8 +114,8 @@ async def test_knowledge_sync_permissions_versions_publish_and_delete(platform):
     assert (
         await client.get(f"{PUBLIC}/knowledge-tasks/{tid}", headers=headers(other["key"]))
     ).status_code == 404
-    assert await services.platform.knowledge_workspace.run_next(
-        services.platform.settings.tenant_id
+    assert await services.groups.business.knowledge_workspace.run_next(
+        services.groups.runtime.settings.tenant_id
     )
     status = (
         await client.get(f"{PUBLIC}/knowledge-tasks/{tid}", headers=headers(key["key"]))
@@ -162,7 +162,7 @@ async def test_knowledge_sync_permissions_versions_publish_and_delete(platform):
 
 async def test_webhook_signature_retry_rotation_isolation(platform, tmp_path):
     client, services, settings = platform
-    wh = services.platform.open_platform.webhooks
+    wh = services.groups.application.open_platform.webhooks
     wh.stopping.set()
     wh.vault = CredentialVault(tmp_path / "master.key")
     await asyncio.sleep(0.02)
@@ -241,7 +241,7 @@ async def test_webhook_signature_retry_rotation_isolation(platform, tmp_path):
 
 async def test_webhook_exhaustion_manual_retry_and_configuration_cancel(platform, tmp_path):
     client, services, _ = platform
-    wh = services.platform.open_platform.webhooks
+    wh = services.groups.application.open_platform.webhooks
     wh.stopping.set()
     wh.vault = CredentialVault(tmp_path / "key")
     await asyncio.sleep(0.02)

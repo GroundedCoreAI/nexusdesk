@@ -37,6 +37,37 @@ export interface Action { id: string; status: string; payload: { title: string; 
 export interface ConversationDetail extends Conversation { messages: Message[]; runs: Run[]; actions: Action[] }
 export interface Handoff { revision?: number; id: string; conversation_id: string; external_id: string; reason: string; summary: string; status: string; assignee: string | null }
 export interface Ticket { ticket_no?: string; priority?: number; assignee_id?: string | null; customer_id?: string | null; customer_active?: boolean; due_at?: string | null; created_at?: string; updated_at?: string; resolution?: string | null; id: string; title: string; description: string; status: string; note: string; revision: number }
+export type ApprovalStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'cancelled';
+export type ApprovalDecision = 'approve' | 'reject';
+export interface ApprovalRequest {
+  id: string;
+  tenant_id: string;
+  title: string;
+  description: string;
+  requested_by: string;
+  status: ApprovalStatus;
+  revision: number;
+  idempotency_key: string | null;
+  decision_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface ApprovalPage {
+  items: ApprovalRequest[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+export interface ApprovalAuditEvent {
+  id: number;
+  actor: string;
+  action: string;
+  resource: string;
+  details: Record<string, unknown>;
+  ip: string | null;
+  created_at: string;
+}
 export interface ChannelField {
   name: string;
   label: string;
@@ -251,6 +282,139 @@ export function getMemorySummary(windowHours?: number, signal?: AbortSignal) {
 }
 export const getMemoryAlerts = (windowHours = 24, signal?: AbortSignal) => api<MemoryAlert[]>(`/observability/memory/alerts?window_hours=${windowHours}`, { signal });
 
+export type CapabilityLifecycleStatus = 'registered' | 'starting' | 'ready' | 'degraded' | 'stopped';
+export interface CapabilityStatusItem {
+  capability_id: string;
+  version: string;
+  enabled?: boolean;
+  config_version?: number | null;
+  status: CapabilityLifecycleStatus;
+  reason: string | null;
+  last_started_at: string | null;
+  last_stopped_at: string | null;
+  last_failure_at: string | null;
+  failure_count: number;
+}
+export interface CapabilityObservability {
+  capabilities: {
+    items: CapabilityStatusItem[];
+    summary: {
+      total: number;
+      by_status: Record<CapabilityLifecycleStatus, number>;
+      failures: number;
+    };
+  };
+  events: {
+    published: number;
+    subscribers: number;
+    failures: number;
+    persistence_failures?: number;
+    queue?: Record<string, number>;
+  };
+}
+export interface CapabilityConfigVersion {
+  capability_id: string;
+  version: number;
+  schema_version: string;
+  config: Record<string, unknown>;
+  created_by: string;
+  created_at: string;
+  rollback_of: number | null;
+}
+export interface CapabilityConfigPage { items: CapabilityConfigVersion[] }
+export type ExtensionEventStatus = 'pending' | 'running' | 'done' | 'failed';
+export interface ExtensionEventTask {
+  id: string;
+  status: ExtensionEventStatus;
+  attempts: number;
+  max_attempts: number;
+  error: string | null;
+  run_after: string;
+  created_at: string;
+  updated_at: string;
+  idempotency_key: string;
+  event_type: string;
+  aggregate_type: string;
+  aggregate_id: string;
+}
+export interface ExtensionEventPage {
+  items: ExtensionEventTask[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+export function getExtensionEvents(status?: ExtensionEventStatus, page = 1, pageSize = 20) {
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  if (status) params.set('status', status);
+  return api<ExtensionEventPage>(`/extensions/events?${params}`);
+}
+export function getUiExtensions(signal?: AbortSignal) {
+  return api<import('../../contracts').UiExtensionManifest[]>('/extensions/ui', { signal });
+}
+export function enableCapability(capabilityId: string) {
+  return post<CapabilityStatusItem>(`/extensions/capabilities/${capabilityId}/enable`);
+}
+export function disableCapability(capabilityId: string) {
+  return post<CapabilityStatusItem>(`/extensions/capabilities/${capabilityId}/disable`);
+}
+export function retryCapability(capabilityId: string) {
+  return post<CapabilityStatusItem>(`/extensions/capabilities/${capabilityId}/retry`);
+}
+export function getCapabilityConfig(capabilityId: string, signal?: AbortSignal) {
+  return api<CapabilityConfigVersion>(`/extensions/capabilities/${capabilityId}/config`, { signal });
+}
+export function getCapabilityConfigVersions(capabilityId: string, signal?: AbortSignal) {
+  return api<CapabilityConfigPage>(`/extensions/capabilities/${capabilityId}/config/versions`, { signal });
+}
+export function saveCapabilityConfig(
+  capabilityId: string,
+  config: Record<string, unknown>,
+  schemaVersion = 'v1',
+) {
+  return post<CapabilityConfigVersion>(`/extensions/capabilities/${capabilityId}/config`, {
+    schema_version: schemaVersion,
+    config,
+  });
+}
+export function rollbackCapabilityConfig(capabilityId: string, version: number) {
+  return post<CapabilityConfigVersion>(`/extensions/capabilities/${capabilityId}/config/rollback`, { version });
+}
+export function getApprovals(
+  status: ApprovalStatus | 'all' = 'all',
+  page = 1,
+  pageSize = 20,
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({
+    status,
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  return api<ApprovalPage>(`/approvals?${params}`, { signal });
+}
+export function getApproval(approvalId: string, signal?: AbortSignal) {
+  return api<ApprovalRequest>(`/approvals/${approvalId}`, { signal });
+}
+export function getApprovalAudit(approvalId: string, limit = 100, signal?: AbortSignal) {
+  return api<{ items: ApprovalAuditEvent[]; approval_id: string }>(
+    `/approvals/${approvalId}/audit?limit=${limit}`,
+    { signal },
+  );
+}
+export function createApproval(body: {
+  title: string;
+  description?: string;
+  idempotency_key?: string;
+}) {
+  return post<ApprovalRequest>('/approvals', body);
+}
+export function decideApproval(approvalId: string, decision: ApprovalDecision, revision: number) {
+  return post<ApprovalRequest>(`/approvals/${approvalId}/decision`, { decision, revision });
+}
+export function cancelApproval(approvalId: string, revision: number) {
+  return post<ApprovalRequest>(`/approvals/${approvalId}/cancel`, { revision });
+}
+
 export function token() { return sessionStorage.getItem('agent-platform-token') || ''; }
 export function setToken(value: string) { if (value) sessionStorage.setItem('agent-platform-token', value); else sessionStorage.removeItem('agent-platform-token'); }
 async function fail(response: Response, credential: string): Promise<never> {
@@ -292,4 +456,6 @@ export async function download(path: string): Promise<{ blob: Blob; filename: st
 export const post = <T,>(path: string, body: unknown = {}) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });
 export const put = <T,>(path: string, body: unknown) => api<T>(path, { method: 'PUT', body: JSON.stringify(body) });
 export const patch = <T,>(path: string, body: unknown) => api<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+export const retryExtensionEvent = (eventId: string) =>
+  post<ExtensionEventTask>(`/extensions/events/${eventId}/retry`);
 export const getModules = (signal?: AbortSignal) => api<PlatformModule[]>('/modules', { signal });

@@ -16,15 +16,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent_platform.modules.memory.extraction import validate_item
-from agent_platform.settings import Settings
+from agent_platform.business_capabilities.memory.extraction import validate_item
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 NOW = datetime(2026, 10, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def mask(text):
     """Lazy import: modules/memory/pii.py lands with dev task T3."""
-    from agent_platform.modules.memory.pii import mask as _mask
+    from agent_platform.business_capabilities.memory.pii import mask as _mask
 
     return _mask(text)
 
@@ -129,7 +129,7 @@ HALF_LIVES = {"profile": 365, "preference": 90, "event": 30}
 
 
 def _ec(confidence, item_type, age_days, protected=False):
-    from agent_platform.modules.memory.decay import effective_confidence
+    from agent_platform.business_capabilities.memory.decay import effective_confidence
 
     return effective_confidence(
         confidence=confidence,
@@ -223,7 +223,7 @@ def test_p4_cm_02_governance_settings_defaults_and_env_override(monkeypatch):
 
 
 def test_r23b_reinforce_dispatch_follows_decay_switch():
-    from agent_platform.modules.agent_runtime.worker import RuntimeWorker
+    from agent_platform.core_platform.agent_runtime.worker import RuntimeWorker
 
     row = {"config": {}, "_memory_reinforce": {"00000000-0000-0000-0000-000000000001": 2}}
     # Decay on (default): collected reference hits become a reinforce task
@@ -243,7 +243,7 @@ def test_r23b_reinforce_dispatch_follows_decay_switch():
 
 
 def test_r23b_sample_rate_zero_still_suppresses_reinforce():
-    from agent_platform.modules.agent_runtime.worker import RuntimeWorker
+    from agent_platform.core_platform.agent_runtime.worker import RuntimeWorker
 
     row = {"config": {}, "_memory_reinforce": {"00000000-0000-0000-0000-000000000001": 1}}
     worker = RuntimeWorker(

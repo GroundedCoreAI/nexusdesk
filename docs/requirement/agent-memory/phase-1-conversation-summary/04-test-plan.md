@@ -64,7 +64,7 @@
 | P1-IT-13 | 并发 claim（多副本安全） | 两个并发 claim 模拟仅一个成功（SKIP LOCKED），任务不被重复执行；获胜方持有 owner 与租约 | memory_tasks 模式 |
 | P1-IT-14 | 优雅停机 | Worker 收 shutdown 时 running 任务重置 pending（owner/lease 清空），不丢任务 | 技术设计 §核心流程3 |
 | P1-IT-15 | 内嵌形态优雅停机 | API 内嵌装配（`embedded_memory_worker`）的 Worker 停机同样重置 running 为 pending | 技术设计 §核心流程3（2026-10-10 修订） |
-| P1-IT-16 | 独立入口可运行 | `python -m agent_platform.apps.worker.memory` 以独立进程认领并执行任务；取消后无 running 残留 | 技术设计 §核心流程3（2026-10-10 修订） |
+| P1-IT-16 | 独立入口可运行 | `python -m agent_platform.applications.worker.memory` 以独立进程认领并执行任务；取消后无 running 残留 | 技术设计 §核心流程3（2026-10-10 修订） |
 | P1-IT-17 | claim 写租约 | claim 后行含 owner 与 `lease_expires_at ≈ now()+120s` | Phase 4 设计 §4 租约/reaper（提前落地） |
 | P1-IT-18 | reaper 重置过期租约 | claim 前置 reaper：租约过期的 running 重置 pending（owner/lease 清空）；租约未过期的 running 不动 | Phase 4 设计 §4 租约/reaper（提前落地） |
 | P1-IT-19 | 心跳续约防误收割 | 执行期间心跳续约（租约前移）；另一副本的 reaper 不收割持有有效租约的 running 任务 | Phase 4 设计 §4 租约/reaper（提前落地） |

@@ -168,7 +168,7 @@ async def _explain(engine, sql) -> str:
 async def test_p7_it13_observability_performance_at_10k_scale(platform):
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
-    observability = services.platform.observability
+    observability = services.groups.application.observability
     decoys = [f"perf-decoy-{i}-{uuid4().hex[:8]}" for i in range(DECOY_TENANTS)]
 
     try:
