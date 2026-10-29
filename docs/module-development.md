@@ -49,8 +49,8 @@ Runtime SSE 游标仍由 Runtime 管理；各 README 中的目标方法和事件
 | 关注点 | 所有者 | 协作方 |
 |---|---|---|
 | 配置层级与继承规则、工单模式及停用流程 | platform_settings（仅规划这两项） | 各模块保留配置所有权；policy 授权，customer_service 执行工单业务 |
-| 认证身份 | platform/identity | API、Worker 和领域服务 |
-| 授权决策 | policy | 各服务执行数据范围及附加约束 |
+| 认证身份 | core_platform/platform_services/identity | API、Worker 和领域服务 |
+| 授权决策 | core_platform/policy_harness | 各服务执行数据范围及附加约束 |
 | Agent 发布 | agent_config | Runtime 捕获版本，evaluation 提供证据 |
 | 模型方案、调用和用量 | model_gateway | Runtime 调用，observability 展示 |
 | Run 总预算与生命周期 | agent_runtime | 模型和工具服从剩余预算 |
