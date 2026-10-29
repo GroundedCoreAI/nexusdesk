@@ -248,6 +248,11 @@ export const getCustomerAudit = (customerId: string, limit = 100) => api<MemoryA
 
 // Phase 4 · governance observability (GET /observability/memory).
 export interface MemoryExtractionDay { day: string; runs: number; added: number; updated: number; pending: number; dropped: number; pii_masked: number }
+// Phase 7 · production health sections of GET /observability/memory; these
+// follow the request's window_hours while the Phase 4 sections above keep
+// their fixed windows.
+export interface MemoryTaskKind { kind: string; avg_ms: number | null; p95_ms: number | null; done: number; failed: number }
+export interface MemoryAgentRow { agent_id: string | null; customer_runs: number; injected_runs: number; inject_rate: number | null; items_written: number | null; tasks_failed: number | null }
 export interface MemorySummary {
   window_hours: number;
   extraction_daily: MemoryExtractionDay[];
@@ -258,7 +263,24 @@ export interface MemorySummary {
   reinforce: { tasks_done: number; tasks_failed: number; ids_refreshed: number };
   decay: { decay_pending: number; decay_expired: number; evicted: number; expired_restored: number };
   search: { calls: number; empty: number };
+  tasks: { pending: number; running: number; failed_15m: number; oldest_pending_age_minutes: number | null; by_kind: MemoryTaskKind[] };
+  embedding: { failed_backlog: number; retry_scanned_7d: number; retry_succeeded_7d: number };
+  search_modes: { vector: number; text: number; keyword_fallback: number; fallback_rate: number | null };
+  search_quality: { calls: number; empty: number; empty_rate: number | null; avg_returned: number | null };
+  maintenance: { ttl_last_at: string | null; decay_last_at: string | null; rule_scan_last_at: string | null; embedding_retry_last_at: string | null; heartbeat_last_at: string | null; overdue: string[] };
+  agents: MemoryAgentRow[];
+  injection: { source: "detail" | "events"; avg_items: number | null; by_section: { flag: number | null; profile: number | null; preference: number | null; event: number | null } };
+  pending_quality: { confirmed_7d: number; rejected_7d: number; confirm_rate: number | null };
 }
+/** Phase 7 · one memory.alert.* firing (GET /observability/memory/alerts, a bare newest-first array). */
+export interface MemoryAlert { rule: string; at: string; value: number | null; threshold: number | null; window: string }
+export function getMemorySummary(windowHours?: number, signal?: AbortSignal) {
+  const params = new URLSearchParams();
+  if (windowHours) params.set('window_hours', String(windowHours));
+  const query = params.toString();
+  return api<MemorySummary>(`/observability/memory${query ? `?${query}` : ''}`, { signal });
+}
+export const getMemoryAlerts = (windowHours = 24, signal?: AbortSignal) => api<MemoryAlert[]>(`/observability/memory/alerts?window_hours=${windowHours}`, { signal });
 
 export type CapabilityLifecycleStatus = 'registered' | 'starting' | 'ready' | 'degraded' | 'stopped';
 export interface CapabilityStatusItem {

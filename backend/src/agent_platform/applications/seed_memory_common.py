@@ -1,8 +1,9 @@
-"""Shared helpers for the memory acceptance seed modules (phases 1-5).
+"""Shared helpers for the memory acceptance seed modules (phases 1-5, 7).
 
 Phase 6 ships its own self-contained seeder (``seed_memory_demo.py``); the
-phase 1-5 acceptance datasets live in ``seed_memory_phase1.py`` …
-``seed_memory_phase5.py`` and reuse the primitives here so every module
+phase 1-5 and 7 acceptance datasets live in ``seed_memory_phase1.py`` …
+``seed_memory_phase5.py`` / ``seed_memory_phase7.py`` and reuse the
+primitives here so every module
 produces identically shaped rows: deterministic uuid5 ids, relative
 timestamps anchored at "now", genuine-shaped runs with the standard 7-event
 sequence, and audit records attributed to the local admin when present.

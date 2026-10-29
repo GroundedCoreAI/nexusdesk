@@ -423,11 +423,20 @@ test('observability page renders the memory governance section', async ({ page }
     reinforce: { tasks_done: 5, tasks_failed: 1, ids_refreshed: 42 },
     decay: { decay_pending: 6, decay_expired: 2, evicted: 9, expired_restored: 1 },
     search: { calls: 8, empty: 3 },
+    tasks: { pending: 2, running: 1, failed_15m: 0, oldest_pending_age_minutes: 12, by_kind: [{ kind: 'memory_extract', avg_ms: 120, p95_ms: 300, done: 5, failed: 1 }] },
+    embedding: { failed_backlog: 0, retry_scanned_7d: 3, retry_succeeded_7d: 3 },
+    search_modes: { vector: 6, text: 2, keyword_fallback: 0, fallback_rate: 0 },
+    search_quality: { calls: 8, empty: 3, empty_rate: 0.375, avg_returned: 2.5 },
+    maintenance: { ttl_last_at: '2026-10-14T01:00:00Z', decay_last_at: '2026-10-14T01:05:00Z', rule_scan_last_at: '2026-10-14T01:10:00Z', embedding_retry_last_at: null, heartbeat_last_at: '2026-10-14T01:15:00Z', overdue: [] },
+    agents: [],
+    injection: { source: 'detail', avg_items: 3.2, by_section: { flag: 1, profile: 2, preference: 2, event: 1 } },
+    pending_quality: { confirmed_7d: 4, rejected_7d: 1, confirm_rate: 0.8 },
   };
   await page.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/me')) return route.fulfill({ json: { role: 'viewer', tenant: '测试企业' } });
     if (path.endsWith('/observability/memory')) return route.fulfill({ json: memory });
+    if (path.endsWith('/observability/memory/alerts')) return route.fulfill({ json: [] });
     if (path.endsWith('/observability/summary')) return route.fulfill({ json: {} });
     if (path.endsWith('/observability/runs')) return route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 10 } });
     if (path.endsWith('/observability/gateways')) return route.fulfill({ json: { models: [], tools: [], known_usage: [] } });
