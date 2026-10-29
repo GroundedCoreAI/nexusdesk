@@ -143,7 +143,7 @@ npm run dev
 ```powershell
 cd C:\code\ai-project\backend
 uv run pytest -q
-uv run ruff check src/agent_platform/modules/model_gateway tests/test_gateway_governance.py tests/test_gateway_migrations.py
+uv run ruff check src/agent_platform/core_platform/platform_services/model_gateway tests/test_gateway_governance.py tests/test_gateway_migrations.py
 
 cd C:\code\ai-project\frontend
 npm run build

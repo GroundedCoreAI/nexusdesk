@@ -43,4 +43,10 @@ This is a **large internal refactor of a modular monolith**. It does not change 
 
 The main physical directory migration has been completed. `agent_platform/modules`, `apps`, `integrations`, and `platform` are no longer retained as runtime directories. Phase 2 is complete, and Phase 3 has completed the context boundary plus data-plane filtering for the main Agent, knowledge-base, and channel configuration resources.
 
+Upgrade note: Python startup modules have moved from `agent_platform.apps.*`
+to `agent_platform.applications.*`. Quickstart/API may embed Workers in the API
+process; production uses dedicated Worker entrypoints such as
+`python -m agent_platform.applications.worker.memory` with
+`AGENT_EMBEDDED_WORKER=false`.
+
 See `07-acceptance-report.md` for the current status.

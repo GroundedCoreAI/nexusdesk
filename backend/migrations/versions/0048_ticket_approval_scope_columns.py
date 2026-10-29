@@ -19,6 +19,12 @@ SCOPED_TABLES = (
 
 
 def upgrade():
+    # The legacy ticket type migration leaves deferred FK trigger events in
+    # the surrounding Alembic transaction after backfilling published
+    # versions. PostgreSQL rejects ALTER TABLE while those events are
+    # pending, so validate them before changing ticket_types.
+    op.execute("SET CONSTRAINTS ALL IMMEDIATE")
+
     for table in SCOPED_TABLES:
         op.execute(
             f"ALTER TABLE {table} "
@@ -184,14 +190,6 @@ def downgrade():
         "DROP CONSTRAINT IF EXISTS ticket_process_log_scope_ticket_fk"
     )
     op.execute(
-        "ALTER TABLE runtime_runs "
-        "DROP CONSTRAINT IF EXISTS runtime_runs_scope_id_key"
-    )
-    op.execute(
-        "ALTER TABLE pending_actions "
-        "DROP CONSTRAINT IF EXISTS pending_actions_scope_id_key"
-    )
-    op.execute(
         "ALTER TABLE tickets_detail "
         "DROP CONSTRAINT IF EXISTS tickets_detail_scope_ticket_fk"
     )
@@ -203,6 +201,16 @@ def downgrade():
         "DROP CONSTRAINT IF EXISTS tickets_scope_conversation_fk, "
         "DROP CONSTRAINT IF EXISTS tickets_scope_id_key, "
         "DROP CONSTRAINT IF EXISTS tickets_scope_number_key"
+    )
+    # These unique constraints back the composite foreign keys above, so they
+    # must be removed only after every dependent ticket FK is gone.
+    op.execute(
+        "ALTER TABLE runtime_runs "
+        "DROP CONSTRAINT IF EXISTS runtime_runs_scope_id_key"
+    )
+    op.execute(
+        "ALTER TABLE pending_actions "
+        "DROP CONSTRAINT IF EXISTS pending_actions_scope_id_key"
     )
     op.execute(
         "ALTER TABLE tickets ADD CONSTRAINT tickets_number_key "

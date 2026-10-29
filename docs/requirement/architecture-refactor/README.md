@@ -43,4 +43,10 @@ NexusDesk
 
 代码目录已完成主要物理迁移，`agent_platform/modules`、`apps`、`integrations`、`platform` 不再作为运行时目录保留。阶段二已完成，阶段三已完成上下文边界和 Agent、知识库、渠道等主要配置资源的数据面过滤。
 
+升级注意：Python 启动模块已从 `agent_platform.apps.*` 统一迁移到
+`agent_platform.applications.*`。Quickstart/API 默认可在 API 进程内嵌 Worker；
+生产环境使用独立 Worker 入口，例如
+`python -m agent_platform.applications.worker.memory`，并通过
+`AGENT_EMBEDDED_WORKER=false` 关闭 API 内嵌 Worker。
+
 详细状态以 `07-acceptance-report.md` 为准。
