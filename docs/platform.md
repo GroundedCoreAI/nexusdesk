@@ -10,8 +10,8 @@
 cd C:\code\ai-project\backend
 uv sync
 uv run alembic upgrade head
-uv run python -m agent_platform.apps.seed
-uv run uvicorn agent_platform.apps.api.main:app --reload --host 127.0.0.1 --port 8000
+uv run python -m agent_platform.applications.seed
+uv run uvicorn agent_platform.applications.customer_service.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 `seed` 是可选的示例初始化，创建“示例服务知识库”“示例客服 Agent”和 `sample-support` 会话。重复执行不会覆盖已编辑内容。必须先配置 `AGENT_DATABASE_URL` 并执行迁移；新增迁移为 `0002_platform`，保留已有 Runtime 表和数据。

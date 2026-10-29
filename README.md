@@ -173,7 +173,7 @@ The documents listed below are currently written in Simplified Chinese.
 | Understand the architecture and extension modules | [Module architecture](docs/architecture.md) |
 | Understand agent execution | [Runtime documentation](docs/runtime.md) |
 | Configure the knowledge base | [Knowledge workspace](docs/knowledge-workspace.md) |
-| Integrate model services | [Model gateway protocol](backend/src/agent_platform/modules/model_gateway/PROTOCOL.md) |
+| Integrate model services | [Model gateway protocol](backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md) |
 | Integrate business applications | [API reference](docs/api.md) · [Open platform](docs/open-platform.md) |
 | See what changed in a release | [Changelog](CHANGELOG.en.md) |
 

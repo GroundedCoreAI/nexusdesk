@@ -60,6 +60,37 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject Claude co-author attribution
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
+          elif [[ "$EVENT_NAME" == "push" &&
+                  "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            range="${PUSH_BEFORE_SHA}..${PUSH_AFTER_SHA}"
+          else
+            echo "No commit range to check."
+            exit 0
+          fi
+
+          if git log "$range" --format='%H%n%B' |
+            grep -Eiq '^Co-Authored-By:.*(Claude|Anthropic|noreply@anthropic\.com)'; then
+            echo "Found forbidden Claude/Anthropic co-author attribution in:"
+            git log "$range" --regexp-ignore-case --extended-regexp --format='%H %s' \
+              --grep='Co-Authored-By:.*(Claude|Anthropic|noreply@anthropic\.com)'
+            echo "Remove the trailer before merging; do not rewrite published tags."
+            exit 1
+          fi
+          echo "No forbidden co-author attribution found."
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -77,6 +108,9 @@ jobs:
       - name: Lint
         working-directory: backend
         run: uv run ruff check .
+
+      - name: Architecture gates
+        run: uv run --directory backend python "$GITHUB_WORKSPACE/scripts/check_architecture.py"
 
       - name: Migrate the test database
         working-directory: backend

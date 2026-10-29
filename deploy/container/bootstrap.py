@@ -9,11 +9,11 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from agent_platform.apps.local_tls import ensure_certificate
-from agent_platform.platform.identity.local_admin import seed_default_admin
-from agent_platform.platform.persistence.database import create_engine
-from agent_platform.platform.secrets.vault import CredentialVault
-from agent_platform.settings import Settings
+from agent_platform.applications.local_tls import ensure_certificate
+from agent_platform.core_platform.platform_services.identity.local_admin import seed_default_admin
+from agent_platform.core_platform.platform_services.persistence.database import create_engine
+from agent_platform.core_platform.platform_services.secrets.vault import CredentialVault
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 
 def local_token(path):
@@ -120,7 +120,7 @@ async def initialize_administrator(settings):
 
 def seed_industry_cases(settings):
     """Load the full industry demo case set. Idempotent; preserves manual edits."""
-    command = [sys.executable, "-m", "agent_platform.apps.seed_industries"]
+    command = [sys.executable, "-m", "agent_platform.applications.seed_industries"]
     if settings.quickstart_mode:
         command.append("--bind-published-chat")
     subprocess.run(command, check=True)
@@ -129,8 +129,8 @@ def seed_industry_cases(settings):
 def seed_memory_demo():
     """Load the memory demo datasets (phase 6 visualization + phases 1-5 and 7
     acceptance showcases). Both idempotent."""
-    subprocess.run([sys.executable, "-m", "agent_platform.apps.seed_memory_demo"], check=True)
-    subprocess.run([sys.executable, "-m", "agent_platform.apps.seed_memory_acceptance"], check=True)
+    subprocess.run([sys.executable, "-m", "agent_platform.applications.seed_memory_demo"], check=True)
+    subprocess.run([sys.executable, "-m", "agent_platform.applications.seed_memory_acceptance"], check=True)
 
 
 async def check_storage(settings):
@@ -179,7 +179,7 @@ def render_nginx_config(settings):
 
     Quickstart serves HTTPS so that a browser reaching the demo over a LAN address
     gets a secure context; plain HTTP on a non-loopback host would not be one, and
-    the console relies on secure-only APIs. See agent_platform.apps.local_tls.
+    the console relies on secure-only APIs. See agent_platform.applications.local_tls.
     """
     certificate, key, authority = ensure_certificate(
         Path("/data/tls"), settings.tls_hosts
@@ -200,7 +200,7 @@ def main(mode):
     if mode == "quickstart":
         # Still generated even though nothing injects it any more: a configured
         # service token switches off the anonymous development fallback in
-        # agent_platform.platform.identity.access, and it leaves an operator a
+        # agent_platform.core_platform.platform_services.identity.access, and it leaves an operator a
         # break-glass credential for the login page's service-token field.
         os.environ["AGENT_API_TOKEN"] = local_token(
             Path("/data/credentials/local-access.token")
@@ -224,7 +224,7 @@ def main(mode):
             seed_memory_demo()
         print("Migrations and configured storage checks completed.", flush=True)
         return
-    subprocess.run([sys.executable, "-m", "agent_platform.apps.seed"], check=True)
+    subprocess.run([sys.executable, "-m", "agent_platform.applications.seed"], check=True)
     if settings.seed_industries:
         seed_industry_cases(settings)
     seed_memory_demo()

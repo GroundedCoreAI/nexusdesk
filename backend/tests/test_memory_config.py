@@ -8,15 +8,15 @@ injection queries, review end-to-end) lives in test_memory_config_postgres.py.
 import pytest
 from pydantic import ValidationError
 
-from agent_platform.modules.agent_config.memory import (
+from agent_platform.business_capabilities.agent_config.memory import (
     MEMORY_TYPES,
     resolve_agent_memory,
     resolve_memory_config,
 )
-from agent_platform.modules.agent_config.service import AgentConfig
-from agent_platform.modules.agent_runtime.worker import RuntimeWorker
-from agent_platform.modules.memory.service import route_confidence
-from agent_platform.settings import Settings
+from agent_platform.business_capabilities.agent_config.service import AgentConfig
+from agent_platform.business_capabilities.memory.service import route_confidence
+from agent_platform.core_platform.agent_runtime.worker import RuntimeWorker
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 asyncio_mark = pytest.mark.asyncio
 

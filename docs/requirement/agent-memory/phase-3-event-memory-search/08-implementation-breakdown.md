@@ -34,7 +34,7 @@
 
 ### R2 "新增 memory-worker 服务"措辞错误——该服务已存在
 
-03 §部署变更称"deploy/production：新增 memory-worker 常驻服务"。现实：`deploy/production/compose.yaml` 第 57 行已有 `memory-worker`（Phase 1 部署形态 2026-10-10 修订引入，`python -m agent_platform.apps.worker.memory`，复用后端镜像），`deploy/README.md` 第 76/107/109 行均已将其列为既有服务。**裁定**：Phase 3 对 production compose **零变更**；memory-worker 仅通过代码新增任务 kind 获得新能力。quickstart 不变（`AGENT_EMBEDDED_WORKER=true` 内嵌）。dev 修订 03 文档措辞为"memory-worker 增加 event_write/TTL/重试任务处理能力，部署形态不变"。
+03 §部署变更称"deploy/production：新增 memory-worker 常驻服务"。现实：`deploy/production/compose.yaml` 第 57 行已有 `memory-worker`（Phase 1 部署形态 2026-10-10 修订引入，`python -m agent_platform.applications.worker.memory`，复用后端镜像），`deploy/README.md` 第 76/107/109 行均已将其列为既有服务。**裁定**：Phase 3 对 production compose **零变更**；memory-worker 仅通过代码新增任务 kind 获得新能力。quickstart 不变（`AGENT_EMBEDDED_WORKER=true` 内嵌）。dev 修订 03 文档措辞为"memory-worker 增加 event_write/TTL/重试任务处理能力，部署形态不变"。
 
 ### R3 镜像版本：postgres:17-alpine → `pgvector/pgvector:pg17`
 

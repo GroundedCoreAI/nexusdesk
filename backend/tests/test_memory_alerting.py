@@ -9,8 +9,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent_platform.modules.memory import alerting
-from agent_platform.modules.memory.alerting import (
+from agent_platform.business_capabilities.memory import alerting
+from agent_platform.business_capabilities.memory.alerting import (
     SEARCH_MIN_CALLS_24H,
     AlertContext,
     AlertScanner,
@@ -25,8 +25,8 @@ from agent_platform.modules.memory.alerting import (
     rule_vector_fallback,
     rule_worker_heartbeat,
 )
-from agent_platform.modules.memory.worker import MemoryWorker
-from agent_platform.settings import Settings
+from agent_platform.business_capabilities.memory.worker import MemoryWorker
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=UTC)
 

@@ -30,13 +30,14 @@ from test_memory_governance_postgres import make_ticket
 from test_memory_postgres import audit_records
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.memory.store import (
+from agent_platform.business_capabilities.memory.store import (
     EMBEDDING_DIMENSION,
     PgVectorStore,
     TsVectorStore,
 )
-from agent_platform.modules.memory.summary import SummaryError
-from agent_platform.modules.memory.worker import MemoryWorker
+from agent_platform.business_capabilities.memory.summary import SummaryError
+from agent_platform.business_capabilities.memory.tools import MemoryToolContribution
+from agent_platform.business_capabilities.memory.worker import MemoryWorker
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -292,7 +293,13 @@ async def run_search_once(client, services, settings, engine, tenant, customer_i
             text("UPDATE runtime_conversations SET customer_id=:c WHERE id=:id"),
             {"c": customer_id, "id": conv["id"]},
         )
-    services.platform.memory_store = store
+    services.groups.business.memory_store = store
+    # The composition froze the store reference into the bound tool
+    # contributions (integration refactor); rebind it or the runtime keeps
+    # searching through the startup store.
+    for contribution in services.groups.tools.contributions:
+        if isinstance(contribution, MemoryToolContribution):
+            contribution.memory_store = store
     response = await client.post(
         f"/api/v1/conversations/{conv['id']}/messages", json={"content": "上次的工单处理进展"}
     )

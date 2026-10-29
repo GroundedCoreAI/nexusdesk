@@ -11,14 +11,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_platform.modules.memory.decay import (
+from agent_platform.business_capabilities.memory.decay import (
     DEFAULT_HALF_LIVES,
     effective_confidence,
     half_lives,
     injection_filter_sql,
 )
-from agent_platform.modules.memory.governance import _keep_source
-from agent_platform.modules.memory.service import (
+from agent_platform.business_capabilities.memory.governance import _keep_source
+from agent_platform.business_capabilities.memory.service import (
     overlap_ids,
     render_flag_injection,
     text_tokens,

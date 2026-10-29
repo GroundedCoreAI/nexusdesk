@@ -1,10 +1,10 @@
-# 模块独立开发与扩展规范
+# 能力独立开发与平台扩展规范
 
-适用于 `backend/src/agent_platform/modules` 的 13 个规划模块（12 个已有实现，platform_settings 仅规划）及其前端页面，详细规划见[架构索引](architecture.md)。本规范是目标约定，不代表现有代码已经完成全部解耦。
+适用于 `backend/src/agent_platform/business_capabilities` 下的业务能力、`backend/src/agent_platform/core_platform` 下的平台服务及其前端页面，详细规划见[架构索引](architecture.md)。本规范是目标约定，不代表现有代码已经完成全部解耦。
 
 ## 1. 开发单位与分层
 
-独立开发的单位是有业务边界、可替换依赖及独立验收用例的模块，初期仍部署为模块化单体。
+独立开发的单位是有业务边界、可替换依赖及独立验收用例的业务能力或平台服务，初期仍部署为模块化单体。
 
 | 层次 | 职责 |
 |---|---|
@@ -14,7 +14,7 @@
 | 仓储 / 适配器 | PostgreSQL、HTTP、模型或渠道的具体实现 |
 | 组合入口 | 依赖注入、配置解析和生命周期 |
 
-按复杂度逐步拆出 `contracts.py`、`ports.py`、`repository.py`、`adapters/`，不要求为简单模块创建空层。现有 `apps/api/platform_services.py` 与 Runtime bootstrap 承担组合职责，后续可迁移到统一应用组合层。
+按复杂度逐步拆出 `contracts.py`、`ports.py`、`repository.py`、`adapters/`，不要求为简单能力创建空层。当前由 `applications/customer_service/platform_services.py` 与 Runtime composition 承担组合职责。
 
 ## 2. 可信执行上下文
 
@@ -24,7 +24,7 @@
 
 ## 3. 数据所有权与事务
 
-各 README 声明数据所有者。目标为通过模块命令修改数据、通过查询端口读取数据，不跨模块直接更新表。观测使用约定的只读投影，投影不能反向改变业务状态。
+各 README 声明数据所有者。目标为通过能力命令修改数据、通过查询端口读取数据，不跨能力直接更新表。观测使用约定的只读投影，投影不能反向改变业务状态。
 
 **当前共享事务例外**：Runtime 仓储、会话、客服业务和人工转接共同维护会话表及相关状态；渠道去重与业务受理也共享事务。这些尚不是完全独立的数据域。
 
@@ -49,8 +49,8 @@ Runtime SSE 游标仍由 Runtime 管理；各 README 中的目标方法和事件
 | 关注点 | 所有者 | 协作方 |
 |---|---|---|
 | 配置层级与继承规则、工单模式及停用流程 | platform_settings（仅规划这两项） | 各模块保留配置所有权；policy 授权，customer_service 执行工单业务 |
-| 认证身份 | platform/identity | API、Worker 和领域服务 |
-| 授权决策 | policy | 各服务执行数据范围及附加约束 |
+| 认证身份 | core_platform/platform_services/identity | API、Worker 和领域服务 |
+| 授权决策 | core_platform/policy_harness | 各服务执行数据范围及附加约束 |
 | Agent 发布 | agent_config | Runtime 捕获版本，evaluation 提供证据 |
 | 模型方案、调用和用量 | model_gateway | Runtime 调用，observability 展示 |
 | Run 总预算与生命周期 | agent_runtime | 模型和工具服从剩余预算 |
@@ -90,6 +90,6 @@ policy 声明配额条件，执行模块维护原子计数。模型网关负责�
 
 ## 8. 公共基础设施
 
-`platform/identity`、`secrets`、`persistence`、`messaging`、`storage` 提供身份、密钥、工作单元、可靠消息和文件存储端口，不计入上述 13 个模块。避免各模块重复建设这些能力，具体实现按实际接入需要扩展。
+`core_platform/platform_services/identity`、`secrets`、`persistence`、`messaging`、`storage` 提供身份、密钥、工作单元、可靠消息和文件存储端口，不计入业务能力目录。避免各业务能力重复建设这些能力，具体实现按实际接入需要扩展。
 
 P0 稳定核心闭环和接口，P1 扩展规模与治理。具体供应商、容量和时限在开发任务启动时确定，本文不预先承诺工期或生产 SLA。

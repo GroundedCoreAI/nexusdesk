@@ -1,8 +1,9 @@
-"""Phase 7 (D1 adjusted): migration 0042 adds memory_tasks.duration_ms.
+"""Phase 7 (D1 adjusted): migration 0051 adds memory_tasks.duration_ms.
 
 Online-safe single-column add; existing rows keep NULL (no backfill —
 ``created_at`` turned out to exist since 0030, contradicting the design
-doc's original D1 assumption).
+doc's original D1 assumption). Renumbered 0042->0051 at the integration
+merge: the platform layering refactor landed migrations 0042..0050 first.
 """
 
 import pytest
@@ -13,9 +14,9 @@ migration_database = _migration_database
 pytestmark = pytest.mark.postgres
 
 
-def test_0042_adds_duration_ms_and_downgrade_drops_it(migration_database):
+def test_0051_adds_duration_ms_and_downgrade_drops_it(migration_database):
     url = migration_database
-    migrate(url, "0041_memory_injection_log")
+    migrate(url, "0050_audit_scope_columns")
     query(
         url,
         "INSERT INTO memory_tasks(tenant_id,kind,payload) VALUES('t','conversation_summary','{}')",
@@ -32,7 +33,7 @@ def test_0042_adds_duration_ms_and_downgrade_drops_it(migration_database):
     # A worker-finished row carries a measurable duration.
     query(url, "UPDATE memory_tasks SET status='done', duration_ms=12")
     assert query(url, "SELECT status,duration_ms FROM memory_tasks") == [("done", 12)]
-    migrate(url, "0041_memory_injection_log", "downgrade")
+    migrate(url, "0050_audit_scope_columns", "downgrade")
     assert not query(
         url,
         "SELECT column_name FROM information_schema.columns"
@@ -41,16 +42,16 @@ def test_0042_adds_duration_ms_and_downgrade_drops_it(migration_database):
     migrate(url, "head")
 
 
-NEW_0043_INDEXES = (
+NEW_0052_INDEXES = (
     "memory_tasks_tenant_created",
     "memory_tasks_tenant_status",
     "runtime_events_type_created",
 )
 
 
-def test_0043_adds_tenant_indexes_and_downgrade_drops_them(migration_database):
+def test_0052_adds_tenant_indexes_and_downgrade_drops_them(migration_database):
     url = migration_database
-    migrate(url, "0042_memory_observability")
+    migrate(url, "0051_memory_observability")
     assert not query(
         url,
         "SELECT indexname FROM pg_indexes WHERE indexname IN"
@@ -66,8 +67,8 @@ def test_0043_adds_tenant_indexes_and_downgrade_drops_them(migration_database):
             " ('memory_tasks','runtime_events')",
         )
     }
-    assert set(NEW_0043_INDEXES) <= found
-    migrate(url, "0042_memory_observability", "downgrade")
+    assert set(NEW_0052_INDEXES) <= found
+    migrate(url, "0051_memory_observability", "downgrade")
     assert not query(
         url,
         "SELECT indexname FROM pg_indexes WHERE indexname IN"

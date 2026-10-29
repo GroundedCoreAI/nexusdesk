@@ -5,9 +5,9 @@ import pytest
 from test_ticket_migrations import migrate, query
 from test_ticket_migrations import migration_database as _migration_database
 
-from agent_platform.modules.model_gateway.catalog import Catalog
-from agent_platform.modules.model_gateway.contracts import Connection
-from agent_platform.settings import Settings
+from agent_platform.core_platform.platform_services.model_gateway.catalog import Catalog
+from agent_platform.core_platform.platform_services.model_gateway.contracts import Connection
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 pytestmark = pytest.mark.postgres
 migration_database = _migration_database

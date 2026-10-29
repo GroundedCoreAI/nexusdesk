@@ -36,7 +36,7 @@ async def test_discovery_auth_normalization_and_access(gateway_platform, monkeyp
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         response = await client.get(path)
         assert response.status_code == 200
         assert response.json() == {
@@ -70,7 +70,7 @@ async def test_discovery_errors_and_empty(gateway_platform, status, data, code):
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda _: httpx.Response(status, json=data))
     ) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         response = await client.get(ROOT + f"/connections/{connection['id']}/available-models")
     if code:
         assert response.status_code >= 400 and response.json()["detail"] == code

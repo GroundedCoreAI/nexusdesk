@@ -3,7 +3,7 @@ from sqlalchemy import text
 from test_platform_postgres import execute_next
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.apps import seed
+from agent_platform.applications import seed
 
 platform = _platform_fixture
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -14,7 +14,7 @@ async def test_quickstart_seed_is_repeatable_and_scenarios_work(platform, monkey
     monkeypatch.setattr(seed, "Settings", lambda: settings)
     await seed.main()
     await seed.main()
-    async with services.platform.engine.connect() as connection:
+    async with services.groups.runtime.engine.connect() as connection:
         for table in ("agents", "knowledge_bases", "gateway_profiles", "runtime_conversations"):
             count = await connection.scalar(
                 text(f"SELECT count(*) FROM {table} WHERE tenant_id=:tenant"),

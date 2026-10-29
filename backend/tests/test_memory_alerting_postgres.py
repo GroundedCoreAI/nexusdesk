@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy import text
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.memory.alerting import AlertScanner
-from agent_platform.modules.memory.worker import MemoryWorker
+from agent_platform.business_capabilities.memory.alerting import AlertScanner
+from agent_platform.business_capabilities.memory.worker import MemoryWorker
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -233,7 +233,7 @@ async def test_r5_maintenance_silent_fires_with_activity_and_is_exempt_when_idle
     # Maintenance evidence in 24h silences the rule (new tenant state reused:
     # write one heartbeat-shaped maintenance audit for this tenant).
     async with engine.begin() as c:
-        from agent_platform.platform.persistence.store import audit
+        from agent_platform.core_platform.platform_services.persistence.store import audit
 
         await audit(
             c,
@@ -267,7 +267,7 @@ async def test_r5_quiet_pass_audits_keep_healthy_tenant_silent(platform):
 
     fired = await make_worker(services, settings).alert_scan()
     assert "maintenance_silent" not in fired
-    summary = await services.platform.observability.memory_summary(tenant)
+    summary = await services.groups.application.observability.memory_summary(tenant)
     assert summary["maintenance"]["overdue"] == []
 
 
@@ -312,7 +312,7 @@ async def test_r6_fires_with_overdue_tickets_and_no_evidence(platform):
 
     # Rule-scan evidence (a rule_scan completion audit) silences the rule.
     async with engine.begin() as c:
-        from agent_platform.platform.persistence.store import audit
+        from agent_platform.core_platform.platform_services.persistence.store import audit
 
         await audit(
             c,
@@ -414,7 +414,7 @@ async def test_webhook_payload_shape_and_failure_isolated(platform):
     engine, tenant = services.repository.engine, settings.tenant_id
     # Maintenance evidence up front keeps R5 quiet so exactly one rule fires.
     async with engine.begin() as c:
-        from agent_platform.platform.persistence.store import audit
+        from agent_platform.core_platform.platform_services.persistence.store import audit
 
         await audit(
             c,

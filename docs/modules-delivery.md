@@ -6,9 +6,9 @@
 
 在 backend 执行 `uv sync`，然后使用目标 PostgreSQL 配置执行 `uv run alembic upgrade head`。本轮新增 0004_tool_versions、0005_service_identity、0006_knowledge_jobs、0007_vector_index。现有开发数据库未自动迁移；启动新版前需要执行迁移。前端在 frontend 执行 `npm ci`。
 
-API：`uv run uvicorn agent_platform.apps.api.main:app --host 127.0.0.1 --port 8000`。
+API：`uv run uvicorn agent_platform.applications.customer_service.main:app --host 127.0.0.1 --port 8000`。
 前端：`npm run dev`。
-文档 Worker（单独终端、相同数据库和租户配置）：`uv run python -m agent_platform.apps.worker.knowledge`。
+文档 Worker（单独终端、相同数据库和租户配置）：`uv run python -m agent_platform.applications.worker.knowledge`。
 文档任务不会因只启动 API 自动被处理。Worker 可运行多个进程，通过 PG SKIP LOCKED 领取任务；120 秒租约，单次执行总预算 90 秒。进程意外退出后过期任务重新领取，三次失联后失败；人工重试需显式调用。
 
 ## 配置外部文档服务

@@ -52,7 +52,7 @@ Agent、知识库、会话、人工队列、工单、渠道、评测与审计的
 
 ## 模型网关
 
-新增 `/api/v1/model-gateway`，支持连接、模型、版本方案、六种 operation、Chat SSE、临时媒体和调用记录。路径、权限及请求示例见 [网关实际协议](../backend/src/agent_platform/modules/model_gateway/PROTOCOL.md)。Runtime 运行事件仍是轮次/工具事件；逐段模型输出使用独立 `/model-gateway/stream` 接口。
+新增 `/api/v1/model-gateway`，支持连接、模型、版本方案、六种 operation、Chat SSE、临时媒体和调用记录。路径、权限及请求示例见 [网关实际协议](../backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md)。Runtime 运行事件仍是轮次/工具事件；逐段模型输出使用独立 `/model-gateway/stream` 接口。
 
 
 本轮模块增量、配置和验证状态见 [模块实施说明](modules-delivery.md) 与 [实施记录](implementation-progress.md)；旧版验证记录保留作历史记录。

@@ -17,13 +17,13 @@ from test_open_platform import application, session
 from test_platform_postgres import create_agent, execute_next
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.channel.service import session_id_hash
-from agent_platform.modules.memory.bootstrap import MemoryDispatcher
-from agent_platform.modules.memory.extraction import EXTRACT_KIND, ExtractionService
-from agent_platform.modules.memory.service import MemoryService
-from agent_platform.modules.memory.summary import SummaryService
-from agent_platform.modules.memory.worker import MemoryWorker
-from agent_platform.platform.persistence.store import DomainError, execute
+from agent_platform.business_capabilities.channel.service import session_id_hash
+from agent_platform.business_capabilities.memory.bootstrap import MemoryDispatcher
+from agent_platform.business_capabilities.memory.extraction import EXTRACT_KIND, ExtractionService
+from agent_platform.business_capabilities.memory.service import MemoryService
+from agent_platform.business_capabilities.memory.summary import SummaryService
+from agent_platform.business_capabilities.memory.worker import MemoryWorker
+from agent_platform.core_platform.platform_services.persistence.store import DomainError, execute
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -37,7 +37,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 def make_worker(services, settings, gateway=None, **kwargs):
     """Assemble a worker the way the deployment entries do, with a stub gateway."""
     engine = services.repository.engine
-    gateway = gateway or services.platform.gateway
+    gateway = gateway or services.groups.runtime.gateway
     dispatcher = MemoryDispatcher(
         SummaryService(engine, gateway, settings),
         ExtractionService(engine, gateway, settings, MemoryService(engine, settings)),
@@ -117,7 +117,7 @@ async def age_memory_tasks(engine, tenant, minutes=10):
 async def make_customer(services, settings, external_key, ops=(), source="channel"):
     """Direct-write a customer, its identity and extracted items (data construction)."""
     engine, tenant = services.repository.engine, settings.tenant_id
-    memory = services.platform.memory
+    memory = services.groups.business.memory
     async with engine.begin() as c:
         customer_id = await memory.resolve_customer(c, tenant, source, external_key)
         if ops:
@@ -143,7 +143,7 @@ def op_add(item_type, key, content, confidence=0.9):
 
 async def test_p2_ut_01_resolve_customer_creates_both_rows(platform):
     _client, services, settings = platform
-    memory, engine = services.platform.memory, services.repository.engine
+    memory, engine = services.groups.business.memory, services.repository.engine
     async with engine.begin() as c:
         customer_id = await memory.resolve_customer(c, settings.tenant_id, "channel", "key-1")
     customers = await db_rows(
@@ -158,7 +158,7 @@ async def test_p2_ut_01_resolve_customer_creates_both_rows(platform):
 
 async def test_p2_ut_02_resolve_customer_hit_reuses_existing(platform):
     _client, services, settings = platform
-    memory, engine = services.platform.memory, services.repository.engine
+    memory, engine = services.groups.business.memory, services.repository.engine
     async with engine.begin() as c:
         first = await memory.resolve_customer(c, settings.tenant_id, "channel", "key-1")
     async with engine.begin() as c:
@@ -176,7 +176,7 @@ async def test_p2_ut_02_resolve_customer_hit_reuses_existing(platform):
 
 async def test_p2_ut_03_concurrent_resolution_loser_rereads_winner(platform):
     _client, services, settings = platform
-    memory, engine = services.platform.memory, services.repository.engine
+    memory, engine = services.groups.business.memory, services.repository.engine
     winner_id, started = uuid4(), asyncio.Event()
 
     async def winner():
@@ -216,7 +216,7 @@ async def test_p2_ut_03_concurrent_resolution_loser_rereads_winner(platform):
 
 async def test_p2_ut_08_same_key_update_merges_with_prev_content(platform):
     _client, services, settings = platform
-    memory, engine = services.platform.memory, services.repository.engine
+    memory, engine = services.groups.business.memory, services.repository.engine
     tenant = settings.tenant_id
     customer_id = await make_customer(services, settings, "merge-key")
     async with engine.begin() as c:
@@ -251,7 +251,7 @@ async def test_p2_ut_08_same_key_update_merges_with_prev_content(platform):
 
 async def test_p2_ut_09_add_on_existing_key_does_nothing(platform):
     _client, services, settings = platform
-    memory, engine = services.platform.memory, services.repository.engine
+    memory, engine = services.groups.business.memory, services.repository.engine
     tenant = settings.tenant_id
     customer_id = await make_customer(services, settings, "dup-key")
     for _ in range(2):
@@ -271,7 +271,7 @@ async def test_extracted_update_never_clobbers_human_edit(platform):
     Phase 2 behaviour); full lifecycle coverage is P4-UT-07/P4-IT-01 in
     test_memory_governance_postgres.py."""
     _client, services, settings = platform
-    memory, engine = services.platform.memory, services.repository.engine
+    memory, engine = services.groups.business.memory, services.repository.engine
     tenant = settings.tenant_id
     customer_id = await make_customer(
         services, settings, "human-key", [op_add("profile", "name", "张三")]
@@ -391,13 +391,13 @@ async def test_p2_it_03_resolution_failure_never_blocks_conversation(platform, c
         async def resolve_customer(self, c, tenant, source, external_key):
             raise RuntimeError("simulated database hiccup")
 
-    original = services.platform.conversations.memory
-    services.platform.conversations.memory = BrokenMemory()
+    original = services.groups.business.conversations.memory
+    services.groups.business.conversations.memory = BrokenMemory()
     try:
         with caplog.at_level(logging.WARNING):
             incoming = await ingest(client, channel, "m1", "customer1", "你好")
     finally:
-        services.platform.conversations.memory = original
+        services.groups.business.conversations.memory = original
     detail = await conversation_detail(client, incoming["conversation_id"])
     assert detail["customer_id"] is None
     assert any("identity resolution failed" in record.message for record in caplog.records)
@@ -822,7 +822,7 @@ async def test_p2_api_03_edit_turns_item_human_and_keeps_previous(platform):
     assert edited["source_type"] == "human" and edited["confidence"] == 1.0
     assert edited["revision"] == 2
     # The next injection carries the edited content.
-    active = await services.platform.memory.injection_items(tenant, customer_id, 20)
+    active = await services.groups.business.memory.injection_items(tenant, customer_id, 20)
     assert [row["content"] for row in active] == ["张叁"]
     records = await audit_records(engine, tenant, "memory.item.edited")
     assert len(records) == 1
@@ -840,12 +840,12 @@ async def test_p2_api_04_soft_delete_and_restore_control_injection(platform):
     item = (await items_of(engine, tenant, customer_id))[0]
     response = await client.delete(f"/api/v1/memory/items/{item['id']}")
     assert response.status_code == 200 and response.json()["status"] == "deleted"
-    assert await services.platform.memory.injection_items(tenant, customer_id, 20) == []
+    assert await services.groups.business.memory.injection_items(tenant, customer_id, 20) == []
     # Repeating the delete is idempotent.
     assert (await client.delete(f"/api/v1/memory/items/{item['id']}")).status_code == 200
     response = await client.post(f"/api/v1/memory/items/{item['id']}/restore")
     assert response.status_code == 200 and response.json()["status"] == "active"
-    active = await services.platform.memory.injection_items(tenant, customer_id, 20)
+    active = await services.groups.business.memory.injection_items(tenant, customer_id, 20)
     assert [row["content"] for row in active] == ["张三"]
     # A non-deleted item cannot be restored.
     assert (await client.post(f"/api/v1/memory/items/{item['id']}/restore")).status_code == 409
@@ -902,9 +902,9 @@ async def test_p2_api_06_cross_tenant_memory_is_unreachable(platform):
     assert listing["total"] == 1
     # Nor can this tenant's items be reached from another tenant's service calls.
     with pytest.raises(DomainError, match="memory_item_not_found"):
-        await services.platform.memory.edit_item("other-tenant", "x", item["id"], "篡改")
+        await services.groups.business.memory.edit_item("other-tenant", "x", item["id"], "篡改")
     with pytest.raises(DomainError, match="memory_customer_not_found"):
-        await services.platform.memory.customer_detail("other-tenant", customer_id)
+        await services.groups.business.memory.customer_detail("other-tenant", customer_id)
     detail = (await client.get(f"/api/v1/memory/customers/{customer_id}")).json()
     assert [i["external_key"] for i in detail["identities"]] == ["isolation-key"]
     assert [i["key"] for i in detail["items"]] == ["name"]

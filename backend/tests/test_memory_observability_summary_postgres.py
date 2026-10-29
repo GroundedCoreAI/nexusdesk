@@ -270,7 +270,7 @@ async def test_p7_it_memory_summary_health_sections_reconcile(platform):
     engine, tenant = services.repository.engine, settings.tenant_id
     await seed_health_dataset(engine, tenant)
 
-    summary = await services.platform.observability.memory_summary(tenant)
+    summary = await services.groups.application.observability.memory_summary(tenant)
 
     # Phase 4 keys untouched.
     assert summary["window_hours"] == 24
@@ -393,7 +393,7 @@ async def test_p7_it_memory_summary_window_hours_168(platform):
         i=uuid4(),
     )
 
-    observability = services.platform.observability
+    observability = services.groups.application.observability
     narrow = await observability.memory_summary(tenant)
     wide = await observability.memory_summary(tenant, 168)
 
@@ -418,7 +418,7 @@ async def test_p7_it_memory_summary_empty_tenant(platform):
     idle tenant reports no overdue maintenance jobs (R5 exemption spirit)."""
     _client, services, settings = platform
     tenant = settings.tenant_id
-    summary = await services.platform.observability.memory_summary(tenant)
+    summary = await services.groups.application.observability.memory_summary(tenant)
 
     assert summary["tasks"] == {
         "pending": 0,
@@ -473,7 +473,9 @@ async def test_p7_it_rule_scan_not_overdue_when_scan_disabled(platform):
     engine, tenant = services.repository.engine, settings.tenant_id
     await make_task(engine, tenant, status="done", duration_ms=10)
 
-    from agent_platform.modules.observability.service import ObservabilityService
+    from agent_platform.core_platform.platform_services.observability.service import (
+        ObservabilityService,
+    )
 
     disabled = ObservabilityService(
         engine, settings.model_copy(update={"memory_rule_scan_interval_minutes": 0})

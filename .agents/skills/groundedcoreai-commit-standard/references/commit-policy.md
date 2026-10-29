@@ -15,6 +15,15 @@
 - 两者都没有时创建 `AGENTS.md`
 - 插入的文本只提 skill 名称，**禁止**包含本地绝对路径
 
+## 作者归属
+
+提交消息禁止追加 Claude、Anthropic 或 `noreply@anthropic.com` 的
+`Co-Authored-By` trailer。GitHub 将共同作者 trailer 计入 Contributors，
+自动署名会污染真实贡献者统计。签名脚本不会生成此类 trailer，并会拒绝包含
+此类署名的新提交。
+
+历史提交中的既有署名不做批量改写，避免破坏正式 tag、提交签名与审计链。
+
 ## Subject
 
 格式：

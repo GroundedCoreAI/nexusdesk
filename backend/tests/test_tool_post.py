@@ -4,8 +4,8 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from agent_platform.modules.tool_gateway.openapi import export_document, preview
-from agent_platform.modules.tool_gateway.service import HttpTool, ToolGateway
+from agent_platform.core_platform.tool_gateway.openapi import export_document, preview
+from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGateway
 
 
 def post_tool(**changes):
