@@ -11,8 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent_platform.modules.memory.store import decay_factor, rank_hits
-from agent_platform.settings import Settings
+from agent_platform.business_capabilities.memory.store import decay_factor, rank_hits
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 asyncio_mark = pytest.mark.asyncio
 

@@ -19,9 +19,9 @@
 cd C:\code\ai-project\backend
 uv sync
 uv run alembic upgrade head
-uv run uvicorn agent_platform.apps.api.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn agent_platform.applications.customer_service.main:app --host 127.0.0.1 --port 8000
 # 另开终端；解析和索引需要此独立 Worker
-uv run python -m agent_platform.apps.worker.knowledge
+uv run python -m agent_platform.applications.worker.knowledge
 ```
 
 前端 `npm run dev`，地址 `http://127.0.0.1:5173/#/knowledge`。Worker 按配置的 `AGENT_TENANT_ID` 处理队列；多租户部署需为目标租户配置 Worker，当前不提供动态全租户调度。

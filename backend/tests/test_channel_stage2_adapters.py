@@ -7,22 +7,28 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from agent_platform.integrations.channels.base import (
+from agent_platform.core_platform.platform_services.integrations.channels.base import (
     IncomingEnvelope,
     TokenCache,
     chunk_text,
     retry_after_seconds,
 )
-from agent_platform.integrations.channels.crypto import (
+from agent_platform.core_platform.platform_services.integrations.channels.crypto import (
     encrypt_wechat_payload,
     slack_signature,
     wechat_signature,
 )
-from agent_platform.integrations.channels.discord import DiscordAdapter
-from agent_platform.integrations.channels.slack import SlackAdapter
-from agent_platform.integrations.channels.telegram import TelegramAdapter
-from agent_platform.integrations.channels.wecom_kf import WeComKfAdapter
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.integrations.channels.discord import (
+    DiscordAdapter,
+)
+from agent_platform.core_platform.platform_services.integrations.channels.slack import SlackAdapter
+from agent_platform.core_platform.platform_services.integrations.channels.telegram import (
+    TelegramAdapter,
+)
+from agent_platform.core_platform.platform_services.integrations.channels.wecom_kf import (
+    WeComKfAdapter,
+)
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 WECOM_KF_KEY = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
 

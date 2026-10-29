@@ -44,7 +44,7 @@ async def test_classification_combined_filters_and_update_compatibility(platform
         "total"
     ] == 0
     assert (await client.get(endpoint, params={"examples_only": True})).json()["total"] == 3
-    assert (await runtime.platform.agents.catalog("other", industries=["游戏"]))["total"] == 0
+    assert (await runtime.groups.business.agents.catalog("other", industries=["游戏"]))["total"] == 0
     agent = agents[0]
     # Older callers that omit the new fields must not erase classifications.
     updated = await client.put(

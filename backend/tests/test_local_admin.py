@@ -4,13 +4,17 @@ import asyncio
 import pytest
 from test_platform_postgres import platform  # noqa: F401
 
-from agent_platform.platform.identity.local_admin import (
+from agent_platform.core_platform.platform_services.identity.local_admin import (
     LocalAdmin,
     hash_password,
     seed_default_admin,
     verify_password,
 )
-from agent_platform.platform.persistence.store import DomainError, execute, one
+from agent_platform.core_platform.platform_services.persistence.store import (
+    DomainError,
+    execute,
+    one,
+)
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 ROOT = "/api/v1/auth/local"
@@ -19,7 +23,7 @@ PASSWORD = "test-admin-password-2026"
 
 def service(platform):
     _, runtime, settings = platform
-    return LocalAdmin(runtime.platform.engine, settings.tenant_id)
+    return LocalAdmin(runtime.groups.runtime.engine, settings.tenant_id)
 
 
 async def login(client, password=PASSWORD, username="rescue.admin", headers=None):
@@ -47,7 +51,7 @@ async def test_login_logout_and_no_secret_leak(platform):
     me = await client.get("/api/v1/me", headers=headers)
     assert me.status_code == 200 and me.json()["role"] == "admin"
     assert me.json()["actor"] == "enterprise:" + admin["id"]
-    async with runtime.platform.engine.connect() as c:
+    async with runtime.groups.runtime.engine.connect() as c:
         session = await one(
             c,
             "SELECT ip FROM local_admin_sessions WHERE tenant_id=:t",
@@ -56,7 +60,7 @@ async def test_login_logout_and_no_secret_leak(platform):
     assert session["ip"] == forwarded_ip
     assert (await client.post(ROOT + "/logout", headers=headers)).status_code == 204
     assert (await client.get("/api/v1/me", headers=headers)).status_code == 401
-    async with runtime.platform.engine.connect() as c:
+    async with runtime.groups.runtime.engine.connect() as c:
         row = await one(
             c,
             "SELECT password_hash FROM local_admin_credentials WHERE tenant_id=:t",
@@ -144,7 +148,7 @@ async def test_enterprise_admin_cannot_disable_demote_or_bind_emergency_account(
             json={"name": "Admin", "role": role, "enabled": enabled, "revision": 1},
         )
         assert r.status_code == 409 and r.json()["detail"] == "independent_admin_protected"
-    ent = runtime.platform.open_platform.enterprise
+    ent = runtime.groups.application.open_platform.enterprise
     async with ent.engine.begin() as c:
         await ent.resolve(c, "provider:test", "employee", "Employee")
         identity = await one(
@@ -166,7 +170,7 @@ async def test_expired_session_and_cross_tenant_rejected(platform):
     settings.tenant_id = "different-tenant"
     assert (await client.get("/api/v1/me", headers=h)).status_code == 401
     settings.tenant_id = original
-    async with runtime.platform.engine.begin() as c:
+    async with runtime.groups.runtime.engine.begin() as c:
         await execute(
             c,
             "UPDATE local_admin_sessions SET expires_at=now()-interval '1 second' WHERE tenant_id=:t",
@@ -180,7 +184,7 @@ async def test_rate_limit_and_password_validation(platform):
     with pytest.raises(DomainError):
         await service(platform).initialize("rescue.admin", "short")
     await service(platform).initialize("rescue.admin", PASSWORD)
-    async with runtime.platform.engine.begin() as c:
+    async with runtime.groups.runtime.engine.begin() as c:
         await execute(
             c,
             "INSERT INTO local_login_limits(tenant_id,bucket,attempts,expires_at) VALUES(:t,'unrelated',1,now()-interval '1 hour')",
@@ -193,7 +197,7 @@ async def test_rate_limit_and_password_validation(platform):
         ROOT + "/login", json={"username": "rescue.admin", "password": "s" * 129}
     )
     assert invalid.status_code == 422 and "s" * 129 not in invalid.text
-    async with runtime.platform.engine.begin() as c:
+    async with runtime.groups.runtime.engine.begin() as c:
         await execute(c, "DELETE FROM local_login_limits WHERE tenant_id=:t", t=settings.tenant_id)
     assert (await login(client)).status_code == 200
     first, second = hash_password(PASSWORD), hash_password(PASSWORD)
@@ -203,7 +207,7 @@ async def test_rate_limit_and_password_validation(platform):
 async def test_deployment_sql_default_password_rotation_and_idempotency(platform):
     client, runtime, settings = platform
     await asyncio.gather(
-        *[seed_default_admin(runtime.platform.engine, settings.tenant_id) for _ in range(2)]
+        *[seed_default_admin(runtime.groups.runtime.engine, settings.tenant_id) for _ in range(2)]
     )
     response = await login(client, "nexusdesk", "admin")
     assert response.status_code == 200, response.text
@@ -228,7 +232,7 @@ async def test_deployment_sql_default_password_rotation_and_idempotency(platform
     )
     assert changed.status_code == 204, changed.text
     assert (await client.get("/api/v1/me", headers=headers)).status_code == 401
-    await seed_default_admin(runtime.platform.engine, settings.tenant_id)
+    await seed_default_admin(runtime.groups.runtime.engine, settings.tenant_id)
     assert (await login(client, "nexusdesk", "admin")).status_code == 401
     response = await login(client, PASSWORD, "admin")
     assert response.json()["must_change_password"] is False
@@ -237,7 +241,7 @@ async def test_deployment_sql_default_password_rotation_and_idempotency(platform
             "/api/v1/me", headers={"Authorization": "Bearer " + response.json()["access_token"]}
         )
     ).status_code == 200
-    async with runtime.platform.engine.connect() as c:
+    async with runtime.groups.runtime.engine.connect() as c:
         count = await one(
             c,
             "SELECT count(*) AS n FROM local_admin_credentials WHERE tenant_id=:t",
@@ -249,7 +253,7 @@ async def test_deployment_sql_default_password_rotation_and_idempotency(platform
 async def test_deployment_seed_preserves_existing_custom_admin(platform):
     client, runtime, settings = platform
     await service(platform).initialize("rescue.admin", PASSWORD)
-    await seed_default_admin(runtime.platform.engine, settings.tenant_id)
+    await seed_default_admin(runtime.groups.runtime.engine, settings.tenant_id)
     response = await login(client)
     assert response.status_code == 200 and not response.json()["must_change_password"]
     assert (await login(client, "nexusdesk", "admin")).status_code == 401

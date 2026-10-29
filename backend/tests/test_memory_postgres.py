@@ -14,10 +14,14 @@ from sqlalchemy import text
 from test_platform_postgres import create_agent, execute_next
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.memory.bootstrap import embedded_memory_worker
-from agent_platform.modules.memory.summary import SUMMARY_KIND, SummaryService, enqueue_summary_task
-from agent_platform.modules.memory.worker import MemoryWorker
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.business_capabilities.memory.bootstrap import embedded_memory_worker
+from agent_platform.business_capabilities.memory.summary import (
+    SUMMARY_KIND,
+    SummaryService,
+    enqueue_summary_task,
+)
+from agent_platform.business_capabilities.memory.worker import MemoryWorker
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -99,7 +103,7 @@ class RecordingGateway:
 def make_worker(services, settings, gateway=None, **kwargs):
     """Assemble a worker the way the deployment entries do, with a stub gateway."""
     engine = services.repository.engine
-    service = SummaryService(engine, gateway or services.platform.gateway, settings)
+    service = SummaryService(engine, gateway or services.groups.runtime.gateway, settings)
     return MemoryWorker(engine, service, settings, **kwargs)
 
 
@@ -528,7 +532,7 @@ async def test_p1_it_15_embedded_shutdown_releases_running_tasks(platform):
     agent, _ = await create_agent(client)
     conv = await make_conversation(client, agent)
     embedded = settings.model_copy(update={"embedded_worker": True})
-    worker = embedded_memory_worker(services, embedded)
+    worker = embedded_memory_worker(services.groups, embedded)
     assert isinstance(worker, MemoryWorker)
     async with services.repository.engine.begin() as c:
         await enqueue_summary_task(
@@ -544,8 +548,8 @@ async def test_p1_it_15_embedded_shutdown_releases_running_tasks(platform):
 
 
 async def test_p1_it_16_standalone_entry_executes_and_shuts_down_cleanly(platform):
-    """python -m agent_platform.apps.worker.memory runs the claim loop (P1-IT-16)."""
-    from agent_platform.apps.worker.memory import main as memory_main
+    """python -m agent_platform.applications.worker.memory runs the claim loop (P1-IT-16)."""
+    from agent_platform.applications.worker.memory import main as memory_main
 
     client, services, settings = platform
     agent, _ = await create_agent(client)

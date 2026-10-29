@@ -60,7 +60,7 @@ API 接口接受只写字段 `api_key`、`clear_api_key`。凭据以 Fernet 认�
 
 本次在已有模型接入、发布、调用链上补齐管理能力。所有功能使用 PostgreSQL 持久化，不依赖浏览器本地模拟数据。
 
-实现状态核对日期：2026-09-21。本文件说明已交付的治理范围，不表示模型网关全部规划已完成。完整的“已实现/部分实现/未实现”清单见 [模型网关 README 第 1 节](../backend/src/agent_platform/modules/model_gateway/README.md#1-当前实现)。真实供应商验收和业务数据库升级需在对应部署环境分别确认。
+实现状态核对日期：2026-09-21。本文件说明已交付的治理范围，不表示模型网关全部规划已完成。完整的“已实现/部分实现/未实现”清单见 [模型网关 README 第 1 节](../backend/src/agent_platform/core_platform/platform_services/model_gateway/README.md#1-当前实现)。真实供应商验收和业务数据库升级需在对应部署环境分别确认。
 
 ## 已实现的闭环
 
@@ -102,15 +102,15 @@ uv run alembic current
 # 终端一：后端，先配置 AGENT_DATABASE_URL，再执行迁移
 cd C:\code\ai-project\backend
 uv run alembic upgrade head
-uv run python -m agent_platform.apps.seed_models  # 可选：添加明确标记的演示资源
-uv run uvicorn agent_platform.apps.api.main:app --host 127.0.0.1 --port 8000
+uv run python -m agent_platform.applications.seed_models  # 可选：添加明确标记的演示资源
+uv run uvicorn agent_platform.applications.customer_service.main:app --host 127.0.0.1 --port 8000
 
 # 终端二：前端
 cd C:\code\ai-project\frontend
 npm run dev
 ```
 
-前端 `/api` 代理到 8000。真实供应商需配置允许访问的主机、模型标识和 `AGENT_MODEL_SECRET_*` 进程环境变量，详见 `backend/src/agent_platform/modules/model_gateway/PROTOCOL.md`。
+前端 `/api` 代理到 8000。真实供应商需配置允许访问的主机、模型标识和 `AGENT_MODEL_SECRET_*` 进程环境变量，详见 `backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md`。
 
 ## 新接口
 
@@ -143,7 +143,7 @@ npm run dev
 ```powershell
 cd C:\code\ai-project\backend
 uv run pytest -q
-uv run ruff check src/agent_platform/modules/model_gateway tests/test_gateway_governance.py tests/test_gateway_migrations.py
+uv run ruff check src/agent_platform/core_platform/platform_services/model_gateway tests/test_gateway_governance.py tests/test_gateway_migrations.py
 
 cd C:\code\ai-project\frontend
 npm run build

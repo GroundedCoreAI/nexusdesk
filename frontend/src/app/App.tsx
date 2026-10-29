@@ -3,11 +3,12 @@ import {AccountMenu} from '../features/auth/AccountMenu';
 import { useTranslation } from 'react-i18next';
 import { LanguageSelector } from '../i18n/LanguageSelector';
 import { t } from '../i18n/index';
-import { lazy, Suspense, useState, useRef, useEffect } from 'react';
+import { lazy, Suspense, useState, useRef, useEffect, type ReactNode } from 'react';
 import { Layout, Button, Avatar, Tag, Spin } from 'antd';
-import { MenuFoldOutlined, MenuUnfoldOutlined, BarChartOutlined, MessageOutlined, FileTextOutlined, CustomerServiceOutlined, RobotOutlined, ApiOutlined, BookOutlined, ToolOutlined, SafetyOutlined, ExperimentOutlined, LineChartOutlined, TeamOutlined, LockOutlined } from '@ant-design/icons';
-import { type PlatformModule, type Summary, setToken, token } from '../shared/api/client';
-import { Alert, Badge, Field, Panel, Role, useResource } from '../shared/components/ui';
+import { MenuFoldOutlined, MenuUnfoldOutlined, BarChartOutlined, MessageOutlined, FileTextOutlined, CustomerServiceOutlined, RobotOutlined, ApiOutlined, BookOutlined, ToolOutlined, SafetyOutlined, ExperimentOutlined, LineChartOutlined, TeamOutlined, LockOutlined, AuditOutlined } from '@ant-design/icons';
+import { type CapabilityObservability, type PlatformModule, type Summary, setToken, token } from '../shared/api/client';
+import { Alert, Badge, Empty, Field, Panel, Role, useResource } from '../shared/components/ui';
+import type { UiExtensionManifest, UiNavigationItem } from '../contracts';
 import { BrandMark } from '../shared/components/BrandMark';
 import { AgentsPage } from '../features/agents/AgentsPage';
 const KnowledgePage = lazy(() => import('../features/knowledge/KnowledgePage').then(module => ({ default: module.KnowledgePage })));
@@ -20,13 +21,26 @@ import { QualityPage } from '../features/evaluation/QualityPage';
 import { Metrics, ObservabilityPage } from '../features/observability/ObservabilityPage';
 import { WorkbenchSso } from '../features/open-platform/SsoLogin';
 import { StaffPanel } from '../features/handoff/StaffPanel';
+import { ExtensionsPage } from '../features/extensions/ExtensionsPage';
+import { SampleOperationsPage } from '../features/extensions/SampleOperationsPage';
 import { useHashRouter, type ModelSection } from './hashRouter';
 import { ModelsPage } from '../features/models/ModelsPage';
 import { MembersPage, RolesPage, SecurityPage } from '../features/access-control/AccessControlPages';
 const OpenPlatformPage = lazy(() => import('../features/open-platform/OpenPlatformPage').then(module => ({ default: module.OpenPlatformPage })));
-const sections = () => ([['overview', t("平台总览")], ['conversations', t("会话工作台")], ['agents', t("Agent 管理")], ['models', t("模型网关")], ['knowledge', t("知识库")], ['tools', t("工具目录")], ['handoff', t("人工协同")], ['tickets', t("服务工单")], ['memory', t("客户记忆")], ['open-platform', t("开放平台")], ['evaluation', t("质量大盘")], ['observability', t("运行与审计")], ['access', t("访问与策略")], ['members', t("成员管理")], ['roles', t("角色与权限")], ['security', t("会话与安全")]] as const);
-type Page = ReturnType<typeof sections>[number][0];
-const icons = { 'open-platform': <ApiOutlined/>, overview: <BarChartOutlined />, conversations: <MessageOutlined />, tickets: <FileTextOutlined />, handoff: <CustomerServiceOutlined />, agents: <RobotOutlined />, models: <ApiOutlined />, knowledge: <BookOutlined />, tools: <ToolOutlined />, memory: <TeamOutlined />, access: <SafetyOutlined />, evaluation: <ExperimentOutlined />, observability: <LineChartOutlined />, members: <TeamOutlined />, roles: <SafetyOutlined />, security: <LockOutlined /> };
+const sections = () => ([['overview', t("平台总览")], ['conversations', t("会话工作台")], ['agents', t("Agent 管理")], ['models', t("模型网关")], ['knowledge', t("知识库")], ['tools', t("工具目录")], ['handoff', t("人工协同")], ['tickets', t("服务工单")], ['memory', t("客户记忆")], ['open-platform', t("开放平台")], ['evaluation', t("质量大盘")], ['observability', t("运行与审计")], ['access', t("访问与策略")], ['members', t("成员管理")], ['roles', t("角色与权限")], ['security', t("会话与安全")], ['extensions', t("插件平台")]] as const);
+type Page = ReturnType<typeof sections>[number][0] | 'approvals';
+const icons: Record<string, ReactNode> = { 'open-platform': <ApiOutlined/>, overview: <BarChartOutlined />, conversations: <MessageOutlined />, tickets: <FileTextOutlined />, handoff: <CustomerServiceOutlined />, agents: <RobotOutlined />, models: <ApiOutlined />, knowledge: <BookOutlined />, tools: <ToolOutlined />, memory: <TeamOutlined />, access: <SafetyOutlined />, evaluation: <ExperimentOutlined />, observability: <LineChartOutlined />, members: <TeamOutlined />, roles: <SafetyOutlined />, security: <LockOutlined />, extensions: <ApiOutlined />, approvals: <AuditOutlined /> };
+
+interface ResolvedUiNavigation extends UiNavigationItem {
+    extensionId: string;
+    feature: string;
+}
+
+const uiFeatureRenderers: Record<string, () => ReactNode> = {
+    'approval/workbench': () => <ApprovalPage />,
+    'extensions/sample-operations': () => <SampleOperationsPage />,
+};
+const ApprovalPage = lazy(() => import('../features/approval/ApprovalPage').then(module => ({ default: module.ApprovalPage })));
 function Overview() {
     const summary = useResource<Summary>('/observability/summary', 5000);
     const modules = useResource<PlatformModule[]>('/modules');
@@ -60,7 +74,11 @@ function Shell({ reset }: {
     const me = useResource<{
         role: string;
         tenant: string;
+        actor: string;
+        permissions: string[];
     }>('/me');
+    const uiExtensions = useResource<UiExtensionManifest[]>('/extensions/ui');
+    const capabilities = useResource<CapabilityObservability>('/extensions/capabilities', 5000);
     const [collapsed, setCollapsed] = useState(false);
     const [agentWorkspace, setAgentWorkspace] = useState(false);
     const previousCollapsed = useRef(false);
@@ -84,16 +102,44 @@ function Shell({ reset }: {
             setCollapsed(window.innerWidth < 992 || previousCollapsed.current);
     }
     const role = me.data?.role || 'viewer';
+    const hasPermission = (permissions: readonly string[] | undefined) =>
+        !permissions?.some(permission => !(me.data?.permissions || []).includes(permission));
+    const hasCapability = (capability: string | undefined) => {
+        if (!capability) return true;
+        return Boolean(capabilities.data?.capabilities.items.some(item =>
+            item.capability_id === capability && item.status !== 'stopped',
+        ));
+    };
+    const extensionNavigation: ResolvedUiNavigation[] = (uiExtensions.data || []).flatMap(manifest => manifest.navigation.flatMap(item => {
+        const route = manifest.routes.find(candidate => candidate.path === item.path);
+        if (!route || !uiFeatureRenderers[route.feature]) return [];
+        if (!hasPermission(item.requiredPermissions) || !hasPermission(route.requiredPermissions)) return [];
+        if (!hasCapability(item.requiredCapability) || !hasCapability(route.requiredCapability)) return [];
+        return [{ ...item, extensionId: manifest.extensionId, feature: route.feature }];
+    }));
+    const extensionLabels = new Map(extensionNavigation.map(item => [item.id, t(item.labelKey)]));
+    const labelFor = (id: Page) => sections().find(item => item[0] === id)?.[1] || extensionLabels.get(id) || id;
+    const extensionGroups = Array.from(extensionNavigation.reduce((groups, item) => {
+        const ids = groups.get(item.group) || [];
+        ids.push(item.id as Page);
+        groups.set(item.group, ids);
+        return groups;
+    }, new Map<string, Page[]>())).map(([group, ids]) => ({
+        title: group === 'approval' ? t('审批工作') : group,
+        ids,
+    }));
     const groups: {
         title: string;
         ids: Page[];
-    }[] = [{ title: t("客服工作"), ids: ['overview', 'conversations', 'tickets', 'handoff', 'memory'] }, { title: t("配置管理"), ids: ['agents', 'models', 'knowledge', 'tools', 'open-platform', 'access'] }, { title: t("质量运营"), ids: ['evaluation', 'observability'] }, { title: t("系统管理"), ids: role === 'admin' ? ['members', 'roles', 'security'] : ['security'] }];
-  const pages = { 'open-platform': <OpenPlatformPage route={router.path} onNavigate={router.navigate}/>, models: <ModelsPage routeSection={router.path.split('/')[2] as ModelSection} onNavigate={section => router.navigate(`/models/${section}`)}/>, overview: <Overview />, conversations: <ConversationsPage route={router.path} onNavigate={router.navigate} />, agents: <AgentsPage route={router.path} onNavigate={router.navigate} onConfigureModels={() => navigate('models', 'profiles')} onWorkspaceChange={workspaceChanged} onGuardChange={guard => { leaveGuard.current = guard; }}/>, knowledge: <KnowledgePage />, tools: <ToolsPage route={router.path} onNavigate={router.navigate}/>, handoff: <HandoffPage />, tickets: <TicketsPage />, memory: <MemoryPage route={router.path} onNavigate={router.navigate} />, evaluation: <QualityPage onNavigate={router.navigate} />, observability: <ObservabilityPage />, access: <><Access onChange={reset}/><StaffPanel /></>, members: <MembersPage />, roles: <RolesPage />, security: <SecurityPage /> };
+    }[] = [{ title: t("客服工作"), ids: ['overview', 'conversations', 'tickets', 'handoff', 'memory'] }, { title: t("配置管理"), ids: ['agents', 'models', 'knowledge', 'tools', 'open-platform', 'access'] }, { title: t("质量运营"), ids: ['evaluation', 'observability'] }, { title: t("系统管理"), ids: role === 'admin' ? ['members', 'roles', 'security', 'extensions'] : ['security'] }, ...extensionGroups];
+  const pages: Partial<Record<Page, ReactNode>> = { 'open-platform': <OpenPlatformPage route={router.path} onNavigate={router.navigate}/>, models: <ModelsPage routeSection={router.path.split('/')[2] as ModelSection} onNavigate={section => router.navigate(`/models/${section}`)}/>, overview: <Overview />, conversations: <ConversationsPage route={router.path} onNavigate={router.navigate} />, agents: <AgentsPage route={router.path} onNavigate={router.navigate} onConfigureModels={() => navigate('models', 'profiles')} onWorkspaceChange={workspaceChanged} onGuardChange={guard => { leaveGuard.current = guard; }}/>, knowledge: <KnowledgePage />, tools: <ToolsPage route={router.path} onNavigate={router.navigate}/>, handoff: <HandoffPage />, tickets: <TicketsPage />, memory: <MemoryPage route={router.path} onNavigate={router.navigate} />, evaluation: <QualityPage onNavigate={router.navigate} />, observability: <ObservabilityPage />, access: <><Access onChange={reset}/><StaffPanel /></>, members: <MembersPage />, roles: <RolesPage />, security: <SecurityPage />, extensions: <ExtensionsPage /> };
+    const extensionPage = extensionNavigation.find(item => item.id === page);
+    const pageContent = extensionPage ? uiFeatureRenderers[extensionPage.feature]?.() : pages[page];
     return <Role.Provider value={role}><Layout className={`console-layout ${page === 'agents' ? 'agents-shell' : page === 'tools' ? 'tools-shell' : page === 'open-platform' ? 'open-platform-shell' : ''} ${agentWorkspace ? 'agent-focus' : ''}`}><Layout.Sider className="console-sider" theme="light" width={248} collapsedWidth={0} collapsed={collapsed} breakpoint="lg" onBreakpoint={setCollapsed} trigger={null}>
     <div className="console-brand"><BrandMark subtitle={t("智能客服平台")}/></div>
-    <nav aria-label={t("主导航")} className="console-nav">{groups.map(group => <div key={group.title}><div className="nav-group-title">{group.title}</div>{group.ids.map(id => <Button block type="text" icon={icons[id]} className={page === id ? 'nav-selected' : ''} aria-current={page === id ? 'page' : undefined} key={id} onClick={() => navigate(id)}>{sections().find(item => item[0] === id)?.[1]}</Button>)}</div>)}</nav>
-  </Layout.Sider><Layout className="console-body"><Layout.Header className="console-header"><div className="console-heading"><Button type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/><div><h1>{sections().find(([id]) => id === page)?.[1]}</h1><p className="page-description">{page === 'tickets' ? t("跟进每一个问题，记录每一次处理。") : page === 'overview' ? t("了解服务运行情况，管理你的客服工作空间。") : page === 'models' ? t("统一接入模型服务，管理模型能力与发布方案。") : page === 'evaluation' ? t("跨 Agent 查看评测通过率、待复核队列与回归。") : page === 'members' ? t("管理组织成员、角色和访问状态。") : page === 'roles' ? t("查看固定角色的权限范围。") : page === 'security' ? t("管理当前账号的登录会话和访问安全。") : t("管理服务配置与协作，让客户问题得到持续跟进。")}</p></div></div><div className="console-header-actions"><LanguageSelector /><AccountMenu access={() => navigate('access')}><Button type="text" aria-label={t("账户菜单")}><Avatar size="small">{role[0].toUpperCase()}</Avatar>{me.data?.tenant || t("未连接")}<Tag>{role}</Tag></Button></AccountMenu></div></Layout.Header>
-    <Layout.Content className="console-content">{me.error && page !== 'access' && <div role="alert" className="alert error">{t("无法连接后端或读取权限：")}{me.error} <Button onClick={() => me.refresh()}>{t("重试")}</Button> <Button onClick={() => navigate('access')}>{t("设置凭据")}</Button></div>}<div className={`page module-page module-${page}`} key={page}><Suspense fallback={<Spin tip={t("正在加载页面")}><div style={{ minHeight: 160 }}/></Spin>}>{pages[page]}</Suspense></div></Layout.Content>
+    <nav aria-label={t("主导航")} className="console-nav">{groups.map(group => <div key={group.title}><div className="nav-group-title">{group.title}</div>{group.ids.map(id => <Button block type="text" icon={icons[id]} className={page === id ? 'nav-selected' : ''} aria-current={page === id ? 'page' : undefined} key={id} onClick={() => navigate(id)}>{labelFor(id)}</Button>)}</div>)}</nav>
+  </Layout.Sider><Layout className="console-body"><Layout.Header className="console-header"><div className="console-heading"><Button type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/><div><h1>{labelFor(page)}</h1><p className="page-description">{page === 'tickets' ? t("跟进每一个问题，记录每一次处理。") : page === 'overview' ? t("了解服务运行情况，管理你的客服工作空间。") : page === 'models' ? t("统一接入模型服务，管理模型能力与发布方案。") : page === 'evaluation' ? t("跨 Agent 查看评测通过率、待复核队列与回归。") : page === 'members' ? t("管理组织成员、角色和访问状态。") : page === 'roles' ? t("查看固定角色的权限范围。") : page === 'security' ? t("管理当前账号的登录会话和访问安全。") : page === 'extensions' ? t("管理插件生命周期、配置版本和运行状态。") : page === 'approvals' ? t("处理待审批请求，查看决策记录。") : t("管理服务配置与协作，让客户问题得到持续跟进。")}</p></div></div><div className="console-header-actions"><LanguageSelector /><AccountMenu access={() => navigate('access')}><Button type="text" aria-label={t("账户菜单")}><Avatar size="small">{role[0].toUpperCase()}</Avatar>{me.data?.tenant || t("未连接")}<Tag>{role}</Tag></Button></AccountMenu></div></Layout.Header>
+    <Layout.Content className="console-content">{me.error && page !== 'access' && <div role="alert" className="alert error">{t("无法连接后端或读取权限：")}{me.error} <Button onClick={() => me.refresh()}>{t("重试")}</Button> <Button onClick={() => navigate('access')}>{t("设置凭据")}</Button></div>}{uiExtensions.error && <div role="alert" className="alert error">{t("无法加载 UI 扩展：")}{uiExtensions.error}</div>}{capabilities.error && <div role="alert" className="alert error">{t("无法加载扩展能力状态：")}{capabilities.error}</div>}<div className={`page module-page module-${page}`} key={page}><Suspense fallback={<Spin tip={t("正在加载页面")}><div style={{ minHeight: 160 }}/></Spin>}>{pageContent || <Empty>{t("扩展页面不可用")}</Empty>}</Suspense></div></Layout.Content>
   </Layout></Layout></Role.Provider>;
 }
 export function App() { useTranslation(); const [revision, setRevision] = useState(0); return <AuthBoundary key={revision}><Shell reset={() => setRevision(v => v + 1)}/></AuthBoundary>; }

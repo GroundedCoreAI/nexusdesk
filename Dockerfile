@@ -24,7 +24,7 @@ COPY backend/alembic.ini ./
 COPY deploy/container ./deploy
 RUN uv sync --frozen --no-dev --no-editable
 USER nexusdesk
-CMD ["uvicorn", "agent_platform.apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "agent_platform.applications.customer_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM backend AS quickstart
 USER root

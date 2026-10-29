@@ -6,13 +6,13 @@ lives in the PostgreSQL integration suites; these cover the pure pieces
 suite live in test_memory_events.py.
 """
 
-from agent_platform.modules.memory.events import (
+from agent_platform.business_capabilities.memory.events import (
     MAX_SUMMARY_CHARS,
     event_content,
     event_key,
     summarize,
 )
-from agent_platform.modules.memory.service import render_event_injection
+from agent_platform.business_capabilities.memory.service import render_event_injection
 
 
 def test_summarize_collapses_whitespace_and_truncates():

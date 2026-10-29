@@ -6,7 +6,7 @@ from uuid import NAMESPACE_URL, uuid5
 import sqlalchemy as sa
 from alembic import op
 
-from agent_platform.settings import Settings
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 revision = "0017_default_channels"
 down_revision = "0016_gateway_credentials"

@@ -13,11 +13,10 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent_platform.modules.agent_config.service import AgentConfig
-from agent_platform.modules.agent_runtime.engine import RuntimeEngine
-from agent_platform.modules.channel.service import session_id_hash
-from agent_platform.modules.memory.bootstrap import MemoryDispatcher
-from agent_platform.modules.memory.extraction import (
+from agent_platform.business_capabilities.agent_config.service import AgentConfig
+from agent_platform.business_capabilities.channel.service import session_id_hash
+from agent_platform.business_capabilities.memory.bootstrap import MemoryDispatcher
+from agent_platform.business_capabilities.memory.extraction import (
     EXTRACT_KIND,
     MAX_CONTENT_CHARS,
     build_extraction_prompt,
@@ -25,7 +24,7 @@ from agent_platform.modules.memory.extraction import (
     valid_key,
     validate_item,
 )
-from agent_platform.modules.memory.service import (
+from agent_platform.business_capabilities.memory.service import (
     INJECT_MAX_TOKENS,
     PREFERENCE_HEADER,
     PROFILE_HEADER,
@@ -33,9 +32,10 @@ from agent_platform.modules.memory.service import (
     route_confidence,
     trim_items,
 )
-from agent_platform.modules.open_platform.service import AppIdentity, session_identity
-from agent_platform.modules.tool_gateway.service import ToolGateway
-from agent_platform.settings import Settings
+from agent_platform.business_capabilities.open_platform.service import AppIdentity, session_identity
+from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
+from agent_platform.core_platform.tool_gateway.service import ToolGateway
 
 asyncio_mark = pytest.mark.asyncio
 

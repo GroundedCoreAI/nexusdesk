@@ -5,9 +5,9 @@ import httpx
 import pytest
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.tool_gateway.service import HttpTool, ToolGateway
-from agent_platform.platform.persistence.store import DomainError, many
-from agent_platform.platform.secrets.vault import CredentialVault
+from agent_platform.core_platform.platform_services.persistence.store import DomainError, many
+from agent_platform.core_platform.platform_services.secrets.vault import CredentialVault
+from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGateway
 
 platform = _platform_fixture
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -25,7 +25,7 @@ def definition(**updates):
 
 async def test_tool_secret_lifecycle_and_pinned_execution(platform, tmp_path):
     client, services, settings = platform
-    registry = services.platform.tools
+    registry = services.groups.tools.tools
     registry.vault = CredentialVault(tmp_path / "master.key")
     secret = "Bearer fake-tool-secret-one"
     body = definition(header_secrets={"Authorization": secret, "X-API-Key": "fake-second-key"})
@@ -112,7 +112,7 @@ async def test_tool_secret_lifecycle_and_pinned_execution(platform, tmp_path):
 
 async def test_tool_secret_validation_binding_and_missing_key(platform, tmp_path):
     client, services, settings = platform
-    registry = services.platform.tools
+    registry = services.groups.tools.tools
     key = tmp_path / "master.key"
     registry.vault = CredentialVault(key)
     secret = "fake-tool-secret-do-not-echo"

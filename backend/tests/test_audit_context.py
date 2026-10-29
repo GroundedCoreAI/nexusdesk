@@ -1,4 +1,4 @@
-from agent_platform.platform.persistence.audit_context import client_ip
+from agent_platform.core_platform.platform_services.persistence.audit_context import client_ip
 
 
 def scope(peer, **headers):

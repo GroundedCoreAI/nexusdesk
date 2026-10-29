@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from agent_platform.settings import Settings
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 
 @pytest.mark.parametrize("operator", ["admin-secret", "", " "])

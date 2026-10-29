@@ -5,7 +5,7 @@ from pathlib import Path
 from alembic import op
 from sqlalchemy import literal
 
-from agent_platform.settings import Settings
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 revision = "0029_default_admin"
 down_revision = "0028_local_admin"

@@ -212,7 +212,7 @@ async def test_rate_limit_and_authorization_revocation(platform):
     async with services.repository.engine.begin() as c:
         await c.execute(
             text("UPDATE open_applications SET tenant_id=:t WHERE id=:id"),
-            {"t": services.platform.settings.tenant_id, "id": app["id"]},
+            {"t": services.groups.runtime.settings.tenant_id, "id": app["id"]},
         )
 
 

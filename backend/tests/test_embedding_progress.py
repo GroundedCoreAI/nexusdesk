@@ -1,7 +1,7 @@
 import pytest
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 platform = _platform_fixture
 ROOT = "/api/v1/knowledge-workspace"
@@ -27,15 +27,15 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
         ROOT + f"/uploads?filename=progress.md&kb={kid}", content=("知识内容。" * 5000).encode()
     )
     did = upload.json()["id"]
-    w = services.platform.knowledge_workspace
+    w = services.groups.business.knowledge_workspace
     await w.run_next(settings.tenant_id)
 
     async def document():
         return (await client.get(ROOT + f"/libraries/{kid}")).json()["documents"][0]
 
     assert (await document())["embedded_chunk_count"] == 0
-    original = services.platform.vector_index.request
-    original_milvus_url = services.platform.vector_index.settings.milvus_url
+    original = services.groups.business.vector_index.request
+    original_milvus_url = services.groups.business.vector_index.settings.milvus_url
     batches = 0
     fail = False
 
@@ -50,10 +50,10 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
             batches += 1
         return {}
 
-    services.platform.vector_index.request = milvus
+    services.groups.business.vector_index.request = milvus
     # VectorIndex.build guards on milvus_url before issuing any request, so the
     # fully mocked adapter still needs a dummy URL to reach the upsert path.
-    services.platform.vector_index.settings.milvus_url = "http://milvus.invalid"
+    services.groups.business.vector_index.settings.milvus_url = "http://milvus.invalid"
     try:
         await client.post(ROOT + f"/libraries/{kid}/publish")
         assert (await document())["embedded_chunk_count"] == 0
@@ -75,5 +75,5 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
         assert doc["embedded_chunk_count"] == 0
         assert doc["published_version"] == 1
     finally:
-        services.platform.vector_index.request = original
-        services.platform.vector_index.settings.milvus_url = original_milvus_url
+        services.groups.business.vector_index.request = original
+        services.groups.business.vector_index.settings.milvus_url = original_milvus_url
