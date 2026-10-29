@@ -12,7 +12,6 @@ service callers working while new writes use the request scope.
 
 from alembic import op
 
-
 revision = "0049_knowledge_memory_scope"
 down_revision = "0048_ticket_approval_scope"
 branch_labels = None
