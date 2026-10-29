@@ -110,9 +110,13 @@ def upgrade():
     for table in MEMORY_TABLES:
         _add_scope(table)
 
+    # Keep the historical index name for compatibility with existing
+    # migrations, maintenance scripts, and clients that inspect this index.
+    # The index definition itself now includes the full three-dimensional
+    # scope, so retaining the name does not weaken isolation.
     op.execute("DROP INDEX IF EXISTS memory_items_lookup")
     op.execute(
-        "CREATE INDEX memory_items_lookup_scope "
+        "CREATE INDEX memory_items_lookup "
         "ON memory_items(tenant_id,business_id,workspace_id,customer_id,type,status)"
     )
 
@@ -203,7 +207,7 @@ def downgrade():
         "UNIQUE(tenant_id,source,external_key)"
     )
     op.execute("ALTER TABLE memory_customers DROP CONSTRAINT memory_customers_scope_id_key")
-    op.execute("DROP INDEX memory_items_lookup_scope")
+    op.execute("DROP INDEX memory_items_lookup")
     op.execute(
         "CREATE INDEX memory_items_lookup ON memory_items (tenant_id, customer_id, type, status)"
     )
