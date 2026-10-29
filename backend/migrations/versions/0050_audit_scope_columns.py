@@ -2,7 +2,6 @@
 
 from alembic import op
 
-
 revision = "0050_audit_scope_columns"
 down_revision = "0049_knowledge_memory_scope"
 branch_labels = None
