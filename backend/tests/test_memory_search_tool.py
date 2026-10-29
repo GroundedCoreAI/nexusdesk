@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from agent_platform.business_capabilities.memory.store import current_search_mode
 from agent_platform.core_platform.platform_services.integrations.business_tools.platform_tools import (
     BUILTIN_SCHEMAS,
     PlatformTools,
@@ -25,12 +26,23 @@ class _Policy:
 
 
 class _Store:
-    def __init__(self, hits):
-        self.hits, self.calls = hits, []
+    def __init__(self, hits, mode="text"):
+        self.hits, self.calls, self._mode = hits, [], mode
+
+    def available(self):
+        return self._mode
 
     async def search(self, tenant_id, customer_id, query, limit):
         self.calls.append((tenant_id, customer_id, query, limit))
         return self.hits
+
+
+class _StampedStore(_Store):
+    """Double that stamps the per-call mode contextvar like the real stores."""
+
+    async def search(self, tenant_id, customer_id, query, limit):
+        current_search_mode.set(self._mode)
+        return await super().search(tenant_id, customer_id, query, limit)
 
 
 class _Ledger:
@@ -41,12 +53,13 @@ class _Ledger:
         self.records.append(operation)
 
 
-def make_tools(row, allowed, hits=(), ledger=None, events=None):
+def make_tools(row, allowed, hits=(), emit=None, store=None, mode="text", ledger=None, events=None):
     http = SimpleNamespace(schemas=[], specs={})
+    memory_store = store if store is not None else _Store(list(hits), mode)
     bindings = RuntimeBindings(
-        policy=_Policy(), memory_store=_Store(list(hits)), ledger=ledger, events=events
+        policy=_Policy(), memory_store=memory_store, ledger=ledger, events=events
     )
-    return PlatformTools(http, bindings, row, allowed, [], None)
+    return PlatformTools(http, bindings, row, allowed, [], emit)
 
 
 def make_row(customer=True, memory_enabled=None):
@@ -156,6 +169,82 @@ async def test_execute_invalid_arguments():
         "ok": False,
         "error": "invalid_arguments",
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: memory_search.completed payload carries the retrieval mode
+# ---------------------------------------------------------------------------
+
+
+def capture_emit():
+    emitted = []
+
+    async def emit(kind, data):
+        emitted.append((kind, data))
+
+    return emit, emitted
+
+
+HIT = {
+    "content": "工单 TK-1 已解决：已补发",
+    "key": "ticket:TK-1:resolved",
+    "updated_at": "2026-10-01",
+    "score": 0.87654321,
+}
+
+
+@pytest.mark.asyncio
+async def test_event_payload_has_mode_hits_and_returned():
+    emit, emitted = capture_emit()
+    tools = make_tools(make_row(), ["memory_search"], [HIT], emit=emit)
+    result = await tools._execute("memory_search", {"query": "补发"})
+    assert result["ok"]
+    assert emitted == [
+        ("memory_search.completed", {"mode": "text", "hits": 1, "returned": 1})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_event_payload_mode_from_store_stamp():
+    """A store stamping the contextvar (PgVectorStore behaviour) wins over
+    the available() fallback — this is how vector and keyword_fallback
+    surface per call."""
+    emit, emitted = capture_emit()
+    tools = make_tools(
+        make_row(),
+        ["memory_search"],
+        emit=emit,
+        store=_StampedStore([HIT], mode="vector"),
+    )
+    await tools._execute("memory_search", {"query": "补发"})
+    assert emitted[0][1] == {"mode": "vector", "hits": 1, "returned": 1}
+
+    emit, emitted = capture_emit()
+    tools = make_tools(
+        make_row(),
+        ["memory_search"],
+        emit=emit,
+        store=_StampedStore([], mode="keyword_fallback"),
+    )
+    await tools._execute("memory_search", {"query": "补发"})
+    assert emitted[0][1] == {"mode": "keyword_fallback", "hits": 0, "returned": 0}
+
+
+@pytest.mark.asyncio
+async def test_event_payload_mode_does_not_bleed_across_calls():
+    """A fallback stamp from one call must not leak into a later unstamped
+    call in the same task: the emitter clears the contextvar before search."""
+    emit, emitted = capture_emit()
+    row = make_row()
+    stamped = make_tools(
+        row, ["memory_search"], emit=emit, store=_StampedStore([], "keyword_fallback")
+    )
+    await stamped._execute("memory_search", {"query": "x"})
+    # Same task, a different (unstamped) store on the next call.
+    plain = make_tools(row, ["memory_search"], [HIT], emit=emit)
+    await plain._execute("memory_search", {"query": "y"})
+    assert emitted[0][1]["mode"] == "keyword_fallback"
+    assert emitted[1][1]["mode"] == "text"
 
 
 @pytest.mark.asyncio

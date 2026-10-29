@@ -21,6 +21,10 @@ import logging
 import time
 from uuid import uuid4
 
+from agent_platform.business_capabilities.memory.alerting import (
+    HEARTBEAT_INTERVAL_SECONDS,
+    AlertScanner,
+)
 from agent_platform.business_capabilities.memory.decay import REINFORCE_KIND, daily_migration
 from agent_platform.business_capabilities.memory.events import EVENT_KIND
 from agent_platform.business_capabilities.memory.governance import scan_overdue_tickets
@@ -68,6 +72,7 @@ class MemoryWorker:
         heartbeat_seconds=HEARTBEAT_SECONDS,
         store=None,
         scan_interval_seconds=SCAN_INTERVAL_SECONDS,
+        embedded=None,
     ):
         self.engine, self.service, self.settings = engine, service, settings
         self.poll_seconds = poll_seconds
@@ -81,6 +86,15 @@ class MemoryWorker:
         # Phase 4 (R14): the built-in rule scan runs on its own timer,
         # independent of the daily maintenance pass; first pass at startup.
         self.last_rule_scan = None
+        # Phase 7 (Task 2): alert scan on its own idle-cycle timer. Embedded
+        # vs standalone decides R8 (worker_heartbeat) and the heartbeat
+        # record: embedded => API alive implies worker alive, so both are
+        # skipped. Defaults to the deployment-wide settings flag.
+        if embedded is None:
+            embedded = getattr(settings, "embedded_worker", True)
+        self.embedded = embedded
+        self.alert_scanner = AlertScanner(engine, settings, embedded=embedded)
+        self.last_heartbeat_audit = None
         self.owner = uuid4()
         self.stopping = asyncio.Event()
 
@@ -157,16 +171,19 @@ class MemoryWorker:
             await asyncio.gather(heartbeat, return_exceptions=True)
             reset_scope(scope_token)
 
-    async def _finish(self, task, status, error=None, retry_in=None):
+    async def _finish(self, task, status, error=None, retry_in=None, duration_ms=None):
         async with self.engine.begin() as c:
             # The owner guard keeps a worker whose lease was reaped from
             # clobbering a row another replica has since picked up.
+            # duration_ms (Phase 7, D1): COALESCE keeps a NULL argument from
+            # clobbering a measured attempt; rows never executed stay NULL.
             updated = await one(
                 c,
                 """UPDATE memory_tasks SET status=:status,error=:error,owner=NULL,
                 lease_expires_at=NULL,
                 run_after=CASE WHEN :retry THEN now() + :seconds * interval '1 second'
                     ELSE run_after END,
+                duration_ms=COALESCE(:d, duration_ms),
                 updated_at=now() WHERE id=:id AND owner=:owner RETURNING id""",
                 id=task["id"],
                 owner=self.owner,
@@ -174,6 +191,7 @@ class MemoryWorker:
                 error=error,
                 retry=retry_in is not None,
                 seconds=retry_in or 0,
+                d=duration_ms,
             )
             if not updated:
                 logger.warning(
@@ -198,6 +216,7 @@ class MemoryWorker:
         task = await self.claim()
         if not task:
             return False
+        started = time.monotonic()
         try:
             await self._execute(task)
         except EventDeliveryError as exc:
@@ -211,15 +230,23 @@ class MemoryWorker:
             else:
                 await self._finish(task, "failed", error=str(exc))
         except SummaryError as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
             retryable = exc.retryable and task["attempts"] < task["max_attempts"]
             if retryable:
                 await self._finish(
-                    task, "pending", error=exc.code, retry_in=backoff_seconds(task["attempts"])
+                    task,
+                    "pending",
+                    error=exc.code,
+                    retry_in=backoff_seconds(task["attempts"]),
+                    duration_ms=duration_ms,
                 )
             else:
-                logger.warning("Memory task %s failed permanently: %s", task["id"], exc.code)
-                await self._finish(task, "failed", error=exc.code)
+                logger.warning(
+                    "Memory task %s failed permanently: %s", task["id"], exc.code
+                )
+                await self._finish(task, "failed", error=exc.code, duration_ms=duration_ms)
         except Exception:  # isolate failures at the worker boundary
+            duration_ms = int((time.monotonic() - started) * 1000)
             logger.exception("Memory task %s crashed", task["id"])
             if task["attempts"] < task["max_attempts"]:
                 await self._finish(
@@ -227,11 +254,15 @@ class MemoryWorker:
                     "pending",
                     error="summary_execution_error",
                     retry_in=backoff_seconds(task["attempts"]),
+                    duration_ms=duration_ms,
                 )
             else:
-                await self._finish(task, "failed", error="summary_execution_error")
+                await self._finish(
+                    task, "failed", error="summary_execution_error", duration_ms=duration_ms
+                )
         else:
-            await self._finish(task, "done")
+            duration_ms = int((time.monotonic() - started) * 1000)
+            await self._finish(task, "done", duration_ms=duration_ms)
         return True
 
     def maintenance_due(self):
@@ -250,14 +281,71 @@ class MemoryWorker:
             self.last_rule_scan is None or time.monotonic() - self.last_rule_scan >= interval * 60
         )
 
+    async def _maintenance_completed(self, job, stats):
+        """Phase 7: one completion audit for every maintenance job pass.
+
+        Every maintenance job is single-tenant — the worker is bound to
+        ``settings.tenant_id`` — so the per-tenant observability contract is
+        exactly one row per job pass for this tenant. Quiet passes (zero
+        affected rows) write too, with zeroed stats: R5
+        (memory.alert.maintenance_silent) and the maintenance.overdue card
+        read a missing audit as "maintenance not running", so a healthy
+        tenant whose passes affect nothing must still leave evidence
+        (03-technical-design: 每轮结束写审计). One row per job per pass
+        keeps the cost negligible.
+        """
+        async with self.engine.begin() as c:
+            await audit(
+                c,
+                self.settings.tenant_id,
+                "memory",
+                "memory.maintenance.completed",
+                job,
+                job=job,
+                result="ok",
+                stats=stats,
+            )
+
+    async def _maintenance_failed(self, job, exc):
+        """Failure counterpart ({job, error}); never masks the original error."""
+        try:
+            async with self.engine.begin() as c:
+                await audit(
+                    c,
+                    self.settings.tenant_id,
+                    "memory",
+                    "memory.maintenance.failed",
+                    job,
+                    job=job,
+                    error=str(exc)[:500],
+                )
+        except Exception:
+            logger.exception("Memory maintenance failure audit failed (job=%s)", job)
+
     async def rule_scan(self):
         """One built-in rule pass: overdue tickets become complaint-risk flags.
 
         Attempt-stamped up front like the maintenance pass, so a failing scan
         retries at the next interval rather than on every idle cycle.
+        Phase 7: every completed pass writes one
+        ``memory.maintenance.completed`` audit (job=rule_scan) — quiet passes
+        included, with zeroed stats (see _maintenance_completed); a failure
+        writes ``memory.maintenance.failed`` and still propagates.
         """
         self.last_rule_scan = time.monotonic()
-        await scan_overdue_tickets(self.engine, self.settings)
+        try:
+            stats = await scan_overdue_tickets(self.engine, self.settings)
+        except Exception as exc:
+            await self._maintenance_failed("rule_scan", exc)
+            raise
+        await self._maintenance_completed(
+            "rule_scan",
+            {
+                "scanned": stats["overdue_customers"],
+                "marked": stats["marked"],
+                "flags_removed": stats["removed"],
+            },
+        )
 
     async def maintenance(self):
         """One maintenance pass: TTL soft-expiry plus bounded embedding retry.
@@ -268,59 +356,164 @@ class MemoryWorker:
         on every idle cycle. Phase 4 (R14): the daily decay migration and
         capacity eviction ride along, gated by ``memory_decay_enabled`` —
         with the switch off the pass is exactly the Phase 3 one (AC-13).
+        Phase 7: every completed job pass writes one
+        ``memory.maintenance.completed`` audit ({job, result, stats}) — quiet
+        passes included, with zeroed stats (see _maintenance_completed); a
+        failing job writes ``memory.maintenance.failed`` ({job, error}) and
+        the error still propagates to the dispatcher boundary.
         """
         self.last_scan = time.monotonic()
         tenant = self.settings.tenant_id
-        async with self.engine.begin() as c:
-            expired = await many(
-                c,
-                """UPDATE memory_items SET status='expired',updated_at=now()
-                WHERE tenant_id=:t AND type='event' AND status='active'
-                AND expires_at<now() RETURNING id""",
-                t=tenant,
-            )
-            if expired:
-                logger.info("Memory TTL pass expired %d event items", len(expired))
-            # Phase 6 (D3): expired injection detail rows ride the same daily
-            # pass, single DELETE in the same transaction.
-            retention = getattr(self.settings, "memory_injection_log_retention_days", 90)
-            purged = await many(
-                c,
-                """DELETE FROM memory_injection_log
-                WHERE tenant_id=:t AND injected_at<now()-:days*interval '1 day'
-                RETURNING id""",
-                t=tenant,
-                days=retention,
-            )
-            if purged:
-                logger.info("Memory TTL pass purged %d injection log rows", len(purged))
-            retry = []
-            if self.store is not None and self.store.available() == "vector":
-                retry = await many(
+        job = "ttl_purge"
+        try:
+            async with self.engine.begin() as c:
+                expired = await many(
                     c,
-                    """SELECT id,content,business_id,workspace_id FROM memory_items
-                    WHERE tenant_id=:t AND embedding_failed AND status='active'
-                    ORDER BY updated_at LIMIT :lim""",
+                    """UPDATE memory_items SET status='expired',updated_at=now()
+                    WHERE tenant_id=:t AND type='event' AND status='active'
+                    AND expires_at<now() RETURNING id""",
                     t=tenant,
-                    lim=EMBED_RETRY_BATCH,
                 )
+                if expired:
+                    logger.info("Memory TTL pass expired %d event items", len(expired))
+                await audit(
+                    c,
+                    tenant,
+                    "memory",
+                    "memory.maintenance.completed",
+                    job,
+                    job=job,
+                    result="ok",
+                    stats={"expired": len(expired)},
+                )
+                # Phase 6 (D3): expired injection detail rows ride the same daily
+                # pass, single DELETE in the same transaction.
+                job = "injection_log_purge"
+                retention = getattr(self.settings, "memory_injection_log_retention_days", 90)
+                purged = await many(
+                    c,
+                    """DELETE FROM memory_injection_log
+                    WHERE tenant_id=:t AND injected_at<now()-:days*interval '1 day'
+                    RETURNING id""",
+                    t=tenant,
+                    days=retention,
+                )
+                if purged:
+                    logger.info("Memory TTL pass purged %d injection log rows", len(purged))
+                await audit(
+                    c,
+                    tenant,
+                    "memory",
+                    "memory.maintenance.completed",
+                    job,
+                    job=job,
+                    result="ok",
+                    stats={"purged": len(purged)},
+                )
+                job = "embedding_retry"
+                retry = []
+                if self.store is not None and self.store.available() == "vector":
+                    retry = await many(
+                        c,
+                        """SELECT id,content,business_id,workspace_id FROM memory_items
+                        WHERE tenant_id=:t AND embedding_failed AND status='active'
+                        ORDER BY updated_at LIMIT :lim""",
+                        t=tenant,
+                        lim=EMBED_RETRY_BATCH,
+                    )
+        except Exception as exc:
+            await self._maintenance_failed(job, exc)
+            raise
         # Embedding runs outside the sweep transaction; per-item failures keep
-        # the embedding_failed flag and wait for the next pass (P3-IT-10).
-        for row in retry:
-            token = bind_scope(
-                BusinessScope(
-                    tenant_id=tenant,
-                    business_id=row["business_id"],
-                    workspace_id=row["workspace_id"],
-                )
-            )
+        # the embedding_failed flag and wait for the next pass (P3-IT-10). A
+        # non-vector topology (or no store) scans nothing and still records
+        # the pass with zeroed stats. Scope binding (integration refactor):
+        # embed_and_save's audit/queries read the row's durable scope.
+        succeeded = failed = 0
+        if retry:
             try:
-                await self.store.embed_and_save(row["id"], row["content"])
-            finally:
-                reset_scope(token)
+                for row in retry:
+                    token = bind_scope(
+                        BusinessScope(
+                            tenant_id=tenant,
+                            business_id=row["business_id"],
+                            workspace_id=row["workspace_id"],
+                        )
+                    )
+                    try:
+                        ok = await self.store.embed_and_save(row["id"], row["content"])
+                    finally:
+                        reset_scope(token)
+                    if ok:
+                        succeeded += 1
+                    else:
+                        failed += 1
+            except Exception as exc:
+                await self._maintenance_failed(job, exc)
+                raise
+        await self._maintenance_completed(
+            job,
+            {"scanned": len(retry), "succeeded": succeeded, "failed": failed},
+        )
         # Phase 4 decay rides the same daily window (R14).
         if getattr(self.settings, "memory_decay_enabled", False):
-            await daily_migration(self.engine, self.settings)
+            job = "decay"
+            try:
+                stats = await daily_migration(self.engine, self.settings)
+            except Exception as exc:
+                await self._maintenance_failed(job, exc)
+                raise
+            await self._maintenance_completed(job, stats)
+
+    def alert_scan_due(self):
+        """Phase 7 alert scan gate: master switch and interval 0 disable it."""
+        return self.alert_scanner.due()
+
+    async def alert_scan(self):
+        """One alert pass; failures never break the claim loop (caller logs)."""
+        return await self.alert_scanner.scan()
+
+    def heartbeat_audit_due(self):
+        """R8 liveness record: standalone only, at most once per interval.
+
+        The master switch off means no heartbeat record (and no R8 scan), so
+        an alerting-disabled deployment stays exactly as quiet as before.
+        Scan interval 0 also suppresses the record: with the scanner off
+        nothing consumes it, and it would still add ~288 audit rows/day.
+        """
+        if (
+            self.embedded
+            or not self.settings.memory_alert_enabled
+            or self.settings.memory_alert_scan_interval_minutes <= 0
+        ):
+            return False
+        return (
+            self.last_heartbeat_audit is None
+            or time.monotonic() - self.last_heartbeat_audit >= HEARTBEAT_INTERVAL_SECONDS
+        )
+
+    async def write_heartbeat_audit(self):
+        """Write the deliberate liveness record (exempt from the quiet-pass
+        rule): one memory.maintenance.completed audit with job=heartbeat.
+
+        Written from the claim loop between run_once passes, so a single task
+        running longer than the 30-minute R8 window starves the record and
+        can false-fire worker_heartbeat — an accepted edge (a liveness record
+        favouring a false alert over a missed one); the fix is a
+        task-duration bound, not a wider window.
+        """
+        self.last_heartbeat_audit = time.monotonic()
+        async with self.engine.begin() as c:
+            await audit(
+                c,
+                self.settings.tenant_id,
+                "memory",
+                "memory.maintenance.completed",
+                "heartbeat",
+                job="heartbeat",
+                result="ok",
+                stats={},
+            )
 
     async def reset_running(self):
         """Graceful shutdown: tasks claimed by this worker become claimable again."""
@@ -337,13 +530,23 @@ class MemoryWorker:
         try:
             while not self.stopping.is_set():
                 try:
+                    if self.heartbeat_audit_due():
+                        # Standalone liveness record (R8); its failure must
+                        # not break the claim loop.
+                        try:
+                            await self.write_heartbeat_audit()
+                        except Exception:
+                            logger.exception("Memory worker heartbeat audit failed")
                     if not await self.run_once():
                         # Rule scan first (R14): the cheaper, more frequent
-                        # timer; the daily maintenance pass follows.
+                        # timer; the daily maintenance pass follows, and the
+                        # alert scan (Phase 7) trails both.
                         if self.rule_scan_due():
                             await self.rule_scan()
                         if self.maintenance_due():
                             await self.maintenance()
+                        if self.alert_scan_due():
+                            await self.alert_scan()
                         await asyncio.sleep(self.poll_seconds)
                 except asyncio.CancelledError:
                     raise

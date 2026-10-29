@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_platform.business_capabilities.agent_config.memory import resolve_agent_memory
+from agent_platform.business_capabilities.memory.store import current_search_mode
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 from agent_platform.extension_contracts import (
     EventEnvelope,
@@ -74,19 +75,35 @@ class MemoryToolContribution:
             return ToolExecutionResult(status="failed", error_code="memory_search_unavailable")
         params = MemorySearchInput.model_validate(request.arguments)
         customer_id = UUID(str(row["customer_id"]))
+        # Phase 7 telemetry seam: the store stamps the per-call retrieval
+        # mode in a task-local contextvar (race-safe for a store shared
+        # across concurrent runs); clear any stamp left by an earlier
+        # memory_search call in this same task first.
+        current_search_mode.set(None)
         hits = await self.memory_store.search(
             request.context.tenant_id,
             customer_id,
             params.query,
             min(params.limit, search_limit),
         )
+        mode = current_search_mode.get()
+        if mode is None:
+            # Doubles outside the two built-in stores don't stamp.
+            available = getattr(self.memory_store, "available", None)
+            mode = available() if callable(available) else "text"
         reinforce = row.setdefault("_memory_reinforce", {})
         for hit in hits:
             if hit.get("id"):
                 hit_id = str(hit["id"])
                 reinforce[hit_id] = reinforce.get(hit_id, 0) + 1
+        # R10 telemetry: call volume and the empty-result rate (hits=0)
+        # aggregate from this event; Phase 7 adds the retrieval mode and
+        # keeps `hits` as the backward-compatible alias of `returned`.
         if emit is not None:
-            await emit("memory_search.completed", {"hits": len(hits)})
+            await emit(
+                "memory_search.completed",
+                {"mode": mode, "hits": len(hits), "returned": len(hits)},
+            )
         if self.events is not None:
             await self.events.publish(
                 EventEnvelope(
