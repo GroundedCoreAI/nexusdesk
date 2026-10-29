@@ -2,14 +2,18 @@ import json
 
 import pytest
 
-from agent_platform.integrations.channels.crypto import (
+from agent_platform.core_platform.platform_services.integrations.channels.crypto import (
     encrypt_wechat_payload,
     feishu_signature,
     wechat_signature,
 )
-from agent_platform.integrations.channels.feishu import FeishuAdapter
-from agent_platform.integrations.channels.registry import provider_catalog
-from agent_platform.integrations.channels.wecom import WeComAdapter
+from agent_platform.core_platform.platform_services.integrations.channels.feishu import (
+    FeishuAdapter,
+)
+from agent_platform.core_platform.platform_services.integrations.channels.registry import (
+    provider_catalog,
+)
+from agent_platform.core_platform.platform_services.integrations.channels.wecom import WeComAdapter
 
 
 @pytest.mark.asyncio

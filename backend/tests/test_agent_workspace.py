@@ -5,7 +5,7 @@ from sqlalchemy import text
 from test_platform_postgres import create_agent
 from test_platform_postgres import platform as _platform
 
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -45,7 +45,7 @@ async def test_catalog_real_pagination_filters_and_legacy(platform):
     assert (
         await client.get("/api/v1/agents/catalog?status=published&include_archived=true")
     ).json()["total"] == 1
-    assert (await runtime.platform.agents.catalog("other-tenant"))["total"] == 0
+    assert (await runtime.groups.business.agents.catalog("other-tenant"))["total"] == 0
 
 
 async def test_agent_records_sources_and_full_history(platform):
@@ -95,10 +95,10 @@ async def test_agent_records_sources_and_full_history(platform):
     assert len(history) == 225 and len({x["id"] for x in history}) == 225
     assert [x["seq"] for x in history] == sorted(x["seq"] for x in history)
     with pytest.raises(DomainError) as exc:
-        await runtime.platform.conversations.history("other-tenant", cid)
+        await runtime.groups.business.conversations.history("other-tenant", cid)
     assert exc.value.status == 404
     with pytest.raises(DomainError) as exc:
-        await runtime.platform.conversations.agent_records("other-tenant", agent["id"])
+        await runtime.groups.business.conversations.agent_records("other-tenant", agent["id"])
     assert exc.value.status == 404
     viewer = {"Authorization": "Bearer platform-viewer"}
     assert (await client.get(endpoint, headers=viewer)).status_code == 200

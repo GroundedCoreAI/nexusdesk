@@ -2,9 +2,9 @@ import pytest
 from test_platform_postgres import create_agent
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.policy.contracts import ResourceFacts
-from agent_platform.modules.policy.service import ExecutionPolicy
-from agent_platform.platform.identity.context import ExecutionContext
+from agent_platform.core_platform.platform_services.identity.context import ExecutionContext
+from agent_platform.core_platform.policy_harness.contracts import ResourceFacts
+from agent_platform.core_platform.policy_harness.service import ExecutionPolicy
 
 platform = _platform_fixture
 
@@ -42,15 +42,15 @@ async def test_tool_release_is_pinned_to_agent(platform):
     assert (
         await client.post(f"/api/v1/tools/{tool['id']}/publish", json={"revision": 2})
     ).status_code == 200
-    async with services.platform.engine.connect() as c:
-        snapshot = await services.platform.agents.snapshot(settings.tenant_id, agent["id"], c)
+    async with services.groups.runtime.engine.connect() as c:
+        snapshot = await services.groups.business.agents.snapshot(settings.tenant_id, agent["id"], c)
     assert snapshot["tools"][0]["version"] == 1
     assert snapshot["tools"][0]["spec"]["description"] == "v1"
     assert (
         await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
     ).status_code == 200
-    async with services.platform.engine.connect() as c:
-        snapshot = await services.platform.agents.snapshot(settings.tenant_id, agent["id"], c)
+    async with services.groups.runtime.engine.connect() as c:
+        snapshot = await services.groups.business.agents.snapshot(settings.tenant_id, agent["id"], c)
     assert snapshot["tools"][0]["version"] == 2
     assert (await client.get("/api/v1/tool-calls")).status_code == 200
 

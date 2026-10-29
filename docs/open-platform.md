@@ -110,7 +110,7 @@ Vite 和生产/快速体验 nginx 均转发 `/openapi/`。快速体验 nginx 对
 
 `external_id` 长度 1–128，建议使用不含斜线的业务文档 ID。本期支持文本/Markdown 正文，长度最多 200,000 字符；采用现有默认分块策略。首次写入 expected_version=0；修改/删除使用列表或写入响应中的 version。相同正文和标题的重复写入返回 unchanged=true，不增加版本；若后台手工改过文档，则须使用最新版本明确覆盖。跨应用无法更新或删除其他应用同步的文档，即使共享同一知识库。
 
-文档保存为草稿，不立即覆盖线上发布版本。发布接口复用现有知识库索引队列，返回 202 / task_id；任务状态为 queued、running、completed、failed、cancelled。相同发布 Idempotency-Key 返回同一任务；修正失败原因后使用新 key 创建新任务。部署需运行现有 `python -m agent_platform.apps.worker.knowledge` 知识任务 Worker。
+文档保存为草稿，不立即覆盖线上发布版本。发布接口复用现有知识库索引队列，返回 202 / task_id；任务状态为 queued、running、completed、failed、cancelled。相同发布 Idempotency-Key 返回同一任务；修正失败原因后使用新 key 创建新任务。部署需运行现有 `python -m agent_platform.applications.worker.knowledge` 知识任务 Worker。
 
 删除仅停用本库中本应用同步的关联，立即从检索中隐藏，保留历史，不删除其他库的关联。恢复已删除的同步文档会生成新草稿，需重新发布才恢复检索。
 

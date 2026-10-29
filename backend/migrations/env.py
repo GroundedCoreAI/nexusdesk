@@ -2,8 +2,8 @@ import asyncio
 
 from alembic import context
 
-from agent_platform.platform.persistence.database import create_engine
-from agent_platform.settings import Settings
+from agent_platform.core_platform.platform_services.persistence.database import create_engine
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 
 def migrate(connection):

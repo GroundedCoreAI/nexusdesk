@@ -109,6 +109,9 @@ jobs:
         working-directory: backend
         run: uv run ruff check .
 
+      - name: Architecture gates
+        run: uv run --directory backend python "$GITHUB_WORKSPACE/scripts/check_architecture.py"
+
       - name: Migrate the test database
         working-directory: backend
         # Required before pytest: the database fixtures expect a migrated schema.

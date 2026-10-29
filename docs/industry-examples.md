@@ -1,13 +1,13 @@
 # 行业案例初始化
 
-显式命令创建 9 行业、18 个 Agent 草稿、9 个行业知识库和 36 篇可检索文档。行业为电商零售、企业软件、制造业、教育培训、酒店文旅、房产物业、物流运输、企业人力资源和游戏。内容在 `backend/src/agent_platform/apps/industry_cases.json`。
+显式命令创建 9 行业、18 个 Agent 草稿、9 个行业知识库和 36 篇可检索文档。行业为电商零售、企业软件、制造业、教育培训、酒店文旅、房产物业、物流运输、企业人力资源和游戏。内容在 `backend/src/agent_platform/applications/industry_cases.json`。
 
 ## 执行
 
 使用已迁移数据库，设置 `AGENT_DATABASE_URL` 和目标 `AGENT_TENANT_ID` 后，在 backend 目录运行：
 
 ```powershell
-.venv/Scripts/python.exe -m agent_platform.apps.seed_industries --report industry-cases-report.json
+.venv/Scripts/python.exe -m agent_platform.applications.seed_industries --report industry-cases-report.json
 ```
 
 可显式附加 `--profile-id <已发布Chat方案UUID> --profile-version <版本>`。必须同时提供，方案需支持工具调用。未指定时模型绑定留空；指定时只绑定新创建的草稿，也不会自动发布或调用模型。已有 Agent 不会被重新绑定。操作人应在配置工作台检查并发布。

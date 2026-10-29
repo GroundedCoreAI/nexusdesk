@@ -1,7 +1,7 @@
 import pytest
 
-from agent_platform.modules.knowledge.parsers import parse_file
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.business_capabilities.knowledge.parsers import parse_file
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 
 def test_large_markdown_and_configured_character_boundary():

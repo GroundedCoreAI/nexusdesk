@@ -117,7 +117,7 @@
 | P1-IT-13（扩展） | 多副本并发 claim：SKIP LOCKED 恰好一方获胜且持有 owner | CI（PG） | 通过（CI run 38043500062） |
 | P1-IT-14（扩展） | 优雅停机重置 running 并清空 owner/lease | CI（PG） | 通过（CI run 38043500062） |
 | P1-IT-15 | 内嵌形态（`embedded_memory_worker` 装配）优雅停机重置 running | CI（PG） | 通过（CI run 38043500062） |
-| P1-IT-16 | 独立入口 `python -m agent_platform.apps.worker.memory` 端到端执行并干净停机 | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-16 | 独立入口 `python -m agent_platform.applications.worker.memory` 端到端执行并干净停机 | CI（PG） | 通过（CI run 38043500062） |
 | P1-IT-17 | claim 写 owner 且 lease≈now()+120s | CI（PG） | 通过（CI run 38043500062） |
 | P1-IT-18 | reaper 重置租约过期 running、健康租约不动 | CI（PG） | 通过（CI run 38043500062） |
 | P1-IT-19 | 心跳续约前移租约、另一副本 reaper 不误收割 | CI（PG） | 通过（CI run 38043500062） |

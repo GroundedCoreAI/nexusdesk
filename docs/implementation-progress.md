@@ -21,11 +21,11 @@
 
 ## 2026-09-21：新增平台设置规划
 
-新增 [platform_settings](../backend/src/agent_platform/modules/platform_settings/README.md) 为第 13 个模块，当前仅完成方案及索引。尚未实现服务、数据库迁移、API、前端或模块开关；此前测试结果不覆盖本模块。按最新范围，方案只保留平台／租户／Agent 配置层级与继承规则、工单模式及停用流程。已移除其他配置功能、通用发布中心及扩展阶段，不再作为本模块待办。
+新增 [platform_settings](../backend/src/agent_platform/core_platform/platform_services/platform_settings/README.md) 为第 13 个模块，当前仅完成方案及索引。尚未实现服务、数据库迁移、API、前端或模块开关；此前测试结果不覆盖本模块。按最新范围，方案只保留平台／租户／Agent 配置层级与继承规则、工单模式及停用流程。已移除其他配置功能、通用发布中心及扩展阶段，不再作为本模块待办。
 
 ## 2026-09-21：通用工单设计 v1
 
-已确定 [混合存储设计](../backend/src/agent_platform/modules/customer_service/TICKETING.md)：3 张业务表＋2 张配置表，沿用 pending_actions。预置字段按类型选择，JSONB 保存业务详情，固定列承载通用查询；已规划版本、权限、事务和兼容迁移。此次仅更新方案，未修改代码、启动服务或执行数据库迁移。
+已确定 [混合存储设计](../backend/src/agent_platform/business_capabilities/customer_service/TICKETING.md)：3 张业务表＋2 张配置表，沿用 pending_actions。预置字段按类型选择，JSONB 保存业务详情，固定列承载通用查询；已规划版本、权限、事务和兼容迁移。此次仅更新方案，未修改代码、启动服务或执行数据库迁移。
 
 ## 2026-09-21：补齐迁移
 
