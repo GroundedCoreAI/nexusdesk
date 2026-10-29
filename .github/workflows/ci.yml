@@ -28,39 +28,23 @@ concurrency:
 permissions:
   contents: read
 
+# NOTE: the backend is split into parallel jobs (lint / unit / postgres×2
+# shards) so wall-clock time is the slowest single job instead of the serial
+# sum. Branch protection required status checks must reference these names:
+#   Backend lint (ruff + architecture)
+#   Backend tests (unit)
+#   Backend tests (postgres 1/2)
+#   Backend tests (postgres 2/2)
+#   Frontend (i18n + typecheck + build)
 jobs:
-  backend:
-    name: Backend (ruff + pytest)
+  backend-lint:
+    name: Backend lint (ruff + architecture)
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: nexusdesk_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d nexusdesk_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      # pytest reads these directly. Without them the database tests skip
-      # silently and the run passes without exercising anything.
-      AGENT_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
-      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
-      # Migration tests create and drop disposable databases, so the role needs
-      # CREATEDB; the postgres superuser has it.
-      MIGRATION_TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
-      AGENT_ENVIRONMENT: development
 
     steps:
       - uses: actions/checkout@v4
         with:
+          # The co-author check needs the full history for commit ranges.
           fetch-depth: 0
 
       - name: Reject Claude co-author attribution
@@ -112,6 +96,85 @@ jobs:
       - name: Architecture gates
         run: uv run --directory backend python "$GITHUB_WORKSPACE/scripts/check_architecture.py"
 
+  backend-test-unit:
+    name: Backend tests (unit)
+    runs-on: ubuntu-latest
+
+    env:
+      AGENT_ENVIRONMENT: development
+
+    steps:
+      # No fetch-depth: 0 and no Postgres here — unit tests never touch a DB
+      # (every DB-touching test carries the `postgres` marker).
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.21"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Test
+        working-directory: backend
+        run: uv run pytest -q -m "not postgres"
+
+  backend-test-postgres:
+    # Two parallel shards (pytest-split, count-based). Each shard job gets its
+    # own Postgres service, so no cross-shard DB interference; migration tests
+    # use randomly named disposable databases and are shard-safe as well.
+    name: Backend tests (postgres ${{ matrix.group }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nexusdesk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nexusdesk_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # pytest reads these directly. Without them the database tests skip
+      # silently and the run passes without exercising anything.
+      AGENT_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
+      # Migration tests create and drop disposable databases, so the role needs
+      # CREATEDB; the postgres superuser has it.
+      MIGRATION_TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
+      AGENT_ENVIRONMENT: development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Pinned to match the version used by the Dockerfile.
+          version: "0.7.21"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python dependencies
+        working-directory: backend
+        # Includes the dev group (pytest, pytest-asyncio, ruff, httpx).
+        run: uv sync --frozen
+
       - name: Migrate the test database
         working-directory: backend
         # Required before pytest: the database fixtures expect a migrated schema.
@@ -119,7 +182,7 @@ jobs:
 
       - name: Test
         working-directory: backend
-        run: uv run pytest -q
+        run: uv run pytest -q -m postgres --splits 2 --group ${{ matrix.group }}
 
   frontend:
     name: Frontend (i18n + typecheck + build)
