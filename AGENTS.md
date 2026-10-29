@@ -49,7 +49,7 @@ sh nexusdesk quickstart
 
 ## 通用约定
 
-- 提交前对应端的自检命令必须全绿（见各 SKILL.md 的"完成前自检清单"）
+- 提交前只跑对应端的快速自检（lint / format / typecheck / i18n / build，见各 SKILL.md 的"完成前自检清单"）；**全量测试套件不在提交前本地执行，统一由 CI 在 push / PR 时运行**（建议本地至少跑受影响模块的测试）
 - **敏感信息（密码、密钥、Token 等）必须独立用环境文件维护**（`.env` 已 gitignore，仅提交 `.env.example` 占位模板），禁止写进任何代码、脚本或配置文件；各端细则见对应 SKILL.md 的"敏感信息管理"章节
 - 用户可见的前端文案必须走 i18n，禁止硬编码
 - 数据库改动必须配 Alembic 迁移，禁止手工改库

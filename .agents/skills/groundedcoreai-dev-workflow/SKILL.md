@@ -47,7 +47,8 @@ nexusdesk（`GroundedCoreAI/nexusdesk`）的分支管理、PR、发布、hotfix 
    git checkout -b feat/my-feature   # 或 fix/ refactor/ docs/ chore/
    ```
 
-2. 开发、自检（对应端 lint/test/build 全绿），提交走
+2. 开发、提交前快速自检（对应端 lint/format/build 全绿；**全量测试套件由 CI
+   在 push / PR 时运行**，不在提交前本地执行），提交走
    `groundedcoreai-commit-standard`。
 3. 推送分支，创建目标为 **`integration`** 的 PR。PR 描述说明修改目的、影响
    范围、测试结果与兼容性影响。涉及数据库、接口、安全或核心执行逻辑时，必须
