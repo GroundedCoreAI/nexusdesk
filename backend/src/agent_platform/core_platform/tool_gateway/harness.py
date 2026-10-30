@@ -13,6 +13,13 @@ from agent_platform.extension_contracts import (
 class ToolExecutionHarness:
     """Apply confirmation, idempotency, and timeout constraints consistently."""
 
+    # Risks whose handler performs the real business effect. A confirmation must
+    # therefore gate the call, not annotate its result: relabelling after the
+    # fact would report "awaiting confirmation" for work already done.
+    # ``proposal`` is different by contract — its handler only records a pending
+    # intent, so running it before the decision is the proposal itself.
+    _EFFECTFUL_RISKS = frozenset({"write", "irreversible"})
+
     async def execute(
         self,
         handler: ToolHandler,
@@ -29,6 +36,8 @@ class ToolExecutionHarness:
                 status="failed",
                 error_code="idempotency_key_required",
             )
+        if decision.confirmation.required and decision.risk in self._EFFECTFUL_RISKS:
+            return ToolExecutionResult(status="requires_confirmation")
         try:
             async with asyncio.timeout(decision.constraint.timeout_seconds):
                 result = await handler.execute(request)

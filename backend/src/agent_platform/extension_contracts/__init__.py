@@ -27,6 +27,7 @@ from .policy import (
 )
 from .runtime import (
     ConversationPort,
+    MemoryInjectionPort,
     RunEvent,
     RunPort,
     RunRequest,
@@ -75,6 +76,7 @@ __all__ = [
     "ExecutionConstraint",
     "ExtensionKind",
     "IdentityBindings",
+    "MemoryInjectionPort",
     "OperationLedgerPort",
     "OperationRecord",
     "PolicyContext",

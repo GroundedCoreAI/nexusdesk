@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 
+from agent_platform.business_capabilities.memory.injection import MemoryInjection
 from agent_platform.business_capabilities.memory.service import (
     BLACKLIST_INSTRUCTION,
     EVENT_HEADER,
@@ -129,7 +130,10 @@ class _FakeMemory:
 @asyncio_mark
 async def test_p6_ut_02_worker_collects_log_entries_and_switch_gate():
     item_id = uuid4()
-    worker = RuntimeWorker(None, None, settings(), "fp", memory=_FakeMemory(item_id, 0.8999999))
+    conf = settings()
+    worker = RuntimeWorker(
+        None, None, conf, "fp", memory=MemoryInjection(_FakeMemory(item_id, 0.8999999))
+    )
     row = {
         "id": str(uuid4()),
         "config": {"agent": {"config": {}}},
@@ -151,7 +155,8 @@ async def test_p6_ut_02_worker_collects_log_entries_and_switch_gate():
 
     # Switch off (C5 degradation): the counts event survives, the detail rows
     # are dropped before they ever reach the repository.
-    off = RuntimeWorker(None, None, settings(memory_injection_log_enabled=False), "fp")
+    off_conf = settings(memory_injection_log_enabled=False)
+    off = RuntimeWorker(None, None, off_conf, "fp", memory=MemoryInjection(None))
     context = off._memory_context(row, [])
     assert "injection_log" not in context
     assert context["injected"]["items"] == 1
@@ -193,16 +198,18 @@ async def test_p6_ut_05_no_injection_leaves_no_log_context():
             **extra,
         }
 
+    def worker_with(conf, fake):
+        return RuntimeWorker(None, None, conf, "fp", memory=MemoryInjection(fake))
+
     # No memory service wired at all.
     await assert_clean(RuntimeWorker(None, None, settings(), "fp", memory=None), base_row())
     # Run not bound to a customer.
     await assert_clean(
-        RuntimeWorker(None, None, settings(), "fp", memory=_FakeMemory(uuid4(), 0.9)), base_row()
+        worker_with(settings(), _FakeMemory(uuid4(), 0.9)), base_row()
     )
     # Agent read switch off: the lookup never happens.
     await assert_clean(
-        RuntimeWorker(None, None, settings(memory_inject_enabled=False), "fp",
-                      memory=_FakeMemory(uuid4(), 0.9)),
+        worker_with(settings(memory_inject_enabled=False), _FakeMemory(uuid4(), 0.9)),
         base_row(customer_id=str(uuid4())),
     )
 
@@ -219,7 +226,8 @@ async def test_p6_ut_05_customer_without_items_collects_nothing():
         async def active_flags(self, *args, **kw):
             return []
 
-    worker = RuntimeWorker(None, None, settings(), "fp", memory=Empty())
+    conf = settings()
+    worker = RuntimeWorker(None, None, conf, "fp", memory=MemoryInjection(Empty()))
     row = {
         "id": str(uuid4()),
         "config": {"agent": {"config": {}}},

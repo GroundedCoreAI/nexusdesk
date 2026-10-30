@@ -7,6 +7,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
+from agent_platform.applications.platform_runtime.runtime_hooks import (
+    BusinessRuntimePersistenceHooks,
+)
 from agent_platform.core_platform.agent_runtime.repository import RunRepository
 from agent_platform.core_platform.agent_runtime.schemas import RunRequest
 from agent_platform.core_platform.platform_services.persistence.database import create_engine
@@ -24,7 +27,7 @@ async def database():
     tenant = "replay-" + str(uuid4())
     settings = Settings(database_url=url, tenant_id=tenant, embedded_worker=False)
     engine = create_engine(settings)
-    repository = RunRepository(engine)
+    repository = RunRepository(engine, BusinessRuntimePersistenceHooks())
     try:
         yield repository, settings
     finally:

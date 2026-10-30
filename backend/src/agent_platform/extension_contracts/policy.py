@@ -59,7 +59,18 @@ class PolicyDecision(ContractModel):
 
 
 class PolicyProvider(Protocol):
-    """Policy extension point implemented by the platform and capabilities."""
+    """Policy extension point implemented by the platform and capabilities.
+
+    Scope — this hook answers *who may act, on which tenant, with which capability
+    granted*, plus the risk/confirmation/constraint shape of the operation. It is
+    deliberately given no resource identifier and no call arguments.
+
+    Resource-level rules therefore belong to the capability that owns the
+    resource, not here: "only the assignee may resolve this ticket", "amounts over
+    X need a second approver", "the order must be in state Y". Those checks run
+    inside the capability's handler, which can load and lock the row. Trying to
+    express them in this hook would silently authorize by name alone.
+    """
 
     async def evaluate(
         self,
