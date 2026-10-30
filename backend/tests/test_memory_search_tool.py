@@ -5,13 +5,17 @@ PostgreSQL integration suites. ``_execute`` is called directly so no database
 is needed (``execute`` only adds the tool_calls ledger around it).
 """
 
+from dataclasses import replace
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from agent_platform.core_platform.platform_services.integrations.business_tools.platform_tools import (
+from agent_platform.applications.platform_runtime.tool_defaults import (
     BUILTIN_SCHEMAS,
+    default_tool_contributions,
+)
+from agent_platform.core_platform.platform_services.integrations.business_tools.platform_tools import (
     PlatformTools,
 )
 from agent_platform.core_platform.tool_gateway.replay import ProcessToolReplayCache
@@ -46,6 +50,9 @@ def make_tools(row, allowed, hits=(), ledger=None, events=None):
     bindings = RuntimeBindings(
         policy=_Policy(), memory_store=_Store(list(hits)), ledger=ledger, events=events
     )
+    # Core no longer falls back to business defaults; the composition root (here,
+    # the test) supplies the contributions explicitly.
+    bindings = replace(bindings, tool_contributions=default_tool_contributions(bindings))
     return PlatformTools(http, bindings, row, allowed, [], None)
 
 

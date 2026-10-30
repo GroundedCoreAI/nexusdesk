@@ -7,6 +7,7 @@ construction stay consistent.
 """
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -26,6 +27,9 @@ from test_memory_postgres import RecordingGateway, audit_records
 from test_platform_postgres import create_agent, execute_next
 from test_platform_postgres import platform as _platform
 
+from agent_platform.applications.platform_runtime.tool_defaults import (
+    default_tool_contributions,
+)
 from agent_platform.core_platform.platform_services.integrations.business_tools.platform_tools import (
     PlatformTools,
 )
@@ -78,6 +82,9 @@ def tools_for(settings, store, agent_config):
     bindings = RuntimeBindings(
         policy=_AllowAllPolicy(), memory_store=store, settings=settings
     )
+    # Core no longer falls back to business defaults, so the composition root
+    # (here, the test) must supply the contributions.
+    bindings = replace(bindings, tool_contributions=default_tool_contributions(bindings))
     return PlatformTools(
         SimpleNamespace(schemas=[], specs={}), bindings, row, ["memory_search"], [], None
     )

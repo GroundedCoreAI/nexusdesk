@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from agent_platform.business_capabilities.memory.extraction import validate_item
+from agent_platform.business_capabilities.memory.injection import MemoryInjection
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 NOW = datetime(2026, 10, 15, 12, 0, 0, tzinfo=UTC)
@@ -228,17 +229,16 @@ def test_r23b_reinforce_dispatch_follows_decay_switch():
     row = {"config": {}, "_memory_reinforce": {"00000000-0000-0000-0000-000000000001": 2}}
     # Decay on (default): collected reference hits become a reinforce task
     # (extraction switched off here to isolate the reinforce gate).
-    on = RuntimeWorker(None, None, Settings(_env_file=None, memory_extract_enabled=False), "fp")
+    on_settings = Settings(_env_file=None, memory_extract_enabled=False)
+    on = RuntimeWorker(None, None, on_settings, "fp", memory=MemoryInjection(None))
     assert on._memory_context(row, [])["reinforce"] == row["_memory_reinforce"]
     # Decay off: no reinforce dispatch (L2/L3 must not refresh
     # last_referenced_at), and with nothing else to dispatch the context
     # collapses to None — the Phase 3 fallback (AC-13).
-    off = RuntimeWorker(
-        None,
-        None,
-        Settings(_env_file=None, memory_decay_enabled=False, memory_extract_enabled=False),
-        "fp",
+    off_settings = Settings(
+        _env_file=None, memory_decay_enabled=False, memory_extract_enabled=False
     )
+    off = RuntimeWorker(None, None, off_settings, "fp", memory=MemoryInjection(None))
     assert off._memory_context(row, []) is None
 
 
@@ -246,10 +246,8 @@ def test_r23b_sample_rate_zero_still_suppresses_reinforce():
     from agent_platform.core_platform.agent_runtime.worker import RuntimeWorker
 
     row = {"config": {}, "_memory_reinforce": {"00000000-0000-0000-0000-000000000001": 1}}
-    worker = RuntimeWorker(
-        None,
-        None,
-        Settings(_env_file=None, memory_extract_enabled=False, memory_reinforce_sample_rate=0.0),
-        "fp",
+    conf = Settings(
+        _env_file=None, memory_extract_enabled=False, memory_reinforce_sample_rate=0.0
     )
+    worker = RuntimeWorker(None, None, conf, "fp", memory=MemoryInjection(None))
     assert worker._memory_context(row, []) is None

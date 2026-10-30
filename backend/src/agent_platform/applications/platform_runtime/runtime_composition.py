@@ -24,6 +24,7 @@ from agent_platform.business_capabilities.customer_service.capability import (
 from agent_platform.business_capabilities.evaluation.service import EvaluationService
 from agent_platform.business_capabilities.knowledge.capability import KnowledgeCapability
 from agent_platform.business_capabilities.memory.capability import MemoryCapability
+from agent_platform.business_capabilities.memory.injection import MemoryInjection
 from agent_platform.business_capabilities.memory.store import build_memory_store
 from agent_platform.core_platform.agent_runtime.admission import RuntimeAdmission
 from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
@@ -53,6 +54,7 @@ from agent_platform.extension_contracts import EventPublisher, IdentityBindings
 
 from .platform_services import PlatformServices
 from .runtime_factory import RuntimeFactory
+from .runtime_hooks import BusinessRuntimePersistenceHooks
 from .service_groups import (
     PlatformServiceGroups,
     build_runtime_bindings,
@@ -158,7 +160,7 @@ async def runtime_services(
             tools = ToolGateway(client, specs, settings.tool_concurrency)
             model = build_model(settings, tools.schemas)
             runtime = RuntimeEngine(model, tools, settings)
-            repository = RunRepository(engine)
+            repository = RunRepository(engine, BusinessRuntimePersistenceHooks())
             platform = PlatformServices(
                 engine,
                 repository,
@@ -293,7 +295,7 @@ async def runtime_services(
                     fingerprint,
                     notifier,
                     listener,
-                    memory=groups.business.memory,
+                    memory=MemoryInjection(groups.business.memory),
                 ),
                 snapshot=snapshot,
                 listener=listener,

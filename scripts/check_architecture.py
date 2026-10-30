@@ -85,34 +85,17 @@ def run() -> int:
         )
     )
 
-    runtime_files = list((SOURCE_ROOT / "core_platform" / "agent_runtime").glob("*.py"))
-    # Memory remains a cross-cutting runtime adapter in the current migration.
-    # It is intentionally not a gate here until its port migration is complete.
+    # The whole Core Platform must stay free of business and application imports.
+    # Checking a hand-picked list of files let a transitive default slip through:
+    # business_tools/defaults.py imported four capabilities while the gate only
+    # looked at platform_tools.py next to it, so the tree is scanned as a whole.
+    core_files = sorted((SOURCE_ROOT / "core_platform").rglob("*.py"))
     failures.extend(
         check_no_imports(
-            runtime_files,
+            core_files,
             (
                 "agent_platform.applications",
-                "agent_platform.applications",
-            ),
-        )
-    )
-
-    failures.extend(
-        check_no_imports(
-            [
-                SOURCE_ROOT
-                / "core_platform"
-                / "platform_services"
-                / "integrations"
-                / "business_tools"
-                / "platform_tools.py",
-            ],
-            (
-                "agent_platform.business_capabilities.approval",
-                "agent_platform.business_capabilities.customer_service",
-                "agent_platform.business_capabilities.knowledge",
-                "agent_platform.business_capabilities.memory",
+                "agent_platform.business_capabilities",
             ),
         )
     )

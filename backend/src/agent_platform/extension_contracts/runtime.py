@@ -148,6 +148,32 @@ class RuntimeMemoryPort(Protocol):
         """Search customer memory within platform limits."""
 
 
+class MemoryInjectionPort(Protocol):
+    """Render the memory context injected into one run.
+
+    The Runtime decides *whether* to inject (its own ``summary_enabled`` switch);
+    the memory capability decides *what* the text is. Implementations live with
+    the capability, never in ``core_platform``, so no memory vocabulary enters
+    the Runtime.
+
+    ``settings`` is passed per call rather than captured at construction: the
+    worker owns the effective settings of the run it is executing, and an adapter
+    holding a snapshot would silently ignore later changes (including per-run
+    overrides, which are the only way to test the gates).
+    """
+
+    def render_summary(self, summary: str | None) -> str | None:
+        """Render a rolling summary as the body of an injected system message."""
+
+    async def customer_memory(self, row: dict[str, object], settings: object) -> str | None:
+        """Render customer profile, preference and event memory for one run."""
+
+    def memory_context(
+        self, row: dict[str, object], dropped: object, settings: object
+    ) -> dict[str, object] | None:
+        """Describe the memory side effects of a completed run."""
+
+
 @dataclass(frozen=True)
 class RuntimeBindings:
     """Small port bundle passed to Runtime-specific adapters.

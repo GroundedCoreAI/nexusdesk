@@ -5,10 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from agent_platform.business_capabilities.conversation.service import add_message
-from agent_platform.business_capabilities.memory.decay import enqueue_reinforce_task
-from agent_platform.business_capabilities.memory.extraction import enqueue_extract_task
-from agent_platform.business_capabilities.memory.summary import enqueue_summary_task
+from agent_platform.core_platform.agent_runtime.hooks import RuntimePersistenceHooks
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL, channel
 from agent_platform.core_platform.agent_runtime.schemas import TERMINAL, BusyError, CapacityError
 from agent_platform.core_platform.platform_services.persistence.store import (
@@ -24,8 +21,11 @@ from agent_platform.extension_contracts import BusinessScope
 
 
 class RunRepository:
-    def __init__(self, engine):
+    def __init__(self, engine, hooks: RuntimePersistenceHooks):
+        # Required, not defaulted: Core cannot persist a conversation or dispatch
+        # memory work by itself, so the composition root must supply an adapter.
         self.engine = engine
+        self.hooks = hooks
 
     async def _event(self, conn, run_id, kind, data):
         seq = await conn.scalar(
@@ -140,7 +140,7 @@ class RunRepository:
                     .mappings()
                     .one()
                 )
-                await add_message(conn, cid, "user", request.message, run_id)
+                await self.hooks.add_message(conn, cid, "user", request.message, run_id)
                 await self._event(conn, run_id, "run.queued", {})
                 return dict(row)
         except IntegrityError as exc:
@@ -281,24 +281,18 @@ class RunRepository:
             return "lost" if cancelled is None else ("cancel" if cancelled else "ok")
 
     async def finish(
-        self, run_id, owner, status, output=None, error=None, history=None, memory=None
+        self, run_id, owner, status, output=None, error=None, history=None, completion=None
     ):
         async with self.engine.begin() as conn:
             cid = await conn.scalar(
                 text("SELECT conversation_id FROM runtime_runs WHERE id=:id"), {"id": run_id}
             )
-            conversation = (
-                (
-                    await conn.execute(
-                        text(
-                            """SELECT summary,customer_id,source,business_id,workspace_id
-                            FROM runtime_conversations WHERE id=:id FOR UPDATE"""
-                        ),
-                        {"id": cid},
-                    )
-                )
-                .mappings()
-                .one()
+            # Lock the conversation, but do not read summary/customer_id/source:
+            # those are business columns, so the hook adapter loads them itself
+            # inside this same transaction.
+            await conn.execute(
+                text("SELECT id FROM runtime_conversations WHERE id=:id FOR UPDATE"),
+                {"id": cid},
             )
             row = (
                 (
@@ -322,94 +316,10 @@ class RunRepository:
                 {"id": run_id, "status": status, "output": output, "error": error},
             )
             if status == "completed":
-                await add_message(conn, row["conversation_id"], "assistant", output, run_id)
-                await conn.execute(
-                    text("""UPDATE runtime_conversations
-                    SET history=CAST(:history AS jsonb) WHERE id=:id"""),
-                    {"id": row["conversation_id"], "history": json.dumps(history or [])},
-                )
-                if memory and memory.get("dropped"):
-                    # Async by design: dispatching the summary task shares this
-                    # transaction, so it never blocks or fails the run itself.
-                    await enqueue_summary_task(
-                        conn,
-                        row["tenant_id"],
-                        cid,
-                        memory["dropped"],
-                        conversation["summary"],
-                        memory.get("max_input", 40),
-                    )
-                    await self._event(
-                        conn, run_id, "summary.queued", {"dropped": len(memory["dropped"])}
-                    )
-                # Extraction dispatch (Phase 2, FR-2): only successful runs on
-                # customer-bound business conversations; the agent-level and
-                # global switches were ANDed into memory["extract"] by the
-                # worker, and enqueue_extract_task applies the 5-minute
-                # per-conversation debounce.
-                if (
-                    memory
-                    and memory.get("extract")
-                    and conversation["customer_id"]
-                    and conversation["source"] != "playground"
+                for kind, data in await self.hooks.on_completed(
+                    conn, row, cid, output, history, completion
                 ):
-                    task_id = await enqueue_extract_task(
-                        conn,
-                        row["tenant_id"],
-                        cid,
-                        conversation["customer_id"],
-                        memory.get("extract_debounce", 300),
-                        memory.get("write_mode", "auto"),
-                        memory.get("types"),
-                    )
-                    if task_id:
-                        await self._event(
-                            conn,
-                            run_id,
-                            "memory_extract.queued",
-                            {"customer_id": str(conversation["customer_id"])},
-                        )
-                # Phase 4 (R11): reference reinforcement. The hit ids were
-                # collected during injection (L3) and memory_search (L2) and
-                # sampled at dispatch time by the worker; the INSERT is the
-                # only synchronous write, same-transaction precedent as the
-                # summary/extraction dispatches.
-                if memory and memory.get("reinforce"):
-                    await enqueue_reinforce_task(conn, row["tenant_id"], memory["reinforce"])
-                # Phase 4 (R10): injection hit-rate telemetry. Written only
-                # when something was actually injected (the worker drops the
-                # key otherwise); data carries section counts plus, since
-                # Phase 6 (FR-1), the injected item ids — never content.
-                if memory and memory.get("injected"):
-                    await self._event(conn, run_id, "memory.injected", memory["injected"])
-                    # Phase 6 (FR-1): the run × item detail rows share this
-                    # transaction, so the event and its detail commit or roll
-                    # back together. One unnest-based batch INSERT for the
-                    # whole run — never per-row writes on the hot path (AC-9).
-                    # The worker omits "injection_log" entirely when the
-                    # platform switch is off (C5 degradation: counts only).
-                    log_rows = memory.get("injection_log")
-                    if log_rows and conversation["customer_id"]:
-                        await conn.execute(
-                            text("""INSERT INTO memory_injection_log
-                            (tenant_id,business_id,workspace_id,run_id,customer_id,item_id,section,score)
-                            SELECT :tenant,:business_id,:workspace_id,:run,:customer,item_id,section,score
-                            FROM unnest(
-                                CAST(:item_ids AS uuid[]),
-                                CAST(:sections AS varchar[]),
-                                CAST(:scores AS real[])
-                            ) AS detail(item_id,section,score)"""),
-                            {
-                                "tenant": row["tenant_id"],
-                                "business_id": row["business_id"],
-                                "workspace_id": row["workspace_id"],
-                                "run": run_id,
-                                "customer": conversation["customer_id"],
-                                "item_ids": [entry["item_id"] for entry in log_rows],
-                                "sections": [entry["section"] for entry in log_rows],
-                                "scores": [entry["score"] for entry in log_rows],
-                            },
-                        )
+                    await self._event(conn, run_id, kind, data)
             await self._event(
                 conn, run_id, "run." + status, {"output": output, "error_code": error}
             )

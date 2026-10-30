@@ -6,7 +6,6 @@ from typing import TypedDict
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
-from agent_platform.business_capabilities.memory.summary import render_injection
 from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
 
 
@@ -145,14 +144,25 @@ class RuntimeEngine:
             "signatures": signatures,
         }
 
-    async def run(self, message, history, emit, summary=None, customer_memory=None):
+    async def run(self, message, history, emit, summary_message=None, customer_memory=None):
+        """Execute one ReAct loop and return ``(output, history, dropped)``.
+
+        ``summary_message`` replaced the earlier ``summary`` parameter: it must
+        already be rendered by the memory capability, and the Runtime inserts it
+        verbatim. This is a deliberate breaking rename with no compatibility
+        alias — accepting raw summary text under the old name would put the
+        rendering (and its business wording) back inside the Runtime, which is
+        the coupling the rename removed.
+        """
         messages: list[BaseMessage] = [SystemMessage(content=self.settings.system_prompt)]
         kept = history[-self.settings.history_turns * 2 :] if self.settings.history_turns else []
-        if summary and self.settings.summary_enabled:
+        if summary_message and self.settings.summary_enabled:
             # Rolling summary of everything the sliding window dropped. It sits
             # between the system prompt and the kept history; an empty summary
             # (or the kill switch) keeps the message sequence exactly as before.
-            messages.append(SystemMessage(content=render_injection(summary)))
+            # The text is rendered by the memory capability and inserted verbatim:
+            # the Runtime only owns the switch, not the wording.
+            messages.append(SystemMessage(content=summary_message))
         if customer_memory:
             # Customer profile/preference memory (Phase 2, FR-3): right after
             # the summary and before the kept history. The worker already
