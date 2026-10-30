@@ -18,10 +18,9 @@ from agent_platform.extension_contracts import (
     ToolRisk,
 )
 
-from .defaults import BUILTIN_SCHEMAS, default_tool_contributions
 from .registry import HttpToolHandler, ToolHandlerRegistry
 
-__all__ = ["BUILTIN_SCHEMAS", "PlatformTools"]
+__all__ = ["PlatformTools"]
 
 
 class PlatformTools:
@@ -31,7 +30,9 @@ class PlatformTools:
         self.allowed, self.kb_ids, self.emit = allowed, [UUID(k) for k in kb_ids], emit
         self.extensions = bindings.extensions
         self.harness = ToolExecutionHarness()
-        contributions = bindings.tool_contributions or default_tool_contributions(bindings)
+        # Contributions arrive from the composition root; Core has no default that
+        # would require importing a business capability.
+        contributions = bindings.tool_contributions or ()
         contributed_handlers = []
         self._visible_tool_names = set()
         for contribution in contributions:
@@ -139,13 +140,28 @@ class PlatformTools:
         status, error = "failed", None
         try:
             result = await self._execute(name, args)
-            status = (
-                "requires_confirmation"
-                if result.get("ok") and effect == "proposal"
-                else "succeeded"
-                if result.get("ok")
-                else "failed"
-            )
+            # The harness reports the authoritative contract status out-of-band so
+            # a gated write is not recorded as "succeeded". Popped here so it never
+            # reaches the model as part of the tool result.
+            contract_status = result.pop("_contract_status", None)
+            # A proposal handler records a pending intent, so "ok" is true: the
+            # proposal exists. A write gated *before* execution did nothing, and
+            # reporting ok would let the model tell the customer it was done.
+            gated_write = contract_status == "requires_confirmation" and effect != "proposal"
+            if gated_write:
+                status = "requires_confirmation"
+                result["ok"] = False
+                result["error"] = "confirmation_required"
+            elif contract_status == "requires_confirmation" or (
+                result.get("ok") and effect == "proposal"
+            ):
+                status = "requires_confirmation"
+            elif contract_status == "cancelled":
+                status = "cancelled"
+            elif result.get("ok"):
+                status = "succeeded"
+            else:
+                status = "failed"
             error = result.get("error")
             payload = {
                 **result,
@@ -213,6 +229,11 @@ class PlatformTools:
 
     def _legacy_result(self, result: ToolExecutionResult):
         payload = {"ok": result.status != "failed"}
+        # ``succeeded``/``failed`` stay derivable from ``ok``; only these two are
+        # not, so only these travel alongside. ``execute`` pops the key before the
+        # payload reaches the model.
+        if result.status in {"requires_confirmation", "cancelled"}:
+            payload["_contract_status"] = result.status
         if result.status != "failed" or result.data is not None:
             payload["data"] = result.data
         if result.message is not None:

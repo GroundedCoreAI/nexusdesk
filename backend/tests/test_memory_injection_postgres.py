@@ -266,7 +266,7 @@ async def test_p6_it_04_detail_insert_failure_rolls_back_whole_finish(platform):
     try:
         with pytest.raises(_Boom):
             await services.repository.finish(
-                run_id, owner, "completed", output="ok", history=[], memory=memory
+                run_id, owner, "completed", output="ok", history=[], completion=memory
             )
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", _fail_on_injection_insert)

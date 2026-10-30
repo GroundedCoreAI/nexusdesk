@@ -21,17 +21,17 @@ def imported_modules(path: Path) -> set[str]:
     return modules
 
 
-def test_agent_runtime_does_not_import_application_composition():
-    root = (
-        Path(__file__).parents[1]
-        / "src"
-        / "agent_platform"
-        / "core_platform"
-        / "agent_runtime"
-    )
+def test_core_platform_does_not_import_applications_or_capabilities():
+    """The whole Core Platform, not just agent_runtime.
+
+    A hand-picked file list let business_tools/defaults.py import four
+    capabilities unnoticed, so this walks the entire tree the same way
+    scripts/check_architecture.py does.
+    """
+    root = Path(__file__).parents[1] / "src" / "agent_platform" / "core_platform"
     offenders: list[str] = []
 
-    for source_file in root.glob("*.py"):
+    for source_file in sorted(root.rglob("*.py")):
         tree = ast.parse(source_file.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -40,7 +40,17 @@ def test_agent_runtime_does_not_import_application_composition():
                 names = [node.module]
             else:
                 continue
-            if any(name.startswith("agent_platform.applications") for name in names):
+            # Core may reach composition roots through injected ports, never by
+            # import: a default implementation here re-couples the whole layer.
+            if any(
+                name.startswith(
+                    (
+                        "agent_platform.applications",
+                        "agent_platform.business_capabilities",
+                    )
+                )
+                for name in names
+            ):
                 offenders.append(str(source_file.relative_to(root)))
 
     assert offenders == []

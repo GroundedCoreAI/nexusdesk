@@ -14,6 +14,7 @@ from agent_platform.business_capabilities.agent_config.memory import (
     resolve_memory_config,
 )
 from agent_platform.business_capabilities.agent_config.service import AgentConfig
+from agent_platform.business_capabilities.memory.injection import MemoryInjection
 from agent_platform.business_capabilities.memory.service import route_confidence
 from agent_platform.core_platform.agent_runtime.worker import RuntimeWorker
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
@@ -227,7 +228,10 @@ class _FakeMemory:
 
 
 def make_worker(overrides=None, fake=None):
-    return RuntimeWorker(None, None, settings(**(overrides or {})), "fp", memory=fake or _FakeMemory())
+    # Same wiring as the composition root: the store is wrapped by the memory
+    # capability, and the worker only receives the injection port.
+    conf = settings(**(overrides or {}))
+    return RuntimeWorker(None, None, conf, "fp", memory=MemoryInjection(fake or _FakeMemory()))
 
 
 @asyncio_mark

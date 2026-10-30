@@ -3,11 +3,11 @@
 import json
 from collections import OrderedDict
 
+from agent_platform.applications.platform_runtime.tool_defaults import BUILTIN_SCHEMAS
 from agent_platform.business_capabilities.evaluation.service import MockTools
 from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
 from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
 from agent_platform.core_platform.platform_services.integrations.business_tools.platform_tools import (
-    BUILTIN_SCHEMAS,
     PlatformTools,
 )
 from agent_platform.core_platform.platform_services.model_gateway.gateway import GatewayChatModel

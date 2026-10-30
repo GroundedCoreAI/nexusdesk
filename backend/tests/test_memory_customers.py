@@ -277,15 +277,20 @@ async def test_engine_injects_customer_memory_after_summary_before_history():
         {"role": "assistant", "content": "早期回答"},
     ]
     memory_text = f"{PROFILE_HEADER}\n- name: 张三"
+    summary_text = "【此前对话摘要】\n订单号 A123"
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
         answer, _, _ = await engine.run(
-            "新问题", history, ignore_event, summary="订单号 A123", customer_memory=memory_text
+            "新问题",
+            history,
+            ignore_event,
+            summary_message=summary_text,
+            customer_memory=memory_text,
         )
     assert answer == "回答"
     seen = model.seen[0]
     assert isinstance(seen[0], SystemMessage) and seen[0].content == Settings().system_prompt
-    assert seen[1].content.startswith("【此前对话摘要】")
+    assert seen[1].content == summary_text
     assert isinstance(seen[2], SystemMessage) and seen[2].content == memory_text
     assert isinstance(seen[3], HumanMessage) and seen[3].content == "早期问题"
     assert seen[-1].content == "新问题"

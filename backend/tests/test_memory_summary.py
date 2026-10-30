@@ -209,12 +209,13 @@ async def test_p1_it_03_engine_injects_summary_between_prompt_and_history():
     ]
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
-        answer, _, _ = await engine.run("新问题", history, ignore_event, summary="订单号 A123")
+        rendered = f"{INJECTION_HEADER}\n订单号 A123"
+        answer, _, _ = await engine.run("新问题", history, ignore_event, summary_message=rendered)
     assert answer == "回答"
     seen = model.seen[0]
     assert isinstance(seen[0], SystemMessage) and seen[0].content == Settings().system_prompt
     assert isinstance(seen[1], SystemMessage)
-    assert seen[1].content == f"{INJECTION_HEADER}\n订单号 A123"
+    assert seen[1].content == rendered
     assert isinstance(seen[2], HumanMessage) and seen[2].content == "早期问题"
     assert seen[-1].content == "新问题"
 
@@ -224,23 +225,29 @@ async def test_engine_skips_empty_or_disabled_summary():
     model = SequenceModel(AIMessage(content="a"), AIMessage(content="b"))
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
-        await engine.run("q1", [], ignore_event, summary=None)
+        await engine.run("q1", [], ignore_event, summary_message=None)
         disabled = RuntimeEngine(
             model, ToolGateway(client, []), Settings(summary_enabled=False)
         )
-        await disabled.run("q2", [], ignore_event, summary="不应注入")
+        await disabled.run("q2", [], ignore_event, summary_message="不应注入")
     for seen in model.seen:
         assert len([m for m in seen if isinstance(m, SystemMessage)]) == 1
 
 
 @asyncio_mark
-async def test_engine_injection_obeys_token_budget():
+async def test_engine_injects_summary_message_verbatim():
+    """The engine inserts the rendered summary unchanged.
+
+    Truncation belongs to the memory capability (``render_injection``, covered
+    above); the Runtime must not re-shape the text, so a long summary arrives
+    intact rather than being silently re-cut here.
+    """
     model = SequenceModel(AIMessage(content="ok"))
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
-        await engine.run("q", [], ignore_event, summary="长" * 5000)
-    body = model.seen[0][1].content.partition("\n")[2]
-    assert len(body) == 1600
+        rendered = f"{INJECTION_HEADER}\n" + "长" * 5000
+        await engine.run("q", [], ignore_event, summary_message=rendered)
+    assert model.seen[0][1].content == rendered
 
 
 @asyncio_mark
