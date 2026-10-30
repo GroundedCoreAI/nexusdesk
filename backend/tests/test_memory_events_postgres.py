@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import text
 from test_platform_postgres import platform as _platform
 
+from agent_platform.business_capabilities.memory.pii import mask
 from agent_platform.business_capabilities.memory.store import (
     EMBEDDING_DIMENSION,
     PgVectorStore,
@@ -373,6 +374,18 @@ async def test_p3_ut_09_search_limit_clamped_to_configured_max(platform):
 # ---------------------------------------------------------------------------
 
 
+def expected_event_content(settings, content):
+    """Stored event content is PII-masked on write (service.add_event_item).
+
+    Ticket numbers from the action path are ``TK-<uuid4 hex>`` and a random
+    digit run inside one can trip the bank-card pattern, so assertions must
+    compare against the masked form the writer actually persists.
+    """
+    if getattr(settings, "memory_pii_masking_enabled", True):
+        return mask(content)[0]
+    return content
+
+
 async def make_bound_ticket(client, services, settings, text="请创建维修工单"):
     """Approve a proposed ticket from a customer-bound channel conversation."""
     from test_memory_customers_postgres import (
@@ -457,7 +470,9 @@ async def test_p3_it_01_ticket_lifecycle_writes_event_memory(platform):
         assert row["confidence"] == 1.0
         assert row["source_ref"] == ticket["id"]
         assert row["type"] == "event"
-    assert created["content"].startswith(f"工单 {ticket_no} 已创建：")
+    assert created["content"].startswith(
+        expected_event_content(settings, f"工单 {ticket_no} 已创建：")
+    )
     # P3-UT-08: event rows expire at now + TTL; two rows of one event share it.
     ttl_seconds = (created["expires_at"] - created["updated_at"]).total_seconds()
     assert abs(ttl_seconds - settings.memory_event_ttl_days * 86400) < 120
@@ -479,7 +494,9 @@ async def test_p3_it_01_ticket_lifecycle_writes_event_memory(platform):
     items = await items_by_key(engine, tenant, customer_id)
     resolved = items[f"ticket:{ticket_no}:resolved"]
     assert resolved["status"] == "active"
-    assert resolved["content"] == f"工单 {ticket_no} 已解决：更换主板后恢复"
+    assert resolved["content"] == expected_event_content(
+        settings, f"工单 {ticket_no} 已解决：更换主板后恢复"
+    )
     assert items[f"open_ticket:{ticket_no}"]["status"] == "expired"  # kept, not deleted
 
     # close: third event row.
@@ -493,7 +510,9 @@ async def test_p3_it_01_ticket_lifecycle_writes_event_memory(platform):
     items = await items_by_key(engine, tenant, customer_id)
     closed = items[f"ticket:{ticket_no}:closed"]
     assert closed["status"] == "active"
-    assert closed["content"] == f"工单 {ticket_no} 已关闭：客户确认无误"
+    assert closed["content"] == expected_event_content(
+        settings, f"工单 {ticket_no} 已关闭：客户确认无误"
+    )
     active_events = [
         key for key, row in items.items() if row["type"] == "event" and row["status"] == "active"
     ]
