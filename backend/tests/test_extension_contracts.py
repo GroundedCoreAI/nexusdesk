@@ -46,6 +46,9 @@ from agent_platform.core_platform.platform_services.events import (
     InProcessEventBus,
 )
 from agent_platform.core_platform.platform_services.identity.access import Principal
+from agent_platform.core_platform.platform_services.integrations.business_tools.platform_tools import (
+    PlatformTools,
+)
 from agent_platform.core_platform.platform_services.integrations.business_tools.registry import (
     HttpToolHandler,
 )
@@ -422,6 +425,125 @@ async def test_execution_harness_applies_confirmation_and_idempotency_constraint
         ),
     )
     assert proposal.status == "requires_confirmation"
+
+
+@pytest.mark.asyncio
+async def test_execution_harness_gates_effectful_writes_before_the_handler_runs():
+    """A confirmation on write/irreversible risk blocks the call, not just the label.
+
+    The harness previously ran the handler and then relabelled a succeeded result,
+    so a write policy that required confirmation still performed the write while
+    reporting "awaiting confirmation".
+    """
+
+    calls: list[str] = []
+
+    class Handler:
+        async def execute(self, request):
+            calls.append(request.definition.name)
+            return ToolExecutionResult(status="succeeded", data={"written": True})
+
+    definition = ToolDefinition(
+        name="write_order",
+        description="Write an order.",
+        parameters={"type": "object", "additionalProperties": False},
+        capability="external-tool",
+        risk="write",
+    )
+    request = ToolExecutionRequest(
+        definition=definition,
+        context=ToolExecutionContext(tenant_id="tenant-a", source="runtime"),
+        idempotency_key="runtime:test",
+    )
+    harness = ToolExecutionHarness()
+
+    gated = await harness.execute(
+        Handler(),
+        request,
+        PolicyDecision(
+            effect="allow",
+            reason_code="authorized",
+            risk="write",
+            confirmation={"required": True, "action": "confirm_tool"},
+        ),
+    )
+    assert gated.status == "requires_confirmation"
+    assert calls == []
+
+    # Without a confirmation requirement the handler runs normally.
+    direct = await harness.execute(
+        Handler(),
+        request,
+        PolicyDecision(effect="allow", reason_code="authorized", risk="write"),
+    )
+    assert direct.status == "succeeded"
+    assert calls == ["write_order"]
+
+
+@pytest.mark.asyncio
+async def test_gated_write_is_reported_as_requires_confirmation_not_succeeded():
+    """A write that never ran must not be audited or reported as a success."""
+
+    ran: list[str] = []
+
+    class WriteHandler:
+        definition = ToolDefinition(
+            name="write_thing",
+            description="Write a thing.",
+            parameters={"type": "object", "additionalProperties": False},
+            capability="demo",
+            risk="write",
+            idempotent=True,
+        )
+
+        async def execute(self, request):
+            ran.append(request.definition.name)
+            return ToolExecutionResult(status="succeeded", data={"written": True})
+
+    class Contribution:
+        def handlers(self, row, emit):
+            return (WriteHandler(),)
+
+    class GatedPolicy:
+        async def evaluate_tool(self, context, name, allowed, risk="read"):
+            return PolicyDecision(
+                effect="allow",
+                reason_code="authorized",
+                risk="write",
+                confirmation={"required": True, "action": "confirm_tool"},
+            )
+
+    class Http:
+        def __init__(self):
+            self.schemas: list[object] = []
+            self.specs: dict[str, object] = {}
+
+    row = {
+        "id": str(uuid4()),
+        "tenant_id": "tenant-a",
+        "conversation_id": str(uuid4()),
+        "config": {"agent": {"config": {}}},
+    }
+    tools = PlatformTools(
+        Http(),
+        RuntimeBindings(policy=GatedPolicy(), tool_contributions=(Contribution(),)),
+        row,
+        ["write_thing"],
+        [],
+        None,
+    )
+
+    result = await tools.execute("write_thing", {})
+
+    assert result["execution_status"] == "requires_confirmation"
+    # Nothing ran, so the model must not be told it succeeded. Unlike a proposal
+    # (whose pending record does exist), a gated write reports ok=False plus a
+    # code the caller can act on.
+    assert result["ok"] is False
+    assert result["error"] == "confirmation_required"
+    # The contract status is consumed by the adapter, never leaked to the model.
+    assert "_contract_status" not in result
+    assert ran == []
 
 
 def test_runtime_factory_lives_in_shared_platform_runtime_module():
@@ -977,6 +1099,55 @@ def test_approval_tools_are_bound_as_a_runtime_contribution():
         "submit_approval",
         "decide_approval",
     }
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_tool_forwards_revision_to_service():
+    approval_id = uuid4()
+    captured: dict[str, object] = {}
+
+    class FakeApprovalService:
+        async def decide(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {"id": approval_id, "status": "approved"}
+
+    contribution = ApprovalToolContribution(FakeApprovalService())
+    handler = next(
+        handler
+        for handler in contribution.handlers({"id": str(uuid4())}, None)
+        if handler.definition.name == "decide_approval"
+    )
+    request = ToolExecutionRequest(
+        definition=handler.definition,
+        context=ToolExecutionContext(
+            tenant_id="tenant-a",
+            actor_id="reviewer-1",
+            source="runtime",
+            business_id="customer-service",
+            workspace_id="default",
+        ),
+        arguments={
+            "request_id": str(approval_id),
+            "decision": "approve",
+            "revision": 2,
+        },
+    )
+
+    result = await handler.execute(request)
+
+    assert result.status == "succeeded"
+    assert result.data == {"id": approval_id, "status": "approved"}
+    assert captured["args"] == (
+        "tenant-a",
+        "reviewer-1",
+        approval_id,
+        "approve",
+        2,
+    )
+    assert captured["kwargs"]["scope"].tenant_id == "tenant-a"
+    assert captured["kwargs"]["scope"].business_id == "customer-service"
+    assert captured["kwargs"]["scope"].workspace_id == "default"
 
 
 @pytest.mark.asyncio
