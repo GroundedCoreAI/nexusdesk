@@ -8,6 +8,9 @@ import pytest_asyncio
 from pydantic import SecretStr
 from sqlalchemy import text
 
+from agent_platform.applications.platform_runtime.runtime_hooks import (
+    BusinessRuntimePersistenceHooks,
+)
 from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
 from agent_platform.core_platform.agent_runtime.repository import RunRepository
 from agent_platform.core_platform.agent_runtime.schemas import BusyError, CapacityError, RunRequest
@@ -28,7 +31,7 @@ async def database():
     tenant = "test-" + str(uuid4())
     settings = Settings(database_url=url, tenant_id=tenant, embedded_worker=False)
     engine = create_engine(settings)
-    repo = RunRepository(engine)
+    repo = RunRepository(engine, BusinessRuntimePersistenceHooks())
     try:
         yield repo, settings
     finally:
@@ -101,7 +104,7 @@ async def test_persisted_history_survives_repository_recreation(database):
     history = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}]
     await repo.finish(row["id"], owner, "completed", output="hi", history=history)
     await submit(repo, settings)
-    recreated = RunRepository(repo.engine)
+    recreated = RunRepository(repo.engine, BusinessRuntimePersistenceHooks())
     next_run = await recreated.claim(uuid4(), 30, settings.tenant_id)
     assert next_run["history"] == history
 

@@ -41,6 +41,7 @@ class DecideApprovalInput(ContractModel):
 
     request_id: UUID
     decision: Literal["approve", "reject"]
+    revision: int = Field(ge=1)
 
 
 APPROVAL_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
