@@ -67,11 +67,17 @@ review:
     stale_head_sha: rerun_review
     ci_failure: keep_blocked
 
-checks:
-  # Phase 3/4: maintain the "AI Review Policy" check run on the PR head SHA.
-  # Wire it into branch protection as a required check to enforce the gate.
-  enabled: true
-  ai_review_check_name: "AI Review Policy"
+# TEMPORARILY DISABLED (2026-10-29): the "AI Review Policy" check run is
+# switched off together with the ai-pr-review workflow. With the block below
+# commented out, checks.enabled falls back to False (see
+# scripts/ai-pr-review/schema.py) and no check run is created. Also remove
+# "AI Review Policy" from the branch protection required checks. To
+# re-enable, restore the block and re-add the required check.
+# checks:
+#   # Phase 3/4: maintain the "AI Review Policy" check run on the PR head SHA.
+#   # Wire it into branch protection as a required check to enforce the gate.
+#   enabled: true
+#   ai_review_check_name: "AI Review Policy"
 
   # Must match the actual workflow name in .github/workflows/ci.yml.
   required_ci_workflows:
