@@ -1156,10 +1156,28 @@ async def gateway_metrics(request: Request, user: Reader):
 
 
 @router.get("/observability/memory")
-async def memory_metrics(request: Request, user: Reader):
+async def memory_metrics(
+    request: Request,
+    user: Reader,
+    window_hours: Annotated[int, Query(ge=1, le=168)] = 24,
+):
     # Phase 4 (FR-7): extraction volume, injection hit rate, pending backlog,
     # governance/decay counters, reinforcement and memory_search telemetry.
-    return await application(request).observability.memory_summary(user.tenant)
+    # Phase 7 Task 3: window_hours scopes the new health sections (tasks,
+    # search modes/quality, agents, injection); Phase 4 sections keep their
+    # fixed windows either way.
+    return await application(request).observability.memory_summary(user.tenant, window_hours)
+
+
+@router.get("/observability/memory/alerts")
+async def memory_alerts(
+    request: Request,
+    user: Reader,
+    window_hours: Annotated[int, Query(ge=1, le=168)] = 24,
+):
+    # Phase 7 Task 3: recent memory.alert.* firings (Task 2 audit rows),
+    # newest first, capped server-side at the latest 200 rows.
+    return await application(request).observability.memory_alerts(user.tenant, window_hours)
 
 
 @router.get("/observability/runs/{rid}/trace")

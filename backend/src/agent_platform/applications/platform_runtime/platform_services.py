@@ -99,7 +99,9 @@ class PlatformServices:
             engine, self.conversations, self.customer, self.agents, settings
         )
         self.tool_contributions = ()
-        self.observability = ObservabilityService(engine)
+        # Phase 7: settings feed the maintenance-overdue cadence of rule_scan
+        # (2x the configured scan interval) in the memory health sections.
+        self.observability = ObservabilityService(engine, settings)
         self.scope = TenantScopeService(engine)
         self.open_platform = OpenPlatform(self)
         self.evaluation = None
