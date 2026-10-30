@@ -27,7 +27,7 @@
 | 维护健康 | 最近一次 TTL/衰退迁移/容量淘汰/规则扫描/embedding 重试的执行时间与结果 | 新增维护完成审计 `memory.maintenance.completed` |
 | Agent 维度 | 按 agent_id：绑定客户 run 数、注入率、抽取写入量、任务失败量 | `runtime_runs` + 审计 + 任务表 |
 | 注入明细 | 平均注入条数、flag/profile/preference/event 分布 | `memory_injection_log`（Phase 6；未上则按事件计数降级） |
-| 质量 | pending 确认率、拒绝率（7d/30d） | `memory.item.confirmed/rejected` 审计 |
+| 质量 | pending 确认率、拒绝率（7d；30d 窗口列为后续增强，本期未实现） | `memory.item.confirmed/rejected` 审计 |
 
 前端观测页"记忆"卡片区按上述类别分组展示；维护健康超期（如 24h 未执行）卡片置红。
 
@@ -40,7 +40,7 @@
 | R1 | memory_tasks 15 分钟内出现 failed | > 0 条 |
 | R2 | 最老 pending 任务年龄 | > 60 分钟 |
 | R3 | embedding 失败积压持续增长 | 连续 2 个检查周期单调上升且 > 0 |
-| R4 | vector 降级率（keyword fallback + text 模式占比） | > 20%（24h 窗，调用数 ≥ 20 才判定，防小样本误报） |
+| R4 | vector 降级率（keyword fallback 占比；text 为 TSVECTOR 部署形态的配置模式而非降级，不计入分子，否则 quickstart 纯文本形态恒为 100% 误报） | > 20%（24h 窗，调用数 ≥ 20 才判定，防小样本误报） |
 | R5 | 24 小时无成功维护任务（TTL/衰退/淘汰任一） | 超期 |
 | R6 | 规则扫描超 2 个周期未执行（规则扫描开启时） | 超期 |
 | R7 | pending 待确认积压 | > 500 条（平台可配） |

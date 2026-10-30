@@ -165,6 +165,27 @@ class Settings(BaseSettings):
     # maintenance pass deletes rows older than this alongside the event TTL
     # sweep.
     memory_injection_log_retention_days: int = Field(default=90, ge=1, le=3650)
+    # Production alerting (Phase 7, Task 2). Master switch: off disables the
+    # alert scan, the standalone worker's heartbeat record and webhook
+    # delivery; metrics and Task 1 audits are unaffected.
+    memory_alert_enabled: bool = True
+    # Alert scan cadence in minutes on the memory worker's idle cycle;
+    # 0 disables the scan (the master switch stays the kill switch).
+    memory_alert_scan_interval_minutes: int = Field(default=15, ge=0, le=1440)
+    # Per-rule cooldown: a rule that fired stays quiet for this long,
+    # deduplicated against existing memory.alert.* audit rows.
+    memory_alert_cooldown_minutes: int = Field(default=60, ge=0, le=10080)
+    # R2 pending_task_age: a pending memory task older than this fires.
+    memory_alert_pending_task_max_age_minutes: int = Field(default=60, ge=0, le=10080)
+    # R7 pending_backlog: pending-confirmation memory items above this fire.
+    memory_alert_pending_backlog_threshold: int = Field(default=500, ge=0, le=1000000)
+    # R4 vector_fallback: keyword_fallback share of memory_search calls above
+    # this fires (gated on >= 20 calls in the 24h window).
+    memory_alert_vector_fallback_rate: float = Field(default=0.2, ge=0, le=1)
+    # Optional alert webhook (FR-3); empty disables delivery. Delivery
+    # failures only log and never block or fail the scan.
+    memory_alert_webhook_url: str = ""
+    memory_alert_webhook_timeout_seconds: int = Field(default=5, ge=1, le=60)
     model_backend: Literal["demo", "openai", "unconfigured"] = "demo"
     model_name: str = ""
     model_api_key: SecretStr | None = None

@@ -79,15 +79,23 @@ agent_platform/
 
 ## 完成前自检清单
 
+提交前快速自检（必须全绿）：
+
 ```bash
 cd backend
 uv run ruff check src tests      # lint 必须全绿
 uv run ruff format --check src   # 格式
-uv run pytest                    # 测试通过
 cd .. && uv run --directory backend python scripts/check_architecture.py   # 架构门禁
 ```
 
-提交前以上四条必须全部通过；若改了模型，确认迁移文件已生成且 `uv run alembic upgrade head` 在干净库上可跑通。
+改动业务逻辑时，建议至少运行受影响模块的测试（如 `uv run pytest tests/test_xxx.py`）。
+
+**全量测试套件（`uv run pytest`，含 postgres 集成测试）不在提交前本地执行**，
+统一由 CI 在 push / PR 时运行（unit 与 postgres 分组并行执行）。发布前或高风险
+改动可本地补跑全量。
+
+若改了模型，确认迁移文件已生成且 `uv run alembic upgrade head` 在干净库上可跑通
+（CI 的 postgres 分组会在空库上执行 migrate，可作为验证兜底）。
 
 架构门禁由 CI 执行（`.github/workflows/ci.yml`），本地跳过它再提交等于把失败推给 CI：
 它校验四根目录存在、旧目录不再出现、**整个 `core_platform/` 树**与 `extension_contracts/`

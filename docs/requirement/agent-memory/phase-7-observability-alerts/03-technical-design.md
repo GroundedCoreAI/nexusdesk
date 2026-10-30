@@ -4,7 +4,7 @@
 
 | 层 | 文件 | 改动 |
 |---|---|---|
-| 迁移 | `backend/migrations/versions/NNNN_memory_observability.py`（编号以实施时主线最新为准） | `memory_tasks` 加 `created_at`、`duration_ms` 列（D1） |
+| 迁移 | `backend/migrations/versions/NNNN_memory_observability.py`（编号以实施时主线最新为准） | `memory_tasks` 加 `duration_ms` 列（D1；`created_at` 自 0030 已存在） |
 | Worker | `modules/memory/worker.py`（:310 行；maintenance :251-259、rule_scan :229-236、embedding 重试 :260-273、`_finish`） | 任务耗时记录；维护完成审计；embedding 重试审计；新增告警检查周期任务 |
 | 新模块 | `modules/memory/alerting.py` | 告警规则求值、冷却判定、审计写入、webhook 外发 |
 | 事件 | `modules/agent_runtime/platform_tools.py`（:195 `memory_search.completed`） | 事件 data 扩展 `mode`（vector/text/keyword_fallback）与 `returned` |
@@ -15,11 +15,10 @@
 ## 数据模型（迁移 `NNNN_memory_observability.py`）
 
 ```sql
-ALTER TABLE memory_tasks ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE memory_tasks ADD COLUMN duration_ms INTEGER;   -- done/failed 时由 worker 写入
 ```
 
-**决策 D1（补任务时间戳）**：现状 `memory_tasks`（0030:19-39）无创建时间与耗时字段，"最老 pending 年龄"只能用 `run_after` 近似、"按 kind 执行耗时"完全无法计算。补两列：存量行 `created_at` 回填 `run_after`（近似），`duration_ms` 留 NULL（聚合时排除）。worker claim 时记录起始时间，`_finish` 写 `duration_ms`。
+**决策 D1（补任务耗时）**：原设计假设 `memory_tasks`（0030:19-39）无创建时间与耗时字段，"最老 pending 年龄"只能用 `run_after` 近似、"按 kind 执行耗时"完全无法计算；实施时勘察发现 `created_at` 自 0030 起已存在，故 0042 只加 `duration_ms` 一列，存量行留 NULL（聚合时排除），无需 `run_after` 回填。worker claim 时记录起始时间，`_finish` 写 `duration_ms`。
 
 **决策 D2（告警不建新表）**：告警记录复用 `audit_records`，action `memory.alert.<rule>`，与平台审计风格一致（同 Phase 4 R17 决策）。冷却判定 = 查同窗内同 action 记录是否存在。观测页告警列表 = audit 按 `memory.alert.%` 过滤查询。不维护告警状态机（事件制，恢复靠指标卡变绿呈现）。
 
@@ -67,7 +66,8 @@ RULES = [
     Rule("task_failed",        check=lambda ctx: ctx.failed_tasks_15m > 0),
     Rule("pending_task_age",   check=lambda ctx: ctx.oldest_pending_age > timedelta(minutes=60)),
     Rule("embedding_growing",  check=lambda ctx: ctx.embedding_backlog_rising_2_cycles),
-    Rule("vector_fallback",    check=lambda ctx: ctx.search_calls_24h >= 20 and ctx.fallback_rate > 0.2),
+    # fallback 分子仅 keyword_fallback 单次降级；text 为 TSVECTOR 部署形态的配置模式而非降级
+    Rule("vector_fallback",    check=lambda ctx: ctx.search_calls_24h >= 20 and ctx.keyword_fallback_rate > 0.2),
     Rule("maintenance_silent", check=lambda ctx: ctx.last_maintenance_at < now() - timedelta(hours=24)),
     Rule("rule_scan_missed",   check=lambda ctx: rule_scan_enabled() and ctx.last_rule_scan_at < now() - 2 * rule_scan_interval()),
     Rule("pending_backlog",    check=lambda ctx: ctx.pending_items > 500),
