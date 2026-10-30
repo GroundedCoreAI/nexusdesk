@@ -733,7 +733,7 @@ async def insert_rule_flag(conn, tenant, cid, flag_id, ticket_id, marked_h):
                 reference_count,created_at,updated_at)
                 VALUES(:id,:t,:c,'flag','complaint_risk',:co,1.0,'active','rule',false,:ref,1,
                 :ca,0,:ca,:ca)
-                ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING"""),
+                ON CONFLICT DO NOTHING"""),
         {
             "id": flag_id,
             "t": tenant,
@@ -764,7 +764,7 @@ async def ensure_ticket_type(conn, tenant):
     await conn.execute(
         text(
             "INSERT INTO ticket_types(tenant_id,id,code,name,published_version)"
-            " VALUES(:t,:id,'general',:name,1) ON CONFLICT (tenant_id,code) DO NOTHING"
+            " VALUES(:t,:id,'general',:name,1) ON CONFLICT DO NOTHING"
         ),
         {"t": tenant, "id": tid, "name": name},
     )
@@ -967,7 +967,9 @@ def _alert_history():
 async def seed(runtime, settings) -> bool:
     """幂等入口：身份绑定已存在则整块跳过，仅首次返回 True。"""
     tenant = settings.tenant_id
-    p = runtime.platform
+    # The refactor replaced RuntimeServices.platform with RuntimeServices.groups;
+    # the helpers below only need `.runtime` (engine, gateway) and `.business`.
+    p = runtime.groups
     audit_actor = await current_audit_actor(p, tenant)
 
     # --- 演示 Agent（ensure_agent 按名称幂等） ------------------------------
@@ -980,7 +982,7 @@ async def seed(runtime, settings) -> bool:
             p, tenant, "seed", spec["name"], spec["description"], config
         )
 
-    async with p.engine.begin() as conn:
+    async with p.runtime.engine.begin() as conn:
         if await identity_bound(conn, tenant, "web", EXT):
             return False
         cid = uid(NS, "customer", "zhaowenbo")
