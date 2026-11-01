@@ -1,4 +1,332 @@
 export interface PlatformModule { id: string; name: string; description: string; status: string }
+export type ServiceApplicationStatus = 'draft' | 'review' | 'published' | 'offline';
+export type ScenarioStatus = 'draft' | 'review' | 'published' | 'offline';
+export type ScenarioTemplate = 'consult' | 'query' | 'action';
+export type ScenarioEntryType = 'natural_language' | 'service_catalog' | 'object_card' | 'external_link';
+export type ScenarioObjectMode = 'none' | 'implicit' | 'optional' | 'required' | 'multiple';
+export type ScenarioHandlerType = 'direct' | 'knowledge' | 'query' | 'action' | 'agent' | 'human' | 'tracking';
+export type ScenarioDecisionKind = 'select_object' | 'confirm_object' | 'select_intent' | 'confirm_action' | 'handoff';
+export type ApplicationCapabilityType = 'direct' | 'knowledge' | 'query' | 'action' | 'agent' | 'human' | 'tracking';
+export type ApplicationChannelStatus = 'active' | 'canary' | 'disabled';
+export interface ApplicationScenarioReference {
+  key: string;
+  version?: number | null;
+  enabled?: boolean;
+}
+export interface ApplicationCapability {
+  key: string;
+  type: ApplicationCapabilityType;
+  label: string;
+  description?: string;
+  enabled?: boolean;
+  priority?: number;
+  when?: Record<string, unknown>;
+  agent_id?: string | null;
+  agent_version?: number | null;
+  agent_name?: string | null;
+  queue?: string | null;
+  tool?: string | null;
+  config?: Record<string, unknown>;
+}
+export interface ApplicationChannel {
+  key: string;
+  name: string;
+  type?: string;
+  status?: ApplicationChannelStatus;
+  config?: Record<string, unknown>;
+}
+export interface ApplicationServiceCategory {
+  name: string;
+  order: number;
+}
+export interface ScenarioEntry {
+  key: string;
+  type: ScenarioEntryType;
+  label: string;
+  description?: string;
+  enabled?: boolean;
+  config?: Record<string, unknown>;
+}
+export interface ScenarioCandidateStrategy {
+  sort?: string;
+  limit?: number;
+  filters?: string[];
+  empty_state: string;
+  unavailable_state: string;
+}
+export interface ScenarioBusinessObject {
+  type: string;
+  provider: string;
+  required: boolean;
+  mode: ScenarioObjectMode;
+  candidate_strategy: ScenarioCandidateStrategy;
+  permission_policy?: string;
+  config?: Record<string, unknown>;
+}
+export interface ScenarioFactField {
+  key: string;
+  label: string;
+  source: string;
+  format?: string;
+  order?: number;
+  masked?: boolean;
+  audiences?: string[];
+  refresh?: string;
+  config?: Record<string, unknown>;
+}
+export interface ScenarioDecisionOption {
+  value: string;
+  label: string;
+  description?: string;
+  next?: string | null;
+}
+export interface ScenarioUserDecision {
+  key: string;
+  kind: ScenarioDecisionKind;
+  label: string;
+  required?: boolean;
+  options?: ScenarioDecisionOption[];
+  allow_free_text?: boolean;
+  allow_skip?: boolean;
+  confirm?: boolean;
+  correctable?: boolean;
+  when?: Record<string, unknown>;
+}
+export interface ScenarioRecommendation {
+  key: string;
+  label: string;
+  message: string;
+  when?: Record<string, unknown>;
+}
+export interface ScenarioHandlerCondition {
+  object_statuses?: string[];
+  message_terms?: string[];
+  decision_keys?: string[];
+  requires_object?: boolean | null;
+}
+export interface ScenarioHandler {
+  key: string;
+  type: ScenarioHandlerType;
+  label: string;
+  priority?: number;
+  enabled?: boolean;
+  when?: ScenarioHandlerCondition;
+  agent_id?: string | null;
+  agent_version?: number | null;
+  agent_name?: string | null;
+  queue?: string | null;
+  tool?: string | null;
+  reply?: string | null;
+  config?: Record<string, unknown>;
+}
+export interface ScenarioConfig {
+  schema_version: 'v1';
+  name: string;
+  description: string;
+  domain: string;
+  category: string;
+  template: ScenarioTemplate;
+  channels: string[];
+  entries: ScenarioEntry[];
+  facts: ScenarioFactField[];
+  object: ScenarioBusinessObject | null;
+  decisions: ScenarioUserDecision[];
+  recommendations: ScenarioRecommendation[];
+  handlers: ScenarioHandler[];
+  fallback_order: string[];
+  matching: { keywords: string[]; intents: string[]; negative_keywords: string[] };
+  config: Record<string, unknown>;
+}
+export interface ServiceApplicationConfig {
+  schema_version: 'v1';
+  name: string;
+  description: string;
+  service_categories: ApplicationServiceCategory[];
+  scenarios: ApplicationScenarioReference[];
+  capabilities: ApplicationCapability[];
+  default_execution_order: string[];
+  channels: ApplicationChannel[];
+}
+export interface ServiceApplicationSummary {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  status: ServiceApplicationStatus;
+  revision: number;
+  published_version: number | null;
+  config: ServiceApplicationConfig;
+  scenario_count: number;
+  capability_count: number;
+  channel_count: number;
+  has_unpublished_changes: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+export interface ServiceApplicationPage { items: ServiceApplicationSummary[]; total: number }
+export interface ServiceApplicationOverview {
+  applications: number;
+  by_status: Record<ServiceApplicationStatus, number>;
+  scenarios: number;
+  capabilities: number;
+  channels: number;
+  simulations: number;
+}
+export interface ServiceApplicationVersion {
+  id: string;
+  version: number;
+  config: ServiceApplicationConfig;
+  source_version: number | null;
+  created_by: string;
+  created_at: string;
+  published: boolean;
+}
+export interface ServiceApplicationVersionPage {
+  items: ServiceApplicationVersion[];
+  published_version: number | null;
+}
+export interface ServiceScenarioMetrics {
+  volume: number;
+  auto_resolved: number;
+  handoffs: number;
+  auto_resolve_rate: number;
+  handoff_rate: number;
+}
+export interface ServiceScenarioSummary {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  domain: string;
+  category?: string;
+  template: ScenarioTemplate;
+  status: ScenarioStatus;
+  revision: number;
+  published_version: number | null;
+  config: ScenarioConfig;
+  published_config?: ScenarioConfig | null;
+  has_unpublished_changes?: boolean;
+  metrics?: ServiceScenarioMetrics;
+  created_at?: string;
+  updated_at?: string;
+}
+export interface ServiceScenarioPage { items: ServiceScenarioSummary[]; total: number }
+export interface ServiceScenarioVersion {
+  id: string;
+  version: number;
+  config: ScenarioConfig;
+  source_version: number | null;
+  created_by: string;
+  created_at: string;
+  published: boolean;
+}
+export interface ServiceScenarioVersionPage {
+  items: ServiceScenarioVersion[];
+  published_version: number | null;
+}
+export interface SimulatedObjectInput {
+  id: string;
+  type: string;
+  status?: string;
+  facts?: Record<string, unknown>;
+  accessible?: boolean;
+  exists?: boolean;
+}
+export interface SimulationRequestInput {
+  message: string;
+  entry: ScenarioEntryType;
+  object?: SimulatedObjectInput | null;
+  selected_decision?: string | null;
+  selected_handler?: string | null;
+  scenario_key?: string | null;
+  application_version?: number | null;
+}
+export interface SimulationStep {
+  step: 'scene' | 'object' | 'facts' | 'decision' | 'handler' | 'result';
+  status: string;
+  reason?: string;
+  [key: string]: unknown;
+}
+export interface SimulationFact {
+  key: string;
+  label: string;
+  source: string;
+  value: unknown;
+  format?: string;
+  order?: number;
+  masked?: boolean;
+  audiences?: string[];
+  refresh?: string;
+}
+export interface SimulationDecision {
+  key: string;
+  kind: ScenarioDecisionKind;
+  label: string;
+  required: boolean;
+  options: ScenarioDecisionOption[];
+  confirm: boolean;
+  correctable: boolean;
+  selected: boolean;
+  when?: Record<string, unknown>;
+}
+export interface SimulationTrace {
+  schema_version: 'v1';
+  scenario_key: string;
+  scenario_name: string;
+  scenario_version: number | null;
+  scenario_status: ScenarioStatus;
+  resolved_by: 'target' | 'keyword' | 'none';
+  steps: SimulationStep[];
+  object_ref?: Record<string, unknown> | null;
+  facts: SimulationFact[];
+  decisions: SimulationDecision[];
+  recommendations: ScenarioRecommendation[];
+  handler?: Record<string, unknown> | null;
+  result: { status: string; reason?: string; reason_code?: string; content: string; [key: string]: unknown };
+  fallback_path: string[];
+  explanation: string[];
+  simulated?: boolean;
+  trace_id?: string | null;
+  application_key?: string;
+  application_revision?: number;
+  application_source?: string;
+  application_version?: number | null;
+}
+export interface ServiceTraceItem {
+  id: string;
+  scenario_key: string;
+  scenario_version: number | null;
+  simulation: boolean;
+  entry: ScenarioEntryType;
+  message_length: number;
+  message_excerpt: string;
+  object_ref: Record<string, unknown> | null;
+  facts: Array<Record<string, unknown>>;
+  decisions: Array<Record<string, unknown>>;
+  handler_type: string | null;
+  outcome: string;
+  reason_code: string;
+  result_summary: string;
+  trace: SimulationTrace;
+  created_by: string;
+  created_at: string;
+}
+export interface ServiceTracePage { items: ServiceTraceItem[] }
+export interface AgentScenarioReference {
+  key: string;
+  name: string;
+  domain: string;
+  status: ScenarioStatus;
+  version: number | null;
+  handler_key: string;
+  handler_label: string;
+  binding: string;
+  agent_version: number | null;
+  configured_version: number | null;
+  metrics: ServiceScenarioMetrics;
+  volume: number;
+}
+export interface AgentScenarioReferencePage { items: AgentScenarioReference[] }
 export interface AgentConfig {
   reply_language?: "auto" | "zh-CN" | "zh-TW" | "en" | "hi";
   system_prompt: string;
@@ -456,6 +784,47 @@ export async function download(path: string): Promise<{ blob: Blob; filename: st
 export const post = <T,>(path: string, body: unknown = {}) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });
 export const put = <T,>(path: string, body: unknown) => api<T>(path, { method: 'PUT', body: JSON.stringify(body) });
 export const patch = <T,>(path: string, body: unknown) => api<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+export const createServiceApplication = (key: string, config: ServiceApplicationConfig) =>
+  post<ServiceApplicationSummary>('/service-apps', { key, config });
+export const updateServiceApplication = (key: string, config: ServiceApplicationConfig, revision: number) =>
+  put<ServiceApplicationSummary>(`/service-apps/${key}`, { config, revision });
+export const updateServiceCatalog = (
+  key: string,
+  categories: ApplicationServiceCategory[],
+  categoryChanges: Record<string, string>,
+  revision: number,
+) =>
+  put<ServiceApplicationSummary>(`/service-apps/${key}/service-catalog`, {
+    revision,
+    categories,
+    category_changes: categoryChanges,
+  });
+export const publishServiceApplication = (key: string, revision: number) =>
+  post<ServiceApplicationSummary>(`/service-apps/${key}/publish`, { revision });
+export const setServiceApplicationStatus = (
+  key: string,
+  status: Exclude<ServiceApplicationStatus, 'published'>,
+  revision: number,
+) => post<ServiceApplicationSummary>(`/service-apps/${key}/status`, { status, revision });
+export const rollbackServiceApplication = (key: string, version: number, revision: number) =>
+  post<ServiceApplicationSummary>(`/service-apps/${key}/rollback`, { version, revision });
+export const simulateServiceApplication = (key: string, body: SimulationRequestInput) =>
+  post<SimulationTrace>(`/service-apps/${key}/simulate`, body);
+export const updateServiceScenario = (key: string, config: ScenarioConfig, revision: number) =>
+  put<ServiceScenarioSummary>(`/service-scenarios/${key}`, { config, revision });
+export const createServiceScenario = (key: string, config: ScenarioConfig) =>
+  post<ServiceScenarioSummary>('/service-scenarios', { key, config });
+export const publishServiceScenario = (key: string, revision: number) =>
+  post<ServiceScenarioSummary>(`/service-scenarios/${key}/publish`, { revision });
+export const setServiceScenarioStatus = (
+  key: string,
+  status: Exclude<ScenarioStatus, 'published'>,
+  revision: number,
+) => post<ServiceScenarioSummary>(`/service-scenarios/${key}/status`, { status, revision });
+export const rollbackServiceScenario = (key: string, version: number, revision: number) =>
+  post<ServiceScenarioSummary>(`/service-scenarios/${key}/rollback`, { version, revision });
+export const simulateServiceScenario = (key: string, body: SimulationRequestInput) =>
+  post<SimulationTrace>(`/service-scenarios/${key}/simulate`, body);
 export const retryExtensionEvent = (eventId: string) =>
   post<ExtensionEventTask>(`/extensions/events/${eventId}/retry`);
 export const getModules = (signal?: AbortSignal) => api<PlatformModule[]>('/modules', { signal });

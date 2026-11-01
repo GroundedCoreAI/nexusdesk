@@ -41,6 +41,8 @@ class BusinessCapabilityServices:
     conversations: object
     handoffs: object
     customer: object
+    scenarios: object
+    service_apps: object
     confirmation: object
     channels: object
 
@@ -97,6 +99,8 @@ def build_service_groups(services: object) -> PlatformServiceGroups:
             conversations=services.conversations,
             handoffs=services.handoffs,
             customer=services.customer,
+            scenarios=services.scenarios,
+            service_apps=getattr(services, "service_apps", None),
             confirmation=services.confirmation,
             channels=services.channels,
         ),

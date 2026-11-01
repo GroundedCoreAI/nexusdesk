@@ -4,6 +4,15 @@ from fastapi import FastAPI
 
 from agent_platform.applications.business_registry import BusinessApplication
 from agent_platform.business_capabilities.approval.routes import router as approval_router
+from agent_platform.business_capabilities.customer_service.scenarios.routes import (
+    agent_router as scenario_agent_router,
+)
+from agent_platform.business_capabilities.customer_service.scenarios.routes import (
+    router as scenario_router,
+)
+from agent_platform.business_capabilities.customer_service.service_apps.routes import (
+    router as service_app_router,
+)
 from agent_platform.business_capabilities.knowledge.routes import router as knowledge_router
 from agent_platform.business_capabilities.memory.routes import router as memory_router
 from agent_platform.business_capabilities.open_platform.routes import management as open_management
@@ -29,6 +38,9 @@ def register_customer_service_routes(
     app.include_router(runtime_router, prefix=api_prefix)
     app.include_router(memory_router, prefix=api_prefix)
     app.include_router(approval_router, prefix=api_prefix)
+    app.include_router(scenario_router, prefix=api_prefix)
+    app.include_router(scenario_agent_router, prefix=api_prefix)
+    app.include_router(service_app_router, prefix=api_prefix)
     app.include_router(ingress, prefix=api_prefix)
     app.include_router(open_management, prefix=api_prefix)
     app.include_router(open_public, prefix=openapi_prefix)

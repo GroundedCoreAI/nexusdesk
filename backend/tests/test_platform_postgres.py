@@ -104,6 +104,12 @@ async def platform():
                         "pending_actions",
                         "handoffs",
                         "approval_requests",
+                        "routing_decisions",
+                        "service_scenario_traces",
+                        "service_application_versions",
+                        "service_applications",
+                        "service_scenario_versions",
+                        "service_scenarios",
                     ]:
                         if table == "channels":
                             await c.execute(

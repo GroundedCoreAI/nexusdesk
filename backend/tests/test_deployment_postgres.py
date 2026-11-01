@@ -21,11 +21,31 @@ async def test_quickstart_seed_is_repeatable_and_scenarios_work(platform, monkey
                 {"tenant": settings.tenant_id},
             )
             assert count == 1, table
+        scenario_count = await connection.scalar(
+            text("SELECT count(*) FROM service_scenarios WHERE tenant_id=:tenant"),
+            {"tenant": settings.tenant_id},
+        )
+        assert scenario_count == 6
+        application_count = await connection.scalar(
+            text("SELECT count(*) FROM service_applications WHERE tenant_id=:tenant"),
+            {"tenant": settings.tenant_id},
+        )
+        assert application_count == 1
         cid = await connection.scalar(
             text("SELECT id FROM runtime_conversations WHERE tenant_id=:tenant"),
             {"tenant": settings.tenant_id},
         )
-    response = await client.post(f"/api/v1/conversations/{cid}/messages", json={"content": "发货需要多久？"})
+    scenarios = (await client.get("/api/v1/service-scenarios")).json()
+    assert scenarios["total"] == 6
+    assert (await client.get("/api/v1/service-scenarios/query-orders")).status_code == 200
+    applications = (await client.get("/api/v1/service-apps")).json()
+    assert applications["total"] == 1
+    assert (
+        await client.get("/api/v1/service-apps/consumer-service")
+    ).status_code == 200
+    response = await client.post(
+        f"/api/v1/conversations/{cid}/messages", json={"content": "发货需要多久？"}
+    )
     assert response.status_code == 202, response.text
     result = await execute_next(services, settings)
     assert result["status"] == "completed", result

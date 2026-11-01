@@ -2,7 +2,7 @@ import inspect
 import io
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 from urllib.parse import quote
 from uuid import UUID
@@ -940,15 +940,73 @@ async def conversation_history(
     )
 
 
+@router.get("/conversations/{cid}/routing-decisions")
+async def routing_decisions(
+    cid: UUID,
+    request: Request,
+    user: Reader,
+    before: Annotated[str | None, Query(min_length=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+):
+    return await business(request).customer.list_routing_decisions(
+        user.tenant,
+        cid,
+        before=before,
+        limit=limit,
+        scope=request.state.business_scope,
+    )
+
+
+def _routing_summary_window(
+    since: datetime | None, until: datetime | None
+) -> tuple[datetime, datetime]:
+    if until is None:
+        end = datetime.now(UTC)
+    elif until.tzinfo is None:
+        end = until.replace(tzinfo=UTC)
+    else:
+        end = until.astimezone(UTC)
+    if since is None:
+        start = end - timedelta(days=7)
+    elif since.tzinfo is None:
+        start = since.replace(tzinfo=UTC)
+    else:
+        start = since.astimezone(UTC)
+    if start >= end or end - start > timedelta(days=31):
+        raise DomainError("invalid_time_range", 422)
+    return start, end
+
+
+@router.get("/routing-decisions/summary")
+async def routing_summary(
+    request: Request,
+    user: Reader,
+    since: datetime | None = None,
+    until: datetime | None = None,
+):
+    start, end = _routing_summary_window(since, until)
+    return await business(request).customer.routing_summary(
+        user.tenant,
+        since=start,
+        until=end,
+        scope=request.state.business_scope,
+    )
+
+
 @router.post("/conversations/{cid}/messages", status_code=202)
 async def message(cid: UUID, body: MessageInput, request: Request, user: Operator):
-    return await business(request).customer.send(
+    result = await business(request).customer.send(
         user.tenant,
         user.actor,
         cid,
         body.content,
         scope=request.state.business_scope,
     )
+    if isinstance(result, dict):
+        rejected = result.get("rejected")
+        if rejected:
+            raise DomainError(str(rejected), 409)
+    return result
 
 
 @router.post("/conversations/{cid}/human-replies")
@@ -1006,9 +1064,7 @@ async def decision(aid: UUID, body: DecisionInput, request: Request, user: Opera
 
 @router.get("/tickets")
 async def tickets(request: Request, user: Reader):
-    return await business(request).customer.tickets(
-        user.tenant, scope=request.state.business_scope
-    )
+    return await business(request).customer.tickets(user.tenant, scope=request.state.business_scope)
 
 
 @router.patch("/tickets/{tid}")

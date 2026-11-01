@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NexusDesk · 服务场景平台 UI 设计稿</title>
+  <link rel="stylesheet" href="mockups.css">
+</head>
+<body>
+  <svg class="svg-sprite" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-overview" viewBox="0 0 24 24"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4V5Z"/><path d="M8 9h8M8 12h5"/></symbol>
+    <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="i-headset" viewBox="0 0 24 24"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><path d="M4 13h3v5H5a1 1 0 0 1-1-1v-4Zm16 0h-3v5h2a1 1 0 0 0 1-1v-4Z"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 5.8M17 15a4.5 4.5 0 0 1 4 4"/></symbol>
+    <symbol id="i-robot" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="13" rx="4"/><path d="M12 2v4M8.5 11h.01M15.5 11h.01M8.5 15h7"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8L12 2Z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H20v17H7.5A3.5 3.5 0 0 0 4 22V5.5Z"/><path d="M4 19a3 3 0 0 1 3-3h13"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.5 6.5a4.5 4.5 0 0 0-5.9 5.9L3 18l3 3 5.6-5.6a4.5 4.5 0 0 0 5.9-5.9l-3 3-3-3 3-3Z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0V8Zm6 10v3"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.4 8.3-8 10-4.6-1.7-8-5-8-10V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.2-6 4.1 12 2.3-6H21"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+  </svg>
+
+  <!-- 01 · 服务场景总览 -->
+  <section class="screen admin-screen" data-screen="catalog">
+    <aside class="sidebar" data-sidebar data-active="scenes"></aside>
+    <main class="workspace">
+      <header class="topbar">
+        <div class="topbar-copy">
+          <div class="crumb">客服工作 <span>/</span> 服务场景</div>
+          <div class="title-line">
+            <h1>服务场景</h1>
+            <span class="platform-badge">PLATFORM</span>
+          </div>
+          <p>把客服能力组织成可发现、可配置、可度量的客户任务。</p>
+        </div>
+        <div class="topbar-right">
+          <button class="ghost-pill"><span class="globe">◎</span> 简体中文 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+          <div class="account-pill"><span class="avatar">A</span><span>local</span><span class="role-tag">admin</span></div>
+          <button class="primary-button"><svg class="ic"><use href="#i-plus"></use></svg> 新建场景</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="metric-grid">
+          <article class="metric-card">
+            <span class="metric-label">服务域</span>
+            <strong>6</strong>
+            <small>购物消费 · 账号服务 · 出行</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">服务场景</span>
+            <strong>18</strong>
+            <small>已发布 12 · 草稿 4 · 待审核 2</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">近 7 日自动解决</span>
+            <strong>82.4<span>%</span></strong>
+            <small><em class="up">↑ 4.2%</em> 较上周</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">带上下文转人工</span>
+            <strong>96.8<span>%</span></strong>
+            <small>订单与对象信息完整率</small>
+          </article>
+        </section>
+
+        <section class="section-heading">
+          <div>
+            <div class="eyebrow">SERVICE CATALOG</div>
+            <h2>场景目录</h2>
+            <p>场景是配置和度量的基本单元。一个场景可以拥有多个入口，但共享同一套对象、事实和承接策略。</p>
+          </div>
+          <div class="segmented">
+            <button class="active">全部场景 <b>18</b></button>
+            <button>需关注 <b>2</b></button>
+            <button>草稿 <b>4</b></button>
+          </div>
+        </section>
+
+        <div class="filter-bar">
+          <label class="search-box"><svg class="ic"><use href="#i-search"></use></svg><input value="" placeholder="搜索场景、客户任务或负责人"></label>
+          <button class="filter-button"><svg class="ic"><use href="#i-filter"></use></svg> 业务域：全部</button>
+          <button class="filter-button">状态：全部 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+          <span class="result-count">共 18 个场景</span>
+        </div>
+
+        <section class="domain-block">
+          <div class="domain-header">
+            <div class="domain-icon"><svg class="ic"><use href="#i-layers"></use></svg></div>
+            <div>
+              <h2>购物消费</h2>
+              <p>下单 · 物流 · 退换货 · 发票</p>
+            </div>
+            <div class="domain-stats"><span>4 个场景</span><span>3 个已发布</span><span>近 7 日 8,420 次进入</span></div>
+            <button class="text-button">管理目录 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+          </div>
+
+          <div class="scene-grid">
+            <article class="scene-card">
+              <div class="scene-card-top">
+                <div class="scene-icon purple"><svg class="ic"><use href="#i-ticket"></use></svg></div>
+                <span class="status-pill published"><i></i>已发布 · v3</span>
+              </div>
+              <h3>查询我的订单</h3>
+              <p>找到并确认一笔订单，查看状态并继续咨询</p>
+              <div class="tag-row"><span class="tag accent">订单对象</span><span class="tag">3 个入口</span></div>
+              <div class="scene-stats"><span><b>82%</b>自动解决</span><span><b>1.8k</b>近 7 日</span><span><b>4.1%</b>转人工</span></div>
+              <div class="scene-foot"><span>更新于 10 分钟前</span><button class="icon-button"><svg class="ic xs"><use href="#i-chevron"></use></svg></button></div>
+            </article>
+
+            <article class="scene-card">
+              <div class="scene-card-top">
+                <div class="scene-icon blue"><svg class="ic"><use href="#i-book"></use></svg></div>
+                <span class="status-pill published"><i></i>已发布 · v2</span>
+              </div>
+              <h3>咨询订单规则</h3>
+              <p>回答发票、取消、退款时效等通用规则问题</p>
+              <div class="tag-row"><span class="tag">无需对象</span><span class="tag">知识回答</span></div>
+              <div class="scene-stats"><span><b>94%</b>自动解决</span><span><b>2.4k</b>近 7 日</span><span><b>2.6%</b>转人工</span></div>
+              <div class="scene-foot"><span>更新于 1 小时前</span><button class="icon-button"><svg class="ic xs"><use href="#i-chevron"></use></svg></button></div>
+            </article>
+
+            <article class="scene-card">
+              <div class="scene-card-top">
+                <div class="scene-icon green"><svg class="ic"><use href="#i-pulse"></use></svg></div>
+                <span class="status-pill published"><i></i>已发布 · v1</span>
+              </div>
+              <h3>查询物流</h3>
+              <p>基于订单查询最新物流节点与异常状态</p>
+              <div class="tag-row"><span class="tag accent">订单对象</span><span class="tag">2 个入口</span></div>
+              <div class="scene-stats"><span><b>88%</b>自动解决</span><span><b>1.1k</b>近 7 日</span><span><b>6.8%</b>转人工</span></div>
+              <div class="scene-foot"><span>更新于昨天</span><button class="icon-button"><svg class="ic xs"><use href="#i-chevron"></use></svg></button></div>
+            </article>
+
+            <article class="scene-card">
+              <div class="scene-card-top">
+                <div class="scene-icon amber"><svg class="ic"><use href="#i-tool"></use></svg></div>
+                <span class="status-pill draft"><i></i>草稿</span>
+              </div>
+              <h3>申请售后</h3>
+              <p>选择订单、填写原因并提交售后申请</p>
+              <div class="tag-row"><span class="tag accent">订单对象</span><span class="tag">办理</span></div>
+              <div class="scene-stats"><span><b>71%</b>完成率</span><span><b>—</b>未发布</span><span><b>—</b>—</span></div>
+              <div class="scene-foot"><span>编辑于 25 分钟前</span><button class="icon-button"><svg class="ic xs"><use href="#i-chevron"></use></svg></button></div>
+            </article>
+
+            <article class="scene-card">
+              <div class="scene-card-top">
+                <div class="scene-icon rose"><svg class="ic"><use href="#i-ticket"></use></svg></div>
+                <span class="status-pill published"><i></i>已发布 · v4</span>
+              </div>
+              <h3>发票与报销</h3>
+              <p>查询开票状态、下载发票或申请重开</p>
+              <div class="tag-row"><span class="tag accent">订单对象</span><span class="tag">2 个入口</span></div>
+              <div class="scene-stats"><span><b>89%</b>自动解决</span><span><b>760</b>近 7 日</span><span><b>3.2%</b>转人工</span></div>
+              <div class="scene-foot"><span>更新于 2 小时前</span><button class="icon-button"><svg class="ic xs"><use href="#i-chevron"></use></svg></button></div>
+            </article>
+
+            <article class="scene-card">
+              <div class="scene-card-top">
+                <div class="scene-icon slate"><svg class="ic"><use href="#i-headset"></use></svg></div>
+                <span class="status-pill review"><i></i>待审核</span>
+              </div>
+              <h3>投诉与反馈</h3>
+              <p>收集问题、绑定订单并转入业务客服队列</p>
+              <div class="tag-row"><span class="tag accent">订单对象</span><span class="tag">人工协同</span></div>
+              <div class="scene-stats"><span><b>64%</b>解决率</span><span><b>320</b>近 7 日</span><span><b>18.4%</b>转人工</span></div>
+              <div class="scene-foot"><span>提交审核于 30 分钟前</span><button class="icon-button"><svg class="ic xs"><use href="#i-chevron"></use></svg></button></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="domain-block compact">
+          <div class="domain-header">
+            <div class="domain-icon sky"><svg class="ic"><use href="#i-users"></use></svg></div>
+            <div>
+              <h2>账号与基础功能</h2>
+              <p>登录 · 实名 · 账号安全</p>
+            </div>
+            <div class="domain-stats"><span>3 个场景</span><span>2 个已发布</span></div>
+            <button class="text-button">展开 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </section>
+
+  <!-- 02 · 场景工作台 -->
+  <section class="screen admin-screen" data-screen="editor">
+    <aside class="sidebar" data-sidebar data-active="scenes"></aside>
+    <main class="workspace">
+      <header class="topbar editor-topbar">
+        <div class="topbar-copy">
+          <div class="crumb">客服工作 <span>/</span> 服务场景 <span>/</span> 查询我的订单</div>
+          <div class="title-line"><h1>查询我的订单</h1><span class="status-pill published"><i></i>已发布 · v3</span><span class="agent-link-pill"><svg class="ic xs"><use href="#i-robot"></use></svg> Agent · 购物消费助手 v5</span></div>
+          <p>找到并确认一笔订单，查看状态并继续咨询。</p>
+        </div>
+        <div class="topbar-right">
+          <button class="secondary-button"><svg class="ic"><use href="#i-play"></use></svg> 模拟</button>
+          <button class="secondary-button">保存草稿</button>
+          <button class="primary-button">发布 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+        </div>
+      </header>
+
+      <div class="content editor-content">
+        <div class="editor-toolbar">
+          <div class="tabs"><button class="active">场景配置</button><button>模拟与决策</button><button>发布记录</button><button>指标</button></div>
+          <span class="save-state"><svg class="ic xs"><use href="#i-check"></use></svg> 所有更改已保存 · 10:24</span>
+        </div>
+
+        <div class="workbench">
+          <aside class="scene-tree">
+            <div class="tree-head"><div><span class="eyebrow">CATALOG</span><h2>服务目录</h2></div><button class="icon-button"><svg class="ic xs"><use href="#i-plus"></use></svg></button></div>
+            <div class="tree-group">
+              <button class="tree-domain"><svg class="ic xs"><use href="#i-chevron"></use></svg><span>购物消费</span><b>4</b></button>
+              <div class="tree-items">
+                <button class="tree-item active"><span class="dot"></span>查询我的订单 <span class="mini-status live"></span></button>
+                <button class="tree-item"><span class="dot"></span>咨询订单规则</button>
+                <button class="tree-item"><span class="dot"></span>查询物流</button>
+                <button class="tree-item"><span class="dot"></span>申请售后 <span class="mini-status draft"></span></button>
+              </div>
+            </div>
+            <div class="tree-group">
+              <button class="tree-domain"><svg class="ic xs"><use href="#i-chevron"></use></svg><span>账号与基础功能</span><b>3</b></button>
+              <div class="tree-items muted"><button class="tree-item"><span class="dot"></span>找回账号</button><button class="tree-item"><span class="dot"></span>修改手机号</button><button class="tree-item"><span class="dot"></span>账号安全</button></div>
+            </div>
+            <div class="tree-help"><svg class="ic"><use href="#i-layers"></use></svg><p>场景是配置单元，不是流程节点。同一场景可被自然语言、目录和对象卡片共同进入。</p></div>
+          </aside>
+
+          <section class="config-panel">
+            <div class="cfg-section">
+              <div class="cfg-head"><span class="step-no">01</span><div><h3>基本信息</h3><p>给客户和管理者看的业务语言</p></div><span class="ok-state"><svg class="ic xs"><use href="#i-check"></use></svg>已配置</span></div>
+              <div class="form-grid two">
+                <label class="field"><span>场景名称</span><input value="查询我的订单"></label>
+                <label class="field"><span>适用渠道</span><div class="multi-select">Web · App · 企业微信 <svg class="ic xs"><use href="#i-chevron"></use></svg></div></label>
+                <label class="field wide"><span>客户任务</span><input value="找到一笔订单，确认状态，并继续咨询或办理"></label>
+              </div>
+            </div>
+
+            <div class="cfg-section">
+              <div class="cfg-head"><span class="step-no">02</span><div><h3>入口方式</h3><p>入口是到达场景的方式，不是场景本身</p></div><span class="ok-state"><svg class="ic xs"><use href="#i-check"></use></svg>4 个入口</span></div>
+              <div class="entry-grid">
+                <button class="entry-option on"><svg class="ic"><use href="#i-chat"></use></svg><span>自然语言</span><small>查我的订单</small></button>
+                <button class="entry-option on"><svg class="ic"><use href="#i-layers"></use></svg><span>服务目录</span><small>购物消费 → 我的订单</small></button>
+                <button class="entry-option on"><svg class="ic"><use href="#i-ticket"></use></svg><span>订单卡片</span><small>最近订单 / 订单列表</small></button>
+                <button class="entry-option"><svg class="ic"><use href="#i-plug"></use></svg><span>外部跳转</span><small>订单详情页 CTA</small></button>
+              </div>
+            </div>
+
+            <div class="cfg-section">
+              <div class="cfg-head"><span class="step-no">03</span><div><h3>业务对象与事实</h3><p>对象解释“是哪一笔”，事实解释“它现在怎样”</p></div><span class="required-chip">对象必需</span></div>
+              <div class="object-row">
+                <span class="object-type"><svg class="ic"><use href="#i-ticket"></use></svg><b>订单</b><small>Order Provider</small></span>
+                <span class="object-arrow"><svg class="ic"><use href="#i-arrow"></use></svg></span>
+                <span class="object-strategy"><b>最近 5 笔 + 筛选</b><small>按更新时间倒序 · 支持全部订单</small></span>
+                <button class="text-button">配置对象 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+              </div>
+              <div class="chip-line"><span class="line-label">展示事实</span><span class="tag accent">订单状态</span><span class="tag accent">下单时间</span><span class="tag accent">金额</span><span class="tag accent">商品名称</span><span class="tag">物流状态</span><button class="dashed-chip">+ 添加字段</button></div>
+            </div>
+
+            <div class="cfg-section">
+              <div class="cfg-head"><span class="step-no">04</span><div><h3>用户决策</h3><p>让用户明确选择、确认和纠正</p></div><span class="ok-state"><svg class="ic xs"><use href="#i-check"></use></svg>已配置</span></div>
+              <div class="decision-grid">
+                <div class="decision-card"><span class="decision-index">1</span><div><b>选择订单</b><small>从候选订单中确认</small></div><span class="req">必选</span></div>
+                <div class="decision-card"><span class="decision-index">2</span><div><b>确认对象</b><small>显示当前咨询的订单摘要</small></div><span class="req">必选</span></div>
+                <div class="decision-card"><span class="decision-index">3</span><div><b>不是这个订单</b><small>返回候选列表</small></div><span class="opt">可跳过</span></div>
+                <div class="decision-card"><span class="decision-index">4</span><div><b>选择问题</b><small>物流、退款、发票等</small></div><span class="opt">可自由输入</span></div>
+              </div>
+              <div class="question-preview"><span class="line-label">对象相关推荐</span><span class="question-chip">物流为什么没更新</span><span class="question-chip">申请退款</span><span class="question-chip">修改地址</span><span class="question-chip">开发票</span><button class="dashed-chip">+ 添加</button></div>
+            </div>
+
+            <div class="cfg-section last">
+              <div class="cfg-head"><span class="step-no">05</span><div><h3>处理承接与兜底</h3><p>选择之后，谁真正把这件事办完</p></div><span class="ok-state"><svg class="ic xs"><use href="#i-check"></use></svg>3 条路径</span></div>
+              <div class="handler-grid">
+                <div class="handler-card selected"><div class="handler-top"><span class="handler-icon purple"><svg class="ic"><use href="#i-ticket"></use></svg></span><span class="yes"><svg class="ic xs"><use href="#i-check"></use></svg></span></div><b>查询订单</b><small>默认承接 · 读取当前状态</small></div>
+                <div class="handler-card"><div class="handler-top"><span class="handler-icon blue"><svg class="ic"><use href="#i-robot"></use></svg></span><span class="switch"></span></div><b>Agent 处理</b><small>复杂问题 · 多轮推理</small></div>
+                <div class="handler-card"><div class="handler-top"><span class="handler-icon green"><svg class="ic"><use href="#i-headset"></use></svg></span><span class="switch"></span></div><b>人工客服</b><small>订单专属队列 · 带上下文</small></div>
+              </div>
+              <div class="agent-binding-row">
+                <span class="binding-icon"><svg class="ic"><use href="#i-robot"></use></svg></span>
+                <div><small>关联 Agent · 复杂问题与查询失败时启用</small><b>购物消费助手</b></div>
+                <span class="agent-version">已发布 v5</span>
+                <button class="text-button">查看 Agent 配置 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+              </div>
+              <div class="fallback-row"><span class="line-label">异常兜底</span><span class="fallback-item">没有对应订单 <b>其他业务</b></span><span class="fallback-item">对象失效 <b>重新选择</b></span><span class="fallback-item">人工不可达 <b>留言回呼</b></span></div>
+            </div>
+          </section>
+
+          <aside class="preview-panel">
+            <div class="preview-head"><div><span class="eyebrow">LIVE PREVIEW</span><h2>实时预览</h2></div><div class="device-toggle"><button class="active"><svg class="ic xs"><use href="#i-phone"></use></svg></button><button><svg class="ic xs"><use href="#i-chat"></use></svg></button></div></div>
+            <div class="phone-frame">
+              <div class="phone-status"><span>10:35</span><span>▮▮▮ ᯤ 85%</span></div>
+              <div class="mini-mobile-head"><span class="back"><svg class="ic xs"><use href="#i-chevron"></use></svg></span><div><b>购物消费</b><small>智能小助手正在为你服务</small></div><span class="mini-ai">AI</span></div>
+              <div class="mini-mobile-body">
+                <div class="mini-msg"><span class="mini-avatar"><svg class="ic xs"><use href="#i-robot"></use></svg></span><div>已为你找到最近订单。请选择要咨询的订单。</div></div>
+                <div class="mini-filter"><span class="on">全部</span><span>待收货</span><span>已完成</span></div>
+                <div class="mini-order selected"><div class="mini-order-top"><b>订单 20261031001</b><span>运输中</span></div><small>无线降噪耳机 · ¥299.00</small><div class="mini-order-bottom"><span>10 月 31 日</span><b>已选择</b></div></div>
+                <div class="mini-order"><div class="mini-order-top"><b>订单 20261012008</b><span class="done">已完成</span></div><small>轻量通勤双肩包 · ¥168.00</small><div class="mini-order-bottom"><span>10 月 12 日</span><span>选择</span></div></div>
+                <div class="mini-more">查看更多订单 <svg class="ic xs"><use href="#i-chevron"></use></svg></div>
+                <div class="mini-context"><span class="ctx-icon"><svg class="ic xs"><use href="#i-ticket"></use></svg></span><div><small>正在咨询此订单</small><b>订单 20261031001 · 运输中</b><span>不是这个订单？</span></div></div>
+              </div>
+              <div class="mini-composer"><span>输入你想咨询的问题…</span><button><svg class="ic xs"><use href="#i-arrow"></use></svg></button></div>
+            </div>
+            <div class="preview-checks"><span><svg class="ic xs"><use href="#i-check"></use></svg>对象已绑定</span><span><svg class="ic xs"><use href="#i-check"></use></svg>事实可展示</span><span><svg class="ic xs"><use href="#i-check"></use></svg>兜底可用</span></div>
+            <p class="preview-note">预览使用模拟数据，不会写入真实订单。发布前可切换到“模拟与决策”查看完整路径。</p>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <!-- 03 · 场景模拟与决策解释 -->
+  <section class="screen admin-screen" data-screen="simulator">
+    <aside class="sidebar" data-sidebar data-active="scenes"></aside>
+    <main class="workspace">
+      <header class="topbar editor-topbar">
+        <div class="topbar-copy">
+          <div class="crumb">服务场景 <span>/</span> 查询我的订单 <span>/</span> 模拟与决策</div>
+          <div class="title-line"><h1>场景模拟器</h1><span class="sim-badge"><svg class="ic xs"><use href="#i-play"></use></svg> SANDBOX</span></div>
+          <p>在发布前验证场景识别、对象绑定、事实投影和处理承接。</p>
+        </div>
+        <div class="topbar-right">
+          <button class="secondary-button">查看发布记录</button>
+          <button class="primary-button">进入编辑</button>
+        </div>
+      </header>
+      <div class="content">
+        <div class="sim-layout">
+          <section class="panel sim-input-panel">
+            <div class="panel-head"><div><span class="eyebrow">01 · INPUT</span><h2>模拟一次真实咨询</h2></div><span class="status-pill neutral">Sandbox</span></div>
+            <label class="field"><span>用户消息</span><textarea>物流三天没更新了，能帮我看一下吗？</textarea></label>
+            <div class="field"><span>模拟业务对象</span>
+              <div class="sim-object"><div class="object-thumb"><svg class="ic"><use href="#i-ticket"></use></svg></div><div><b>订单 20261031001</b><small>无线降噪耳机 · ¥299.00 · 运输中</small></div><button class="icon-button"><svg class="ic xs"><use href="#i-chevron"></use></svg></button></div>
+            </div>
+            <div class="field"><span>入口</span><div class="choice-row"><button class="choice on"><svg class="ic xs"><use href="#i-chat"></use></svg>自然语言</button><button class="choice"><svg class="ic xs"><use href="#i-ticket"></use></svg>订单卡片</button><button class="choice">目录</button></div></div>
+            <div class="sim-actions"><button class="primary-button wide"><svg class="ic"><use href="#i-play"></use></svg> 运行模拟</button><button class="secondary-button">重置</button></div>
+            <div class="sim-hint"><svg class="ic"><use href="#i-shield"></use></svg>模拟不会创建真实订单、工单或人工队列。</div>
+          </section>
+
+          <section class="panel sim-path-panel">
+            <div class="panel-head"><div><span class="eyebrow">02 · RUNTIME</span><h2>处理路径</h2></div><span class="run-time"><svg class="ic xs"><use href="#i-clock"></use></svg> 0.8s</span></div>
+            <div class="path-list">
+              <div class="path-step done">
+                <div class="path-rail"><span><svg class="ic xs"><use href="#i-check"></use></svg></span><i></i></div>
+                <div class="path-card"><div class="path-title"><b>服务场景</b><span class="path-status">命中</span></div><h3>查询我的订单</h3><p>依据“物流未更新” + 已选订单，命中订单查询场景。</p><div class="path-tags"><span>订单查询</span><span>v3</span></div></div>
+              </div>
+              <div class="path-step done">
+                <div class="path-rail"><span><svg class="ic xs"><use href="#i-check"></use></svg></span><i></i></div>
+                <div class="path-card"><div class="path-title"><b>业务对象</b><span class="path-status">已绑定</span></div><h3>订单 20261031001</h3><p>属于当前客户，状态为运输中，允许查看物流。</p><div class="path-tags"><span>Order Provider</span><span>权限通过</span></div></div>
+              </div>
+              <div class="path-step done">
+                <div class="path-rail"><span><svg class="ic xs"><use href="#i-check"></use></svg></span><i></i></div>
+                <div class="path-card"><div class="path-title"><b>业务事实</b><span class="path-status">已投影</span></div><h3>3 个事实参与处理</h3><p>订单状态、物流状态、最后更新时间。</p><div class="path-tags"><span>状态：运输中</span><span>更新：10/31 09:20</span></div></div>
+              </div>
+              <div class="path-step done">
+                <div class="path-rail"><span><svg class="ic xs"><use href="#i-check"></use></svg></span><i></i></div>
+                <div class="path-card"><div class="path-title"><b>用户决策</b><span class="path-status">已选择</span></div><h3>物流未更新</h3><p>用户已明确问题，可继续查询，也可随时转人工。</p><div class="path-tags"><span>可纠正</span><span>可转人工</span></div></div>
+              </div>
+              <div class="path-step done last">
+                <div class="path-rail"><span><svg class="ic xs"><use href="#i-check"></use></svg></span></div>
+                <div class="path-card highlight"><div class="path-title"><b>处理承接</b><span class="path-status">查询成功</span></div><h3>物流查询工具</h3><p>返回最新节点；若查询失败或用户追问复杂原因，升级到已关联 Agent。</p><div class="path-tags"><span>默认承接</span><span>Agent：购物消费助手 v5</span><span>可转人工</span></div></div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="sim-side">
+            <section class="panel result-panel">
+              <div class="panel-head compact-head"><div><span class="eyebrow">03 · RESULT</span><h2>客户可见结果</h2></div><span class="live-dot">LIVE</span></div>
+              <div class="sim-chat-preview">
+                <div class="mini-mobile-head"><span class="back"><svg class="ic xs"><use href="#i-chevron"></use></svg></span><div><b>购物消费</b><small>智能小助手</small></div><span class="mini-ai">AI</span></div>
+                <div class="sim-chat-body">
+                  <div class="sim-user-bubble">物流三天没更新了，能帮我看一下吗？</div>
+                  <div class="sim-answer"><div class="answer-head"><span class="mini-avatar"><svg class="ic xs"><use href="#i-robot"></use></svg></span><b>已为你查询到最新物流</b></div><div class="logistics-line"><i class="dot active"></i><div><b>深圳转运中心</b><small>10/29 18:20 · 已发出</small></div></div><div class="logistics-line"><i class="dot"></i><div><b>等待下一站扫描</b><small>已停留约 2 天</small></div></div><div class="answer-actions"><button>继续等待</button><button class="accent">转人工</button></div></div>
+                </div>
+              </div>
+            </section>
+            <section class="panel explain-panel">
+              <div class="panel-head compact-head"><div><span class="eyebrow">WHY</span><h2>为什么这样处理</h2></div><button class="icon-button"><svg class="ic xs"><use href="#i-more"></use></svg></button></div>
+              <ul class="reason-list">
+                <li><span class="reason-icon"><svg class="ic xs"><use href="#i-chat"></use></svg></span><div><b>消息包含“物流”</b><small>与订单查询场景强相关</small></div></li>
+                <li><span class="reason-icon"><svg class="ic xs"><use href="#i-ticket"></use></svg></span><div><b>已绑定订单对象</b><small>无需再次询问是哪一笔</small></div></li>
+                <li><span class="reason-icon"><svg class="ic xs"><use href="#i-tool"></use></svg></span><div><b>查询成功且可解释</b><small>返回 2 个物流节点</small></div></li>
+                <li><span class="reason-icon"><svg class="ic xs"><use href="#i-robot"></use></svg></span><div><b>Agent 与人工兜底均已就绪</b><small>购物消费助手 v5 / 购物消费 · 订单</small></div></li>
+              </ul>
+              <button class="trace-link">查看完整决策记录 <svg class="ic xs"><use href="#i-arrow"></use></svg></button>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <!-- 04 · Agent 详情：被服务场景使用 -->
+  <section class="screen admin-screen" data-screen="agent-usage">
+    <aside class="sidebar" data-sidebar data-active="agents"></aside>
+    <main class="workspace">
+      <header class="topbar editor-topbar">
+        <div class="topbar-copy">
+          <div class="crumb">配置管理 <span>/</span> Agent 管理 <span>/</span> 购物消费助手</div>
+          <div class="title-line"><h1>购物消费助手</h1><span class="status-pill published"><i></i>已发布 · v5</span></div>
+          <p>通用执行能力由 Agent 管理维护；客服业务场景只引用已发布版本。</p>
+        </div>
+        <div class="topbar-right">
+          <button class="secondary-button">返回 Agent 列表</button>
+          <button class="primary-button">发布新版本</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <div class="editor-toolbar">
+          <div class="tabs"><button>配置</button><button class="active">使用场景</button><button>发布记录</button><button>评测</button></div>
+          <span class="save-state"><svg class="ic xs"><use href="#i-layers"></use></svg> 被 3 个服务场景引用</span>
+        </div>
+
+        <div class="agent-detail-layout">
+          <section class="agent-main">
+            <div class="relation-banner">
+              <span class="binding-icon"><svg class="ic"><use href="#i-shield"></use></svg></span>
+              <div><b>服务场景与 Agent 是引用关系</b><p>场景由“客服工作 → 服务场景”维护；这里只读展示 Agent 被哪些场景使用，不在此重复配置业务对象、用户决策或兜底策略。</p></div>
+            </div>
+
+            <section class="panel usage-panel">
+              <div class="panel-head">
+                <div><span class="eyebrow">SCENE REFERENCES</span><h2>被以下服务场景使用</h2></div>
+                <button class="secondary-button"><svg class="ic"><use href="#i-filter"></use></svg> 全部业务域</button>
+              </div>
+              <div class="usage-table">
+                <div class="usage-table-head"><span>服务场景</span><span>业务域</span><span>绑定条件</span><span>状态</span><span>近 7 日进入</span><span></span></div>
+                <button class="usage-row">
+                  <span class="usage-scene"><span class="scene-icon purple"><svg class="ic"><use href="#i-ticket"></use></svg></span><span><b>查询我的订单</b><small>购物消费 / 订单服务</small></span></span>
+                  <span class="usage-cell">购物消费</span>
+                  <span class="usage-cell"><span class="tag accent">查询失败或复杂追问</span></span>
+                  <span class="usage-cell"><span class="status-pill published"><i></i>已发布</span></span>
+                  <span class="usage-cell usage-number">1.8k</span>
+                  <span class="usage-link">查看场景 <svg class="ic xs"><use href="#i-chevron"></use></svg></span>
+                </button>
+                <button class="usage-row">
+                  <span class="usage-scene"><span class="scene-icon green"><svg class="ic"><use href="#i-pulse"></use></svg></span><span><b>查询物流</b><small>购物消费 / 订单服务</small></span></span>
+                  <span class="usage-cell">购物消费</span>
+                  <span class="usage-cell"><span class="tag">物流异常解释</span></span>
+                  <span class="usage-cell"><span class="status-pill published"><i></i>已发布</span></span>
+                  <span class="usage-cell usage-number">1.1k</span>
+                  <span class="usage-link">查看场景 <svg class="ic xs"><use href="#i-chevron"></use></svg></span>
+                </button>
+                <button class="usage-row">
+                  <span class="usage-scene"><span class="scene-icon blue"><svg class="ic"><use href="#i-book"></use></svg></span><span><b>咨询订单规则</b><small>购物消费 / 订单规则</small></span></span>
+                  <span class="usage-cell">购物消费</span>
+                  <span class="usage-cell"><span class="tag">无法命中知识时</span></span>
+                  <span class="usage-cell"><span class="status-pill published"><i></i>已发布</span></span>
+                  <span class="usage-cell usage-number">2.4k</span>
+                  <span class="usage-link">查看场景 <svg class="ic xs"><use href="#i-chevron"></use></svg></span>
+                </button>
+              </div>
+              <p class="usage-hint">这里只读展示引用关系。修改绑定条件、回退顺序或场景状态，请进入对应的服务场景。</p>
+            </section>
+          </section>
+
+          <aside class="agent-side">
+            <section class="panel agent-profile-card">
+              <div class="agent-profile-top">
+                <span class="agent-big-icon"><svg class="ic"><use href="#i-robot"></use></svg></span>
+                <div><span class="eyebrow">AGENT</span><h2>购物消费助手</h2><p>处理购物、订单、物流与售后问题</p></div>
+              </div>
+              <div class="agent-facts">
+                <div><span>当前版本</span><b>v5 · 已发布</b></div>
+                <div><span>模型方案</span><b>通用对话 · v2</b></div>
+                <div><span>知识库</span><b>购物消费规则</b></div>
+                <div><span>工具</span><b>订单查询 · 物流查询</b></div>
+              </div>
+              <button class="secondary-button wide">打开 Agent 配置</button>
+            </section>
+            <section class="panel reference-card">
+              <span class="eyebrow">REFERENCE POLICY</span>
+              <h2>版本引用规则</h2>
+              <div class="reference-line"><span class="reference-dot"></span><div><b>固定已发布版本</b><small>场景发布时会固定到 v5</small></div></div>
+              <div class="reference-line"><span class="reference-dot"></span><div><b>Agent 升级不自动影响场景</b><small>需重新发布场景或显式切换版本</small></div></div>
+              <div class="reference-line"><span class="reference-dot"></span><div><b>不可用时执行兜底</b><small>回到查询工具或转人工队列</small></div></div>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <!-- 05 · 客户端：订单选择 -->
+  <section class="screen mobile-screen" data-screen="picker">
+    <div class="mobile-shell">
+      <div class="mobile-status"><span>10:35</span><span class="status-icons">▮▮▮ ᯤ <b>85%</b></span></div>
+      <header class="mobile-header">
+        <button class="mobile-back"><svg class="ic"><use href="#i-chevron"></use></svg></button>
+        <div class="mobile-title"><h1>购物消费</h1><p>智能小助手正在为你服务</p></div>
+        <span class="ai-mark">AI</span>
+      </header>
+      <main class="mobile-chat">
+        <div class="assistant-row">
+          <span class="assistant-avatar"><svg class="ic"><use href="#i-robot"></use></svg></span>
+          <div class="assistant-bubble">您好，请选择您要咨询的订单。<small>我会带着这笔订单帮你继续处理。</small></div>
+        </div>
+        <div class="mobile-filters"><button class="active">全部</button><button>待收货</button><button>已完成</button><button>退款/售后</button></div>
+        <div class="mobile-order-list">
+          <button class="mobile-order selected">
+            <div class="order-top"><span class="order-status amber">运输中</span><span class="order-date">10 月 31 日</span></div>
+            <div class="order-product"><div class="product-thumb headphones"></div><div><b>无线降噪耳机</b><span>订单 20261031001</span></div></div>
+            <div class="order-bottom"><strong>¥299.00</strong><span class="select-order">选择 <svg class="ic xs"><use href="#i-chevron"></use></svg></span></div>
+          </button>
+          <button class="mobile-order">
+            <div class="order-top"><span class="order-status green">已完成</span><span class="order-date">10 月 12 日</span></div>
+            <div class="order-product"><div class="product-thumb bag"></div><div><b>轻量通勤双肩包</b><span>订单 20261012008</span></div></div>
+            <div class="order-bottom"><strong>¥168.00</strong><span class="select-order">选择 <svg class="ic xs"><use href="#i-chevron"></use></svg></span></div>
+          </button>
+        </div>
+        <button class="no-order">没有对应订单？选择其他业务 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+        <div class="assistant-row">
+          <span class="assistant-avatar small"><svg class="ic"><use href="#i-robot"></use></svg></span>
+          <div class="assistant-bubble compact">也可以直接告诉我你在找什么。</div>
+        </div>
+        <div class="quick-prompts"><span>我的订单</span><span>退款进度</span><span>开发票</span><span>其他问题</span></div>
+      </main>
+      <footer class="mobile-composer">
+        <div class="composer-line"><span>输入你想咨询的问题…</span><button><svg class="ic"><use href="#i-arrow"></use></svg></button></div>
+        <p>AI 回答仅供参考，请核实重要信息。</p>
+      </footer>
+    </div>
+  </section>
+
+  <!-- 06 · 客户端：对象绑定后的会话 -->
+  <section class="screen mobile-screen" data-screen="context">
+    <div class="mobile-shell">
+      <div class="mobile-status"><span>10:35</span><span class="status-icons">▮▮▮ ᯤ <b>85%</b></span></div>
+      <header class="mobile-header">
+        <button class="mobile-back"><svg class="ic"><use href="#i-chevron"></use></svg></button>
+        <div class="mobile-title"><h1>购物消费</h1><p>正在咨询订单 20261031001</p></div>
+        <span class="ai-mark">AI</span>
+      </header>
+      <main class="mobile-chat context-chat">
+        <div class="bound-order">
+          <div class="bound-head"><span>正在咨询此订单</span><span class="order-status amber">运输中</span></div>
+          <b>无线降噪耳机</b>
+          <div class="bound-meta"><span>订单 20261031001</span><span>¥299.00</span></div>
+          <div class="bound-foot"><span>10 月 31 日下单</span><button>不是这个订单？</button></div>
+        </div>
+        <div class="assistant-row">
+          <span class="assistant-avatar"><svg class="ic"><use href="#i-robot"></use></svg></span>
+          <div class="assistant-bubble">关于本订单，你想咨询什么？<small>已依据当前订单状态准备建议。</small></div>
+        </div>
+        <div class="suggestion-list">
+          <button><span>物流为什么没更新？</span><svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+          <button><span>如何申请退款？</span><svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+          <button><span>修改收货地址</span><svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+          <button><span>开发票</span><svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+        </div>
+        <button class="other-question">其他问题 <svg class="ic xs"><use href="#i-chevron"></use></svg></button>
+        <div class="user-row"><div class="user-bubble">物流三天没更新了</div></div>
+        <div class="assistant-row">
+          <span class="assistant-avatar"><svg class="ic"><use href="#i-robot"></use></svg></span>
+          <div class="answer-bubble">
+            <b>已为你查到物流状态</b>
+            <p>包裹在深圳转运中心已停留约 2 天，目前没有新的扫描记录。</p>
+            <div class="answer-actions"><button>继续等待</button><button class="primary-mini">转人工跟进</button></div>
+          </div>
+        </div>
+        <div class="system-line">可随时切换订单或业务 <button>切换</button></div>
+      </main>
+      <footer class="mobile-composer">
+        <div class="composer-line"><span>继续输入…</span><button><svg class="ic"><use href="#i-arrow"></use></svg></button></div>
+        <p>当前已绑定订单 20261031001</p>
+      </footer>
+    </div>
+  </section>
+
+  <script src="mockups.js"></script>
+</body>
+</html>

@@ -1763,5 +1763,19 @@
   "回滚": "Rollback",
   "暂无配置版本": "No configuration versions",
   "配置必须是 JSON 对象": "Configuration must be a JSON object",
-  "时间": "Time"
+  "时间": "Time",
+  "服务场景": "Service scenarios",
+  "查询我的订单": "Find my order",
+  "场景模拟器": "Scenario simulator",
+  "客户端交互预览": "Customer experience preview",
+  "使用场景": "Used by scenarios",
+  "把客服能力组织成可发现、可配置、可度量的客户任务。": "Organize service capabilities into discoverable, configurable, and measurable customer tasks.",
+  "找到并确认一笔订单，查看状态并继续咨询。": "Find and confirm an order, review its status, and continue the conversation.",
+  "在发布前验证场景识别、对象绑定、事实投影和处理承接。": "Validate scenario recognition, object binding, fact projection, and handling before publishing.",
+  "查看客户从选择订单到带上下文继续服务的完整体验。": "Review the complete experience from selecting an order to continuing service with context.",
+  "客户统一体验": "Unified customer experience",
+  "在一个入口中体验服务识别、业务对象选择、用户决策与处理承接。": "Experience service recognition, business-object selection, customer decisions, and fulfillment in one entry point.",
+  "服务应用": "Service applications",
+  "购物消费服务应用": "Shopping service application",
+  "把业务编排和执行能力组合成可配置、可预览、可调试、可发布的服务应用。": "Compose business orchestration and execution capabilities into configurable, previewable, debuggable, and releasable service applications."
 }

@@ -259,8 +259,9 @@
   .agent-topbar strong { max-width: 146px; font-size: 13px; }
   .agent-topbar .ant-btn { font-size: 12px; height: 32px; padding-inline: 10px; }
   .agent-topbar .ant-tag { padding: 0 5px; font-size: 10px; white-space: nowrap; }
-  .agent-local-nav { width: 100%; padding: 10px 16px; display: flex; flex-direction: row; gap: 8px; background: #fafbfe; }
-  .agent-local-nav > .ant-btn { min-height: 34px; height: 34px; font-size: 12px; }
+  .agent-local-nav { width: 100%; padding: 8px 12px; display: flex; flex-direction: row; gap: 4px; background: #fafbfe; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .agent-local-nav::-webkit-scrollbar { display: none; }
+  .agent-local-nav > .ant-btn { min-height: 34px; height: 34px; padding-inline: 8px; font-size: 11px; }
   .agent-nav-eyebrow, .agent-nav-footer { display: none; }
   .agent-config-form { padding: 22px 18px 40px; }
   .agent-form-intro { margin-bottom: 24px; }

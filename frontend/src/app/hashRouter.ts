@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export const modelSections = ['connections', 'models', 'profiles', 'playground', 'logs', 'monitor', 'access_keys', 'sensitive_words', 'alert_rules', 'quota'] as const;
 export type ModelSection = typeof modelSections[number];
-const pages = ['overview', 'conversations', 'agents', 'knowledge', 'tools', 'handoff', 'tickets', 'memory', 'open-platform', 'evaluation', 'observability', 'access', 'members', 'roles', 'security', 'extensions', 'approvals'];
+const pages = ['overview', 'conversations', 'service-apps', 'agents', 'knowledge', 'tools', 'handoff', 'tickets', 'memory', 'open-platform', 'evaluation', 'observability', 'access', 'members', 'roles', 'security', 'extensions', 'approvals'];
 export function normalizeRoute(value: string) {
   const [base, query] = value.split('?');
   const path = normalizePath(base);
@@ -17,13 +17,14 @@ function normalizePath(value: string) {
   if (/^\/conversations\/[0-9a-zA-Z_-]+$/.test(path)) return path;
   if (path === '/memory/pending') return path;
   if (/^\/memory\/customers\/[0-9a-zA-Z_-]+$/.test(path)) return path;
+  if (/^\/service-apps(?:\/[a-z0-9-]+(?:\/experience(?:\/[a-z][a-z0-9_-]{0,63})?|\/scenarios\/[a-z][a-z0-9_-]{0,63}(?:\/(?:simulator|customer))?)?)?$/.test(path)) return path;
   if (/^\/tools\/[0-9a-f-]+\/(apis|versions|calls)$/.test(path)) return path;
   if (/^\/open-platform\/[0-9a-f-]+\/(settings|integrations|embed|webhook|keys|docs|debug|logs)$/.test(path)) return path;
   if (path === '/open-platform/identity') return path;
   if (path === '/models') return '/models/models';
   if (path === '/agents/new') return '/agents/new/config';
   if (path === '/agents/new/conversations') return '/agents/new/config';
-  if (/^\/agents\/[^/?#]+\/(config|conversations|evaluation)$/.test(path)) return path;
+  if (/^\/agents\/[^/?#]+\/(config|conversations|evaluation|usage)$/.test(path)) return path;
   if (modelSections.some(section => path === `/models/${section}`)) return path;
   return '/overview';
 }

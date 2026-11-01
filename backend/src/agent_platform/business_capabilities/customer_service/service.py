@@ -1,11 +1,27 @@
+import base64
+import binascii
 import hashlib
 import json
+from collections import Counter
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_platform.business_capabilities.agent_config.memory import resolve_agent_memory
 from agent_platform.business_capabilities.conversation.service import add_message
+from agent_platform.business_capabilities.customer_service.routing.decision import (
+    RoutingDecision,
+    decide_ingress,
+)
+from agent_platform.business_capabilities.customer_service.routing.repository import (
+    list_decisions,
+    record,
+    summarize_decisions,
+)
+from agent_platform.business_capabilities.customer_service.routing.settings import (
+    CustomerServiceRoutingSettings,
+    load_customer_service_routing_settings,
+)
 from agent_platform.business_capabilities.memory.events import enqueue_event_task
 from agent_platform.core_platform.agent_runtime.schemas import RunRequest
 from agent_platform.core_platform.platform_services.persistence.store import (
@@ -60,6 +76,7 @@ class CustomerService:
         snapshot,
         memory=None,
         events: EventPublisher | None = None,
+        routing_settings: CustomerServiceRoutingSettings | None = None,
     ):
         self.engine, self.repository, self.agents, self.handoffs = (
             engine,
@@ -72,6 +89,11 @@ class CustomerService:
         # handoff; None keeps every legacy wiring unchanged.
         self.memory = memory
         self.events = events
+        self.routing_settings = routing_settings or load_customer_service_routing_settings()
+        # Process-local diagnostics. The durable routing table remains the source
+        # of truth; this counter makes isolated insert failures visible without
+        # turning observability into a second persistence system.
+        self._routing_write_failures: Counter[str] = Counter()
 
     async def _publish_ticket_event(
         self,
@@ -126,90 +148,225 @@ class CustomerService:
                     **scope_params,
                 )
             )
-            if conv["mode"] == "closed":
-                raise DomainError("conversation_closed", 409)
-            if message.strip() in {"转人工", "人工客服"}:
-                await add_message(c, cid, "user", message)
-                handoff = await self.handoffs.request(
-                    tenant,
-                    actor,
-                    cid,
-                    "用户请求人工服务",
-                    c,
-                    scope=resolved,
-                )
-                return {"conversation_id": cid, "run": None, "handoff": handoff}
-            if conv["mode"] in {"human", "waiting"}:
-                await add_message(c, cid, "user", message)
-                await execute(
-                    c,
-                    "UPDATE runtime_conversations SET history=CAST(:msg AS jsonb) WHERE id=:id",
-                    id=cid,
-                    msg=json.dumps(
-                        (
-                            [*conv["history"], {"role": "user", "content": message}][
-                                -self.settings.history_turns * 2 :
-                            ]
-                        )
-                        if self.settings.history_turns
-                        else []
-                    ),
-                )
-                return {"conversation_id": cid, "run": None}
-            # Phase 5 (C-4): the agent snapshot is fetched up front (when the
-            # conversation is agent-bound) so its blacklist-handoff switch can
-            # combine with the platform one; a conversation without an agent
-            # falls back to the platform value. Fetched once and reused for the
-            # run below, so the non-blacklist path gains no extra query.
-            agent_snapshot = None
-            if conv["agent_id"]:
-                agent_snapshot = await self.agents.snapshot(tenant, conv["agent_id"], c)
-            # Phase 4 (R13): a blacklisted customer goes straight to a human.
-            # The message is recorded and the handoff requested inside this
-            # transaction — no run is submitted. Enabling is the tightening
-            # direction, so the effective value is platform OR agent.
-            if self.memory is not None and conv["customer_id"]:
-                effective = resolve_agent_memory(
-                    agent_snapshot.get("config") if agent_snapshot else None, self.settings
-                )
-                if effective.blacklist_auto_handoff:
-                    flags = await self.memory.active_flags(
-                        tenant,
-                        conv["customer_id"],
-                        getattr(self.settings, "memory_flag_inject_max", 3),
-                    )
-                    if any(flag["key"] == "blacklist" for flag in flags):
-                        await add_message(c, cid, "user", message)
-                        handoff = await self.handoffs.request(
-                            tenant,
-                            actor,
-                            cid,
-                            "黑名单客户自动转人工",
-                            c,
-                            scope=resolved,
-                        )
-                        return {"conversation_id": cid, "run": None, "handoff": handoff}
-            snapshot = dict(self.snapshot)
-            if agent_snapshot is not None:
-                snapshot["agent"] = agent_snapshot
-            elif self.settings.model_backend == "unconfigured":
-                raise DomainError("model_not_configured", 409)
-            row = await self.repository.submit(
-                tenant,
-                RunRequest(conversation_id=conv["external_id"], message=message),
-                snapshot,
-                self.settings.queue_capacity,
-                self.settings.tenant_capacity,
-                self.settings.queue_timeout_seconds,
-                scope=BusinessScope(
-                    tenant_id=conv["tenant_id"],
-                    business_id=conv["business_id"],
-                    workspace_id=conv["workspace_id"],
-                ),
-                connection=c,
+            ingress = await decide_ingress(
+                conn=c,
+                conv=conv,
+                message=message,
+                request_id=uuid4(),
+                agents=self.agents,
+                memory=self.memory,
+                settings=self.settings,
+                routing_settings=self.routing_settings,
             )
-            await audit(c, tenant, actor, "run.submitted", row["id"])
-            return {"conversation_id": cid, "run": {"id": row["id"], "status": row["status"]}}
+            await self._record_decision(c, ingress.decision)
+            return await self._apply_decision(
+                c,
+                conv,
+                ingress.decision,
+                ingress.agent_snapshot,
+                message,
+                tenant,
+                actor,
+                resolved,
+            )
+
+    async def _record_decision(self, conn, decision: RoutingDecision) -> bool:
+        if not self.routing_settings.trace_enabled:
+            return False
+        recorded = await record(conn, decision)
+        if not recorded:
+            self._routing_write_failures[decision.tenant_id] += 1
+        return recorded
+
+    async def _apply_decision(
+        self,
+        conn,
+        conv: dict[str, object],
+        decision: RoutingDecision,
+        agent_snapshot: dict[str, object] | None,
+        message: str,
+        tenant: str,
+        actor: str,
+        resolved: BusinessScope,
+    ) -> dict[str, object]:
+        cid = conv["id"]
+        if decision.action == "reject":
+            return {
+                "conversation_id": cid,
+                "run": None,
+                "rejected": decision.reason_code,
+            }
+        if decision.action == "request_handoff":
+            await add_message(conn, cid, "user", message)
+            reason = (
+                "黑名单客户自动转人工"
+                if decision.reason_code == "blacklist_flag"
+                else "用户请求人工服务"
+            )
+            handoff = await self.handoffs.request(
+                tenant,
+                actor,
+                cid,
+                reason,
+                conn,
+                scope=resolved,
+            )
+            return {"conversation_id": cid, "run": None, "handoff": handoff}
+        if decision.action == "defer":
+            await add_message(conn, cid, "user", message)
+            await execute(
+                conn,
+                "UPDATE runtime_conversations SET history=CAST(:msg AS jsonb) WHERE id=:id",
+                id=cid,
+                msg=json.dumps(
+                    (
+                        [*conv["history"], {"role": "user", "content": message}][
+                            -self.settings.history_turns * 2 :
+                        ]
+                    )
+                    if self.settings.history_turns
+                    else []
+                ),
+            )
+            return {"conversation_id": cid, "run": None}
+        if decision.action == "submit_agent_run":
+            return await self._submit_run(
+                conn,
+                conv,
+                agent_snapshot,
+                message,
+                tenant,
+                actor,
+            )
+        raise DomainError("routing_action_unhandled", 500)
+
+    async def _submit_run(
+        self,
+        conn,
+        conv: dict[str, object],
+        agent_snapshot: dict[str, object] | None,
+        message: str,
+        tenant: str,
+        actor: str,
+    ) -> dict[str, object]:
+        snapshot = dict(self.snapshot)
+        if agent_snapshot is not None:
+            snapshot["agent"] = agent_snapshot
+        elif self.settings.model_backend == "unconfigured":
+            # Defensive only: decide_ingress turns this path into a persisted reject.
+            raise DomainError("model_not_configured", 409)
+        row = await self.repository.submit(
+            tenant,
+            RunRequest(conversation_id=conv["external_id"], message=message),
+            snapshot,
+            self.settings.queue_capacity,
+            self.settings.tenant_capacity,
+            self.settings.queue_timeout_seconds,
+            scope=BusinessScope(
+                tenant_id=conv["tenant_id"],
+                business_id=conv["business_id"],
+                workspace_id=conv["workspace_id"],
+            ),
+            connection=conn,
+        )
+        await audit(conn, tenant, actor, "run.submitted", row["id"])
+        return {
+            "conversation_id": conv["id"],
+            "run": {"id": row["id"], "status": row["status"]},
+        }
+
+    async def list_routing_decisions(
+        self,
+        tenant: str,
+        cid: UUID,
+        *,
+        before: str | None,
+        limit: int,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, object]:
+        resolved = resolve_scope(tenant, scope)
+        if limit < 1 or limit > 200:
+            raise DomainError("routing_limit_invalid", 400)
+        before_at, before_id = self._decode_routing_cursor(before)
+        async with self.engine.connect() as conn:
+            items = await list_decisions(
+                conn,
+                tenant_id=resolved.tenant_id,
+                business_id=resolved.business_id,
+                workspace_id=resolved.workspace_id,
+                conversation_id=cid,
+                before_at=before_at,
+                before_id=before_id,
+                limit=limit,
+            )
+        next_before = self._encode_routing_cursor(items[-1]) if len(items) == limit else None
+        return {"items": items, "next_before": next_before}
+
+    async def routing_summary(
+        self,
+        tenant: str,
+        *,
+        since: datetime | None,
+        until: datetime | None,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, object]:
+        resolved = resolve_scope(tenant, scope)
+        since, until = self._resolve_summary_window(since, until)
+        async with self.engine.connect() as conn:
+            summary = await summarize_decisions(
+                conn,
+                tenant_id=resolved.tenant_id,
+                business_id=resolved.business_id,
+                workspace_id=resolved.workspace_id,
+                since=since,
+                until=until,
+            )
+        return {
+            **summary,
+            "since": since,
+            "until": until,
+            "routing_write_failures": self.routing_write_failure_count(tenant),
+        }
+
+    def routing_write_failure_count(self, tenant: str) -> int:
+        return self._routing_write_failures[tenant]
+
+    @staticmethod
+    def _encode_routing_cursor(row: dict[str, object]) -> str:
+        raw = f"{row['created_at'].isoformat()}|{row['id']}"
+        return base64.urlsafe_b64encode(raw.encode()).decode()
+
+    @staticmethod
+    def _decode_routing_cursor(before: str | None) -> tuple[datetime | None, UUID | None]:
+        if before is None:
+            return None, None
+        try:
+            padded = before + "=" * (-len(before) % 4)
+            raw = base64.urlsafe_b64decode(padded.encode()).decode()
+            timestamp, cursor_id = raw.split("|", 1)
+            before_at = datetime.fromisoformat(timestamp)
+            if before_at.tzinfo is None:
+                before_at = before_at.replace(tzinfo=UTC)
+            return before_at, UUID(cursor_id)
+        except (binascii.Error, ValueError, UnicodeDecodeError, TypeError) as exc:
+            raise DomainError("routing_cursor_invalid", 400) from exc
+
+    @staticmethod
+    def _resolve_summary_window(
+        since: datetime | None,
+        until: datetime | None,
+    ) -> tuple[datetime, datetime]:
+        resolved_until = until or datetime.now(UTC)
+        resolved_since = since or (resolved_until - timedelta(days=7))
+        if resolved_since.tzinfo is None:
+            resolved_since = resolved_since.replace(tzinfo=UTC)
+        if resolved_until.tzinfo is None:
+            resolved_until = resolved_until.replace(tzinfo=UTC)
+        if resolved_since >= resolved_until:
+            raise DomainError("routing_time_range_invalid", 400)
+        if resolved_until - resolved_since > timedelta(days=31):
+            raise DomainError("routing_time_range_too_large", 400)
+        return resolved_since, resolved_until
 
     async def propose(self, tenant, cid, run_id, body, scope: BusinessScope | None = None):
         resolved = resolve_scope(tenant, scope)
@@ -325,9 +482,7 @@ class CustomerService:
             )
             existing = await one(
                 c,
-                TICKET_VIEW
-                + " WHERE t.action_id=:id AND t.tenant_id=:t AND "
-                + ticket_scope_sql,
+                TICKET_VIEW + " WHERE t.action_id=:id AND t.tenant_id=:t AND " + ticket_scope_sql,
                 id=aid,
                 t=tenant,
                 **scope_params,
@@ -354,8 +509,7 @@ class CustomerService:
                 await execute(
                     c,
                     "UPDATE pending_actions SET status='rejected' "
-                    "WHERE id=:id AND tenant_id=:t AND "
-                    + scope_sql,
+                    "WHERE id=:id AND tenant_id=:t AND " + scope_sql,
                     id=aid,
                     t=tenant,
                     **scope_params,
@@ -475,8 +629,7 @@ class CustomerService:
                 await execute(
                     c,
                     "UPDATE pending_actions SET status='confirmed' "
-                    "WHERE id=:id AND tenant_id=:t AND "
-                    + scope_sql,
+                    "WHERE id=:id AND tenant_id=:t AND " + scope_sql,
                     id=aid,
                     t=tenant,
                     **scope_params,
@@ -495,8 +648,7 @@ class CustomerService:
                 await execute(
                     c,
                     "UPDATE runtime_conversations SET history=CAST(:h AS jsonb) "
-                    "WHERE id=:id AND tenant_id=:t AND "
-                    + scope_sql,
+                    "WHERE id=:id AND tenant_id=:t AND " + scope_sql,
                     id=conv["id"],
                     t=tenant,
                     **scope_params,
@@ -632,8 +784,7 @@ class CustomerService:
                 await execute(
                     c,
                     "UPDATE tickets_detail SET resolution=:note "
-                    "WHERE ticket_id=:id AND tenant_id=:t AND "
-                    + scope_sql,
+                    "WHERE ticket_id=:id AND tenant_id=:t AND " + scope_sql,
                     note=note,
                     id=tid,
                     t=tenant,
@@ -665,8 +816,7 @@ class CustomerService:
             if due_at is not UNSET and due_at != row["due_at"]:
                 await execute(
                     c,
-                    "UPDATE tickets SET due_at=:due WHERE id=:id AND tenant_id=:t AND "
-                    + scope_sql,
+                    "UPDATE tickets SET due_at=:due WHERE id=:id AND tenant_id=:t AND " + scope_sql,
                     due=due_at,
                     id=tid,
                     t=tenant,
