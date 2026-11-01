@@ -36,7 +36,7 @@ data: {"output":"[演示模式] ...","error_code":null}
 
 ```
 
-事件顺序以 id 为准。断线不会取消运行，重新连接可以从已消费事件之后继续。没有逐 Token 流。
+持久化事件按 id 排序，断线后可用 `Last-Event-ID` 或 `after` 从已消费事件之后重放。`model.delta` 提供模型文本增量，但属于不入库的瞬态事件，没有事件 id，也不保证重放；断线不会取消运行，最终完整回复仍以 `run.completed.data.output` 为准。
 
 HTTP 错误：401 无效令牌；404 运行不存在或不在当前租户；409 会话忙；422 输入不合法；429 容量不足；503 数据库不可用。
 
@@ -46,13 +46,12 @@ HTTP 错误：401 无效令牌；404 运行不存在或不在当前租户；409 
 
 ## 平台接口
 
-Agent、知识库、会话、人工队列、工单、渠道、评测与审计的接口分组见 [平台使用说明](platform.md)。完整请求与响应字段以运行服务的 `/docs` 为准。
+Agent、知识库、会话、人工队列、工单、渠道、评测与审计的接口分组见 [平台使用说明](../guides/platform.md)。完整请求与响应字段以运行服务的 `/docs` 为准。
 
-成员、固定角色、权限码和活动会话接口见 [用户权限模块 P0](access-control.md)。
+成员、固定角色、权限码和活动会话接口见 [用户权限模块 P0](../guides/access-control.md)。
 
 ## 模型网关
 
-新增 `/api/v1/model-gateway`，支持连接、模型、版本方案、六种 operation、Chat SSE、临时媒体和调用记录。路径、权限及请求示例见 [网关实际协议](../backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md)。Runtime 运行事件仍是轮次/工具事件；逐段模型输出使用独立 `/model-gateway/stream` 接口。
+新增 `/api/v1/model-gateway`，支持连接、模型、版本方案、六种 operation、Chat SSE、临时媒体和调用记录。路径、权限及请求示例见 [网关实际协议](../../backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md)。Runtime SSE 同时提供轮次/工具事件和瞬态 `model.delta`；模型网关也提供独立的 `/model-gateway/stream` 接口。
 
-
-本轮模块增量、配置和验证状态见 [模块实施说明](modules-delivery.md) 与 [实施记录](implementation-progress.md)；旧版验证记录保留作历史记录。
+早期交付与验证快照见[历史文档归档](../archive/README.md)，不代表当前接口或测试状态。

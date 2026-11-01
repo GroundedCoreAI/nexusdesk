@@ -2,9 +2,9 @@
 
 本目录包含 13 个规划模块（12 个已有实现，新增 platform_settings 当前仅规划），业务能力与平台服务目录中的 `README.md` 是对应模块的规划入口。
 
-- [模块总索引与协作关系](../../../../docs/architecture.md)
-- [独立开发规范与统一契约](../../../../docs/module-development.md)
-- [现有平台使用说明](../../../../docs/platform.md)
+- [模块总索引与协作关系](../../../docs/architecture/overview.md)
+- [独立开发规范与统一契约](../../../docs/development/module-development.md)
+- [现有平台使用说明](../../../docs/guides/platform.md)
 
 各模块文档分别记录当前实现、功能优先级、数据归属、接口和事件、依赖边界、设计约束、页面规划、实施阶段与验收条件。目标方法和实体不代表已实现 API 或数据库表。
 

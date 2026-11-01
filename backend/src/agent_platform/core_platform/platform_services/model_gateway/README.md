@@ -10,7 +10,7 @@
 
 ## 1. 当前实现
 
-治理扩展已实现：服务端分页、限定方案的访问密钥、文本敏感词输入输出拦截、租户/密钥数据库配额、单位定价与费用估算、历史区间统计、站内告警规则及事件确认。迁移版本为 `0010_gateway_governance`，部署、接口、测试和边界见 [治理与联调说明](../../../../../docs/model-gateway-governance.md)。后文规划表中的钱包计费、语义审核、Token 预算及灰度等仍不代表已实现。
+治理扩展已实现：服务端分页、限定方案的访问密钥、文本敏感词输入输出拦截、租户/密钥数据库配额、单位定价与费用估算、历史区间统计、站内告警规则及事件确认。迁移版本为 `0010_gateway_governance`，部署、接口、测试和边界见 [治理与联调说明](../../../../../../docs/guides/model-gateway-governance.md)。后文规划表中的钱包计费、语义审核、Token 预算及灰度等仍不代表已实现。
 
 已落地第一版配置—发布—调用闭环。实际请求格式、部署方法和供应商契约见 [PROTOCOL.md](PROTOCOL.md)；本文后续章节仍包含规划，不代表所有 P0/P1 均已完成。
 
@@ -250,7 +250,7 @@ Chat、embedding 批次、重排候选、音频时长及 OCR 像素消耗不同�
 
 ## 8. 数据归属与接口契约
 
-共同遵循[独立开发规范](../../../../../docs/module-development.md)，模块总览见[架构索引](../../../../../docs/architecture.md)。
+共同遵循[独立开发规范](../../../../../../docs/development/module-development.md)，模块总览见[架构索引](../../../../../../docs/architecture/overview.md)。
 
 当前已有模型网关专属 PostgreSQL `gateway_*` 表和在线管理 API，包含目录/连接/方案及版本、调用及尝试、临时媒体、访问密钥、敏感词、审核与价格设置、配额与租约、费用和告警事件。基础表由 `0003_model_gateway` 创建，治理扩展由 `0010_gateway_governance` 创建。配置来自 Settings、经 `ChatModel.ainvoke(messages) -> AIMessage` 调用的旧路径仅作为未绑定网关方案时的部署级兼容入口。
 

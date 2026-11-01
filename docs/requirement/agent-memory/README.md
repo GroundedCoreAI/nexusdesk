@@ -26,13 +26,13 @@ NexusDesk 当前的"上下文"仅有 `runtime_conversations.history` JSONB 滑�
 
 | 阶段 | 主题 | 核心价值 | 难度 | 预估 | 目录 |
 |---|---|---|---|---|---|
-| Phase 1 | 会话摘要记忆 | 解决滑动窗口遗忘；提升人工接管上下文质量 | 低 | ~1 周 | [phase-1-conversation-summary/](phase-1-conversation-summary/) |
-| Phase 2 | 客户实体 + 画像/偏好记忆 | 跨会话连续服务，记忆系统主体 | 中 | ~2-3 周 | [phase-2-customer-profile/](phase-2-customer-profile/) |
-| Phase 3 | 事件记忆 + 语义检索 | 工单闭环联动；海量记忆按需检索（含检索时间衰减） | 中 | ~2 周 | [phase-3-event-memory-search/](phase-3-event-memory-search/) |
-| Phase 4 | 治理、衰退与标记记忆 | 生产合规前提：纠错、遗忘、防污染；记忆衰退与强化保鲜 | 中低 | ~1-2 周 | [phase-4-governance/](phase-4-governance/) |
-| Phase 5 | Agent 记忆配置开关 | 记忆行为按 Agent 场景裁剪；配置可见可改；只能收紧不能放宽 | 低 | ~1 周 | [phase-5-agent-memory-config/](phase-5-agent-memory-config/) |
-| Phase 6 | 记忆可视化与注入可解释性 | 三层记忆视图；注入明细落库，"本次对话用了哪几条记忆"可回溯 | 中 | ~1.5-2 周 | [phase-6-memory-visualization/](phase-6-memory-visualization/) |
-| Phase 7 | 生产观测与告警 | 任务/embedding/检索/维护健康度可视；轻量告警主动发现故障 | 中低 | ~1-1.5 周 | [phase-7-observability-alerts/](phase-7-observability-alerts/) |
+| Phase 1 | 会话摘要记忆 | 解决滑动窗口遗忘；提升人工接管上下文质量 | 低 | ~1 周 | [phase-1-conversation-summary/](phase-1-conversation-summary) |
+| Phase 2 | 客户实体 + 画像/偏好记忆 | 跨会话连续服务，记忆系统主体 | 中 | ~2-3 周 | [phase-2-customer-profile/](phase-2-customer-profile) |
+| Phase 3 | 事件记忆 + 语义检索 | 工单闭环联动；海量记忆按需检索（含检索时间衰减） | 中 | ~2 周 | [phase-3-event-memory-search/](phase-3-event-memory-search) |
+| Phase 4 | 治理、衰退与标记记忆 | 生产合规前提：纠错、遗忘、防污染；记忆衰退与强化保鲜 | 中低 | ~1-2 周 | [phase-4-governance/](phase-4-governance) |
+| Phase 5 | Agent 记忆配置开关 | 记忆行为按 Agent 场景裁剪；配置可见可改；只能收紧不能放宽 | 低 | ~1 周 | [phase-5-agent-memory-config/](phase-5-agent-memory-config) |
+| Phase 6 | 记忆可视化与注入可解释性 | 三层记忆视图；注入明细落库，"本次对话用了哪几条记忆"可回溯 | 中 | ~1.5-2 周 | [phase-6-memory-visualization/](phase-6-memory-visualization) |
+| Phase 7 | 生产观测与告警 | 任务/embedding/检索/维护健康度可视；轻量告警主动发现故障 | 中低 | ~1-1.5 周 | [phase-7-observability-alerts/](phase-7-observability-alerts) |
 
 各阶段目录下统一包含五份文档：
 

@@ -116,13 +116,13 @@ NexusDesk 的客服主链路已经可以跑通：知识检索 → Agent 推理 �
 
 | 文档 | 与本文的关系 |
 |---|---|
-| [模块逐个实施记录](../../implementation-progress.md) | 各模块已交付能力与后续重点，是核验状态的主要线索来源 |
-| [异步客服 Runtime](../../runtime.md) | Run 状态机与执行路径，#35、#36 的改造对象 |
-| [用户权限模块 P0](../../access-control.md) | 固定角色与权限码表，#32 授权判断的现有依据 |
-| [API 参考](../../api.md) | Run 提交与工具调用接口，#33、#35 的契约落点 |
-| [模块架构与开发规划索引](../../architecture.md) | 模块边界与扩展契约，约束「复用优先」 |
-| [数据库迁移说明](../../database-migrations.md) | 操作账本、幂等键的落地载体 |
-| [模块首轮实施说明](../../modules-delivery.md) | 各模块交付口径，核对「已实现」声明时参照 |
+| [模块逐个实施记录](../../archive/implementation-progress.md) | 各模块已交付能力与后续重点，是核验状态的主要线索来源 |
+| [异步客服 Runtime](../../architecture/runtime.md) | Run 状态机与执行路径，#35、#36 的改造对象 |
+| [用户权限模块 P0](../../guides/access-control.md) | 固定角色与权限码表，#32 授权判断的现有依据 |
+| [API 参考](../../reference/api.md) | Run 提交与工具调用接口，#33、#35 的契约落点 |
+| [模块架构与开发规划索引](../../architecture/overview.md) | 模块边界与扩展契约，约束「复用优先」 |
+| [数据库迁移说明](../../operations/database-migrations.md) | 操作账本、幂等键的落地载体 |
+| [模块首轮实施说明](../../archive/modules-delivery.md) | 各模块交付口径，核对「已实现」声明时参照 |
 
 ## Review 指引
 

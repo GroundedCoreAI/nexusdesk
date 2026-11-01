@@ -45,4 +45,4 @@ Milvus 使用独立集合构建，成功后更新 PG 指针；单次最多 1000 
 
 2026-09-20：82 项后端测试（81 项全量回归与新增 1 项 Judge 契约测试）通过，覆盖真实 PostgreSQL 迁移/事务与模拟上游协议；TypeScript 检查和 Vite 生产构建通过；2 条 Playwright 流程通过（模型发布调用绑定，以及知识→Agent→会话→工单确认→人工接管→评估）。这些测试不代表真实模型效果、全格式文档质量或生产并发容量验收。
 
-后续新增 0008_ticketing、0009_ticket_settings；本页前述 0004～0007 为首轮记录，最新迁移与兼容范围见 [数据库迁移说明](database-migrations.md)。
+后续新增 0008_ticketing、0009_ticket_settings；本页前述 0004～0007 为首轮记录，最新迁移与兼容范围见 [数据库迁移说明](../operations/database-migrations.md)。

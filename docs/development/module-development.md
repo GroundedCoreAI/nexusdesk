@@ -1,6 +1,6 @@
 # 能力独立开发与平台扩展规范
 
-适用于 `backend/src/agent_platform/business_capabilities` 下的业务能力、`backend/src/agent_platform/core_platform` 下的平台服务及其前端页面，详细规划见[架构索引](architecture.md)。本规范是目标约定，不代表现有代码已经完成全部解耦。
+适用于 `backend/src/agent_platform/business_capabilities` 下的业务能力、`backend/src/agent_platform/core_platform` 下的平台服务及其前端页面，详细规划见[架构索引](../architecture/overview.md)。本规范是目标约定，不代表现有代码已经完成全部解耦。
 
 ## 1. 开发单位与分层
 
