@@ -6,7 +6,7 @@ from sqlalchemy import text
 from test_platform_postgres import create_agent
 from test_platform_postgres import platform as _platform
 
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -102,7 +102,7 @@ async def test_delete_permissions_archive_revision_and_tenant(platform):
         "detail"
     ] == "agent_revision_conflict"
     with pytest.raises(DomainError) as exc:
-        await runtime.platform.agents.delete("other-tenant", "admin", agent["id"], 2)
+        await runtime.groups.business.agents.delete("other-tenant", "admin", agent["id"], 2)
     assert exc.value.status == 404
     assert (await client.get(endpoint)).status_code == 200
 

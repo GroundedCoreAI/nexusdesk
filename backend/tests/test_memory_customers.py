@@ -13,11 +13,10 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent_platform.modules.agent_config.service import AgentConfig
-from agent_platform.modules.agent_runtime.engine import RuntimeEngine
-from agent_platform.modules.channel.service import session_id_hash
-from agent_platform.modules.memory.bootstrap import MemoryDispatcher
-from agent_platform.modules.memory.extraction import (
+from agent_platform.business_capabilities.agent_config.service import AgentConfig
+from agent_platform.business_capabilities.channel.service import session_id_hash
+from agent_platform.business_capabilities.memory.bootstrap import MemoryDispatcher
+from agent_platform.business_capabilities.memory.extraction import (
     EXTRACT_KIND,
     MAX_CONTENT_CHARS,
     build_extraction_prompt,
@@ -25,7 +24,7 @@ from agent_platform.modules.memory.extraction import (
     valid_key,
     validate_item,
 )
-from agent_platform.modules.memory.service import (
+from agent_platform.business_capabilities.memory.service import (
     INJECT_MAX_TOKENS,
     PREFERENCE_HEADER,
     PROFILE_HEADER,
@@ -33,9 +32,10 @@ from agent_platform.modules.memory.service import (
     route_confidence,
     trim_items,
 )
-from agent_platform.modules.open_platform.service import AppIdentity, session_identity
-from agent_platform.modules.tool_gateway.service import ToolGateway
-from agent_platform.settings import Settings
+from agent_platform.business_capabilities.open_platform.service import AppIdentity, session_identity
+from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
+from agent_platform.core_platform.tool_gateway.service import ToolGateway
 
 asyncio_mark = pytest.mark.asyncio
 
@@ -277,15 +277,20 @@ async def test_engine_injects_customer_memory_after_summary_before_history():
         {"role": "assistant", "content": "早期回答"},
     ]
     memory_text = f"{PROFILE_HEADER}\n- name: 张三"
+    summary_text = "【此前对话摘要】\n订单号 A123"
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
         answer, _, _ = await engine.run(
-            "新问题", history, ignore_event, summary="订单号 A123", customer_memory=memory_text
+            "新问题",
+            history,
+            ignore_event,
+            summary_message=summary_text,
+            customer_memory=memory_text,
         )
     assert answer == "回答"
     seen = model.seen[0]
     assert isinstance(seen[0], SystemMessage) and seen[0].content == Settings().system_prompt
-    assert seen[1].content.startswith("【此前对话摘要】")
+    assert seen[1].content == summary_text
     assert isinstance(seen[2], SystemMessage) and seen[2].content == memory_text
     assert isinstance(seen[3], HumanMessage) and seen[3].content == "早期问题"
     assert seen[-1].content == "新问题"

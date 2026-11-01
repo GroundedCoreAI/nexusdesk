@@ -11,27 +11,34 @@ name: AI PR Review
 #   - never installs, builds, or executes code from the PR,
 #   - uses the default GITHUB_TOKEN read-only; all writes go through the
 #     short-lived GitHub App installation token.
+# TEMPORARILY DISABLED (2026-10-29): automatic AI review is switched off along
+# with the nexusdesk-ai-pr-reviewer GitHub App. To re-enable, restore the
+# triggers below and reinstall the app.
 on:
-  pull_request_target:
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  # Manual trigger kept so the workflow file stays valid and the reviewer can
+  # still be run on demand if needed.
+  workflow_dispatch:
+
+  # pull_request_target:
+  #   types:
+  #     - opened
+  #     - reopened
+  #     - synchronize
+  #     - ready_for_review
 
   # A human review may clear the REQUIRE_HUMAN_REVIEW gate. The pipeline
   # ignores reviews submitted by bots (including itself) to prevent loops.
-  pull_request_review:
-    types:
-      - submitted
+  # pull_request_review:
+  #   types:
+  #     - submitted
 
   # A finished CI run may clear the awaiting-CI gate. The name must match the
   # actual workflow name in ci.yml, not the filename.
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
+  # workflow_run:
+  #   workflows:
+  #     - CI
+  #   types:
+  #     - completed
 
 permissions:
   contents: read

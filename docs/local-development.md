@@ -19,10 +19,10 @@ cd backend
 uv sync
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
 uv run alembic upgrade head
-uv run python -m agent_platform.apps.seed  # 可选：初始化示例知识库、Agent 和会话
-uv run python -m agent_platform.apps.seed_memory_demo  # 可选：客户记忆可视化演示数据（4 个演示客户、注入明细、生命周期审计；幂等）
-uv run python -m agent_platform.apps.seed_memory_acceptance  # 可选：阶段 1-5 记忆验收演示数据（摘要/画像/事件搜索/治理/Agent 配置场景；幂等）
-uv run uvicorn agent_platform.apps.api.main:app --reload --host 127.0.0.1 --port 8000
+uv run python -m agent_platform.applications.seed  # 可选：初始化示例知识库、Agent 和会话
+uv run python -m agent_platform.applications.seed_memory_demo  # 可选：客户记忆可视化演示数据（4 个演示客户、注入明细、生命周期审计；幂等）
+uv run python -m agent_platform.applications.seed_memory_acceptance  # 可选：阶段 1-5 记忆验收演示数据（摘要/画像/事件搜索/治理/Agent 配置场景；幂等）
+uv run uvicorn agent_platform.applications.customer_service.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 记忆演示数据（seed_memory_demo / seed_memory_acceptance）的文案语言由 `AGENT_SEED_LOCALE` 控制，与前端 i18n 语言包一致：`zh-CN`（默认，简体）、`zh-TW`/`zh-HK`/`zh-MO`（繁体）、`en`（英文）、`hi`（印地语）。语言只在**首次**写入时生效——演示身份已入库后切换 locale 不会重写已有数据；如需切换语言，请换一个新数据库重新播种。
@@ -41,7 +41,7 @@ npm run dev
 知识库异步解析、分片和索引任务还需在后端目录另开终端运行：
 
 ```powershell
-uv run python -m agent_platform.apps.worker.knowledge
+uv run python -m agent_platform.applications.worker.knowledge
 ```
 
 ## 验证

@@ -3,7 +3,7 @@ from uuid import UUID
 import pytest
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.agent_config.service import AgentDraft
+from agent_platform.business_capabilities.agent_config.service import AgentDraft
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
@@ -11,8 +11,9 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 async def test_mine_uses_authenticated_creator_and_combines_filters(platform):
     client, runtime, settings = platform
-    service = runtime.platform
-    staff = await service.staff.create(settings.tenant_id, "admin", "同事", "operator")
+    staff = await runtime.groups.application.staff.create(
+        settings.tenant_id, "admin", "同事", "operator"
+    )
     headers = {"Authorization": "Bearer " + staff["token"]}
     body = {
         "name": "自己的助手",
@@ -22,14 +23,14 @@ async def test_mine_uses_authenticated_creator_and_combines_filters(platform):
     }
     mine = (await client.post("/api/v1/agents", json=body)).json()
     assert mine["created_by"] == "admin"
-    theirs = await service.agents.create(
+    theirs = await runtime.groups.business.agents.create(
         settings.tenant_id,
         "staff:" + str(staff["id"]),
         AgentDraft.model_validate({**body, "name": "同事的助手"}),
     )
     theirs["id"] = str(theirs["id"])
     assert theirs["created_by"] == "staff:" + str(staff["id"])
-    await service.agents.create(
+    await runtime.groups.business.agents.create(
         settings.tenant_id,
         "seed-industries",
         AgentDraft.model_validate({**body, "is_example": True}),
@@ -70,4 +71,6 @@ async def test_mine_uses_authenticated_creator_and_combines_filters(platform):
     assert (
         await client.get(endpoint, params={"mine_only": True, "include_archived": True})
     ).json()["total"] == 1
-    assert (await service.agents.get(settings.tenant_id, UUID(mine["id"])))["created_by"] == "admin"
+    assert (
+        await runtime.groups.business.agents.get(settings.tenant_id, UUID(mine["id"]))
+    )["created_by"] == "admin"

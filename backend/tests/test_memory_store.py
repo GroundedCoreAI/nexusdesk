@@ -9,15 +9,15 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from agent_platform.modules.memory import store as store_module
-from agent_platform.modules.memory.store import (
+from agent_platform.business_capabilities.memory import store as store_module
+from agent_platform.business_capabilities.memory.store import (
     PgVectorStore,
     TsVectorStore,
     decay_factor,
     escape_like,
     rank_hits,
 )
-from agent_platform.settings import Settings
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 NOW = datetime(2026, 10, 14, tzinfo=UTC)
 

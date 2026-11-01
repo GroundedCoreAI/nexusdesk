@@ -6,10 +6,13 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from test_model_gateway import ROOT, setup
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.model_gateway.adapters import stream_chat_http
-from agent_platform.modules.model_gateway.gateway import GatewayChatModel
-from agent_platform.modules.model_gateway.thinking import provider_messages, provider_parameters
-from agent_platform.platform.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.model_gateway.adapters import stream_chat_http
+from agent_platform.core_platform.platform_services.model_gateway.gateway import GatewayChatModel
+from agent_platform.core_platform.platform_services.model_gateway.thinking import (
+    provider_messages,
+    provider_parameters,
+)
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 gateway_platform = _platform_fixture
 ROUTE = {
@@ -109,9 +112,9 @@ async def test_thinking_published_profile_tool_round_trip(gateway_platform):
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
-        services.platform.gateway.client = mock
+        services.groups.runtime.gateway.client = mock
         chat = GatewayChatModel(
-            services.platform.gateway, settings.tenant_id, profile["id"], 2, [TOOL]
+            services.groups.runtime.gateway, settings.tenant_id, profile["id"], 2, [TOOL]
         )
         first = await chat.ainvoke([HumanMessage(content="hi")])
         assert first.additional_kwargs["reasoning_content"] == "provider-tool-trace"

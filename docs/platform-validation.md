@@ -27,7 +27,7 @@
 - 模型演示初始化脚本连续执行两次，六个方案 UUID 保持一致，不重复创建、不改已有业务绑定。
 - 网关测试覆盖六种 operation、不可变发布快照、跨租户拒绝、角色权限、连接启停、凭据轮换、非推理探测、HTTP 429 重试、主备实际模型归因、超时和取消释放额度、向量顺序/维度/空间、候选与页面映射、音频二进制、流式完成及中断后禁止重试。
 - 使用 httpx MockTransport 验证 OpenAI 兼容 Chat/Embedding/ASR/TTS 和平台自定义 Rerank/OCR 线协议，没有调用真实供应商。所有 demo 输出均标记；不能据此推断模型质量或生产吞吐量。
-- 媒体目前为 PostgreSQL 临时 BYTEA；operation / connection 限额按进程生效，尚无分布式配额或 MinIO/S3 接入。协议、启动步骤和其他边界见 [模型网关实际协议](../backend/src/agent_platform/modules/model_gateway/PROTOCOL.md)。
+- 媒体目前为 PostgreSQL 临时 BYTEA；operation / connection 限额按进程生效，尚无分布式配额或 MinIO/S3 接入。协议、启动步骤和其他边界见 [模型网关实际协议](../backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md)。
 
 
 本轮模块增量、配置和验证状态见 [模块实施说明](modules-delivery.md) 与 [实施记录](implementation-progress.md)；旧版验证记录保留作历史记录。

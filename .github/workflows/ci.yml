@@ -28,10 +28,126 @@ concurrency:
 permissions:
   contents: read
 
+# NOTE: the backend is split into parallel jobs (lint / unit / postgres×2
+# shards) so wall-clock time is the slowest single job instead of the serial
+# sum. Branch protection required status checks must reference these names:
+#   Backend lint (ruff + architecture)
+#   Backend tests (unit)
+#   Backend tests (postgres 1/2)
+#   Backend tests (postgres 2/2)
+#   Frontend (i18n + typecheck + build)
 jobs:
-  backend:
-    name: Backend (ruff + pytest)
+  backend-lint:
+    name: Backend lint (ruff + architecture)
     runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The co-author check needs the full history for commit ranges.
+          fetch-depth: 0
+
+      - name: Reject Claude co-author attribution
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          # Commits published before the attribution rule (3e4b9ff, 2026-10-26) are
+          # exempt: repository policy forbids rewriting published history, and the
+          # attribution guard only applies to new commits. This list is append-only and
+          # must never contain a commit created after the rule took effect.
+          ALLOWLIST="aafb726e8e62b708588aa33081ee2a1a492ef84f 2035a8bc0dca068a1f6ece348b0f94d5c0890b23"
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
+          elif [[ "$EVENT_NAME" == "push" &&
+                  "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            range="${PUSH_BEFORE_SHA}..${PUSH_AFTER_SHA}"
+          else
+            echo "No commit range to check."
+            exit 0
+          fi
+
+          offenders=0
+          matched="$(
+            git log "$range" --format='%H' --regexp-ignore-case --extended-regexp \
+              --grep='Co-Authored-By:.*(Claude|Anthropic|noreply@anthropic\.com)'
+          )"
+          for sha in $matched; do
+            if [[ " $ALLOWLIST " == *" $sha "* ]]; then
+              echo "Allowed pre-rule commit: $sha $(git log -1 --format='%s' "$sha")"
+            else
+              echo "Forbidden co-author attribution: $sha $(git log -1 --format='%s' "$sha")"
+              offenders=$((offenders + 1))
+            fi
+          done
+
+          if [[ "$offenders" -gt 0 ]]; then
+            echo "Remove the trailer before merging; do not rewrite published tags."
+            exit 1
+          fi
+          echo "No forbidden co-author attribution found."
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Pinned to match the version used by the Dockerfile.
+          version: "0.7.21"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python dependencies
+        working-directory: backend
+        # Includes the dev group (pytest, pytest-asyncio, ruff, httpx).
+        run: uv sync --frozen
+
+      - name: Lint
+        working-directory: backend
+        run: uv run ruff check .
+
+      - name: Architecture gates
+        run: uv run --directory backend python "$GITHUB_WORKSPACE/scripts/check_architecture.py"
+
+  backend-test-unit:
+    name: Backend tests (unit)
+    runs-on: ubuntu-latest
+
+    env:
+      AGENT_ENVIRONMENT: development
+
+    steps:
+      # No fetch-depth: 0 and no Postgres here — unit tests never touch a DB
+      # (every DB-touching test carries the `postgres` marker).
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.21"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Test
+        working-directory: backend
+        run: uv run pytest -q -m "not postgres"
+
+  backend-test-postgres:
+    # Two parallel shards (pytest-split, count-based). Each shard job gets its
+    # own Postgres service, so no cross-shard DB interference; migration tests
+    # use randomly named disposable databases and are shard-safe as well.
+    name: Backend tests (postgres ${{ matrix.group }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
 
     services:
       postgres:
@@ -74,10 +190,6 @@ jobs:
         # Includes the dev group (pytest, pytest-asyncio, ruff, httpx).
         run: uv sync --frozen
 
-      - name: Lint
-        working-directory: backend
-        run: uv run ruff check .
-
       - name: Migrate the test database
         working-directory: backend
         # Required before pytest: the database fixtures expect a migrated schema.
@@ -85,7 +197,7 @@ jobs:
 
       - name: Test
         working-directory: backend
-        run: uv run pytest -q
+        run: uv run pytest -q -m postgres --splits 2 --group ${{ matrix.group }}
 
   frontend:
     name: Frontend (i18n + typecheck + build)

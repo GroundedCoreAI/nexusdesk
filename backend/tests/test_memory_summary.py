@@ -5,14 +5,15 @@ Database-bound cases with UT numbers (task merge, retry transitions) live in
 test_memory_postgres.py.
 """
 
+from types import SimpleNamespace
+
 import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent_platform.modules.agent_config.service import AgentConfig
-from agent_platform.modules.agent_runtime.engine import RuntimeEngine
-from agent_platform.modules.memory.bootstrap import embedded_memory_worker
-from agent_platform.modules.memory.summary import (
+from agent_platform.business_capabilities.agent_config.service import AgentConfig
+from agent_platform.business_capabilities.memory.bootstrap import embedded_memory_worker
+from agent_platform.business_capabilities.memory.summary import (
     INJECTION_HEADER,
     SummaryError,
     backoff_seconds,
@@ -22,9 +23,10 @@ from agent_platform.modules.memory.summary import (
     require_binding,
     trim_dropped,
 )
-from agent_platform.modules.memory.worker import MemoryWorker
-from agent_platform.modules.tool_gateway.service import ToolGateway
-from agent_platform.settings import Settings
+from agent_platform.business_capabilities.memory.worker import MemoryWorker
+from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
+from agent_platform.core_platform.tool_gateway.service import ToolGateway
 
 asyncio_mark = pytest.mark.asyncio
 
@@ -119,15 +121,14 @@ def test_p1_ut_10_backoff_grows_exponentially_and_is_capped():
 class _DummyServices:
     """Assembly only stores engine/gateway; no database is touched."""
 
-    class repository:
-        engine = None
-
-    class platform:
-        gateway = None
+    groups = SimpleNamespace(
+        runtime=SimpleNamespace(engine=None, gateway=None),
+        business=SimpleNamespace(memory_store=None),
+    )
 
 
 def test_p1_ut_12_embedded_worker_assembly_follows_deployment_flags():
-    services = _DummyServices()
+    services = _DummyServices().groups
     # All four embedded_worker × summary_enabled combinations.
     both_off = Settings(_env_file=None, embedded_worker=False, summary_enabled=False)
     assert embedded_memory_worker(services, both_off) is None
@@ -208,12 +209,13 @@ async def test_p1_it_03_engine_injects_summary_between_prompt_and_history():
     ]
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
-        answer, _, _ = await engine.run("新问题", history, ignore_event, summary="订单号 A123")
+        rendered = f"{INJECTION_HEADER}\n订单号 A123"
+        answer, _, _ = await engine.run("新问题", history, ignore_event, summary_message=rendered)
     assert answer == "回答"
     seen = model.seen[0]
     assert isinstance(seen[0], SystemMessage) and seen[0].content == Settings().system_prompt
     assert isinstance(seen[1], SystemMessage)
-    assert seen[1].content == f"{INJECTION_HEADER}\n订单号 A123"
+    assert seen[1].content == rendered
     assert isinstance(seen[2], HumanMessage) and seen[2].content == "早期问题"
     assert seen[-1].content == "新问题"
 
@@ -223,23 +225,29 @@ async def test_engine_skips_empty_or_disabled_summary():
     model = SequenceModel(AIMessage(content="a"), AIMessage(content="b"))
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
-        await engine.run("q1", [], ignore_event, summary=None)
+        await engine.run("q1", [], ignore_event, summary_message=None)
         disabled = RuntimeEngine(
             model, ToolGateway(client, []), Settings(summary_enabled=False)
         )
-        await disabled.run("q2", [], ignore_event, summary="不应注入")
+        await disabled.run("q2", [], ignore_event, summary_message="不应注入")
     for seen in model.seen:
         assert len([m for m in seen if isinstance(m, SystemMessage)]) == 1
 
 
 @asyncio_mark
-async def test_engine_injection_obeys_token_budget():
+async def test_engine_injects_summary_message_verbatim():
+    """The engine inserts the rendered summary unchanged.
+
+    Truncation belongs to the memory capability (``render_injection``, covered
+    above); the Runtime must not re-shape the text, so a long summary arrives
+    intact rather than being silently re-cut here.
+    """
     model = SequenceModel(AIMessage(content="ok"))
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
-        await engine.run("q", [], ignore_event, summary="长" * 5000)
-    body = model.seen[0][1].content.partition("\n")[2]
-    assert len(body) == 1600
+        rendered = f"{INJECTION_HEADER}\n" + "长" * 5000
+        await engine.run("q", [], ignore_event, summary_message=rendered)
+    assert model.seen[0][1].content == rendered
 
 
 @asyncio_mark
@@ -271,7 +279,7 @@ async def test_engine_reports_no_dropped_messages_inside_window():
 async def test_demo_model_never_calls_tools_the_caller_did_not_offer():
     # Regression: a summary prompt quoting an earlier demo reply (which mentions
     # "查询演示") must get plain text back when the request carries no tools.
-    from agent_platform.modules.model_gateway.service import DemoModel
+    from agent_platform.core_platform.platform_services.model_gateway.service import DemoModel
 
     reply = await DemoModel([]).ainvoke([HumanMessage(content="此前回复提到查询演示链路")])
     assert not reply.tool_calls and reply.content.strip()

@@ -18,7 +18,8 @@ import pytest
 from sqlalchemy import text
 from test_platform_postgres import platform as _platform
 
-from agent_platform.modules.memory.store import (
+from agent_platform.business_capabilities.memory.pii import mask
+from agent_platform.business_capabilities.memory.store import (
     EMBEDDING_DIMENSION,
     PgVectorStore,
     TsVectorStore,
@@ -140,7 +141,7 @@ async def test_p3_ut_01_probe_vector_when_column_and_profile_ready(platform):
     profile = await make_embed_profile(client)
     probed = await build_memory_store(
         engine,
-        services.platform.gateway,
+        services.groups.runtime.gateway,
         store_settings(
             settings,
             memory_embedding_profile_id=profile["id"],
@@ -159,7 +160,7 @@ async def test_p3_ut_02_probe_text_without_vector_column(platform):
     profile = await make_embed_profile(client)
     probed = await build_memory_store(
         engine,
-        services.platform.gateway,
+        services.groups.runtime.gateway,
         store_settings(
             settings,
             memory_embedding_profile_id=profile["id"],
@@ -175,7 +176,7 @@ async def test_p3_ut_02_probe_text_when_profile_missing(platform):
     engine = services.repository.engine
     if not await has_embedding_column(engine):
         pytest.skip("profile-probing variant needs the embedding column present")
-    probed = await build_memory_store(engine, services.platform.gateway, store_settings(settings))
+    probed = await build_memory_store(engine, services.groups.runtime.gateway, store_settings(settings))
     assert isinstance(probed, TsVectorStore)
     assert probed.available() == "text"
 
@@ -188,7 +189,7 @@ async def test_p3_ut_02_probe_text_when_profile_not_embed(platform):
     profile = await make_embed_profile(client, operation="chat")
     probed = await build_memory_store(
         engine,
-        services.platform.gateway,
+        services.groups.runtime.gateway,
         store_settings(
             settings,
             memory_embedding_profile_id=profile["id"],
@@ -207,10 +208,10 @@ async def test_p3_dp_05_probe_text_with_warning_on_dimension_mismatch(platform, 
     if not await has_embedding_column(engine):
         pytest.skip("dimension probing needs the embedding column present")
     profile = await make_embed_profile(client, dimension=8)
-    with caplog.at_level(logging.WARNING, logger="agent_platform.modules.memory.store"):
+    with caplog.at_level(logging.WARNING, logger="agent_platform.business_capabilities.memory.store"):
         probed = await build_memory_store(
             engine,
-            services.platform.gateway,
+            services.groups.runtime.gateway,
             store_settings(
                 settings,
                 memory_embedding_profile_id=profile["id"],
@@ -233,7 +234,7 @@ async def test_p3_ut_03_vector_enabled_false_forces_text(platform):
     profile = await make_embed_profile(client)
     probed = await build_memory_store(
         engine,
-        services.platform.gateway,
+        services.groups.runtime.gateway,
         store_settings(
             settings,
             memory_embedding_profile_id=profile["id"],
@@ -252,7 +253,7 @@ async def test_p3_ut_03_vector_enabled_true_forces_vector_without_profile(platfo
         pytest.skip("override assertion needs the embedding column present")
     probed = await build_memory_store(
         engine,
-        services.platform.gateway,
+        services.groups.runtime.gateway,
         store_settings(settings, memory_vector_enabled="true"),
     )
     assert isinstance(probed, PgVectorStore)
@@ -264,10 +265,10 @@ async def test_p3_ut_03_vector_enabled_true_without_column_still_text(platform, 
     engine = services.repository.engine
     if await has_embedding_column(engine):
         pytest.skip("needs a database without the embedding column")
-    with caplog.at_level(logging.WARNING, logger="agent_platform.modules.memory.store"):
+    with caplog.at_level(logging.WARNING, logger="agent_platform.business_capabilities.memory.store"):
         probed = await build_memory_store(
             engine,
-            services.platform.gateway,
+            services.groups.runtime.gateway,
             store_settings(settings, memory_vector_enabled="true"),
         )
     assert isinstance(probed, TsVectorStore)
@@ -373,6 +374,18 @@ async def test_p3_ut_09_search_limit_clamped_to_configured_max(platform):
 # ---------------------------------------------------------------------------
 
 
+def expected_event_content(settings, content):
+    """Stored event content is PII-masked on write (service.add_event_item).
+
+    Ticket numbers from the action path are ``TK-<uuid4 hex>`` and a random
+    digit run inside one can trip the bank-card pattern, so assertions must
+    compare against the masked form the writer actually persists.
+    """
+    if getattr(settings, "memory_pii_masking_enabled", True):
+        return mask(content)[0]
+    return content
+
+
 async def make_bound_ticket(client, services, settings, text="请创建维修工单"):
     """Approve a proposed ticket from a customer-bound channel conversation."""
     from test_memory_customers_postgres import (
@@ -405,7 +418,7 @@ async def event_tasks(engine, tenant):
 
 async def run_event_tasks(engine, services, settings, store=None):
     """Execute every queued event_write task through the real EventWriter."""
-    from agent_platform.modules.memory.events import EventWriter
+    from agent_platform.business_capabilities.memory.events import EventWriter
 
     store = store or TsVectorStore(engine, store_settings(settings))
     writer = EventWriter(engine, store, store_settings(settings))
@@ -457,7 +470,9 @@ async def test_p3_it_01_ticket_lifecycle_writes_event_memory(platform):
         assert row["confidence"] == 1.0
         assert row["source_ref"] == ticket["id"]
         assert row["type"] == "event"
-    assert created["content"].startswith(f"工单 {ticket_no} 已创建：")
+    assert created["content"].startswith(
+        expected_event_content(settings, f"工单 {ticket_no} 已创建：")
+    )
     # P3-UT-08: event rows expire at now + TTL; two rows of one event share it.
     ttl_seconds = (created["expires_at"] - created["updated_at"]).total_seconds()
     assert abs(ttl_seconds - settings.memory_event_ttl_days * 86400) < 120
@@ -479,7 +494,9 @@ async def test_p3_it_01_ticket_lifecycle_writes_event_memory(platform):
     items = await items_by_key(engine, tenant, customer_id)
     resolved = items[f"ticket:{ticket_no}:resolved"]
     assert resolved["status"] == "active"
-    assert resolved["content"] == f"工单 {ticket_no} 已解决：更换主板后恢复"
+    assert resolved["content"] == expected_event_content(
+        settings, f"工单 {ticket_no} 已解决：更换主板后恢复"
+    )
     assert items[f"open_ticket:{ticket_no}"]["status"] == "expired"  # kept, not deleted
 
     # close: third event row.
@@ -493,7 +510,9 @@ async def test_p3_it_01_ticket_lifecycle_writes_event_memory(platform):
     items = await items_by_key(engine, tenant, customer_id)
     closed = items[f"ticket:{ticket_no}:closed"]
     assert closed["status"] == "active"
-    assert closed["content"] == f"工单 {ticket_no} 已关闭：客户确认无误"
+    assert closed["content"] == expected_event_content(
+        settings, f"工单 {ticket_no} 已关闭：客户确认无误"
+    )
     active_events = [
         key for key, row in items.items() if row["type"] == "event" and row["status"] == "active"
     ]
@@ -804,13 +823,13 @@ async def test_p3_it_06_memory_search_tool_end_to_end(platform):
         # Vector leg: route the tool through a PgVectorStore with a stubbed
         # embed gateway (deterministic cosine) over the real pgvector SQL.
         await set_embedding(engine, item_id, [1.0] + [0.0] * (EMBEDDING_DIMENSION - 1))
-        services.platform.memory_store = PgVectorStore(
+        services.groups.business.memory_store = PgVectorStore(
             engine,
             StubEmbedGateway([1.0] + [0.0] * (EMBEDDING_DIMENSION - 1)),
             store_settings(settings),
         )
     else:
-        services.platform.memory_store = TsVectorStore(engine, store_settings(settings))
+        services.groups.business.memory_store = TsVectorStore(engine, store_settings(settings))
 
     response = await client.post(
         f"/api/v1/conversations/{conv['id']}/messages", json={"content": message}
@@ -918,7 +937,7 @@ async def test_p3_it_08_recency_orders_equal_relevance_hits(platform):
 
 
 def make_maintenance_worker(services, settings, store=None):
-    from agent_platform.modules.memory.worker import MemoryWorker
+    from agent_platform.business_capabilities.memory.worker import MemoryWorker
 
     engine = services.repository.engine
     return MemoryWorker(
@@ -970,7 +989,7 @@ async def test_p3_it_09_ttl_pass_soft_expires_and_hides(platform):
         tenant, customer_id, "超龄", 5
     )
     assert hits == []
-    from agent_platform.modules.memory.service import MemoryService
+    from agent_platform.business_capabilities.memory.service import MemoryService
 
     pending = await MemoryService(engine, settings).pending_event_items(tenant, customer_id, 5)
     assert [row["key"] for row in pending] == ["commitment:9"]
@@ -1054,7 +1073,7 @@ async def test_p3_cm_02_embedding_usage_lands_in_gateway_calls(platform):
     profile = await make_embed_profile(client)  # demo adapter, 1536 dimensions
     store = PgVectorStore(
         engine,
-        services.platform.gateway,
+        services.groups.runtime.gateway,
         store_settings(
             settings,
             memory_embedding_profile_id=profile["id"],
@@ -1084,7 +1103,7 @@ async def test_p3_cm_03_event_task_failure_backoff_and_audit(platform):
     kind-specific audit action memory.event.failed."""
     from test_memory_postgres import audit_records, force_claimable
 
-    from agent_platform.modules.memory.worker import MemoryWorker
+    from agent_platform.business_capabilities.memory.worker import MemoryWorker
 
     class CrashingDispatcher:
         async def execute(self, task):
@@ -1168,7 +1187,7 @@ async def test_p3_it_12_vector_search_p99_under_300ms(platform):
 
 
 async def test_add_event_item_overwrite_clears_stale_embedding(platform):
-    from agent_platform.modules.memory.service import MemoryService
+    from agent_platform.business_capabilities.memory.service import MemoryService
 
     _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id

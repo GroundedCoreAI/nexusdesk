@@ -1,0 +1,20 @@
+manifest_version: "1"
+capability:
+  id: sample-operations
+  version: 1.0.0
+  api_version: v1
+  name: Sample Operations
+  description: Reference external capability used for runtime acceptance testing.
+  dependencies: []
+  dependency_constraints: {}
+  requires_platform: ">=0.1.0,<1.0.0"
+  configuration_schema_version: v1
+  permissions:
+    - sample-operations.read
+    - sample-operations.manage
+  contributions:
+    - tools
+    - events
+    - policies
+    - ui
+  enabled_by_default: true

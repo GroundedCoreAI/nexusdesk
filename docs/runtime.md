@@ -47,7 +47,7 @@ cd backend
 uv sync
 Copy-Item .env.example .env
 uv run alembic upgrade head
-uv run uvicorn agent_platform.apps.api.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn agent_platform.applications.customer_service.main:app --host 127.0.0.1 --port 8000
 ```
 
 没有 Docker 时，使用已有 PostgreSQL 16+，创建专用数据库并在 `.env` 中配置 `AGENT_DATABASE_URL`。示例账号和密码仅用于本地开发。不要覆盖已有 `.env`。
@@ -64,7 +64,7 @@ uv run uvicorn examples.mock_business:app --host 127.0.0.1 --port 8010
 分离 API 和 Worker：API 设置 `AGENT_EMBEDDED_WORKER=false`，另开进程执行：
 
 ```powershell
-uv run python -m agent_platform.apps.worker
+uv run python -m agent_platform.applications.worker
 ```
 
 Worker 使用与 API 相同的 `.env`。数据库迁移是显式发布步骤，进程启动不自动建表。

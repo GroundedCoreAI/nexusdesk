@@ -7,9 +7,9 @@ from docx import Document
 from openpyxl import Workbook
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.knowledge.chunking import ChunkingPolicy, chunk_pages
-from agent_platform.modules.knowledge.parsers import parse_file
-from agent_platform.modules.knowledge.retrieval import fuse
+from agent_platform.business_capabilities.knowledge.chunking import ChunkingPolicy, chunk_pages
+from agent_platform.business_capabilities.knowledge.parsers import parse_file
+from agent_platform.business_capabilities.knowledge.retrieval import fuse
 
 platform = _platform_fixture
 
@@ -26,7 +26,7 @@ async def test_semantic_preview_cache_reused_for_pages_and_save(platform):
 
     client, services, settings = platform
     _, _, profile = await setup(client, "embed")
-    w = services.platform.knowledge_workspace
+    w = services.groups.business.knowledge_workspace
     upload = await client.post(
         ROOT + "/uploads?filename=semantic.md", content=("知识段落。" * 500).encode()
     )
@@ -77,7 +77,7 @@ async def test_paginated_chunks_preview_and_partial_save(platform):
     content = "\n\n".join(f"Section {i}: " + "content " * 100 for i in range(65))
     upload = await client.post(ROOT + "/uploads?filename=pagination.md", content=content.encode())
     did = upload.json()["id"]
-    await services.platform.knowledge_workspace.run_next(settings.tenant_id)
+    await services.groups.business.knowledge_workspace.run_next(settings.tenant_id)
     path = ROOT + f"/documents/{did}"
     first = (await client.get(path)).json()
     assert len(first["chunks"]) == 20 and first["total"] > 40
@@ -189,7 +189,7 @@ def test_pdf_pptx_csv_and_whole_document_limits():
 @pytest.mark.postgres
 async def test_workspace_publish_draft_isolation_and_tenant(platform):
     client, services, settings = platform
-    w = services.platform.knowledge_workspace
+    w = services.groups.business.knowledge_workspace
     kb = (await client.post("/api/v1/knowledge-bases", json={"name": "Workspace"})).json()
     state = (await client.get(ROOT + f"/libraries/{kb['id']}")).json()
     assert state["vector_ready"] is False and state["published_document_count"] == 0
@@ -250,7 +250,7 @@ async def test_workspace_cancel_and_viewer(platform):
     client, services, settings = platform
     uploaded = (await client.post(ROOT + "/uploads?filename=a.txt", content=b"hello world")).json()
     assert (await client.post(ROOT + f"/tasks/{uploaded['task_id']}/cancel")).status_code == 200
-    assert not await services.platform.knowledge_workspace.run_next(settings.tenant_id)
+    assert not await services.groups.business.knowledge_workspace.run_next(settings.tenant_id)
     cancelled = (await client.get(ROOT + f"/documents/{uploaded['id']}")).json()
     assert cancelled["processing"] == "cancelled"
     denied = await client.post(
@@ -288,7 +288,7 @@ async def test_live_vector_publication_and_agent_retrieval(platform):
         content="# 退款政策\n签收七天内可申请退款。".encode(),
     )
     assert upload.status_code == 202, upload.text
-    w = services.platform.knowledge_workspace
+    w = services.groups.business.knowledge_workspace
     await w.run_next(settings.tenant_id)
     await w.run_next(settings.tenant_id)
     tasks = (await client.get(ROOT + "/tasks")).json()
@@ -297,7 +297,7 @@ async def test_live_vector_publication_and_agent_retrieval(platform):
     assert response.status_code == 200, response.text
     assert response.json()["items"][0]["channels"] == ["keyword", "vector"]
     assert "rerank_score" in response.json()["items"][0]
-    assert await services.platform.retrieval.for_agent(settings.tenant_id, "退款", [UUID(kid)])
+    assert await services.groups.business.retrieval.for_agent(settings.tenant_id, "退款", [UUID(kid)])
     did = upload.json()["id"]
     replacement = await client.post(
         ROOT + f"/documents/{did}/replace?filename=live.md",
@@ -307,30 +307,30 @@ async def test_live_vector_publication_and_agent_retrieval(platform):
     await w.run_next(settings.tenant_id)
     await client.post(ROOT + f"/libraries/{kid}/documents", json={"document_id": did})
     await client.post(ROOT + f"/libraries/{kid}/publish")
-    original_request = services.platform.vector_index.request
-    from agent_platform.platform.persistence.store import DomainError
+    original_request = services.groups.business.vector_index.request
+    from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
     async def fail_upsert(path, body):
         if path == "entities/upsert":
             raise DomainError("test_index_provider_failure", 502)
         return await original_request(path, body)
 
-    services.platform.vector_index.request = fail_upsert
+    services.groups.business.vector_index.request = fail_upsert
     try:
         await w.run_next(settings.tenant_id)
     finally:
-        services.platform.vector_index.request = original_request
+        services.groups.business.vector_index.request = original_request
     library = (await client.get(ROOT + f"/libraries/{kid}")).json()
     assert library["documents"][0]["published_version"] == 1
     response = await client.post(ROOT + "/search", json={"query": "退款", "kb_ids": [kid]})
     assert response.status_code == 200 and response.json()["items"][0]["version"] == 1
     # Dispose only the collection created by this test.
-    from agent_platform.platform.persistence.store import one
+    from agent_platform.core_platform.platform_services.persistence.store import one
 
-    async with services.platform.engine.connect() as c:
+    async with services.groups.runtime.engine.connect() as c:
         index = await one(
             c, "SELECT collection_name FROM knowledge_vector_indexes WHERE kb_id=:k", k=UUID(kid)
         )
-    await services.platform.vector_index.request(
+    await services.groups.business.vector_index.request(
         "collections/drop", {"collectionName": index["collection_name"]}
     )
