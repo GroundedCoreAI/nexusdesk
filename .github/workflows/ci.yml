@@ -56,6 +56,11 @@ jobs:
           PUSH_AFTER_SHA: ${{ github.event.after }}
         run: |
           set -euo pipefail
+          # Commits published before the attribution rule (3e4b9ff, 2026-10-26) are
+          # exempt: repository policy forbids rewriting published history, and the
+          # attribution guard only applies to new commits. This list is append-only and
+          # must never contain a commit created after the rule took effect.
+          ALLOWLIST="aafb726e8e62b708588aa33081ee2a1a492ef84f 2035a8bc0dca068a1f6ece348b0f94d5c0890b23"
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
           elif [[ "$EVENT_NAME" == "push" &&
@@ -66,11 +71,21 @@ jobs:
             exit 0
           fi
 
-          if git log "$range" --format='%H%n%B' |
-            grep -Eiq '^Co-Authored-By:.*(Claude|Anthropic|noreply@anthropic\.com)'; then
-            echo "Found forbidden Claude/Anthropic co-author attribution in:"
-            git log "$range" --regexp-ignore-case --extended-regexp --format='%H %s' \
+          offenders=0
+          matched="$(
+            git log "$range" --format='%H' --regexp-ignore-case --extended-regexp \
               --grep='Co-Authored-By:.*(Claude|Anthropic|noreply@anthropic\.com)'
+          )"
+          for sha in $matched; do
+            if [[ " $ALLOWLIST " == *" $sha "* ]]; then
+              echo "Allowed pre-rule commit: $sha $(git log -1 --format='%s' "$sha")"
+            else
+              echo "Forbidden co-author attribution: $sha $(git log -1 --format='%s' "$sha")"
+              offenders=$((offenders + 1))
+            fi
+          done
+
+          if [[ "$offenders" -gt 0 ]]; then
             echo "Remove the trailer before merging; do not rewrite published tags."
             exit 1
           fi
