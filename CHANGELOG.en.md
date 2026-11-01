@@ -56,12 +56,12 @@ Second feature batch: streamed answers, the agent memory system (phases 1–6), 
 
 - The demo uses a mock model and **does not represent real answer quality**; it does not connect to real order systems and provides no real OCR or GPU inference.
 - The production topology does not terminate TLS itself; the host or an ingress proxy is expected to.
-- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/modules-delivery.md).
+- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/archive/modules-delivery.md).
 - The project is under active development and is not production ready.
 
 ### Upgrade notes
 
-Database migrations run automatically when the container starts (41 migrations cumulative in this release) and **cannot be rolled back** — reverting the image does not revert the schema. Upgrading from v0.1.0 is a straight image pull and restart; on a self-hosted PostgreSQL, vector retrieval uses pgvector by default with no extra middleware. See [database migrations](docs/database-migrations.md).
+Database migrations run automatically when the container starts (41 migrations cumulative in this release) and **cannot be rolled back** — reverting the image does not revert the schema. Upgrading from v0.1.0 is a straight image pull and restart; on a self-hosted PostgreSQL, vector retrieval uses pgvector by default with no extra middleware. See [database migrations](docs/operations/database-migrations.md).
 
 ## v0.1.0 — 2026-10-09
 
@@ -102,9 +102,9 @@ First runnable release. The core customer-service flow is complete and usable.
 - The demo uses a mock model and **does not represent real answer quality**. It does not connect to real order systems and provides no real OCR, vector search, or GPU inference.
 - The demo injects an admin-role token for requests that carry no identity. **Do not expose it to the public internet**; if you must widen the bind address, restrict the source with a firewall.
 - The production topology does not terminate TLS itself; the host or an ingress proxy is expected to.
-- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/modules-delivery.md).
+- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/archive/modules-delivery.md).
 - The project is under active development and is not production ready.
 
 ### Upgrade notes
 
-This is the first release, so there is no upgrade path. Database migrations run automatically when the container starts and **cannot be rolled back** — reverting the image does not revert the schema, so migrations must stay forward compatible (new columns nullable or defaulted, dropped columns removed over two releases). See [database migrations](docs/database-migrations.md).
+This is the first release, so there is no upgrade path. Database migrations run automatically when the container starts and **cannot be rolled back** — reverting the image does not revert the schema, so migrations must stay forward compatible (new columns nullable or defaulted, dropped columns removed over two releases). See [database migrations](docs/operations/database-migrations.md).

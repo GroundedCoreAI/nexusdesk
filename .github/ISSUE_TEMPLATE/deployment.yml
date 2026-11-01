@@ -11,8 +11,8 @@ body:
 
         动手排查前建议先看：
         - [Docker 部署手册](https://github.com/GroundedCoreAI/nexusdesk/blob/main/deploy/README.md)
-        - [中间件说明](https://github.com/GroundedCoreAI/nexusdesk/blob/main/docs/middleware.md)
-        - [本地开发](https://github.com/GroundedCoreAI/nexusdesk/blob/main/docs/local-development.md)
+        - [中间件说明](https://github.com/GroundedCoreAI/nexusdesk/blob/main/docs/operations/middleware.md)
+        - [本地开发](https://github.com/GroundedCoreAI/nexusdesk/blob/main/docs/development/local-development.md)
   - type: dropdown
     id: path
     attributes:

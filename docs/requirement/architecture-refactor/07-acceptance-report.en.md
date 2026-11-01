@@ -21,7 +21,7 @@
 - [x] Architecture gate passed.
 - [x] compileall passed.
 - [x] Frontend typecheck, i18n, and build all passed.
-- [x] Legacy paths in `docs/architecture.md` and `docs/module-development.md` have been synchronized.
+- [x] Legacy paths in `docs/architecture/overview.md` and `docs/development/module-development.md` have been synchronized.
 - [x] Runtime path references in root operational documents have been switched to the new layout; old paths in historical requirement documents are retained as historical records for now.
 - [ ] Final change-list and open-item review.
 

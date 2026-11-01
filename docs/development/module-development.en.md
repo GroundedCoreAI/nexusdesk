@@ -1,6 +1,6 @@
 # Capability Development and Platform Extension Rules
 
-These rules apply to business capabilities under `backend/src/agent_platform/business_capabilities`, platform services under `backend/src/agent_platform/core_platform`, and their frontend surfaces. See the [Architecture Index](architecture.en.md). These are target rules; they do not claim that every existing dependency has already been fully decoupled.
+These rules apply to business capabilities under `backend/src/agent_platform/business_capabilities`, platform services under `backend/src/agent_platform/core_platform`, and their frontend surfaces. See the [Architecture Index](../architecture/overview.en.md). These are target rules; they do not claim that every existing dependency has already been fully decoupled.
 
 ## 1. Development unit and layers
 

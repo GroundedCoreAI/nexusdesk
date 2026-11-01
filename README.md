@@ -129,7 +129,7 @@ NexusDesk is not a knowledge Q&A chatbot, a traditional workflow engine that fix
 - **Tools:** built-in tools and HTTP integrations are available; the MCP adapter is still planned.
 - **Quickstart:** uses a mock model, connects to no real business system, and does not represent real model quality.
 - **Deployment:** Docker Compose only; no Kubernetes or Helm charts yet.
-- **Overall status:** the project is under continuous development and is not production ready out of the box. See the [module delivery notes](docs/modules-delivery.md).
+- **Overall status:** the project is under continuous development and is not production ready out of the box. See the [documentation index](docs/README.en.md) and section 1 of each module README for current implementation status.
 
 ## Architecture overview
 
@@ -158,7 +158,7 @@ NexusDesk is a modular monolith: the API and workers share one backend codebase 
 | Knowledge storage | Milvus, MinIO / S3 (optional) |
 | Deployment | Docker Compose, Nginx |
 
-Using external model services requires no GPU on the application server. See the [middleware guide](docs/middleware.md) for details.
+Using external model services requires no GPU on the application server. See the [middleware guide](docs/operations/middleware.md) for details.
 
 ## Documentation
 
@@ -166,15 +166,16 @@ The documents listed below are currently written in Simplified Chinese.
 
 | I want to... | Document |
 | --- | --- |
-| Use the customer service workbench | [Platform guide](docs/platform.md) |
+| Browse all documentation | [Documentation index](docs/README.en.md) |
+| Use the customer service workbench | [Platform guide](docs/guides/platform.md) |
 | Deploy, upgrade, or migrate data | [Docker deployment guide](deploy/README.md) |
-| Understand middleware and configuration | [Middleware guide](docs/middleware.md) |
-| Start a local development environment | [Local development](docs/local-development.md) |
-| Understand the architecture and extension modules | [Module architecture](docs/architecture.md) |
-| Understand agent execution | [Runtime documentation](docs/runtime.md) |
-| Configure the knowledge base | [Knowledge workspace](docs/knowledge-workspace.md) |
+| Understand middleware and configuration | [Middleware guide](docs/operations/middleware.md) |
+| Start a local development environment | [Local development](docs/development/local-development.md) |
+| Understand the architecture and extension modules | [Module architecture](docs/architecture/overview.md) |
+| Understand agent execution | [Runtime documentation](docs/architecture/runtime.md) |
+| Configure the knowledge base | [Knowledge workspace](docs/guides/knowledge-workspace.md) |
 | Integrate model services | [Model gateway protocol](backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md) |
-| Integrate business applications | [API reference](docs/api.md) · [Open platform](docs/open-platform.md) |
+| Integrate business applications | [API reference](docs/reference/api.md) · [Open platform](docs/guides/open-platform.md) |
 | See what changed in a release | [Changelog](CHANGELOG.en.md) |
 
 ## Open source and next steps
@@ -188,7 +189,7 @@ The public roadmap has two complementary tracks:
 | Platform Roadmap | Establish a stable, trustworthy, and extensible agent core: execution and task lifecycle, clear module boundaries and extension contracts, permissions, human confirmation, audit, observability, evaluation, and failure recovery. |
 | Open-source Application Roadmap | Make AI customer service a complete, real-world open-source reference application: knowledge Q&A with citations, tickets and human takeover, business tools, channels, deployment, monitoring, evaluation, and user documentation. |
 
-See the [module architecture](docs/architecture.md) for module-level plans.
+See the [module architecture](docs/architecture/overview.md) for module-level plans.
 
 ## Contributing
 

@@ -13,3 +13,5 @@ uv run uvicorn agent_platform.applications.customer_service.main:app --reload --
 ```
 
 The seed command is optional and idempotent. Preserve existing `.env` settings.
+
+The platform supports staff accounts and fixed-role access control, enterprise OIDC/SSO, GET and JSON POST tools, and runtime SSE with transient model text deltas. See the [Chinese platform guide](platform.md) for detailed operations and current feature boundaries.

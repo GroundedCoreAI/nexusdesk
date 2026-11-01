@@ -4,7 +4,7 @@
 
 ## 启动服务
 
-依赖：Python 3.11+、uv、PostgreSQL 17（根 compose、quickstart 与 CI 均使用 17），以及 Node.js 22.12+ 和 npm。已有 .env 请合并配置，不要覆盖。如需测试“查询演示”的 HTTP 工具，按 [Runtime 文档](runtime.md) 启动 mock_business 服务。
+依赖：Python 3.11+、uv、PostgreSQL 17（根 compose、quickstart 与 CI 均使用 17），以及 Node.js 22.12+ 和 npm。已有 .env 请合并配置，不要覆盖。如需测试“查询演示”的 HTTP 工具，按 [Runtime 文档](../architecture/runtime.md) 启动 mock_business 服务。
 
 先启动 PostgreSQL（已有数据库可直接配置连接）：
 
@@ -63,4 +63,4 @@ PostgreSQL 集成测试需配置指向独立、已迁移测试库的 `TEST_DATAB
 
 生产构建输出为 `frontend/dist`。部署时需要为 `/api` 配置反向代理；Vite 开发代理不包含在静态构建中。已提供基础服务令牌角色控制；个人账号、SSO 等生产扩展见平台文档。
 
-独立 Runtime Worker 的启动与配置见 [Runtime 文档](runtime.md)。数据库迁移说明见 [迁移指南](database-migrations.md)。
+独立 Runtime Worker 的启动与配置见 [Runtime 文档](../architecture/runtime.md)。数据库迁移说明见 [迁移指南](../operations/database-migrations.md)。

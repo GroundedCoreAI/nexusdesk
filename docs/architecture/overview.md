@@ -1,6 +1,6 @@
 # NexusDesk 架构与能力规划索引
 
-平台采用 Python 模块化单体、异步 LangGraph Runtime、PostgreSQL 与 React 管理台。当前代码按四层组织：Core Platform、Extension Contracts、Business Capabilities 和 Applications。本文件描述当前架构和能力规划；本次目录重构的过程与验收证据见[架构重构需求文档](requirement/architecture-refactor/README.md)。
+平台采用 Python 模块化单体、异步 LangGraph Runtime、PostgreSQL 与 React 管理台。当前代码按四层组织：Core Platform、Extension Contracts、Business Capabilities 和 Applications。本文件描述当前架构和能力规划；目标演进见 [Agent 执行平台 v2](agent-execution-platform-v2.md)，目录重构的过程与验收证据见[架构重构需求文档](../requirement/architecture-refactor/README.md)。
 
 ## 四层架构
 
@@ -27,24 +27,29 @@ agent_platform/
 
 | 模块 | 名称 | 文档 |
 |---|---|---|
-| agent_config | Agent 配置与发布 | [详细规划](../backend/src/agent_platform/business_capabilities/agent_config/README.md) |
-| agent_runtime | Agent Runtime | [详细规划](../backend/src/agent_platform/core_platform/agent_runtime/README.md) |
-| channel | 渠道接入 | [详细规划](../backend/src/agent_platform/business_capabilities/channel/README.md) |
-| conversation | 会话管理 | [详细规划](../backend/src/agent_platform/business_capabilities/conversation/README.md) |
-| customer_service | 客服业务与流程 | [详细规划](../backend/src/agent_platform/business_capabilities/customer_service/README.md) |
-| human_handoff | 人工客服协同 | [详细规划](../backend/src/agent_platform/business_capabilities/human_handoff/README.md) |
-| knowledge | 知识服务 | [详细规划](../backend/src/agent_platform/business_capabilities/knowledge/README.md) |
-| tool_gateway | 工具网关 | [详细规划](../backend/src/agent_platform/core_platform/tool_gateway/README.md) |
-| policy | 策略与权限 | [详细规划](../backend/src/agent_platform/core_platform/policy_harness/README.md) |
-| observability | 运行观测与审计 | [详细规划](../backend/src/agent_platform/core_platform/platform_services/observability/README.md) |
-| evaluation | 质量评测 | [详细规划](../backend/src/agent_platform/business_capabilities/evaluation/README.md) |
-| model_gateway | 模型网关 | [详细规划](../backend/src/agent_platform/core_platform/platform_services/model_gateway/README.md) |
-| open_platform | 开放平台 | [详细说明](open-platform.md) |
-| platform_settings | 平台设置（规划中） | [详细规划](../backend/src/agent_platform/core_platform/platform_services/platform_settings/README.md) |
+| agent_config | Agent 配置与发布 | [详细规划](../../backend/src/agent_platform/business_capabilities/agent_config/README.md) |
+| agent_runtime | Agent Runtime | [详细规划](../../backend/src/agent_platform/core_platform/agent_runtime/README.md) |
+| channel | 渠道接入 | [详细规划](../../backend/src/agent_platform/business_capabilities/channel/README.md) |
+| conversation | 会话管理 | [详细规划](../../backend/src/agent_platform/business_capabilities/conversation/README.md) |
+| customer_service | 客服业务与流程 | [详细规划](../../backend/src/agent_platform/business_capabilities/customer_service/README.md) |
+| human_handoff | 人工客服协同 | [详细规划](../../backend/src/agent_platform/business_capabilities/human_handoff/README.md) |
+| knowledge | 知识服务 | [详细规划](../../backend/src/agent_platform/business_capabilities/knowledge/README.md) |
+| memory | 客户记忆 | [需求与阶段文档](../requirement/agent-memory/README.md) |
+| approval | 审批与待确认动作 | [模块源码](../../backend/src/agent_platform/business_capabilities/approval/) |
+| tool_gateway | 工具网关 | [详细规划](../../backend/src/agent_platform/core_platform/tool_gateway/README.md) |
+| policy | 策略与权限 | [详细规划](../../backend/src/agent_platform/core_platform/policy_harness/README.md) |
+| access_control | 员工账号与访问控制 | [使用说明](../guides/access-control.md) |
+| integrations | 共享集成服务 | [模块源码](../../backend/src/agent_platform/core_platform/platform_services/integrations/) |
+| tenant_isolation | 租户隔离与上下文 | [模块源码](../../backend/src/agent_platform/core_platform/platform_services/tenant_isolation/) |
+| observability | 运行观测与审计 | [详细规划](../../backend/src/agent_platform/core_platform/platform_services/observability/README.md) |
+| evaluation | 质量评测 | [详细规划](../../backend/src/agent_platform/business_capabilities/evaluation/README.md) |
+| model_gateway | 模型网关 | [详细规划](../../backend/src/agent_platform/core_platform/platform_services/model_gateway/README.md) |
+| open_platform | 开放平台 | [详细说明](../guides/open-platform.md) |
+| platform_settings | 平台设置（规划中） | [详细规划](../../backend/src/agent_platform/core_platform/platform_services/platform_settings/README.md) |
 
 每个能力或平台服务规划包含现状、功能优先级、数据归属、接口契约、依赖边界、设计约束、管理台、阶段与验收。模型网关保留详细配置层级设计。platform_settings 按当前范围仅保留配置层级与继承、工单模式与停用两节，不扩展为其他模块的配置中心。
 
-统一契约、共享事务演进及独立交付规则见[模块独立开发与扩展规范](module-development.md)。
+统一契约、共享事务演进及独立交付规则见[模块独立开发与扩展规范](../development/module-development.md)。
 
 ## 协作关系
 
@@ -95,9 +100,8 @@ flowchart TD
 
 先定义端口、数据所有权与假实现，不要求立即拆为微服务。普通 API 调用无需沙箱；未来代码执行应设计独立沙箱边界。Applications 只负责组合，不承载平台或领域实现。
 
-操作说明见[平台使用说明](platform.md)和[Runtime 文档](runtime.md)，已验证范围见[平台验证记录](platform-validation.md)。规划文档不新增可调用接口，也不改变现有数据库。
+操作说明见[平台使用说明](../guides/platform.md)和 [Runtime 文档](runtime.md)。当前实现以代码和各模块 README 第 1 节为准，测试覆盖以 CI 实际运行结果为准；规划文档不新增可调用接口，也不改变现有数据库。
 
+早期模块交付、实施进度和阶段验证记录见[历史文档归档](../archive/README.md)，不代表当前交付或测试状态。
 
-本轮模块增量、配置和验证状态见 [模块实施说明](modules-delivery.md) 与 [实施记录](implementation-progress.md)；旧版验证记录保留作历史记录。
-
-工单目标结构见 [通用工单设计 v1](../backend/src/agent_platform/business_capabilities/customer_service/TICKETING.md)：固定主表、JSONB 业务详情、独立过程记录；直接切换迁移已准备，现有工单读写已接入；类型设计器及自定义字段编辑仍待实现。
+工单目标结构见 [通用工单设计 v1](../../backend/src/agent_platform/business_capabilities/customer_service/TICKETING.md)：固定主表、JSONB 业务详情、独立过程记录；直接切换迁移已准备，现有工单读写已接入；类型设计器及自定义字段编辑仍待实现。

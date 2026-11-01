@@ -14,7 +14,7 @@ uv run python -m agent_platform.applications.seed
 uv run uvicorn agent_platform.applications.customer_service.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`seed` 是可选的示例初始化，创建“示例服务知识库”“示例客服 Agent”和 `sample-support` 会话。重复执行不会覆盖已编辑内容。必须先配置 `AGENT_DATABASE_URL` 并执行迁移；新增迁移为 `0002_platform`，保留已有 Runtime 表和数据。
+`seed` 是可选的示例初始化，创建“示例服务知识库”“示例客服 Agent”和 `sample-support` 会话。重复执行不会覆盖已编辑内容。必须先配置 `AGENT_DATABASE_URL` 并执行迁移；平台业务表自 `0002_platform` 起加入，后续版本必须继续升级到当前 head，不能只执行单个迁移。
 
 另开终端启动前端：
 
@@ -24,7 +24,7 @@ npm ci
 npm run dev
 ```
 
-访问 http://127.0.0.1:5173。默认 `AGENT_MODEL_BACKEND=demo` 可离线演示知识查询和工单流程，回复会明确显示演示模式；它不是通用语言模型。知识检索、工单和人工协作演示无需启动外部工具服务。使用 `lookup_demo` 才需要 [Runtime 文档](runtime.md) 中的 mock_business。
+访问 http://127.0.0.1:5173。默认 `AGENT_MODEL_BACKEND=demo` 可离线演示知识查询和工单流程，回复会明确显示演示模式；它不是通用语言模型。知识检索、工单和人工协作演示无需启动外部工具服务。使用 `lookup_demo` 才需要 [Runtime 文档](../architecture/runtime.md) 中的 mock_business。
 
 真实模型需要在后端设置 `AGENT_MODEL_BACKEND=openai`、`AGENT_MODEL_NAME`、`AGENT_MODEL_API_KEY`，可选 `AGENT_MODEL_BASE_URL`。API 与独立 Worker 必须使用相同运行配置。密钥不传入前端。
 
@@ -33,10 +33,10 @@ npm run dev
 | 模块 | 已实现能力 | 管理台入口 |
 |---|---|---|
 | Agent 配置 | 草稿修订、工具与知识库授权、不可变发布版本、版本回滚 | Agent 管理 |
-| Runtime | 模型—工具循环、异步队列、并发预算、取消、SSE 阶段事件 | 会话工作台 / 运行与审计 |
+| Runtime | 模型—工具循环、异步队列、并发预算、取消、SSE 阶段事件与模型文本增量 | 会话工作台 / 运行与审计 |
 | 模型网关 | 演示模式、OpenAI 适配、超时和 Token 用量 | 访问与策略展示配置 |
-| 知识服务 | 文本/Markdown、文档版本、分块索引、中英文关键词检索、引用 | 知识库 |
-| 工具网关 | 固定 GET API 注册、参数校验、主机白名单、启停和超时 | 工具目录 |
+| 知识服务 | 本地文档解析、文档版本、分块索引、关键词/向量/混合检索、引用 | 知识库 |
+| 工具网关 | 固定 GET/JSON POST API 注册、参数校验、主机白名单、启停和超时 | 工具目录 |
 | 会话管理 | 消息账本、Agent 绑定、自动/等待/人工/关闭状态 | 会话工作台 |
 | 客服业务 | 工单提案、确认/拒绝、幂等创建和工单状态流转 | 会话工作台 / 服务工单 |
 | 人工协同 | 转接、摘要、接管、人工回复、恢复 Agent、关闭 | 人工协同 |
@@ -67,9 +67,9 @@ npm run dev
 | `AGENT_TOOL_ALLOWED_HOSTS` | 可注册工具主机 JSON 数组，例如 `["crm.internal"]` |
 | `AGENT_TOOL_SECRET_*` | 工具请求头引用的服务端凭据 |
 
-三个角色使用不同令牌。开发环境未配置管理员令牌时允许本地管理员访问；共享部署应设置令牌。工作台“访问与策略”填写服务令牌，保存在当前浏览器 sessionStorage 中。admin 管理配置、渠道和评测；operator 操作会话、人工接管与工单；viewer 只读。审计记录当前令牌角色，尚不是个人员工身份审计。
+三个服务令牌角色使用不同令牌。开发环境未配置管理员令牌时允许本地管理员访问；共享部署应设置令牌。工作台“访问与策略”填写服务令牌，保存在当前浏览器 sessionStorage 中。admin 管理配置、渠道和评测；operator 操作会话、人工接管与工单；viewer 只读。员工账号、固定角色和权限码见[用户权限](access-control.md)；服务令牌角色与员工身份是不同的认证入口。
 
-API 注册工具只能使用 `AGENT_TOOL_ALLOWED_HOSTS` 中的固定主机。参数要求 JSON Schema `type=object`、`additionalProperties=false`，GET 参数仅支持标量。`headers_from_env` 只能引用 `AGENT_TOOL_SECRET_` 前缀的环境变量；实际凭据由启动进程环境注入。服务器上的 `AGENT_TOOLS_FILE` 属于受信任运维配置。停用数据库工具会阻止后续实际调用；不会撤回已经发出的 HTTP 请求。
+API 注册工具只能使用 `AGENT_TOOL_ALLOWED_HOSTS` 中的固定主机。参数要求 JSON Schema `type=object`、`additionalProperties=false`；GET 使用标量查询参数，POST 将参数整体作为 JSON 请求体发送，暂不支持 multipart 或表单编码。`headers_from_env` 只能引用 `AGENT_TOOL_SECRET_` 前缀的环境变量；实际凭据由启动进程环境注入。服务器上的 `AGENT_TOOLS_FILE` 属于受信任运维配置。停用数据库工具会阻止后续实际调用；不会撤回已经发出的 HTTP 请求。
 
 工具目录的注册和编辑表单支持“接口鉴权”：选择“密钥鉴权”后默认直接输入密钥，不需要设置工具环境变量。`Authorization` 填写完整的 `Bearer <实际密钥>`，`X-API-Key` 直接填写实际密钥；可以添加多个请求头。已保存密钥不回显，留空保留、输入新值替换，移除请求头或选择“无需鉴权”后保存会清空草稿中的对应配置。修改接口地址或请求头名称时必须重新输入密钥。原环境变量方式保留兼容入口。
 
@@ -133,12 +133,12 @@ npm run test:e2e
 
 可通过 `E2E_CHROME_PATH` 使用已安装 Chrome，通过 `E2E_BASE_URL` 指定测试站点。没有 `TEST_DATABASE_URL` 时 PostgreSQL 测试会跳过。
 
-当前为完整基础流程的 MVP，扩展边界明确如下：
+平台已覆盖基础客服流程及后续身份、知识和渠道能力，仍有以下扩展边界：
 
-- 采用服务令牌角色和部署级租户，未实现员工账号、SSO、细粒度组织授权及渠道客户身份系统。
-- 知识库为 PostgreSQL 关键词检索，支持中英文；尚无向量召回、重排、PDF/OCR、异步大文件管线。
+- 员工账号、固定角色 RBAC、企业 OIDC/SSO 与嵌入聊天已实现；更细粒度的组织授权和渠道客户身份体系仍需按实际场景扩展。
+- 知识库支持本地文档解析、异步索引、关键词及向量/混合检索；真实 OCR、旧格式转换和大文件流式解析等边界见[知识库工作台](knowledge-workspace.md)。
 - 工单写入本地 PostgreSQL；外部 CRM、订单、退款等写入接口仍需专用适配器。普通 API 调用不需要沙箱，未来开放代码执行再独立设计沙箱。
 - 渠道内置企业微信/微信客服/飞书/钉钉/Slack/Telegram/Discord 原生适配，均具备验签/解密、回调标准化与主动出站投递；Discord 采用应用交互端点（普通消息需 Gateway），其余平台（微信公众号、Teams 等）仍需按需新增适配器。
-- SSE 是阶段事件，不是逐 Token 输出。Worker 失联会把运行标为失败，不支持 LangGraph 节点检查点续跑。
+- SSE 同时提供持久化阶段事件与瞬态模型文本增量；增量不保证重放，最终答案以完成事件为准。Worker 失联会把运行标为失败，不支持 LangGraph 节点检查点续跑。
 - 评测最多 20 个用例、单次总预算 60 秒，当前通过请求执行，进程内限流；尚无分布式评测队列和模型效果基准。
 - 列表采用有限条数，管理台暂无全量搜索/分页、数据保留清理及附件对象存储。耗时与并发仍需针对实际模型和业务 API 压测；本次验证不代表生产容量承诺。
