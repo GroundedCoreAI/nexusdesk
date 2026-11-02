@@ -21,7 +21,7 @@
 - [x] 架构门禁脚本通过。
 - [x] compileall 通过。
 - [x] 前端 typecheck、i18n、build 全部通过。
-- [x] `docs/architecture.md` 和 `docs/module-development.md` 中的旧路径已同步更新。
+- [x] `docs/architecture/overview.md` 和 `docs/development/module-development.md` 中的旧路径已同步更新。
 - [x] 根目录运行文档中的代码路径已切换到新目录；历史需求文档中的旧路径暂作为历史记录保留。
 - [ ] 最终变更清单和遗留问题评审。
 

@@ -133,7 +133,7 @@ NexusDesk 不是单纯的知识问答机器人，不是把所有路径提前固�
 - **工具接入**：内置工具与 HTTP 接入可用；MCP 适配仍在规划中。
 - **快速体验**：使用模拟模型，不连接真实业务系统，不代表真实模型回答质量。
 - **部署形态**：目前仅提供 Docker Compose，暂无 Kubernetes / Helm。
-- **整体状态**：项目仍在持续开发，尚未达到开箱即用的生产可用程度。详见[模块交付说明](docs/modules-delivery.md)。
+- **整体状态**：项目仍在持续开发，尚未达到开箱即用的生产可用程度。当前实现状态见[文档总索引](docs/README.md)及各模块 README 第 1 节。
 
 ## 架构概览
 
@@ -162,21 +162,22 @@ flowchart LR
 | 知识存储 | Milvus、MinIO / S3（按需配置） |
 | 部署 | Docker Compose、Nginx |
 
-使用外部模型服务时，应用服务器无需 GPU。详细依赖见[中间件说明](docs/middleware.md)。
+使用外部模型服务时，应用服务器无需 GPU。详细依赖见[中间件说明](docs/operations/middleware.md)。
 
 ## 文档导航
 
 | 我想要…… | 文档 |
 | --- | --- |
-| 使用客服工作台 | [平台使用说明](docs/platform.md) |
+| 浏览全部文档 | [文档总索引](docs/README.md) |
+| 使用客服工作台 | [平台使用说明](docs/guides/platform.md) |
 | 部署、升级或迁移数据 | [Docker 部署手册](deploy/README.md) |
-| 了解中间件与配置 | [中间件说明](docs/middleware.md) |
-| 启动本地开发环境 | [本地开发](docs/local-development.md) |
-| 了解架构和扩展模块 | [模块架构](docs/architecture.md) |
-| 理解 Agent 执行机制 | [Runtime 文档](docs/runtime.md) |
-| 配置知识库 | [知识库工作台](docs/knowledge-workspace.md) |
+| 了解中间件与配置 | [中间件说明](docs/operations/middleware.md) |
+| 启动本地开发环境 | [本地开发](docs/development/local-development.md) |
+| 了解架构和扩展模块 | [模块架构](docs/architecture/overview.md) |
+| 理解 Agent 执行机制 | [Runtime 文档](docs/architecture/runtime.md) |
+| 配置知识库 | [知识库工作台](docs/guides/knowledge-workspace.md) |
 | 接入模型服务 | [模型网关协议](backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md) |
-| 接入业务应用 | [API 说明](docs/api.md) · [开放平台](docs/open-platform.md) |
+| 接入业务应用 | [API 说明](docs/reference/api.md) · [开放平台](docs/guides/open-platform.md) |
 | 查看版本更新 | [更新日志](CHANGELOG.md) |
 
 ## 开源与后续方向
@@ -190,14 +191,14 @@ NexusDesk 将保持平台内核与扩展契约的开放性，通过真实业务�
 | Platform Roadmap | 建设稳定、可信、可扩展的 Agent 内核，包括执行与任务生命周期、清晰的模块边界和扩展契约、权限、人工确认、审计、可观测性、评估与失败恢复。 |
 | Open-source Application Roadmap | 将 AI 客服做成完整、真实可用的开源参考应用，包括带引用的知识问答、工单与人工接管、业务工具、渠道接入、部署、监控、评估和用户文档。 |
 
-各模块规划见[模块架构](docs/architecture.md)。
+各模块规划见[模块架构](docs/architecture/overview.md)。
 
 ## 参与贡献
 
 欢迎通过问题反馈、文档改进、测试用例和代码贡献参与建设。
 
 - 提交问题请使用 [issue 模板](https://github.com/GroundedCoreAI/nexusdesk/issues/new/choose)，并提供复现步骤、部署方式和脱敏日志。
-- 贡献代码前请阅读[贡献指南](CONTRIBUTING.md)。
+- 贡献代码前请阅读[贡献指南](CONTRIBUTING.zh-CN.md)。
 - 方案讨论欢迎前往 [Discussions](https://github.com/GroundedCoreAI/nexusdesk/discussions)。
 
 请勿在问题报告、截图或代码中包含 API Key、访问令牌及客户隐私数据。

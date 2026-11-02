@@ -1,6 +1,6 @@
 # 数据库迁移说明
 
-当前单一 Alembic 链（共 34 个版本，以 `backend/migrations/versions/` 为准）：0001_runtime → 0002_platform → 0003_model_gateway → 0004_tool_versions → 0005_service_identity → 0006_knowledge_jobs → 0007_vector_index → 0008_ticketing → 0009_ticket_settings → 0010_gateway_governance → 0011_agent_workspace → 0012_agent_deletion → 0013_agent_classification → 0014_agent_locale_codes → 0015_agent_creator → 0016_gateway_credentials → 0017_default_channels → 0018_global_channels → 0019_knowledge_workspace → 0020_knowledge_lifecycle → 0021_tool_credentials → 0022_tool_workspace → 0023_semantic_chunk_cache → 0024_chunk_preview_tasks → 0025_open_platform → 0026_open_integrations → 0027_enterprise_identity → 0028_local_admin → 0029_default_admin → 0030_conversation_summary → 0031_channel_adapters → 0032_channel_inbound_outbox → 0033_channel_delivery_chunks → 0034_channel_access_tokens。
+当前单一 Alembic 链（共 52 个版本，以 `backend/migrations/versions/` 为准）：0001_runtime → 0002_platform → 0003_model_gateway → 0004_tool_versions → 0005_service_identity → 0006_knowledge_jobs → 0007_vector_index → 0008_ticketing → 0009_ticket_settings → 0010_gateway_governance → 0011_agent_workspace → 0012_agent_deletion → 0013_agent_classification → 0014_agent_locale_codes → 0015_agent_creator → 0016_gateway_credentials → 0017_default_channels → 0018_global_channels → 0019_knowledge_workspace → 0020_knowledge_lifecycle → 0021_tool_credentials → 0022_tool_workspace → 0023_semantic_chunk_cache → 0024_chunk_preview_tasks → 0025_open_platform → 0026_open_integrations → 0027_enterprise_identity → 0028_local_admin → 0029_default_admin → 0030_conversation_summary → 0031_channel_adapters → 0032_channel_inbound_outbox → 0033_channel_delivery_chunks → 0034_channel_access_tokens → 0035_memory_customers → 0036_memory_events → 0037_memory_governance → 0038_evaluation_environment → 0039_audit_ip → 0040_access_control → 0041_memory_injection_log → 0042_approval_requests → 0043_plugin_config_versions → 0044_plugin_runtime_state → 0045_tenant_business_scopes → 0046_resource_scope_columns → 0047_runtime_scope_columns → 0048_ticket_approval_scope_columns → 0049_knowledge_memory_scope_columns → 0050_audit_scope_columns → 0051_memory_observability → 0052_memory_tasks_tenant_index。
 
 本文件仅详述部分重点迁移（0008、0009、0011–0013）；其余版本的设计说明见对应迁移文件与各模块 README。
 
@@ -43,7 +43,7 @@ uv run alembic current
 uv run alembic upgrade head
 ```
 
-已有部署使用自己的配置，切勿复制测试数据库地址。本次未升级开发数据库。
+已有部署使用自己的配置，切勿复制测试数据库地址。
 
 ## 回滚
 
@@ -57,7 +57,7 @@ uv run alembic upgrade head
 
 覆盖空库完整升级/回退/再升级、旧数据回填、新表无旧列/兼容触发器、租户外键、JSONB 类型及优先级约束、删除保护和有数据回滚拒绝。常规业务回归使用 TEST_DATABASE_URL。测试数据库与开发数据库隔离。
 
-验证结果：84 项完整后端回归通过，另新增 1 项新工单生命周期测试通过；2 条 Playwright 流程通过，TypeScript/Vite 构建及 Ruff 检查通过。迁移测试覆盖空库和有原始工单数据的升级/回退/再升级。开发数据库未迁移。
+迁移测试覆盖空库和有原始工单数据的升级、回退与再升级；当前测试结果以 CI 实际运行为准，本文不保留历史通过数量作为现状声明。
 
 ## 0011 Agent 工作台
 

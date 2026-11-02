@@ -55,14 +55,15 @@ Webhook、调用日志和 SDK 文档仍属于具体应用，先进入“应用�
 
 ## SSE 语义
 
-当前 Runtime 使用完整模型响应，**不支持模型 token 增量输出**。一期开放真实运行事件流，而非模拟逐字输出：
+Runtime 同时提供持久化运行事件和瞬态 `model.delta` 文本增量。增量用于实时展示，不写入事件日志、不参与断线重放；最终完整回复仍以 `run.completed` 为准：
 
 - `accepted`：包含 run_id/request_id，无事件序号。
+- `model.delta`：包含 run_id、round 和可见文本 text；不暴露 reasoning 或工具调用分片。该事件是瞬态增量，无持久化事件 id，断线后不重放。
 - `run.queued`、`run.started`、`model.started`、`model.completed`、`tool.*` 等进度事件：公开流只返回 run_id，避免泄漏工具参数或内部追踪信息。
 - `run.completed`：包含完整 output 和公开运行状态。
 - `run.failed` / `run.cancelled`：包含最终状态与 error_code。
 - `error`：连接存续期间密钥失效、应用停用或授权撤销后终止流。
-- 每个持久化事件有递增 id，重连使用 `Last-Event-ID` 或 after。SSE 块可能跨多个网络数据块，客户端需缓冲解析。
+- 每个持久化事件有递增 id，重连使用 `Last-Event-ID` 或 after；瞬态 `model.delta` 不适用该游标。SSE 块可能跨多个网络数据块，客户端需缓冲解析。
 - 心跳每约 15 秒一次，代理需关闭缓冲。关闭流不取消运行；取消需显式调用 cancel。
 
 ## 限流、日志及调试

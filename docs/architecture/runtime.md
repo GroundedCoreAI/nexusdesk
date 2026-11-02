@@ -1,10 +1,10 @@
-# 异步客服 Runtime（第一版）
+# 异步客服 Runtime
 
 ## 已实现范围
 
 - LangGraph 编译一次、按 Run 隔离状态：model → tools → model → END。
 - 可注入模型协议，提供明确标记的 DemoModel 和 ChatOpenAI 异步适配器。
-- 服务端固定配置 GET 工具，参数经过 JSON Schema 校验；URL、HTTP 方法和鉴权头不能由模型改写。
+- 服务端固定配置 HTTP 工具，支持 GET 与 JSON POST；参数经过 JSON Schema 校验，URL、HTTP 方法和鉴权头不能由模型改写。
 - 同一轮的独立只读工具并行执行，共享进程内工具并发上限。
 - PostgreSQL 持久化会话摘要式历史、任务队列、运行终态和阶段事件。
 - API 提交后立即返回 202，Worker 异步执行；支持查询、取消、SSE 与断线重放。
@@ -32,11 +32,11 @@ Worker 使用 `FOR UPDATE SKIP LOCKED` 领取任务。不同 Worker 可以同时
 
 取消 queued 任务立即生效；取消 running 任务先记录 cancel_requested，Worker 通常在下一个心跳检测时取消本地 await。无法保证撤销外部服务已接收的请求，也不保证模型提供方停止计费。
 
-事件：run.queued、run.started、model.started、model.completed、tool.started、tool.completed、run.cancel_requested、run.completed、run.failed、run.cancelled。
+持久化事件：run.queued、run.started、model.started、model.completed、tool.started、tool.completed、run.cancel_requested、run.completed、run.failed、run.cancelled。SSE 另外转发瞬态 `model.delta` 文本增量；增量不写入 `runtime_events`，无事件序号，也不保证重放。最终完整回复始终位于 `run.completed.data.output`。
 
-当前 SSE 是**阶段事件流**，最终回复位于 run.completed.data.output；不是逐 Token 输出。普通事件不暴露工具参数、原始结果或密钥。最终回复和会话历史仍属于客户数据，需要配置保留期限与访问控制。
+普通持久化事件不暴露工具参数、原始结果或密钥。内部 SSE 可转发文本与 reasoning 增量；公开 API 只转发可见文本。最终回复和会话历史仍属于客户数据，需要配置保留期限与访问控制。
 
-SSE 从 PostgreSQL 每 0.5 秒读取一次，包含 15 秒心跳，支持 `Last-Event-ID` 或 `after`。终态和最终事件在同一事务提交。高连接量时可将唤醒机制升级为 LISTEN/NOTIFY 或消息总线，数据库事件仍作为重放依据。
+SSE 使用 PostgreSQL LISTEN/NOTIFY 唤醒，并以 15 秒超时轮询和心跳作为通知丢失时的兜底，支持 `Last-Event-ID` 或 `after` 重放持久化事件。终态和最终事件在同一事务提交；瞬态增量不参与该游标。
 
 ## 启动（PowerShell）
 
@@ -81,13 +81,13 @@ Worker 使用与 API 相同的 `.env`。数据库迁移是显式发布步骤，�
 
 环境变量 ORDER_SERVICE_AUTH 保存完整请求头值，例如 Bearer 加业务令牌。配置文件只引用变量名。工具不跟随重定向、不自动重试；非 2xx、非 JSON、超时、过大响应均转成结构化错误供模型观察。网络层 trust_env=false，不隐式使用环境代理。
 
-只注册真正只读的 GET 接口；HTTP 方法本身不能证明接口没有副作用。内部地址由管理员配置白名单式固定端点，不能开放用户自助注册 URL。业务服务仍需依据服务端身份实施对象级权限检查。
+GET 工具只应注册真正只读的接口；HTTP 方法本身不能证明接口没有副作用。JSON POST 已支持，调用记录会标记为 write，但外部写入的通用逐次审批与幂等账本仍需按业务完善。内部地址由管理员配置白名单式固定端点，不能开放用户自助注册 URL。业务服务仍需依据服务端身份实施对象级权限检查。
 
-## 第一版边界
+## 运行边界
 
 - 持久化的是运行与事件，不是 LangGraph 节点检查点；进程崩溃后不承诺从中间节点继续。平台已实现运行之外的待确认工单流程与人工接管；LangGraph 节点级审批暂停恢复仍未实现。
-- 暂未开放 POST/PATCH/DELETE、任意代码和沙箱；写入工具需要先补充授权确认、幂等及结果核查。
-- 当前提供固定部署租户和可选 Bearer 服务令牌。生产模式强制令牌，但它不等于完整用户认证与多租户 RBAC；接入业务前应从可信认证层派生租户与用户身份。
+- 暂未开放 PATCH/DELETE、任意代码和沙箱；POST 写入工具需要按业务补充授权确认、幂等及结果核查。
+- Runtime 提供可选 Bearer 服务令牌，生产模式强制令牌。员工账号、固定角色 RBAC 与企业 SSO 由平台其他模块提供，见[用户权限](../guides/access-control.md)和[企业身份与嵌入聊天](../guides/open-platform-identity.md)；接入业务时仍应从可信认证层派生租户与用户身份。
 - 模型轮数、输出 Token 上限和时间预算已实现；提供方 RPM/TPM、费用预算及自适应限流尚未实现。
 - 最近 N 轮只保存用户消息与最终回复，不保留完整工具结果作为后续上下文；原始运行步骤仅在本轮内存中存在。
 - 持久记录需要后续添加清理策略、加密和运营审计。当前未实现幂等提交键，网络重试可能在前一运行完成后重复提交。

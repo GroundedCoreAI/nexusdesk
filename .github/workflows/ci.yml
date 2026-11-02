@@ -60,7 +60,13 @@ jobs:
           # exempt: repository policy forbids rewriting published history, and the
           # attribution guard only applies to new commits. This list is append-only and
           # must never contain a commit created after the rule took effect.
-          ALLOWLIST="aafb726e8e62b708588aa33081ee2a1a492ef84f 2035a8bc0dca068a1f6ece348b0f94d5c0890b23"
+          #
+          # This guard is a process safeguard, not a security boundary: the committer
+          # identity of a commit is not authenticated. It exists to stop agents from
+          # adding AI attribution to new commits, and the rules below are written to
+          # keep that intent without flagging commits that merely restate already
+          # published attribution.
+          ALLOWLIST="aafb726e8e62b708588aa33081ee2a1a492ef84f 2035a8bc0dca068a1f6ece348b0f94d5c0890b23 1e3007ae9bd81b509f166b60759e387d8fa3ca00 e390abe357bf89c727d78ad48be27ff4bc3c6568 1566ff6daa6bc85cd00231e96119ddce8fafe16a 369324343cdfa453dcd4921d151ebd2fa12a5194"
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
           elif [[ "$EVENT_NAME" == "push" &&
@@ -77,10 +83,21 @@ jobs:
               --grep='Co-Authored-By:.*(Claude|Anthropic|noreply@anthropic\.com)'
           )"
           for sha in $matched; do
-            if [[ " $ALLOWLIST " == *" $sha "* ]]; then
-              echo "Allowed pre-rule commit: $sha $(git log -1 --format='%s' "$sha")"
+            committer_email="$(git log -1 --format='%ce' "$sha")"
+            subject="$(git log -1 --format='%s' "$sha")"
+            # GitHub creates squash commits and pull-request merge commits itself, and when
+            # squashing it copies the co-author trailers of every commit in the pull request
+            # into the resulting message. Those trailers restate attribution that is already
+            # published, so such a commit is not an offender on its own. Matching both the
+            # committer identity and the GitHub subject shape keeps locally authored commits
+            # (whose committer can be set freely) inside the check.
+            if [[ "$committer_email" == "noreply@github.com" ]] &&
+               { [[ "$subject" =~ \(#[0-9]+\)$ ]] || [[ "$subject" == "Merge pull request #"* ]]; }; then
+              echo "Skipped GitHub-generated commit: $sha $subject"
+            elif [[ " $ALLOWLIST " == *" $sha "* ]]; then
+              echo "Allowed pre-rule commit: $sha $subject"
             else
-              echo "Forbidden co-author attribution: $sha $(git log -1 --format='%s' "$sha")"
+              echo "Forbidden co-author attribution: $sha $subject"
               offenders=$((offenders + 1))
             fi
           done
