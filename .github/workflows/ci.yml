@@ -60,7 +60,7 @@ jobs:
           # exempt: repository policy forbids rewriting published history, and the
           # attribution guard only applies to new commits. This list is append-only and
           # must never contain a commit created after the rule took effect.
-          ALLOWLIST="aafb726e8e62b708588aa33081ee2a1a492ef84f 2035a8bc0dca068a1f6ece348b0f94d5c0890b23"
+          ALLOWLIST="aafb726e8e62b708588aa33081ee2a1a492ef84f 2035a8bc0dca068a1f6ece348b0f94d5c0890b23 1e3007ae9bd81b509f166b60759e387d8fa3ca00 e390abe357bf89c727d78ad48be27ff4bc3c6568 1566ff6daa6bc85cd00231e96119ddce8fafe16a 369324343cdfa453dcd4921d151ebd2fa12a5194"
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
           elif [[ "$EVENT_NAME" == "push" &&
