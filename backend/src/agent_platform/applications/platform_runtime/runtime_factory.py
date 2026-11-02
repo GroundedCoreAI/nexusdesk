@@ -12,6 +12,7 @@ from agent_platform.core_platform.platform_services.integrations.business_tools.
 )
 from agent_platform.core_platform.platform_services.model_gateway.gateway import GatewayChatModel
 from agent_platform.core_platform.platform_services.model_gateway.service import build_model
+from agent_platform.core_platform.tool_gateway.egress import ToolEgressPolicy
 from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGateway
 from agent_platform.extension_contracts import RuntimeBindings
 
@@ -19,12 +20,13 @@ from agent_platform.extension_contracts import RuntimeBindings
 class RuntimeFactory:
     """Build one Runtime instance from a run snapshot and explicit bindings."""
 
-    def __init__(self, base_runtime, bindings, client, settings, shared_limit):
+    def __init__(self, base_runtime, bindings, client, settings, shared_limit, network_policy=None):
         if not isinstance(bindings, RuntimeBindings):
             raise TypeError("RuntimeFactory requires RuntimeBindings")
         self.base_runtime, self.client, self.settings = base_runtime, client, settings
         self.bindings = bindings
         self.limit = shared_limit
+        self.network_policy: ToolEgressPolicy | None = network_policy
         self.models = OrderedDict()
 
     @property
@@ -81,6 +83,7 @@ class RuntimeFactory:
             credential_resolver=lambda spec: self.bindings.tools.credential_headers(
                 row["tenant_id"], spec
             ),
+            network_policy=self.network_policy,
         )
         http.limit = self.limit
         tools = PlatformTools(

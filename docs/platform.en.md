@@ -13,3 +13,11 @@ uv run uvicorn agent_platform.applications.customer_service.main:app --reload --
 ```
 
 The seed command is optional and idempotent. Preserve existing `.env` settings.
+
+Tool egress policy: `AGENT_TOOL_ALLOWED_HOSTS` remains the hostname allowlist.
+Each call resolves and validates every IPv4/IPv6 result, rejects loopback,
+private, link-local, multicast, reserved, and unspecified destinations, and pins
+the validated address for the TCP connection. Explicitly allowlisted loopback
+names remain available for local development. Set
+`AGENT_TOOL_ALLOW_PRIVATE_NETWORKS=true` only for explicitly allowlisted
+internal development services.
