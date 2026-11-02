@@ -38,3 +38,9 @@ work/
 
 # Agent skills bundled helper scripts are source, not artifacts
 !.agents/skills/**/scripts/
+
+# Local dev-server logs and pytest scratch directories
+.uvicorn*.log
+.vite*.log
+pytest-of-*/
+frontend/.tmp/

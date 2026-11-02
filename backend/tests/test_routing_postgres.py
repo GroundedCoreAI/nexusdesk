@@ -241,6 +241,9 @@ async def test_routing_decision_list_and_summary(platform):
 
 async def test_closed_channel_message_is_processed_without_retry(platform):
     client, services, _settings = platform
+    customer = services.groups.business.customer
+    assert services.groups.business.channels.customer is customer
+    assert customer.routing_settings.trace_enabled is True
     agent, _ = await create_agent(client)
     channel = (
         await client.post(
@@ -349,8 +352,22 @@ async def test_closed_channel_message_is_processed_without_retry(platform):
 
     decisions = await _rows(
         engine,
-        "SELECT disposition,reason_code FROM routing_decisions"
-        " WHERE conversation_id=:id AND disposition='reject'",
+        "SELECT disposition,execution_tier,action,reason_code,matched_rule_id,decider,"
+        "message_length,request_id FROM routing_decisions"
+        " WHERE conversation_id=:id ORDER BY created_at,id",
         id=conversation_id,
     )
-    assert decisions == [{"disposition": "reject", "reason_code": "conversation_closed"}]
+    assert len(decisions) == 2
+    by_disposition = {row["disposition"]: row for row in decisions}
+    assert set(by_disposition) == {"continue", "reject"}
+    assert by_disposition["continue"]["reason_code"] == "default_agent"
+    assert by_disposition["continue"]["execution_tier"] == "agent"
+
+    reject = by_disposition["reject"]
+    assert reject["action"] == "reject"
+    assert reject["reason_code"] == "conversation_closed"
+    assert reject["execution_tier"] is None
+    assert reject["matched_rule_id"] is None
+    assert reject["decider"] == "cs_routing_v1"
+    assert reject["message_length"] == len("closed session")
+    assert reject["request_id"] is not None

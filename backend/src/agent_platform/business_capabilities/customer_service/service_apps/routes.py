@@ -95,6 +95,15 @@ async def get_application(key: str, request: Request, user: Reader):
     )
 
 
+@router.get("/{key}/readiness")
+async def application_readiness(key: str, request: Request, user: Reader):
+    return await _applications(request).readiness(
+        user.tenant,
+        key,
+        scope=request.state.business_scope,
+    )
+
+
 @router.put("/{key}")
 async def update_application(
     key: str,

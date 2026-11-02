@@ -30,6 +30,12 @@ from .models import (
     ServiceApplicationConfig,
     ServiceCatalogUpdateRequest,
 )
+from .readiness import (
+    ApplicationReadinessResult,
+    ReadinessState,
+    ScenarioReadinessSnapshot,
+    evaluate_application_readiness,
+)
 
 MAX_TRACE_LIMIT = 200
 
@@ -552,6 +558,140 @@ WHERE s.tenant_id=:tenant AND {scope_sql}
             raise DomainError("service_application_scenario_version_not_found", 404)
         return row
 
+    async def _scenario_readiness_snapshot(
+        self,
+        connection: Any,
+        tenant: str,
+        scope: BusinessScope,
+        reference: ApplicationScenarioReference,
+    ) -> ScenarioReadinessSnapshot:
+        """Read the exact scenario snapshots used by an application release."""
+
+        scope_sql, scope_params = scope_predicate(scope, alias="s")
+        row = await one(
+            connection,
+            f"""
+SELECT s.id,s.scenario_key,s.name,s.status,s.published_version,s.draft,
+       vpub.config AS published_config,
+       vref.config AS version_config
+FROM service_scenarios s
+LEFT JOIN service_scenario_versions vpub
+  ON vpub.tenant_id=s.tenant_id
+ AND vpub.business_id=s.business_id
+ AND vpub.workspace_id=s.workspace_id
+ AND vpub.scenario_id=s.id
+ AND vpub.version=s.published_version
+LEFT JOIN service_scenario_versions vref
+  ON vref.tenant_id=s.tenant_id
+ AND vref.business_id=s.business_id
+ AND vref.workspace_id=s.workspace_id
+ AND vref.scenario_id=s.id
+ AND vref.version=COALESCE(CAST(:version AS integer),s.published_version)
+WHERE s.tenant_id=:tenant AND {scope_sql}
+  AND s.scenario_key=:key AND NOT s.archived
+""",
+            tenant=tenant,
+            key=reference.key,
+            version=reference.version,
+            **scope_params,
+        )
+        if row is None:
+            return ScenarioReadinessSnapshot(
+                reference=reference,
+                found=False,
+            )
+
+        version_config = row.get("version_config")
+        draft = row.get("draft")
+        published_config = row.get("published_config")
+        effective_version = (
+            reference.version
+            if reference.version is not None
+            else row.get("published_version")
+        )
+        effective_config: ScenarioConfig | None = None
+        if version_config is not None:
+            effective_config = ScenarioConfig.model_validate(version_config)
+        elif draft is not None:
+            # Draft details remain useful for explaining what must be fixed,
+            # but publication is still blocked because no release exists.
+            effective_config = ScenarioConfig.model_validate(draft)
+        return ScenarioReadinessSnapshot(
+            reference=reference,
+            name=row["name"],
+            scenario_status=row["status"],
+            published_version=row.get("published_version"),
+            effective_version=effective_version,
+            version_available=version_config is not None,
+            effective_config=effective_config,
+            has_unpublished_changes=(
+                row.get("published_version") is None
+                or published_config is None
+                or draft != published_config
+            ),
+            found=True,
+        )
+
+    async def _readiness_result(
+        self,
+        connection: Any,
+        tenant: str,
+        scope: BusinessScope,
+        current: dict[str, Any],
+    ) -> ApplicationReadinessResult:
+        config = self._row_config(current)
+        snapshots = [
+            await self._scenario_readiness_snapshot(
+                connection,
+                tenant,
+                scope,
+                reference,
+            )
+            for reference in config.scenarios
+        ]
+        return evaluate_application_readiness(
+            application_key=current["application_key"],
+            application_name=config.name,
+            revision=current["draft_revision"],
+            application_status=current["status"],
+            application=config,
+            scenarios=snapshots,
+        )
+
+    async def readiness(
+        self,
+        tenant: str,
+        key: str,
+        *,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, Any]:
+        """Return the application-level and per-scenario publish gate."""
+
+        resolved = persisted_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, alias="a")
+        async with self.engine.connect() as connection:
+            current = required(
+                await one(
+                    connection,
+                    f"""
+SELECT a.* FROM service_applications a
+WHERE a.tenant_id=:tenant AND {scope_sql} AND a.application_key=:key
+  AND NOT a.archived
+""",
+                    tenant=tenant,
+                    key=key,
+                    **scope_params,
+                ),
+                "service_application_not_found",
+            )
+            result = await self._readiness_result(
+                connection,
+                tenant,
+                resolved,
+                current,
+            )
+        return result.model_dump(mode="json", by_alias=True)
+
     async def _resolve_agent(
         self,
         connection: Any,
@@ -667,6 +807,19 @@ FOR UPDATE
             )
             if current["draft_revision"] != revision:
                 raise DomainError("service_application_revision_conflict", 409)
+            readiness = await self._readiness_result(
+                connection,
+                tenant,
+                resolved,
+                current,
+            )
+            if readiness.status == ReadinessState.BLOCKED:
+                raise DomainError("service_application_readiness_blocked", 409)
+            if readiness.status == ReadinessState.SIMULATE_ONLY:
+                raise DomainError(
+                    "service_application_readiness_simulate_only",
+                    409,
+                )
             config = await self._resolve_for_publish(
                 connection,
                 tenant,

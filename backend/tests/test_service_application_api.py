@@ -55,6 +55,10 @@ class FakeApplicationService:
         self._record("get", tenant=tenant, key=key, scope=scope)
         return {"key": key}
 
+    async def readiness(self, tenant: str, key: str, *, scope: BusinessScope):
+        self._record("readiness", tenant=tenant, key=key, scope=scope)
+        return {"key": key, "status": "ready", "scenarios": []}
+
     async def create(self, tenant: str, actor: str, key: str, body: Any, *, scope):
         self._record("create", tenant=tenant, actor=actor, key=key, body=body, scope=scope)
         return {"key": key, "revision": 1}
@@ -157,10 +161,12 @@ def test_list_overview_and_get_forward_scope_filters_and_key():
         listed = client.get("/api/v1/service-apps", params={"status": "review", "q": "消费"})
         overview = client.get("/api/v1/service-apps/overview")
         detail = client.get("/api/v1/service-apps/consumer-service")
+        readiness = client.get("/api/v1/service-apps/consumer-service/readiness")
 
     assert listed.status_code == 200
     assert overview.status_code == 200
     assert detail.status_code == 200
+    assert readiness.status_code == 200
     assert applications.calls["list"][0] == {
         "tenant": TENANT,
         "status": "review",
@@ -170,6 +176,11 @@ def test_list_overview_and_get_forward_scope_filters_and_key():
     assert applications.calls["overview"][0]["scope"] == SCOPE
     assert applications.calls["get"][0]["key"] == "consumer-service"
     assert "overview" not in applications.calls.get("get", [{}])[0]
+    assert applications.calls["readiness"][0] == {
+        "tenant": TENANT,
+        "key": "consumer-service",
+        "scope": SCOPE,
+    }
 
 
 def test_write_routes_require_admin_and_forward_revisions():
