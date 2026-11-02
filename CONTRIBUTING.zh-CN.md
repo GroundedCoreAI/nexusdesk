@@ -34,23 +34,23 @@
 
 | 分支 | 用途 | PR 目标 |
 |---|---|---|
-| `integration` | 日常开发集成 | **功能、修复、重构、文档改动都提到这里** |
-| `main` | 正式发布线 | 只接收 `release/*` 与维护者发起的 hotfix |
+| `integration` | 日常开发集成 —— **仓库默认分支** | **功能、修复、重构、文档改动都提到这里** |
+| `main` | 正式发布线（上次发版的快照） | 只接收来自 `integration` 的合并，以及维护者的 `release/*`、`hotfix/*` 分支 |
 
-仓库的**默认分支是 `main`**（clone、浏览代码、Fork 默认都落在它上面），但 `main` 是发布快照，**开发必须从 `integration` 切出**：
+仓库的**默认分支是 `integration`**：clone、浏览代码、Fork 和新建 PR 都默认落在它上面。从这个分支切出你的工作分支：
 
 ```bash
 git fetch origin
 git switch -c fix/your-change origin/integration
 ```
 
-如果已经基于 `main` 开了分支，提交 PR 前先迁移过来：
+功能与修复 PR **不要提到 `main`** —— 它是发布线，不直接接收开发改动。如果已经基于 `main` 开了分支，提交 PR 前先迁移过来：
 
 ```bash
 git rebase --onto origin/integration origin/main your-branch
 ```
 
-原因是 `integration` 上的文档结构和模块路径比 `main` 新。基于 `main` 的分支合进 `integration` 时，会产生大量与本次改动无关的冲突，review 也会被这些噪音淹没。拿不准就直接开 PR，我们会帮你调整。
+`main` 不适合作为起点的原因：它是发布快照，而 `integration` 上是最新的文档结构和模块路径。基于 `main` 的分支合进 `integration` 时，会产生大量与本次改动无关的冲突，review 也会被这些噪音淹没。拿不准就直接开 PR，我们会帮你调整。
 
 ## 贡献代码
 

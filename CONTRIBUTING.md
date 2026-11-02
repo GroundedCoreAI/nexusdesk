@@ -32,23 +32,23 @@ We are collecting real-world customer-service scenarios to decide which capabili
 
 | Branch | Purpose | PR target |
 |---|---|---|
-| `integration` | Day-to-day development integration | **Functionality, fixes, refactors and documentation all go here** |
-| `main` | Release line | Only `release/*` and maintainer-initiated hotfixes |
+| `integration` | Day-to-day development — **the default branch** | **Functionality, fixes, refactors and documentation all go here** |
+| `main` | Release line (what the last release was cut from) | Only merges from `integration`, plus maintainer `release/*` and `hotfix/*` branches |
 
-The repository's **default branch is `main`** (clone, code browsing and forks land on it by default), but `main` is a release snapshot — **development must branch off `integration`**:
+The repository's **default branch is `integration`**: clones, code browsing, forks and new pull requests all land on it. Branch off it:
 
 ```bash
 git fetch origin
 git switch -c fix/your-change origin/integration
 ```
 
-If you already opened a branch from `main`, move it over before submitting a PR:
+Do not target `main` with a feature or fix pull request — it is the release line and does not receive development directly. If you already opened a branch from `main`, move it over before submitting:
 
 ```bash
 git rebase --onto origin/integration origin/main your-branch
 ```
 
-The reason: the documentation structure and module paths on `integration` are newer than on `main`. A branch cut from `main` produces a large number of conflicts unrelated to your change when merged into `integration`, and the review gets buried in that noise. If you are unsure, just open the PR and we will help you adjust it.
+The reason `main` is not a starting point: it is a release snapshot, while `integration` carries the current documentation structure and module paths. A branch cut from `main` produces a large number of conflicts unrelated to your change when merged into `integration`, and the review gets buried in that noise. If you are unsure, just open the PR and we will help you adjust it.
 
 ## Contributing code
 
