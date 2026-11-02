@@ -269,7 +269,12 @@ async def test(tid: UUID, body: TestInput, request: Request, user: Admin):
         )
         return await w.registry.credential_headers(user.tenant, source)
 
-    gateway = ToolGateway(w.client, [spec], credential_resolver=credentials)
+    gateway = ToolGateway(
+        w.client,
+        [spec],
+        credential_resolver=credentials,
+        network_policy=w.network_policy,
+    )
     # Share the same process limit across all workbench tests.
     gateway.limit = w.test_limit
     return {

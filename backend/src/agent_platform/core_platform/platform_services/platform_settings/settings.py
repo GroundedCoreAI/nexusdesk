@@ -18,7 +18,11 @@ class Settings(BaseSettings):
     api_token: SecretStr | None = None
     operator_api_token: SecretStr | None = None
     viewer_api_token: SecretStr | None = None
-    tool_allowed_hosts: list[str] = ["127.0.0.1", "localhost"]
+    tool_allowed_hosts: list[str] = ["127.0.0.1", "localhost", "::1"]
+    # Private and link-local tool destinations remain blocked unless an operator
+    # explicitly enables them for an allowlisted hostname. Loopback names remain
+    # available for local development.
+    tool_allow_private_networks: bool = False
     tenant_id: str = "local"
     embedded_worker: bool = True
     # Channel inbound/outbound loops default to following ``embedded_worker``:
