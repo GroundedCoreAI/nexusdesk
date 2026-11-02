@@ -23,6 +23,15 @@
 
 涉及安全漏洞请**不要**开公开 issue，按 [SECURITY.md](SECURITY.md) 的方式私下报告。
 
+## 分享使用场景
+
+我们在收集真实环境中的智能客服应用场景，用来决定平台下一步抽象哪些能力。
+如果你正在用（或者试用过、放弃过）客服 agent，欢迎到
+[使用场景征集](https://github.com/GroundedCoreAI/nexusdesk/discussions/93) 按模板分享一段。
+
+**不需要使用 NexusDesk**，也不需要把字段填满——一个具体段落比空白表单有用得多。
+这是产品调研：具体的缺陷与功能需求仍请走上面的 issue 模板。
+
 ## 贡献代码
 
 1. **开发前先阅读** [本地开发](docs/development/local-development.md) 与 [模块开发规范](docs/development/module-development.md)。
