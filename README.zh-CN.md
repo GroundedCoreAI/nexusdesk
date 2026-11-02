@@ -198,7 +198,7 @@ NexusDesk 将保持平台内核与扩展契约的开放性，通过真实业务�
 欢迎通过问题反馈、文档改进、测试用例和代码贡献参与建设。
 
 - 提交问题请使用 [issue 模板](https://github.com/GroundedCoreAI/nexusdesk/issues/new/choose)，并提供复现步骤、部署方式和脱敏日志。
-- 贡献代码前请阅读[贡献指南](CONTRIBUTING.md)。
+- 贡献代码前请阅读[贡献指南](CONTRIBUTING.zh-CN.md)。
 - 方案讨论欢迎前往 [Discussions](https://github.com/GroundedCoreAI/nexusdesk/discussions)。
 
 请勿在问题报告、截图或代码中包含 API Key、访问令牌及客户隐私数据。
