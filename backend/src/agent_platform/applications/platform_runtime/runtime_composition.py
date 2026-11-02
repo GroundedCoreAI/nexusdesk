@@ -49,6 +49,10 @@ from agent_platform.core_platform.platform_services.platform_settings.settings i
 from agent_platform.core_platform.platform_services.tenant_isolation.service import (
     TenantScopeService,
 )
+from agent_platform.core_platform.tool_gateway.egress import (
+    ToolEgressPolicy,
+    ToolEgressTransport,
+)
 from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGateway
 from agent_platform.extension_contracts import EventPublisher, IdentityBindings
 
@@ -145,10 +149,17 @@ async def runtime_services(
     implementation_registry = CapabilityImplementationRegistry()
     extension_discovery: tuple[PluginDiscoveryResult, ...] = ()
     extensions_started = False
+    tool_policy = ToolEgressPolicy.from_settings(settings)
     try:
         async with (
             httpx.AsyncClient(
-                trust_env=False, limits=httpx.Limits(max_connections=settings.tool_concurrency)
+                transport=ToolEgressTransport(
+                    tool_policy,
+                    trust_env=False,
+                    limits=httpx.Limits(max_connections=settings.tool_concurrency),
+                ),
+                trust_env=False,
+                limits=httpx.Limits(max_connections=settings.tool_concurrency),
             ) as client,
             httpx.AsyncClient(
                 trust_env=False,
@@ -157,7 +168,12 @@ async def runtime_services(
                 limits=httpx.Limits(max_connections=settings.model_gateway_concurrency * 6),
             ) as model_client,
         ):
-            tools = ToolGateway(client, specs, settings.tool_concurrency)
+            tools = ToolGateway(
+                client,
+                specs,
+                settings.tool_concurrency,
+                network_policy=tool_policy,
+            )
             model = build_model(settings, tools.schemas)
             runtime = RuntimeEngine(model, tools, settings)
             repository = RunRepository(engine, BusinessRuntimePersistenceHooks())
@@ -169,6 +185,8 @@ async def runtime_services(
                 specs,
                 model_client,
                 contributions,
+                tool_client=client,
+                tool_network_policy=tool_policy,
             )
             platform.extensions = extensions
             platform.ui_extensions = ui_extensions
@@ -258,7 +276,7 @@ async def runtime_services(
             platform.channels.bind_listener(listener)
             groups = build_service_groups(platform)
             bindings = build_runtime_bindings(groups)
-            factory = RuntimeFactory(runtime, bindings, client, settings, tools.limit)
+            factory = RuntimeFactory(runtime, bindings, client, settings, tools.limit, tool_policy)
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             groups.application.evaluation = platform.evaluation
             identity = IdentityBindings(

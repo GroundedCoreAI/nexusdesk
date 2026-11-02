@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+from contextlib import nullcontext
 from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -12,6 +13,8 @@ from jsonschema.exceptions import SchemaError
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from agent_platform.core_platform.platform_services.persistence.store import DomainError
+
+from .egress import PinnedDestination, ToolEgressError, ToolEgressPolicy
 
 
 class HttpTool(BaseModel):
@@ -143,6 +146,7 @@ class ToolGateway:
         specs: list[HttpTool],
         concurrency=8,
         credential_resolver=None,
+        network_policy: ToolEgressPolicy | None = None,
     ):
         self.client = client
         self.specs = {tool.name: tool for tool in specs}
@@ -150,6 +154,7 @@ class ToolGateway:
             raise ValueError("Duplicate tool names")
         self.limit = asyncio.Semaphore(concurrency)
         self.credential_resolver = credential_resolver
+        self.network_policy = network_policy
 
     @property
     def schemas(self):
@@ -166,6 +171,12 @@ class ToolGateway:
             and len(json.dumps(arguments, ensure_ascii=False).encode()) > 100_000
         ):
             return {"ok": False, "error": "request_too_large"}
+        destination: PinnedDestination | None = None
+        if self.network_policy is not None:
+            try:
+                destination = await self.network_policy.validate(tool.url)
+            except ToolEgressError as exc:
+                return {"ok": False, "error": exc.code}
         headers = dict(tool.headers)
         if tool.credential_id:
             if self.credential_resolver is None:
@@ -179,39 +190,51 @@ class ToolGateway:
             if not value:
                 return {"ok": False, "error": "tool_credential_unavailable"}
             headers[header] = value
+        if self.network_policy is not None and destination is not None:
+            try:
+                destination = await self.network_policy.validate(tool.url, previous=destination)
+            except ToolEgressError as exc:
+                return {"ok": False, "error": exc.code}
         try:
             # No automatic retries and no redirect following. URL and headers are server-owned.
-            async with asyncio.timeout(tool.timeout_seconds), self.limit:  # noqa: SIM117
-                async with self.client.stream(
-                    tool.method,
-                    tool.url,
-                    **({"json": arguments} if tool.method == "POST" else {"params": arguments}),
-                    headers=headers,
-                    follow_redirects=False,
-                    timeout=tool.timeout_seconds,
-                ) as response:
-                    if not 200 <= response.status_code < 300:
-                        return {
-                            "ok": False,
-                            "error": "upstream_http_error",
-                            "status_code": response.status_code,
-                        }
-                    if response.status_code in {204, 205}:
-                        return {"ok": True, "data": None}
-                    body = bytearray()
-                    async for chunk in response.aiter_bytes(chunk_size=8192):
-                        body.extend(chunk)
-                        if len(body) > tool.max_response_bytes:
-                            return {"ok": False, "error": "response_too_large"}
-                    try:
-                        data = json.loads(body)
-                        if tool.response_schema is not None and not Draft202012Validator(
-                            tool.response_schema
-                        ).is_valid(data):
-                            return {"ok": False, "error": "invalid_output_schema"}
-                        return {"ok": True, "data": data}
-                    except (ValueError, UnicodeDecodeError):
-                        return {"ok": False, "error": "invalid_json_response"}
+            async with asyncio.timeout(tool.timeout_seconds), self.limit:
+                pin = (
+                    self.network_policy.pin(destination)
+                    if self.network_policy is not None and destination is not None
+                    else nullcontext()
+                )
+                with pin:
+                    stream = self.client.stream(
+                        tool.method,
+                        tool.url,
+                        **({"json": arguments} if tool.method == "POST" else {"params": arguments}),
+                        headers=headers,
+                        follow_redirects=False,
+                        timeout=tool.timeout_seconds,
+                    )
+                    async with stream as response:
+                        if not 200 <= response.status_code < 300:
+                            return {
+                                "ok": False,
+                                "error": "upstream_http_error",
+                                "status_code": response.status_code,
+                            }
+                        if response.status_code in {204, 205}:
+                            return {"ok": True, "data": None}
+                        body = bytearray()
+                        async for chunk in response.aiter_bytes(chunk_size=8192):
+                            body.extend(chunk)
+                            if len(body) > tool.max_response_bytes:
+                                return {"ok": False, "error": "response_too_large"}
+                        try:
+                            data = json.loads(body)
+                            if tool.response_schema is not None and not Draft202012Validator(
+                                tool.response_schema
+                            ).is_valid(data):
+                                return {"ok": False, "error": "invalid_output_schema"}
+                            return {"ok": True, "data": data}
+                        except (ValueError, UnicodeDecodeError):
+                            return {"ok": False, "error": "invalid_json_response"}
         except (TimeoutError, httpx.TimeoutException):
             return {"ok": False, "error": "tool_timeout"}
         except httpx.HTTPError:
