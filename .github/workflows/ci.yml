@@ -37,6 +37,31 @@ permissions:
 #   Backend tests (postgres 2/2)
 #   Frontend (i18n + typecheck + build)
 jobs:
+  # `main` is the release line: changes reach it by merging `integration`, or from a
+  # maintainer `release/*` / `hotfix/*` branch. Anything else is either a mistake or a
+  # contributor who based a branch on the default branch, so reject it here with an
+  # actionable message. This job is registered as a required status check on `main`
+  # (ruleset "Protect main"), which is what actually blocks the merge.
+  main-entry-guard:
+    name: Guard main entry branch
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require integration, release/* or hotfix/* as head branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          case "$HEAD_REF" in
+            integration|release/*|hotfix/*)
+              echo "Allowed head branch: $HEAD_REF"
+              ;;
+            *)
+              echo "::error title=Wrong target branch::'main' only accepts pull requests from 'integration', 'release/*' or 'hotfix/*'. This pull request comes from '$HEAD_REF'. Development branches off 'integration' and targets it — see CONTRIBUTING.md (Which branch to develop from)."
+              exit 1
+              ;;
+          esac
+
   backend-lint:
     name: Backend lint (ruff + architecture)
     runs-on: ubuntu-latest
