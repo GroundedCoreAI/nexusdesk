@@ -4,6 +4,52 @@
 
 Versions map to `v`-prefixed Git tags and follow [Semantic Versioning](https://semver.org/). During `0.x`, releases follow feature batches: `x` is the batch and `y` is a fix.
 
+## v0.3.0 — 2026-11-01
+
+Third feature batch: the plugin platform architecture V2 refactor (four root directories, runtime namespace, business scope isolation, and architecture gates), agent memory system phase 7 (observability and alerting), and moving the full test suite and architecture gates into CI.
+
+### Added
+
+**Plugin platform architecture V2**
+
+- The backend is consolidated into four root directories: `core_platform/` (platform capabilities), `business_capabilities/` (business capabilities), `applications/` (business application assembly), and `extension_contracts/` (plugin contracts); the previous `apps/`, `modules/`, `platform/`, and `integrations/` directories are gone.
+- The application entry point moved to `agent_platform.applications.customer_service.main:app`; the Dockerfile, `deploy/`, and documentation were updated in step.
+- Business resource scope isolation is in place: tenant / business / resource scope columns were added across resources, conversations, tickets, approvals, knowledge, memory, and audit data (migrations 0042–0050).
+- New tables for plugin configuration versions and plugin runtime state (migrations 0043–0044) provide a configuration baseline and runtime state for plugin extensions.
+- Added the architecture gate `scripts/check_architecture.py`: it verifies the four root directories exist, legacy directories are gone, and Core does not depend on business or application code; CI enforces it.
+- Memory injection now goes through a port, closing the Core boundary so platform capabilities no longer depend on business modules.
+
+**Agent memory system phase 7 (observability and alerting)**
+
+- Memory observability: task duration columns, maintenance completion audits, and retrieval-mode events; new `memory_summary` health sections and alert list API (migrations 0051–0052).
+- Added a memory alert rule engine and a periodic worker alert scan; the console observability page gained grouped memory metric cards and an alert list.
+- Observability and alert aggregation now have tenant indexes, activity probing is split into a dedicated EXISTS, and performance and execution-plan tests pass on ten-thousand-item datasets.
+- The quickstart now seeds observability and alert demo data.
+
+**Engineering and process**
+
+- New requirement-lifecycle documentation skill: business goals, requirements, technical design, test plan, acceptance plan, and test/acceptance reports.
+- Dependency updates: langgraph 1.2.14 and langgraph-sdk 0.4.6.
+- Added phase 7 test and acceptance reports (bilingual) and synchronized the post-refactor startup, worker, and directory-migration docs.
+
+### Changed
+
+- The full test suite moved to CI: backend unit and postgres groups run in parallel (pytest-split), and local pre-commit checks stay fast.
+- The AI PR review pipeline was adjusted: automatic triggering and the policy check run are paused and related configuration is cleaned up.
+- Commit standard: any automatically appended Claude/Anthropic co-author attribution is rejected.
+
+### Known limitations
+
+- The plugin platform directory refactor is a breaking internal change: custom scripts, images, or deployment configs that reference the old module paths must be updated.
+- Demo mode still uses a simulated model and **does not represent real answer quality**; it is not connected to real order systems and offers no real OCR or GPU inference.
+- The production topology does not terminate TLS itself; a host or ingress proxy must do it.
+- Real Parser / Milvus / S3 integration is not complete yet; see [module delivery](docs/modules-delivery.md).
+- The project is under active development and is not production ready.
+
+### Upgrade notes
+
+Database migrations run automatically when the container starts (52 migrations cumulative in this release) and **cannot be rolled back** — reverting the image does not revert the schema. This release adds 11 migrations (0042–0052); back up the database before upgrading. For the module path changes see the four-root directory notes under Added; custom start commands must switch to `agent_platform.applications.customer_service.main:app`. See [database migrations](docs/database-migrations.md).
+
 ## v0.2.0 — 2026-10-26
 
 Second feature batch: streamed answers, the agent memory system (phases 1–6), native channel integrations, member and access management, an evaluation workbench, AI-assisted PR review, and a CI/CD pipeline that separates test deployments from formal releases.
@@ -45,6 +91,7 @@ Second feature batch: streamed answers, the agent memory system (phases 1–6), 
 - Branch governance: `integration` is the default branch, rulesets protect `main`/`integration`, and CODEOWNERS enforces review of sensitive paths.
 - Added the AI PR review pipeline (phases 1–3): policy-driven risk checks, PR context collection, LLM review, bilingual review comments, and configurable model timeouts.
 - CI/CD V2 separates test deployments from formal releases: pushes to `integration` deploy to the test server after CI succeeds and identify images by commit SHA, while `main`, formal tags, and GitHub Releases never trigger a server deployment.
+- Dependency update: pypdf was upgraded to 6.21.2, with the release and deployment tests updated accordingly.
 - The quickstart defaults to the pgvector image; new AGENTS.md entry point and team-standard skills (commit standard, dev workflow, and more).
 - New brand mark (orbit logo with gradient wordmark); the quickstart pre-fills the demo sign-in form.
 
@@ -56,12 +103,12 @@ Second feature batch: streamed answers, the agent memory system (phases 1–6), 
 
 - The demo uses a mock model and **does not represent real answer quality**; it does not connect to real order systems and provides no real OCR or GPU inference.
 - The production topology does not terminate TLS itself; the host or an ingress proxy is expected to.
-- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/archive/modules-delivery.md).
+- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/modules-delivery.md).
 - The project is under active development and is not production ready.
 
 ### Upgrade notes
 
-Database migrations run automatically when the container starts (41 migrations cumulative in this release) and **cannot be rolled back** — reverting the image does not revert the schema. Upgrading from v0.1.0 is a straight image pull and restart; on a self-hosted PostgreSQL, vector retrieval uses pgvector by default with no extra middleware. See [database migrations](docs/operations/database-migrations.md).
+Database migrations run automatically when the container starts (41 migrations cumulative in this release) and **cannot be rolled back** — reverting the image does not revert the schema. Upgrading from v0.1.0 is a straight image pull and restart; on a self-hosted PostgreSQL, vector retrieval uses pgvector by default with no extra middleware. See [database migrations](docs/database-migrations.md).
 
 ## v0.1.0 — 2026-10-09
 
@@ -102,9 +149,9 @@ First runnable release. The core customer-service flow is complete and usable.
 - The demo uses a mock model and **does not represent real answer quality**. It does not connect to real order systems and provides no real OCR, vector search, or GPU inference.
 - The demo injects an admin-role token for requests that carry no identity. **Do not expose it to the public internet**; if you must widen the bind address, restrict the source with a firewall.
 - The production topology does not terminate TLS itself; the host or an ingress proxy is expected to.
-- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/archive/modules-delivery.md).
+- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/modules-delivery.md).
 - The project is under active development and is not production ready.
 
 ### Upgrade notes
 
-This is the first release, so there is no upgrade path. Database migrations run automatically when the container starts and **cannot be rolled back** — reverting the image does not revert the schema, so migrations must stay forward compatible (new columns nullable or defaulted, dropped columns removed over two releases). See [database migrations](docs/operations/database-migrations.md).
+This is the first release, so there is no upgrade path. Database migrations run automatically when the container starts and **cannot be rolled back** — reverting the image does not revert the schema, so migrations must stay forward compatible (new columns nullable or defaulted, dropped columns removed over two releases). See [database migrations](docs/database-migrations.md).
