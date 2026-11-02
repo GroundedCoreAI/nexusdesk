@@ -230,6 +230,114 @@ export const consumerApp = {
     updated_at: '2026-10-31T02:00:00Z',
 };
 
+type ReadinessStatus = 'ready' | 'simulate_only' | 'blocked';
+
+function readinessCheck(status: ReadinessStatus) {
+    if (status === 'blocked') {
+        return {
+            key: 'business-facts',
+            title: '业务事实字段',
+            detail: '查询或办理场景尚未配置业务事实，客户无法看到判断所需的关键信息。',
+            status: 'blocked',
+            severity: 'blocking',
+        };
+    }
+    if (status === 'simulate_only') {
+        return {
+            key: 'customer-channels',
+            title: '客户渠道',
+            detail: '尚未接入可用客户渠道，可以先用模拟体验，但暂不能对外发布。',
+            status: 'warning',
+            severity: 'warning',
+        };
+    }
+    return {
+        key: 'business-object',
+        title: '必填业务对象',
+        detail: '已配置订单对象，并明确业务数据来源。',
+        status: 'pass',
+        severity: 'blocking',
+    };
+}
+
+const readinessLabels: Record<ReadinessStatus, string> = {
+    ready: '可发布',
+    simulate_only: '仅可模拟',
+    blocked: '配置不完整',
+};
+
+const readinessDescriptions: Record<ReadinessStatus, string> = {
+    ready: '核心配置和客户触点已就绪，可以发布新版本。',
+    simulate_only: '核心链路可以模拟体验，但仍有发布前需要处理的配置。',
+    blocked: '存在阻断发布的配置缺失，请先完成必需项。',
+};
+
+export function buildApplicationReadiness(
+    status: ReadinessStatus,
+    scenarioStatuses: Record<string, ReadinessStatus> = {},
+    defaultScenarioStatus?: ReadinessStatus,
+) {
+    const fallbackStatus = defaultScenarioStatus || status;
+    const scenarioResults = scenarios.map(item => {
+        const currentStatus = scenarioStatuses[item.key] || fallbackStatus;
+        return {
+            key: item.key,
+            name: item.name,
+            version: item.published_version,
+            scenario_status: item.status,
+            status: currentStatus,
+            label: readinessLabels[currentStatus],
+            description: readinessDescriptions[currentStatus],
+            checks: [readinessCheck(currentStatus)],
+            counts: {
+                pass: currentStatus === 'ready' ? 1 : 0,
+                warning: currentStatus === 'simulate_only' ? 1 : 0,
+                blocked: currentStatus === 'blocked' ? 1 : 0,
+            },
+            can_publish: currentStatus === 'ready',
+            can_simulate: currentStatus !== 'blocked',
+        };
+    });
+    const hasBlocked = scenarioResults.some(item => item.status === 'blocked');
+    const hasSimulateOnly = scenarioResults.some(item => item.status === 'simulate_only');
+    const effectiveStatus: ReadinessStatus = hasBlocked
+        ? 'blocked'
+        : hasSimulateOnly
+            ? 'simulate_only'
+            : status;
+    return {
+        key: consumerApp.key,
+        name: consumerApp.name,
+        revision: consumerApp.revision,
+        application_status: consumerApp.status,
+        status: effectiveStatus,
+        label: readinessLabels[effectiveStatus],
+        description: readinessDescriptions[effectiveStatus],
+        checks: [
+            {
+                key: 'application-scenarios',
+                title: '服务场景',
+                detail: `已关联 ${scenarios.length} 个服务场景。`,
+                status: 'pass',
+                severity: 'blocking',
+            },
+            {
+                key: 'customer-channels',
+                title: '客户渠道',
+                detail: '已接入 4 个客户渠道。',
+                status: 'pass',
+                severity: 'blocking',
+            },
+        ],
+        counts: { pass: 2, warning: 0, blocked: 0 },
+        can_publish: effectiveStatus === 'ready',
+        can_simulate: effectiveStatus !== 'blocked',
+        scenarios: scenarioResults,
+    };
+}
+
+const defaultReadiness = buildApplicationReadiness('ready');
+
 const createdApp = {
     id: 'app-account',
     key: 'account-service',
@@ -365,6 +473,36 @@ export async function mockConsoleApi(
                     capabilities: applicationConfig.capabilities.length,
                     channels: applicationConfig.channels.length,
                     simulations: 1,
+                },
+            });
+        }
+        if (path === '/service-apps/consumer-service/readiness') {
+            return route.fulfill({ json: defaultReadiness });
+        }
+        if (path === '/service-apps/account-service/readiness') {
+            return route.fulfill({
+                json: {
+                    ...defaultReadiness,
+                    key: 'account-service',
+                    name: '账号安全服务应用',
+                    revision: 1,
+                    application_status: 'draft',
+                    status: 'blocked',
+                    label: '配置不完整',
+                    description: '存在阻断发布的配置缺失，请先完成必需项。',
+                    checks: [
+                        {
+                            key: 'application-scenarios',
+                            title: '服务场景',
+                            detail: '服务应用尚未关联任何场景，客户无法从应用进入服务。',
+                            status: 'blocked',
+                            severity: 'blocking',
+                        },
+                    ],
+                    counts: { pass: 0, warning: 0, blocked: 1 },
+                    can_publish: false,
+                    can_simulate: false,
+                    scenarios: [],
                 },
             });
         }

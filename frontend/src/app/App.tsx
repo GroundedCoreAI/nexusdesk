@@ -49,6 +49,7 @@ function Overview() {
 }
 function serviceAppTitle(path:string) {
     if (path === '/service-apps') return t('服务应用');
+    if (path === '/service-apps/industry') return t('行业能力');
     if (/\/experience(?:\/|$)/.test(path)) return t('客户统一体验');
     if (path.endsWith('/simulator')) return t('场景模拟器');
     if (path.endsWith('/customer')) return t('客户端交互预览');
@@ -57,6 +58,7 @@ function serviceAppTitle(path:string) {
 }
 function serviceAppDescription(path:string) {
     if (path === '/service-apps') return t('把业务编排和执行能力组合成可配置、可预览、可调试、可发布的服务应用。');
+    if (path === '/service-apps/industry') return t('安装行业模板、配置业务数据接入，并在不覆盖本地修改的前提下安全升级。');
     if (/^\/service-apps\/[a-z0-9-]+$/.test(path)) return '';
     if (/\/experience(?:\/|$)/.test(path)) return t('在一个入口中体验服务识别、业务对象选择、用户决策与处理承接。');
     if (path.endsWith('/simulator')) return t('在发布前验证场景识别、对象绑定、事实投影和处理承接。');
@@ -159,7 +161,7 @@ function Shell({ reset }: {
     const extensionPage = extensionNavigation.find(item => item.id === page);
     const pageContent = extensionPage ? uiFeatureRenderers[extensionPage.feature]?.() : pages[page];
     const activeServicePageMeta = servicePageMeta?.path === router.path ? servicePageMeta : null;
-    const serviceApplicationWorkspace = page === 'service-apps' && /^\/service-apps\/[a-z0-9-]+(?:\/|$)/.test(router.path);
+    const serviceApplicationWorkspace = page === 'service-apps' && router.path !== '/service-apps/industry' && /^\/service-apps\/[a-z0-9-]+(?:\/|$)/.test(router.path);
     return <Role.Provider value={role}><Layout className={`console-layout ${page === 'agents' ? 'agents-shell' : page === 'tools' ? 'tools-shell' : page === 'open-platform' ? 'open-platform-shell' : ''} ${serviceApplicationWorkspace ? 'service-app-workspace' : ''} ${agentWorkspace ? 'agent-focus' : ''}`}><Layout.Sider className="console-sider" theme="light" width={248} collapsedWidth={0} collapsed={collapsed} breakpoint="lg" onBreakpoint={setCollapsed} trigger={null}>
     <div className="console-brand"><BrandMark subtitle={t("智能客服平台")}/></div>
     <nav aria-label={t("主导航")} className="console-nav">{groups.map(group => <div key={group.title}><div className="nav-group-title">{group.title}</div>{group.ids.map(id => <Button block type="text" icon={icons[id]} className={page === id ? 'nav-selected' : ''} aria-current={page === id ? 'page' : undefined} key={id} onClick={() => navigate(id)}>{labelFor(id)}</Button>)}</div>)}</nav>

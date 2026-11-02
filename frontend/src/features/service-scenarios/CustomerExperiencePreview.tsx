@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button, Input, Spin } from 'antd';
 import {
     ArrowLeftOutlined,
@@ -14,7 +14,8 @@ import { Alert, useResource, toast } from '../../shared/components/ui';
 import { demoText as demo } from './data';
 import { ScenarioTabs, ScenarioTopline } from './ScenarioChrome';
 import { experienceBasePath, scenarioBasePath, scenarioKeyFromPath } from './routes';
-import { formatTraceValue } from './scenarioConfig';
+import { formatTraceValue, objectTypeLabel, serviceResultLabel } from './scenarioConfig';
+import { simulatedBusinessObjects, type SimulatedBusinessObject } from './simulationSamples';
 import './service-scenarios.css';
 
 interface Props {
@@ -23,16 +24,7 @@ interface Props {
     onMetaChange?: (meta: { path: string; title: string; description?: string }) => void;
 }
 
-interface SimulatedOrder {
-    id: string;
-    label: string;
-    status: string;
-}
-
-const simulatedOrders: SimulatedOrder[] = [
-    { id: 'SIM-ORDER-20261031', label: '模拟订单 A', status: '运输中' },
-    { id: 'SIM-ORDER-20261012', label: '模拟订单 B', status: '已完成' },
-];
+type SimulatedOrder = SimulatedBusinessObject;
 
 function appKeyFromRoute(route: string) {
     return route.match(/^\/service-apps\/([a-z0-9-]+)/)?.[1] || '';
@@ -51,6 +43,9 @@ export function CustomerExperiencePreview({ route, onNavigate, onMetaChange }: P
     const [error, setError] = useState('');
     const base = scenarioBasePath(route);
     const config = scenario.data?.config;
+    const objectLabel = config?.object?.type ? objectTypeLabel(config.object.type) : '业务对象';
+    const objectContextLabel = config?.object ? objectLabel : '无需业务对象';
+    const simulatedOrders = useMemo(() => simulatedBusinessObjects(scenario.data), [scenario.data]);
 
     useEffect(() => {
         if (!scenario.data) return;
@@ -76,11 +71,7 @@ export function CustomerExperiencePreview({ route, onNavigate, onMetaChange }: P
                         id: order.id,
                         type: config.object.type,
                         status: order.status,
-                        facts: {
-                            status: order.status,
-                            order_status: order.status,
-                            product_name: order.label,
-                        },
+                        facts: order.facts,
                     }
                     : null,
             });
@@ -128,8 +119,8 @@ export function CustomerExperiencePreview({ route, onNavigate, onMetaChange }: P
         <header className="customer-preview-intro">
             <div>
                 <span className="scenario-eyebrow">CUSTOMER EXPERIENCE · SERVER SIMULATION</span>
-                <h2>{demo('从“选择订单”到“带上下文继续服务”')}</h2>
-                <p>{demo('两个界面调用同一个后端模拟接口。订单是模拟对象，结果、事实、承接与解释均来自服务端轨迹。')}</p>
+                <h2>{demo(config?.object?.required ? `从“选择${objectLabel}”到“带上下文继续服务”` : '从发起咨询到获得明确处理结果')}</h2>
+                <p>{demo('两个界面调用同一个后端模拟接口。业务对象为模拟数据，结果、事实、承接与解释均来自服务端轨迹。')}</p>
             </div>
             <div className="customer-step-legend">
                 <span className={selectedOrder ? '' : 'is-active'}><i>1</i>{demo('选择业务对象')}</span>
@@ -140,7 +131,7 @@ export function CustomerExperiencePreview({ route, onNavigate, onMetaChange }: P
 
         <div className="customer-preview-grid">
             <section className="customer-stage">
-                <header className="customer-stage-label"><span>01</span><div><strong>{demo('选择订单')}</strong><small>{demo('模拟输入，不读取真实订单')}</small></div></header>
+                <header className="customer-stage-label"><span>01</span><div><strong>{demo(config?.object?.required ? `选择${objectLabel}` : '直接发起咨询')}</strong><small>{demo('模拟输入，不读取真实业务数据')}</small></div></header>
                 <PhoneFrame>
                     <div className="customer-phone-status"><span>10:35</span><span>▮▮▮ ᯤ 85%</span></div>
                     <div className="customer-phone-head">
@@ -151,17 +142,17 @@ export function CustomerExperiencePreview({ route, onNavigate, onMetaChange }: P
                     <div className="customer-phone-body picker-body">
                         <div className="customer-agent-row">
                             <span><RobotOutlined/></span>
-                            <div>{config?.object?.required ? demo('您好，请选择要咨询的模拟订单。') : demo('该场景无需业务对象，可以直接开始咨询。')}
+                            <div>{config?.object?.required ? demo(`您好，请选择要咨询的模拟${objectLabel}。`) : demo('该场景无需业务对象，可以直接开始咨询。')}
                                 <small>{demo('选择后会携带对象上下文调用后端模拟器。')}</small></div>
                         </div>
                         <div className="customer-filter-pills"><span className="is-active">{demo('模拟数据')}</span><span>{demo('运输中')}</span><span>{demo('已完成')}</span></div>
-                        {simulatedOrders.map((order, index) => <OrderOption
+                        {config?.object?.required && simulatedOrders.map((order, index) => <OrderOption
                             key={order.id}
                             id={order.id}
                             product={order.label}
-                            amount={demo('模拟金额')}
+                            amount={`¥${order.amount.toFixed(2)}`}
                             status={order.status}
-                            date={demo('模拟时间')}
+                            date={order.orderedAt}
                             selected={selectedOrder?.id === order.id}
                             onSelect={() => chooseOrder(order)}
                             tone={index === 0 ? 'purple' : 'amber'}
@@ -188,17 +179,17 @@ export function CustomerExperiencePreview({ route, onNavigate, onMetaChange }: P
                     <div className="customer-phone-body context-body">
                         <div className="customer-context-card">
                             <div><span>{demo('当前场景')}</span><b>{scenario.data.name}</b></div>
-                            <strong>{selectedOrder?.label || config?.object?.type || '无需业务对象'}</strong>
+                            <strong>{selectedOrder?.label || objectContextLabel}</strong>
                             <p>{selectedOrder?.id || '模拟输入'} <b>{selectedOrder?.status || ''}</b></p>
                             <footer><span>{trace ? `trace ${trace.trace_id?.slice(0, 8) || '已运行'}` : '等待模拟'}</span>
                                 <button type="button" onClick={() => {
                                     setSelectedOrder(null);
                                     setTrace(null);
-                                }}>{demo('不是这个订单？')}</button></footer>
+                                }}>{demo(config?.object ? `不是这个${objectLabel}？` : '重新发起咨询')}</button></footer>
                         </div>
                         <div className="customer-agent-row compact">
                             <span><RobotOutlined/></span>
-                            <div>{trace ? `${trace.scenario_name} · ${trace.result.status}` : demo('关于本订单，你想咨询什么？')}
+                            <div>{trace ? `${trace.scenario_name} · ${serviceResultLabel(trace.result.status)}` : demo(config?.object ? `关于这个${objectLabel}，你想咨询什么？` : '请描述你想咨询或办理的问题。')}
                                 <small>{trace ? (config?.recommendations[0]?.label || '已根据当前对象执行服务') : demo('选择后由后端处理。')}</small></div>
                         </div>
                         <div className="customer-question-list">
@@ -208,8 +199,8 @@ export function CustomerExperiencePreview({ route, onNavigate, onMetaChange }: P
                         {trace ? <div className="customer-result-card">
                             <strong>{trace.handler?.label ? String(trace.handler.label) : trace.scenario_name}</strong>
                             <p>{trace.result.content}</p>
-                            {trace.facts.length > 0 && <div className="customer-result-facts">
-                                {trace.facts.slice(0, 4).map(fact => <span key={fact.key}>{fact.label}：{formatTraceValue(fact.value)}</span>)}
+                            {trace.facts.some(fact => fact.value !== null && fact.value !== undefined && fact.value !== '') && <div className="customer-result-facts">
+                                {trace.facts.filter(fact => fact.value !== null && fact.value !== undefined && fact.value !== '').slice(0, 4).map(fact => <span key={fact.key}>{fact.label}：{formatTraceValue(fact.value)}</span>)}
                             </div>}
                             <div>
                                 <Button size="small" onClick={() => void run(selectedOrder, '转人工')} icon={<CustomerServiceOutlined/>}>{demo('转人工跟进')}</Button>
@@ -217,7 +208,7 @@ export function CustomerExperiencePreview({ route, onNavigate, onMetaChange }: P
                             </div>
                         </div> : <div className="customer-result-card is-empty">
                             <strong>{busy ? '正在调用后端模拟器…' : '尚未运行'}</strong>
-                            <p>选择订单或问题后，这里展示后端返回的处理结果。</p>
+                            <p>选择业务对象或问题后，这里展示后端返回的处理结果。</p>
                         </div>}
                         <p className="customer-switch-note">{demo('可随时切换场景')} <button type="button" onClick={() => onNavigate(`${experienceBasePath(route)}/${scenarioKey}`)}>{demo('切换')}</button></p>
                     </div>

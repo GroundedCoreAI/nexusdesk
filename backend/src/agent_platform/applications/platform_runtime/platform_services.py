@@ -6,6 +6,12 @@ from agent_platform.business_capabilities.conversation.service import Conversati
 from agent_platform.business_capabilities.customer_service.confirmation import (
     CustomerConfirmationAdapter,
 )
+from agent_platform.business_capabilities.customer_service.industry_packs.installations import (
+    IndustryPackService,
+)
+from agent_platform.business_capabilities.customer_service.providers.service import (
+    ServiceProviderRegistry,
+)
 from agent_platform.business_capabilities.customer_service.routing.settings import (
     load_customer_service_routing_settings,
 )
@@ -80,10 +86,13 @@ class PlatformServices:
         self.gateway = ModelGateway(engine, settings, model_client)
         self.agents = AgentService(engine, self.tools, self.gateway.catalog)
         self.scenarios = ScenarioService(engine, self.agents)
+        self.providers = ServiceProviderRegistry(engine)
+        self.industry_packs = IndustryPackService(engine, self.providers)
         self.service_apps = ServiceApplicationService(
             engine,
             self.agents,
             self.scenarios,
+            self.providers,
         )
         self.knowledge = KnowledgeService(engine)
         self.ingestion = IngestionService(engine, self.knowledge, settings, model_client)

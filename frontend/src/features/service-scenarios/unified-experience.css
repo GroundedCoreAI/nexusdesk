@@ -411,6 +411,82 @@
   font-size: 9px;
 }
 
+.cx-catalog-controls {
+  margin-bottom: 13px;
+}
+
+.cx-catalog-search.ant-input-affix-wrapper {
+  height: 34px;
+  padding-inline: 11px;
+  background: #fff;
+  border-color: #e5e8ef;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.cx-catalog-search.ant-input-affix-wrapper:hover,
+.cx-catalog-search.ant-input-affix-wrapper:focus-within {
+  border-color: #cfccff;
+  box-shadow: 0 0 0 2px #5b5bf00b;
+}
+
+.cx-catalog-search .ant-input {
+  color: #555c69;
+  font-size: 9px;
+}
+
+.cx-catalog-search .ant-input-prefix {
+  margin-inline-end: 7px;
+  color: #a2a6b1;
+}
+
+.cx-category-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.cx-category-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  color: #8b919d;
+  background: #f5f6f9;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-size: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+
+.cx-category-tabs button:hover {
+  color: #514ccc;
+  border-color: #dcd9ff;
+}
+
+.cx-category-tabs button.is-active {
+  color: #514ccc;
+  background: #efefff;
+  border-color: #e2dfff;
+}
+
+.cx-category-tabs b {
+  min-width: 15px;
+  padding: 1px 4px;
+  color: inherit;
+  background: #ffffffa8;
+  border-radius: 4px;
+  font-size: 7px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .cx-welcome-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -459,6 +535,28 @@
   padding: 9px 0 8px;
 }
 
+.cx-welcome-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+
+.cx-welcome-card-tags em {
+  padding: 2px 5px;
+  color: #8c84b2;
+  background: #f6f2ff;
+  border-radius: 4px;
+  font-size: 7px;
+  font-style: normal;
+  line-height: 1.4;
+}
+
+.cx-welcome-card-tags em + em {
+  color: #6d8ba5;
+  background: #f1f6fb;
+}
+
 .cx-welcome-card strong {
   display: block;
   font-size: 11px;
@@ -493,6 +591,48 @@
   color: #7b78b6;
   font-size: 13px;
   font-style: normal;
+}
+
+.cx-catalog-empty {
+  display: flex;
+  min-height: 190px;
+  grid-column: 1 / -1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 18px;
+  color: #8d93a0;
+  background: #ffffffa8;
+  border: 1px dashed #dde0e9;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.cx-catalog-empty > .anticon {
+  margin-bottom: 9px;
+  color: #a6a1d5;
+  font-size: 22px;
+}
+
+.cx-catalog-empty strong {
+  color: #5c6270;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cx-catalog-empty p {
+  margin: 5px 0 12px;
+  color: #9a9fac;
+  font-size: 8px;
+  line-height: 1.7;
+}
+
+.cx-catalog-empty .ant-btn {
+  height: 27px;
+  color: #514ccc;
+  border-color: #dcd9ff;
+  border-radius: 7px;
+  font-size: 8px;
 }
 
 .cx-welcome-foot {
@@ -758,6 +898,17 @@
   font-size: 8px;
 }
 
+.cx-order-meta {
+  display: block;
+  margin: 3px 0 6px;
+  overflow: hidden;
+  color: #9ba0aa;
+  font-size: 8px;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cx-order-main footer b {
   color: #4f5562;
   font-size: 10px;
@@ -986,6 +1137,16 @@
 
 .cx-fact-grid strong.positive {
   color: #4c9a75;
+}
+
+.cx-fact-empty {
+  margin: 0;
+  padding: 12px;
+  color: #9ba0aa;
+  background: #fafafd;
+  border-radius: 9px;
+  font-size: 8px;
+  line-height: 1.7;
 }
 
 .cx-logistics {
@@ -1656,6 +1817,14 @@
     grid-template-columns: 1fr;
   }
 
+  .cx-catalog-controls {
+    margin-bottom: 11px;
+  }
+
+  .cx-category-tabs {
+    margin-top: 7px;
+  }
+
   .cx-welcome-card {
     display: grid;
     grid-template-columns: 30px minmax(0, 1fr) auto;
@@ -1670,6 +1839,14 @@
 
   .cx-welcome-card p {
     display: none;
+  }
+
+  .cx-welcome-card-tags em {
+    font-size: 6px;
+  }
+
+  .cx-catalog-empty {
+    min-height: 150px;
   }
 
   .cx-welcome-card small {
@@ -1731,6 +1908,10 @@
 
   .cx-fact-grid {
     gap: 5px;
+  }
+
+  .cx-order-meta {
+    white-space: normal;
   }
 
   .cx-composer-wrap {

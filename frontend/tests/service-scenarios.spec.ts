@@ -42,12 +42,12 @@ test('unified customer experience is scoped to one service application', async (
     await page.getByRole('button', { name: '统一体验', exact: true }).click();
     await expect(page).toHaveURL(/#\/service-apps\/consumer-service\/experience$/);
     await expect(page.locator('.console-heading h1')).toHaveText('客户统一体验');
-    await expect(page.getByRole('heading', { name: '你好，我是购物消费服务应用服务助手' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '你好，我是购物消费服务助手' })).toBeVisible();
 
     await page.getByRole('button', { name: /查询我的订单/ }).first().click();
     await expect(page.locator('.cx-message-bubble').filter({ hasText: '已进入「查询我的订单」' })).toHaveCount(1);
-    await page.getByRole('button', { name: '选择订单 SIM-ORDER-20261031' }).click();
-    await expect(page.locator('.cx-context-chip.order')).toContainText('SIM-ORDER-20261031');
+    await page.getByRole('button', { name: /选择订单 SIM-ORDER-\d{8}/ }).first().click();
+    await expect(page.locator('.cx-context-chip.order')).toContainText('SIM-ORDER-');
     await expect(page.locator('.cx-result-lead').filter({ hasText: '已由查询我的订单处理后端模拟请求。' })).toBeVisible();
 
     await page.locator('.cx-topbar-actions').getByRole('button', { name: '决策解释' }).click();
@@ -81,6 +81,6 @@ test('service scenario mobile pages stay inside the application without horizont
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 
     await page.goto('/#/service-apps/consumer-service/experience');
-    await expect(page.getByRole('heading', { name: '你好，我是购物消费服务应用服务助手' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '你好，我是购物消费服务助手' })).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });

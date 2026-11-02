@@ -1037,6 +1037,15 @@ async def handoffs(request: Request, user: Reader):
     return await business(request).handoffs.list(user.tenant, scope=request.state.business_scope)
 
 
+@router.get("/handoffs/{hid}/context")
+async def handoff_context(hid: UUID, request: Request, user: Reader):
+    return await business(request).handoffs.context(
+        user.tenant,
+        hid,
+        scope=request.state.business_scope,
+    )
+
+
 @router.post("/handoffs/{hid}/transition")
 async def transition(hid: UUID, body: HandoffTransition, request: Request, user: Operator):
     return await business(request).handoffs.transition(

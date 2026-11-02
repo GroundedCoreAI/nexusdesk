@@ -105,6 +105,23 @@ class ScenarioService:
     def _row_config(row: dict[str, Any]) -> ScenarioConfig:
         return ScenarioConfig.model_validate(row["draft"])
 
+    @staticmethod
+    def _reject_pack_metadata_injection(config: ScenarioConfig) -> None:
+        """Pack lineage is owned by the installer and cannot be forged by CRUD."""
+
+        if "industry_pack" in config.config:
+            raise DomainError("scenario_industry_pack_metadata_reserved", 422)
+
+    @staticmethod
+    def _preserve_pack_metadata(
+        current: ScenarioConfig,
+        incoming: ScenarioConfig,
+    ) -> None:
+        """Keep pack lineage immutable while allowing normal draft edits."""
+
+        if current.config.get("industry_pack") != incoming.config.get("industry_pack"):
+            raise DomainError("scenario_industry_pack_metadata_immutable", 409)
+
     async def list(
         self,
         tenant: str,
@@ -217,6 +234,7 @@ WHERE s.tenant_id=:tenant
         resolved = persisted_scope(tenant, scope)
         _, scope_params = scope_predicate(resolved, alias="s")
         config = self._config(body.config)
+        self._reject_pack_metadata_injection(config)
         async with self.engine.begin() as connection:
             row = await one(
                 connection,
@@ -284,6 +302,7 @@ FOR UPDATE
             )
             if current["draft_revision"] != body.revision:
                 raise DomainError("scenario_revision_conflict", 409)
+            self._preserve_pack_metadata(self._row_config(current), config)
             row = await one(
                 connection,
                 f"""
@@ -429,6 +448,12 @@ FOR UPDATE
             )
             if current["draft_revision"] != revision:
                 raise DomainError("scenario_revision_conflict", 409)
+            industry_pack = self._row_config(current).config.get("industry_pack")
+            if (
+                isinstance(industry_pack, dict)
+                and str(industry_pack.get("maturity", "")).casefold() == "alpha"
+            ):
+                raise DomainError("scenario_alpha_publish_forbidden", 409)
             config = await self._resolve_agent_handlers(
                 connection,
                 tenant,
@@ -640,6 +665,7 @@ RETURNING s.*
         trace_data: dict[str, Any],
         actor: str,
         simulation: bool = True,
+        conversation_id: UUID | None = None,
     ) -> UUID:
         trace_id = uuid4()
         _, scope_params = scope_predicate(scope)
@@ -649,12 +675,12 @@ RETURNING s.*
             connection,
             """
 INSERT INTO service_scenario_traces(
-    id,tenant_id,business_id,workspace_id,scenario_id,scenario_key,
+    id,tenant_id,business_id,workspace_id,conversation_id,scenario_id,scenario_key,
     scenario_version,simulation,entry,message_length,message_excerpt,
     object_ref,facts,decisions,handler_type,outcome,reason_code,
     result_summary,trace,created_by
 ) VALUES(
-    :id,:tenant,:scope_business,:scope_workspace,:scenario,:key,
+    :id,:tenant,:scope_business,:scope_workspace,:conversation,:scenario,:key,
     :version,:simulation,:entry,:length,:excerpt,
     CAST(:object_ref AS jsonb),CAST(:facts AS jsonb),CAST(:decisions AS jsonb),
     :handler_type,:outcome,:reason,:summary,CAST(:trace AS jsonb),:actor
@@ -662,6 +688,7 @@ INSERT INTO service_scenario_traces(
 """,
             id=trace_id,
             tenant=tenant,
+            conversation=conversation_id,
             scenario=scenario_id,
             key=scenario_key,
             version=scenario_version,
@@ -755,6 +782,24 @@ ORDER BY s.domain,s.name,s.id
             trace_data = trace.model_dump(mode="json")
             if trace_context:
                 trace_data["application"] = trace_context
+            conversation_id = body.conversation_id
+            if conversation_id is not None:
+                # A trace may only be bound to a conversation the caller can
+                # already see; the scope check keeps tenants and workspaces apart.
+                conversation_scope_sql, conversation_params = scope_predicate(resolved)
+                required(
+                    await one(
+                        connection,
+                        f"""SELECT id FROM runtime_conversations
+                        WHERE id=:cid AND tenant_id=:tenant
+                          AND {conversation_scope_sql}""",
+                        cid=conversation_id,
+                        tenant=tenant,
+                        **conversation_params,
+                    ),
+                    "conversation_not_found",
+                )
+                trace_data["conversation_id"] = str(conversation_id)
             trace_id = None
             if persist:
                 trace_id = await self._trace(
@@ -768,6 +813,7 @@ ORDER BY s.domain,s.name,s.id
                     message=body.message,
                     trace_data=trace_data,
                     actor=actor,
+                    conversation_id=conversation_id,
                 )
         trace_data["trace_id"] = str(trace_id) if trace_id else None
         return trace_data
@@ -820,7 +866,7 @@ WHERE s.tenant_id=:tenant AND {scope_sql} AND s.scenario_key=:key
             items = await many(
                 connection,
                 """
-SELECT id,scenario_key,scenario_version,simulation,entry,message_length,
+SELECT id,conversation_id,scenario_key,scenario_version,simulation,entry,message_length,
        message_excerpt,object_ref,facts,decisions,handler_type,outcome,
        reason_code,result_summary,trace,created_by,created_at
 FROM service_scenario_traces

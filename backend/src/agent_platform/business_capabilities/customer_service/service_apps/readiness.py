@@ -211,6 +211,30 @@ def _requires_business_object(
     return bool(object_required or object_mode in {ObjectMode.REQUIRED, ObjectMode.MULTIPLE})
 
 
+def _industry_pack_metadata(config: ScenarioConfig | None) -> dict[str, Any]:
+    if config is None:
+        return {}
+    value = config.config.get("industry_pack")
+    return value if isinstance(value, dict) else {}
+
+
+def _provider_requirements(config: ScenarioConfig) -> set[str]:
+    """Return provider identities required by a pack scenario."""
+
+    identities: set[str] = set()
+    if config.object is not None and _text(config.object.provider):
+        identities.add(f"object:{config.object.provider}")
+    for handler in config.handlers:
+        if not handler.enabled:
+            continue
+        if _text(handler.tool):
+            identities.add(f"tool:{handler.tool}")
+        queue = _queue_of(handler)
+        if _text(queue) and (handler.type == HandlerType.HUMAN or handler.queue):
+            identities.add(f"human_queue:{queue}")
+    return identities
+
+
 def _counts(checks: list[ReadinessCheck]) -> ReadinessCounts:
     return ReadinessCounts(
         passed=sum(item.status == ReadinessCheckStatus.PASS for item in checks),
@@ -339,6 +363,72 @@ def _business_facts_check(config: ScenarioConfig | None) -> ReadinessCheck:
         "business-facts",
         "业务事实字段",
         f"已配置 {len(config.facts)} 项业务事实，客户可看到判断所需的信息。",
+    )
+
+
+def _template_maturity_check(
+    application: ServiceApplicationConfig,
+    config: ScenarioConfig | None,
+) -> ReadinessCheck | None:
+    metadata = _industry_pack_metadata(config)
+    maturity = _text(metadata.get("maturity")).casefold()
+    if not maturity:
+        return None
+    if maturity == "alpha":
+        return _blocked(
+            "template-maturity",
+            "模板成熟度",
+            "该服务模板仍在灰度验证中，暂不能发布给客户。",
+        )
+    if maturity == "beta":
+        canary = any(item.status == ChannelStatus.CANARY for item in application.channels)
+        if not canary:
+            return _blocked(
+                "template-maturity",
+                "模板成熟度",
+                "该服务模板处于公测阶段，请先配置灰度客户渠道再发布。",
+            )
+        return _passed(
+            "template-maturity",
+            "模板成熟度",
+            "已配置灰度渠道，可在受控客户范围内验证该服务模板。",
+            ReadinessCheckSeverity.INFO,
+        )
+    return _passed(
+        "template-maturity",
+        "模板成熟度",
+        "该服务模板已达到正式发布标准。",
+        ReadinessCheckSeverity.INFO,
+    )
+
+
+def _provider_capability_check(
+    config: ScenarioConfig | None,
+    available_identities: set[str] | None,
+) -> ReadinessCheck | None:
+    if config is None or not _industry_pack_metadata(config):
+        return None
+    required = _provider_requirements(config)
+    if not required:
+        return _passed(
+            "provider-capability",
+            "执行能力接入",
+            "该服务模板不依赖外部业务数据或执行能力。",
+            ReadinessCheckSeverity.INFO,
+        )
+    available = available_identities or set()
+    missing = required - available
+    if missing:
+        return _blocked(
+            "provider-capability",
+            "执行能力接入",
+            f"该场景需要接入 {len(missing)} 项业务数据能力，尚未完成配置。",
+        )
+    return _passed(
+        "provider-capability",
+        "执行能力接入",
+        f"已接入 {len(required)} 项业务数据能力。",
+        ReadinessCheckSeverity.INFO,
     )
 
 
@@ -586,6 +676,7 @@ def _application_scenarios_check(
 def _scenario_result(
     application: ServiceApplicationConfig,
     snapshot: ScenarioReadinessSnapshot,
+    available_provider_identities: set[str] | None,
 ) -> ScenarioReadinessResult:
     if not snapshot.found:
         checks = [_application_link_check(application, snapshot)]
@@ -601,6 +692,14 @@ def _scenario_result(
             _customer_channels_check(application),
             _publication_check(snapshot),
         ]
+        optional_checks = (
+            _template_maturity_check(application, snapshot.effective_config),
+            _provider_capability_check(
+                snapshot.effective_config,
+                available_provider_identities,
+            ),
+        )
+        checks.extend(item for item in optional_checks if item is not None)
     state = _state(checks)
     return ScenarioReadinessResult(
         key=snapshot.reference.key,
@@ -629,6 +728,7 @@ def evaluate_application_readiness(
     application_status: str,
     application: ServiceApplicationConfig,
     scenarios: list[ScenarioReadinessSnapshot],
+    available_provider_identities: set[str] | None = None,
 ) -> ApplicationReadinessResult:
     """Evaluate an application release from already-loaded snapshots."""
 
@@ -636,7 +736,10 @@ def evaluate_application_readiness(
         _application_scenarios_check(application),
         _customer_channels_check(application),
     ]
-    scenario_results = [_scenario_result(application, snapshot) for snapshot in scenarios]
+    scenario_results = [
+        _scenario_result(application, snapshot, available_provider_identities)
+        for snapshot in scenarios
+    ]
     checks = [*application_checks]
     state = _state(checks)
     if any(item.status == ReadinessState.BLOCKED for item in scenario_results):

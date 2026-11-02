@@ -254,6 +254,17 @@ def test_template_digest_is_stable_across_mapping_order():
     ) == IndustryPackCompiler(reordered).digest_scenario_template("account-status-query")
 
 
+def test_pack_builders_return_isolated_template_instances():
+    first = build_content_community_pack()
+    second = build_content_community_pack()
+
+    first.scenario_templates[0].name = "本地修改"
+    first.object_templates[0].name = "本地对象修改"
+
+    assert second.scenario_templates[0].name != "本地修改"
+    assert second.object_templates[0].name != "本地对象修改"
+
+
 def test_scenario_object_override_cannot_change_protected_identity():
     scenario_config = _scenario_template().config
     scenario_config["object"] = {

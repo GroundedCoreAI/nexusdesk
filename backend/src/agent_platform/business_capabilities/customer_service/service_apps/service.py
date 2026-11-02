@@ -18,6 +18,7 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
 )
 from agent_platform.extension_contracts import BusinessScope
 
+from ..providers.service import ServiceProviderRegistry
 from ..scenarios.models import ScenarioConfig, SimulationRequest
 from ..scenarios.service import ScenarioService
 from .models import (
@@ -59,10 +60,12 @@ class ServiceApplicationService:
         engine: object,
         agents: object,
         scenarios: ScenarioService,
+        providers: ServiceProviderRegistry | None = None,
     ) -> None:
         self.engine = engine
         self.agents = agents
         self.scenarios = scenarios
+        self.providers = providers
 
     @staticmethod
     def _config(value: ServiceApplicationConfig | dict[str, Any]) -> ServiceApplicationConfig:
@@ -649,6 +652,11 @@ WHERE s.tenant_id=:tenant AND {scope_sql}
             )
             for reference in config.scenarios
         ]
+        available_provider_identities = (
+            await self.providers.available_identities(connection, tenant, scope)
+            if self.providers is not None
+            else set()
+        )
         return evaluate_application_readiness(
             application_key=current["application_key"],
             application_name=config.name,
@@ -656,6 +664,7 @@ WHERE s.tenant_id=:tenant AND {scope_sql}
             application_status=current["status"],
             application=config,
             scenarios=snapshots,
+            available_provider_identities=available_provider_identities,
         )
 
     async def readiness(

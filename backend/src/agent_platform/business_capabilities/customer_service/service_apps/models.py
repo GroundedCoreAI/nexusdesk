@@ -179,6 +179,7 @@ class ApplicationSimulationRequest(ScenarioModel):
         max_length=64,
     )
     application_version: int | None = Field(default=None, ge=1)
+    conversation_id: UUID | None = None
 
 
 __all__ = [

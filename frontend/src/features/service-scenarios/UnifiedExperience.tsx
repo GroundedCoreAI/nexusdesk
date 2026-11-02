@@ -6,7 +6,9 @@ import {
     CheckCircleFilled,
     CheckOutlined,
     ClockCircleOutlined,
+    CloseCircleFilled,
     CustomerServiceOutlined,
+    ExclamationCircleFilled,
     FileSearchOutlined,
     FileTextOutlined,
     InboxOutlined,
@@ -15,8 +17,10 @@ import {
     ReloadOutlined,
     RobotOutlined,
     SafetyCertificateOutlined,
+    SearchOutlined,
     SendOutlined,
     ShoppingOutlined,
+    SyncOutlined,
     ThunderboltOutlined,
 } from '@ant-design/icons';
 import type {
@@ -29,7 +33,13 @@ import { simulateServiceApplication } from '../../shared/api/client';
 import { Alert, useResource, toast } from '../../shared/components/ui';
 import { demoText as demo } from './data';
 import { appBasePath, experienceBasePath } from './routes';
-import { formatTraceValue, scenarioStatusLabel } from './scenarioConfig';
+import {
+    formatTraceValue,
+    objectTypeLabel,
+    scenarioTemplateLabel,
+    serviceResultLabel,
+} from './scenarioConfig';
+import { simulatedBusinessObjects, type SimulatedBusinessObject } from './simulationSamples';
 import './unified-experience.css';
 
 interface Props {
@@ -47,12 +57,7 @@ interface ChatMessage {
     text: string;
 }
 
-interface SimulatedOrder {
-    id: string;
-    label: string;
-    status: string;
-    tone: 'purple' | 'amber';
-}
+type SimulatedOrder = SimulatedBusinessObject;
 
 interface ExperienceScenario {
     key: string;
@@ -136,6 +141,8 @@ export function UnifiedExperience({ route, onNavigate, onMetaChange }: Props) {
     const [traceOpen, setTraceOpen] = useState(false);
     const [trace, setTrace] = useState<SimulationTrace | null>(null);
     const [error, setError] = useState('');
+    const [catalogQuery, setCatalogQuery] = useState('');
+    const [catalogCategory, setCatalogCategory] = useState('all');
     const idRef = useRef(0);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const initialisedRoute = useRef<string | null>(null);
@@ -177,20 +184,30 @@ export function UnifiedExperience({ route, onNavigate, onMetaChange }: Props) {
         const messages = scenarioItems.flatMap(item => item.recommendations.map(recommendation => recommendation.message));
         return Array.from(new Set(messages)).slice(0, 4);
     }, [scenarioItems]);
-    const simulatedOrders = useMemo<SimulatedOrder[]>(() => [
-        {
-            id: 'SIM-ORDER-20261031',
-            label: `模拟${activeScenario?.objectType || '业务对象'} A`,
-            status: '运输中',
-            tone: 'purple',
-        },
-        {
-            id: 'SIM-ORDER-20261012',
-            label: `模拟${activeScenario?.objectType || '业务对象'} B`,
-            status: '已完成',
-            tone: 'amber',
-        },
-    ], [activeScenario?.objectType]);
+    const catalogCategories = useMemo(
+        () => Array.from(new Set(scenarioItems.map(item => item.category))),
+        [scenarioItems],
+    );
+    const visibleScenarios = useMemo(() => {
+        const query = catalogQuery.trim().toLocaleLowerCase();
+        return scenarioItems.filter(item => {
+            if (catalogCategory !== 'all' && item.category !== catalogCategory) return false;
+            if (!query) return true;
+            const searchable = [
+                item.name,
+                item.description,
+                item.category,
+                scenarioTemplateLabel(item.source.template),
+                objectTypeLabel(item.objectType),
+                ...item.recommendations.map(recommendation => recommendation.label),
+            ].join(' ').toLocaleLowerCase();
+            return searchable.includes(query);
+        });
+    }, [catalogCategory, catalogQuery, scenarioItems]);
+    const simulatedOrders = useMemo<SimulatedOrder[]>(
+        () => simulatedBusinessObjects(activeScenario?.source),
+        [activeScenario?.source],
+    );
 
     useEffect(() => {
         if (initialisedRoute.current === routeKey || !routeKey || !activeScenario) return;
@@ -236,11 +253,7 @@ export function UnifiedExperience({ route, onNavigate, onMetaChange }: Props) {
                         id: order.id,
                         type: scenario.objectType,
                         status: order.status,
-                        facts: {
-                            status: order.status,
-                            order_status: order.status,
-                            product_name: order.label,
-                        },
+                        facts: order.facts,
                     }
                     : null,
                 selected_decision: options.selectedDecision || null,
@@ -332,6 +345,8 @@ export function UnifiedExperience({ route, onNavigate, onMetaChange }: Props) {
         setEntryMode('natural');
         setTrace(null);
         setError('');
+        setCatalogQuery('');
+        setCatalogCategory('all');
         onNavigate(experienceBasePath(route));
     }
 
@@ -364,7 +379,7 @@ export function UnifiedExperience({ route, onNavigate, onMetaChange }: Props) {
                             aria-pressed={activeKey === item.key}
                         >
                             <span className={`cx-scenario-link-icon ${scenarioTone(scenarioItems.indexOf(item))}`}>{scenarioIcon(item)}</span>
-                            <span><strong>{item.name}</strong><small>{item.objectRequired ? `需要${item.objectType}` : '无需对象'}</small></span>
+                            <span><strong>{item.name}</strong><small>{item.objectRequired ? `需要${objectTypeLabel(item.objectType)}` : '无需业务对象'}</small></span>
                             <i className={`cx-status-dot ${item.status}`}/>
                         </button>)}
                     </div>
@@ -399,8 +414,14 @@ export function UnifiedExperience({ route, onNavigate, onMetaChange }: Props) {
             <div className="cx-conversation" ref={scrollRef} aria-live="polite">
                 {messages.length === 0 && !busy && <Welcome
                     applicationName={application.data.name}
-                    scenarios={scenarioItems}
+                    allScenarios={scenarioItems}
+                    scenarios={visibleScenarios}
+                    categories={catalogCategories}
+                    query={catalogQuery}
+                    category={catalogCategory}
                     prompts={quickPrompts}
+                    onQueryChange={setCatalogQuery}
+                    onCategoryChange={setCatalogCategory}
                     onScenario={enterScenario}
                     onPrompt={send}
                     onHandoff={() => requestHandoff('用户从欢迎页请求人工客服')}
@@ -498,36 +519,101 @@ function stepTitle(step: string) {
     }[step] || step;
 }
 
-function Welcome({ applicationName, scenarios, prompts, onScenario, onPrompt, onHandoff }: {
+function Welcome({
+    applicationName,
+    allScenarios,
+    scenarios,
+    categories,
+    query,
+    category,
+    prompts,
+    onQueryChange,
+    onCategoryChange,
+    onScenario,
+    onPrompt,
+    onHandoff,
+}: {
     applicationName: string;
+    allScenarios: ExperienceScenario[];
     scenarios: ExperienceScenario[];
+    categories: string[];
+    query: string;
+    category: string;
     prompts: string[];
+    onQueryChange: (value: string) => void;
+    onCategoryChange: (value: string) => void;
     onScenario: (scenario: ExperienceScenario) => void;
     onPrompt: (prompt: string) => void;
     onHandoff: () => void;
 }) {
+    const assistantName = applicationName.replace(/服务应用$/, '').trim() || applicationName;
     return <section className="cx-welcome">
         <div className="cx-welcome-hero">
             <span className="cx-welcome-avatar"><RobotOutlined/></span>
             <div>
                 <span className="cx-eyebrow">UNIFIED CUSTOMER EXPERIENCE</span>
-                <h2>你好，我是{applicationName}服务助手</h2>
-                <p>直接描述问题，我会自动识别服务场景；也可以从服务目录进入，先选业务对象再开始咨询。所有结果由后端模拟器生成。</p>
+                <h2>你好，我是{assistantName}服务助手</h2>
+                <p>直接描述问题，我会自动识别服务场景；也可以搜索服务、按分类浏览，再选择业务对象开始咨询。</p>
             </div>
         </div>
         {prompts.length > 0 && <div className="cx-welcome-prompts">
             {prompts.map(prompt => <button type="button" key={prompt} onClick={() => onPrompt(prompt)}>{prompt}<span>›</span></button>)}
         </div>}
         <div className="cx-welcome-section-head">
-            <div><span className="cx-eyebrow">SERVICE CATALOG</span><h3>从服务目录进入</h3></div>
-            <span>{scenarios.length} 个服务场景</span>
+            <div><span className="cx-eyebrow">SERVICE CATALOG</span><h3>找到你要办理的服务</h3></div>
+            <span>{scenarios.length} / {allScenarios.length} 个服务场景</span>
+        </div>
+        <div className="cx-catalog-controls">
+            <Input
+                className="cx-catalog-search"
+                allowClear
+                prefix={<SearchOutlined/>}
+                value={query}
+                placeholder="搜索订单、退款、发票、物流..."
+                aria-label="搜索服务"
+                onChange={event => onQueryChange(event.target.value)}
+            />
+            <div className="cx-category-tabs" role="tablist" aria-label="服务分类">
+                <button
+                    type="button"
+                    role="tab"
+                    className={category === 'all' ? 'is-active' : ''}
+                    aria-selected={category === 'all'}
+                    onClick={() => onCategoryChange('all')}
+                >
+                    全部服务 <b>{allScenarios.length}</b>
+                </button>
+                {categories.map(item => <button
+                    type="button"
+                    role="tab"
+                    key={item}
+                    className={category === item ? 'is-active' : ''}
+                    aria-selected={category === item}
+                    onClick={() => onCategoryChange(item)}
+                >
+                    {item} <b>{allScenarios.filter(scenario => scenario.category === item).length}</b>
+                </button>)}
+            </div>
         </div>
         <div className="cx-welcome-grid">
             {scenarios.map((scenario, index) => <button type="button" className="cx-welcome-card" key={scenario.key} onClick={() => onScenario(scenario)}>
                 <span className={`cx-welcome-card-icon ${scenarioTone(index)}`}>{scenarioIcon(scenario)}</span>
-                <div><strong>{scenario.name}</strong><p>{scenario.description}</p></div>
-                <small>{scenario.objectRequired ? `需要选择${scenario.objectType}` : '无需业务对象'} <i>›</i></small>
+                <div>
+                    <span className="cx-welcome-card-tags">
+                        <em>{scenario.category}</em>
+                        <em>{scenarioTemplateLabel(scenario.source.template)}</em>
+                    </span>
+                    <strong>{scenario.name}</strong>
+                    <p>{scenario.description}</p>
+                </div>
+                <small>{scenario.objectRequired ? `需要选择${objectTypeLabel(scenario.objectType)}` : '无需业务对象'} <i>›</i></small>
             </button>)}
+            {!scenarios.length && <div className="cx-catalog-empty">
+                <SearchOutlined/>
+                <strong>没有匹配的服务</strong>
+                <p>换个关键词或分类继续查找，也可以直接描述你的问题。</p>
+                <Button onClick={() => { onQueryChange(''); onCategoryChange('all'); }}>查看全部服务</Button>
+            </div>}
         </div>
         <div className="cx-welcome-foot">
             <span><SafetyCertificateOutlined/> 当前为后端模拟体验，使用模拟对象和后端轨迹</span>
@@ -545,7 +631,7 @@ function ObjectPicker({ scenario, orders, onSelect, onMissing }: {
     return <section className="cx-object-picker">
         <header>
             <span className="cx-card-icon"><ShoppingOutlined/></span>
-            <div><strong>选择要咨询的{scenario.objectType}</strong><p>{scenario.intro}</p></div>
+            <div><strong>选择要咨询的{objectTypeLabel(scenario.objectType)}</strong><p>{scenario.intro}</p></div>
             <span className="cx-card-step">模拟对象</span>
         </header>
         <div className="cx-order-list">
@@ -554,8 +640,8 @@ function ObjectPicker({ scenario, orders, onSelect, onMissing }: {
                 <div className="cx-order-main">
                     <div><span className={`cx-order-status ${order.status === '运输中' ? 'shipping' : ''}`}>{order.status}</span><small>模拟数据</small></div>
                     <strong>{order.label}</strong>
-                    <p>对象 {order.id}</p>
-                    <footer><b>仅用于模拟</b><Button size="small" type="primary" onClick={() => onSelect(order)} aria-label={`选择订单 ${order.id}`}>选择</Button></footer>
+                    <span className="cx-order-meta">{order.orderedAt} · 金额 ¥{order.amount.toFixed(2)} · {objectTypeLabel(order.type)} {order.id}</span>
+                    <footer><b>仅用于模拟</b><Button size="small" type="primary" onClick={() => onSelect(order)} aria-label={`选择${objectTypeLabel(order.type)} ${order.id}`}>选择</Button></footer>
                 </div>
             </article>)}
         </div>
@@ -575,7 +661,7 @@ function DecisionPanel({ scenario, order, onQuestion, onCorrect }: {
     return <section className="cx-decision">
         {order && <div className="cx-bound-order">
             <span className="cx-bound-icon"><ShoppingOutlined/></span>
-            <div><small>正在咨询此模拟对象</small><strong>{order.label}</strong><p>{scenario.objectType} {order.id} · {order.status}</p></div>
+            <div><small>正在咨询此模拟对象</small><strong>{order.label}</strong><p>{objectTypeLabel(scenario.objectType)} {order.id} · {order.status}</p></div>
             <Button type="link" onClick={onCorrect}>不是这个对象？</Button>
         </div>}
         <header>
@@ -591,12 +677,15 @@ function DecisionPanel({ scenario, order, onQuestion, onCorrect }: {
 
 function ScenarioResult({ trace, onConfirm, onHandoff }: { trace: SimulationTrace; onConfirm: () => void; onHandoff: () => void }) {
     const needConfirmation = trace.decisions.some(item => item.kind === 'confirm_action' && item.required);
+    const resultState = resultPresentation(trace.result.status);
+    const visibleFacts = trace.facts.filter(fact => fact.value !== null && fact.value !== undefined && fact.value !== '');
     return <section className="cx-result">
-        <ResultHead icon={<CheckCircleFilled/>} label={trace.result.status === 'needs_input' ? '等待确认' : '处理完成'} title={String(trace.handler?.label || trace.scenario_name)} tone="green"/>
+        <ResultHead icon={resultIcon(resultState.kind)} label={resultState.label} title={String(trace.handler?.label || trace.scenario_name)} tone={resultState.tone}/>
         <p className="cx-result-lead">{trace.result.content}</p>
-        {trace.facts.length > 0 && <div className="cx-fact-grid">
-            {trace.facts.slice(0, 6).map(fact => <div key={fact.key}><span>{fact.label}</span><strong>{formatTraceValue(fact.value)}</strong></div>)}
+        {visibleFacts.length > 0 && <div className="cx-fact-grid">
+            {visibleFacts.slice(0, 6).map(fact => <div key={fact.key}><span>{fact.label}</span><strong>{formatTraceValue(fact.value)}</strong></div>)}
         </div>}
+        {!visibleFacts.length && <p className="cx-fact-empty">本次模拟没有返回可展示的业务事实。</p>}
         <div className="cx-result-actions">
             {needConfirmation && <Button type="primary" onClick={onConfirm} icon={<CheckOutlined/>}>确认提交</Button>}
             <Button icon={<CustomerServiceOutlined/>} onClick={onHandoff}>转人工跟进</Button>
@@ -604,6 +693,27 @@ function ScenarioResult({ trace, onConfirm, onHandoff }: { trace: SimulationTrac
         </div>
         <p className="cx-result-note"><SafetyCertificateOutlined/> 结果来自后端模拟轨迹，未写入真实业务系统。</p>
     </section>;
+}
+
+type ResultKind = 'success' | 'failed' | 'handoff' | 'pending' | 'processing' | 'unknown';
+
+function resultPresentation(status: string): { label: string; tone: string; kind: ResultKind } {
+    const normalized = status.toLocaleLowerCase();
+    if (['needs_input', 'clarify', 'awaiting_confirmation'].includes(normalized)) return { label: serviceResultLabel(status), tone: 'amber', kind: 'pending' };
+    if (['failed', 'error', 'rejected', 'denied'].includes(normalized)) return { label: serviceResultLabel(status), tone: 'rose', kind: 'failed' };
+    if (['handoff', 'handed_off'].includes(normalized)) return { label: serviceResultLabel(status), tone: 'blue', kind: 'handoff' };
+    if (['processing', 'pending', 'deferred', 'tracking'].includes(normalized)) return { label: serviceResultLabel(status), tone: 'blue', kind: 'processing' };
+    if (['succeeded', 'success', 'completed', 'resolved'].includes(normalized)) return { label: serviceResultLabel(status), tone: 'green', kind: 'success' };
+    return { label: serviceResultLabel(status), tone: 'amber', kind: 'unknown' };
+}
+
+function resultIcon(kind: ResultKind): ReactNode {
+    if (kind === 'success') return <CheckCircleFilled/>;
+    if (kind === 'failed') return <CloseCircleFilled/>;
+    if (kind === 'handoff') return <CustomerServiceOutlined/>;
+    if (kind === 'processing') return <SyncOutlined spin/>;
+    if (kind === 'pending') return <ClockCircleOutlined/>;
+    return <ExclamationCircleFilled/>;
 }
 
 function ResultHead({ icon, label, title, tone }: { icon: ReactNode; label: string; title: string; tone: string }) {

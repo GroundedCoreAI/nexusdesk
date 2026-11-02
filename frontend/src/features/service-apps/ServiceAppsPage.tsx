@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Spin, Switch } from 'antd';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Spin, Switch, Tooltip } from 'antd';
 import {
     ApartmentOutlined,
     ApiOutlined,
@@ -45,6 +45,7 @@ import type {
     ScenarioConfig,
     ScenarioHandler,
     ScenarioTemplate,
+    ServiceApplicationReadiness,
     ServiceApplicationConfig,
     ServiceApplicationOverview,
     ServiceApplicationPage,
@@ -63,6 +64,7 @@ import type {
 import {
     createServiceApplication,
     createServiceScenario,
+    getServiceApplicationReadiness,
     publishServiceApplication,
     rollbackServiceApplication,
     setServiceApplicationStatus,
@@ -70,6 +72,7 @@ import {
     updateServiceApplication,
 } from '../../shared/api/client';
 import { Alert, toast, useAccess, useResource } from '../../shared/components/ui';
+import { t } from '../../i18n/index';
 import { CustomerExperiencePreview } from '../service-scenarios/CustomerExperiencePreview';
 import { SceneSimulator } from '../service-scenarios/SceneSimulator';
 import { SceneWorkbench } from '../service-scenarios/SceneWorkbench';
@@ -79,14 +82,24 @@ import {
     effectiveServiceCategories,
     formatTraceValue,
     groupScenariosByCategory,
+    handlerProductHint,
     handlerTypeLabel,
     newScenarioConfig,
     objectModeLabel,
+    objectTypeLabel,
+    serviceResultLabel,
     scenarioStatusLabel,
     defaultExecutionStages,
     withApplicationScenario,
 } from '../service-scenarios/scenarioConfig';
 import { ServiceCatalogManager } from './ServiceCatalogManager';
+import { IndustryCapabilitiesPage } from './IndustryCapabilitiesPage';
+import { ScenarioReadinessPanel } from './ScenarioReadinessPanel';
+import {
+    applicationReadinessGateMessage,
+    scenarioReadinessResultFromApi,
+    type ScenarioReadinessResult,
+} from './scenarioReadiness';
 import './service-apps.css';
 
 interface Props {
@@ -108,6 +121,12 @@ interface AppScenario {
     enabled: boolean;
     config: ScenarioConfig;
     source: ServiceScenarioSummary;
+}
+
+interface ApplicationReadinessState {
+    data: ServiceApplicationReadiness | null;
+    loading: boolean;
+    error: string;
 }
 
 const studioTabs: { key: StudioSection; label: string }[] = [
@@ -182,6 +201,8 @@ function capabilityTone(type: ApplicationCapabilityType) {
 
 export function ServiceAppsPage({ route, onNavigate, onMetaChange }: Props) {
     if (route === '/service-apps') return <AppCatalog onNavigate={onNavigate}/>;
+    if (route === '/service-apps/industry')
+        return <IndustryCapabilitiesPage onNavigate={onNavigate}/>;
     if (/^\/service-apps\/[a-z0-9-]+\/experience(?:\/[a-z][a-z0-9_-]{0,63})?$/.test(route))
         return <UnifiedExperience route={route} onNavigate={onNavigate} onMetaChange={onMetaChange}/>;
     if (/^\/service-apps\/[a-z0-9-]+\/scenarios\/[a-z][a-z0-9_-]{0,63}\/simulator$/.test(route))
@@ -263,7 +284,10 @@ function AppCatalog({ onNavigate }: { onNavigate: (path: string) => void }) {
                 <h2>把业务编排和执行能力交付成应用</h2>
                 <p>应用负责服务目录、场景和对象；能力负责 Direct、查询、办理、Agent 与人工。配置、预览、调试和发布都在同一个应用内完成。</p>
             </div>
-            <Button type="primary" icon={<PlusOutlined/>} disabled={!admin} onClick={openCreate}>新建服务应用</Button>
+            <div className="sa-catalog-hero-actions">
+                <Button icon={<DeploymentUnitOutlined/>} onClick={() => onNavigate('/service-apps/industry')}>行业能力</Button>
+                <Button type="primary" icon={<PlusOutlined/>} disabled={!admin} onClick={openCreate}>新建服务应用</Button>
+            </div>
         </section>
 
         <Alert error={applications.error || overview.error}/>
@@ -401,6 +425,57 @@ function ServiceAppStudio({ route, onNavigate, onMetaChange }: { route: string; 
         () => effectiveServiceCategories(app, scenarios.data?.items || []),
         [app, scenarios.data],
     );
+    const scenarioReadinessSignature = useMemo(
+        () => appScenarios
+            .map(item => `${item.key}:${item.source.revision}:${item.source.published_version ?? 'none'}:${item.enabled ? 'enabled' : 'disabled'}`)
+            .join('|'),
+        [appScenarios],
+    );
+    const [readinessState, setReadinessState] = useState<ApplicationReadinessState>({
+        data: null,
+        loading: false,
+        error: '',
+    });
+    const [readinessReload, setReadinessReload] = useState(0);
+    const readinessKey = app && scenarios.data
+        ? `${app.key}:${app.revision}:${scenarioReadinessSignature}`
+        : '';
+    const retryReadiness = useCallback(() => setReadinessReload(value => value + 1), []);
+
+    useEffect(() => {
+        if (!readinessKey) {
+            if (app && scenarios.error) {
+                setReadinessState(current => current.error === scenarios.error
+                    ? current
+                    : { data: null, loading: false, error: scenarios.error });
+                return;
+            }
+            setReadinessState(current => current.data === null && current.error === ''
+                ? current
+                : { data: null, loading: false, error: '' });
+            return;
+        }
+
+        let active = true;
+        const controller = new AbortController();
+        setReadinessState({ data: null, loading: true, error: '' });
+        void getServiceApplicationReadiness(app!.key, controller.signal)
+            .then(value => {
+                if (active) setReadinessState({ data: value, loading: false, error: '' });
+            })
+            .catch(cause => {
+                if (!active || controller.signal.aborted) return;
+                setReadinessState({
+                    data: null,
+                    loading: false,
+                    error: cause instanceof Error ? cause.message : '读取完整性检查失败',
+                });
+            });
+        return () => {
+            active = false;
+            controller.abort();
+        };
+    }, [app, readinessKey, readinessReload, scenarios.error]);
 
     useEffect(() => {
         if (!app) return;
@@ -426,6 +501,25 @@ function ServiceAppStudio({ route, onNavigate, onMetaChange }: { route: string; 
     }, [advancedSceneKey, appScenarios]);
 
     const activeScene = appScenarios.find(item => item.key === activeSceneKey) || appScenarios[0];
+    const readinessLoading = !!app && !readinessState.error && (
+        !readinessState.data || readinessState.loading || scenarios.loading || !readinessKey
+    );
+    const canPublishApplication = !!readinessState.data
+        && readinessState.data.can_publish === true
+        && !readinessLoading
+        && !readinessState.error;
+    const releaseGateMessage = readinessState.error
+        ? t('完整性检查不可用，暂不能发布。')
+        : readinessLoading
+            ? t('正在加载完整性检查…')
+            : readinessState.data
+                ? applicationReadinessGateMessage(readinessState.data)
+                : t('完整性检查不可用，暂不能发布。');
+    const activeScenarioReadiness = useMemo<ScenarioReadinessResult | null>(() => {
+        if (!activeScene || !readinessState.data) return null;
+        const match = readinessState.data.scenarios.find(item => item.key === activeScene.key);
+        return match ? scenarioReadinessResultFromApi(match) : null;
+    }, [activeScene, readinessState.data]);
 
     async function saveAppConfig(next: ServiceApplicationConfig, message = '应用配置已保存') {
         if (!app) return;
@@ -455,6 +549,7 @@ function ServiceAppStudio({ route, onNavigate, onMetaChange }: { route: string; 
             const updated = await publishServiceApplication(app.key, app.revision);
             application.refresh();
             versions.refresh();
+            retryReadiness();
             toast.success(`应用已发布${updated.published_version ? `为 v${updated.published_version}` : ''}`);
         }
         catch (cause) {
@@ -544,11 +639,28 @@ function ServiceAppStudio({ route, onNavigate, onMetaChange }: { route: string; 
                 <Button disabled={!hasScenarios} icon={<CustomerServiceOutlined/>} aria-label="统一体验" onClick={() => onNavigate(`${basePath}/experience`)}>统一体验</Button>
                 <Button disabled={!hasScenarios} icon={<EyeOutlined/>} aria-label="预览" onClick={() => openPreview(false)}>预览</Button>
                 <Button disabled={!hasScenarios} icon={<BugOutlined/>} aria-label="调试" onClick={() => openPreview(true)}>调试</Button>
-                <Button type="primary" disabled={!admin || busy} loading={busy} onClick={() => void publish()}>发布新版本</Button>
+                <Tooltip title={releaseGateMessage}>
+                    <span>
+                        <Button
+                            type="primary"
+                            disabled={!admin || busy || !canPublishApplication}
+                            loading={busy}
+                            onClick={() => void publish()}
+                        >发布新版本</Button>
+                    </span>
+                </Tooltip>
             </div>
         </div>
 
         <Alert error={error || application.error || scenarios.error || versions.error || traces.error}/>
+        {readinessState.error && <div className="sa-readiness-error" role="alert">
+            <span className="sa-readiness-error-icon"><SafetyCertificateOutlined/></span>
+            <div>
+                <strong>{t('完整性检查加载失败')}</strong>
+                <p>{readinessState.error}</p>
+            </div>
+            <Button size="small" icon={<ReloadOutlined/>} onClick={retryReadiness}>{t('重试')}</Button>
+        </div>}
 
         {!hasScenarios ? <EmptyApplicationWorkspace
             application={app}
@@ -609,6 +721,7 @@ function ServiceAppStudio({ route, onNavigate, onMetaChange }: { route: string; 
                 application={app}
                 scenes={appScenarios}
                 activeScene={activeScene}
+                scenarioReadiness={activeScenarioReadiness}
                 admin={admin}
                 busy={busy}
                 onScene={setActiveSceneKey}
@@ -642,16 +755,26 @@ function ServiceAppStudio({ route, onNavigate, onMetaChange }: { route: string; 
             />}
             {section === 'deploy' && <DeployTab
                 application={app}
+                scenes={appScenarios}
                 versions={versions.data}
                 traces={traces.data}
+                readiness={readinessState.data}
+                readinessLoading={readinessLoading}
+                readinessError={readinessState.error}
+                canPublish={canPublishApplication}
                 admin={admin}
                 busy={busy}
                 onNavigate={onNavigate}
                 onPublish={publish}
+                onInspectScene={sceneKey => {
+                    setActiveSceneKey(sceneKey);
+                    setSection('orchestration');
+                }}
                 onRefresh={() => {
                     application.refresh();
                     versions.refresh();
                     traces.refresh();
+                    retryReadiness();
                 }}
                 onSave={saveAppConfig}
             />}
@@ -822,10 +945,11 @@ function OverviewTab({ application, scenes, versions, traces, basePath, onNaviga
     </div>;
 }
 
-function OrchestrationTab({ application, scenes, activeScene, admin, busy, onScene, onCreate, onToggleScene, onNavigate, basePath, onDebug, serviceCategories, onManageCatalog }: {
+function OrchestrationTab({ application, scenes, activeScene, scenarioReadiness, admin, busy, onScene, onCreate, onToggleScene, onNavigate, basePath, onDebug, serviceCategories, onManageCatalog }: {
     application: ServiceApplicationSummary;
     scenes: AppScenario[];
     activeScene: AppScenario;
+    scenarioReadiness: ScenarioReadinessResult | null;
     serviceCategories: ReturnType<typeof effectiveServiceCategories>;
     admin: boolean;
     busy: boolean;
@@ -866,7 +990,7 @@ function OrchestrationTab({ application, scenes, activeScene, admin, busy, onSce
                         onClick={() => onScene(scene.key)}
                     >
                         <span className="sa-tree-scene-icon">{scenarioVisual(scene)}</span>
-                        <span><strong>{scene.name}</strong><small>{scene.config.object ? `${scene.config.object.type}对象` : '无需业务对象'}</small></span>
+                        <span><strong>{scene.name}</strong><small>{scene.config.object ? `${objectTypeLabel(scene.config.object.type)}对象` : '无需业务对象'}</small></span>
                         <i className={scene.status}/>
                     </button>)}
                 </div>)}
@@ -897,6 +1021,13 @@ function OrchestrationTab({ application, scenes, activeScene, admin, busy, onSce
                 <span><strong>{enabledHandlers.length}</strong> 个可用承接</span>
             </div>
 
+            <ScenarioReadinessPanel
+                application={application}
+                scenario={activeScene.source}
+                readiness={scenarioReadiness}
+                className="sa-orchestration-readiness"
+            />
+
             <section className="sa-flow">
                 <FlowStage number="01" title="入口方式" hint="客户从哪里到达场景" icon={<BranchesOutlined/>} tone="slate">
                     <div className="sa-flow-chips">{activeScene.config.entries.filter(item => item.enabled !== false).map(item => <span key={item.key}>{item.label}</span>)}</div>
@@ -904,7 +1035,7 @@ function OrchestrationTab({ application, scenes, activeScene, admin, busy, onSce
                 <FlowStage number="02" title="业务对象" hint="场景围绕什么业务实体继续" icon={<DatabaseOutlined/>} tone="blue">
                     <div className="sa-object-card">
                         <span><ShoppingOutlined/></span>
-                        <div><strong>{activeScene.config.object?.type || '无需对象'}</strong><small>{activeScene.config.object ? `${activeScene.config.object.provider} · ${activeScene.config.object.mode}` : '可由知识或固定规则直接处理'}</small></div>
+                        <div><strong>{activeScene.config.object ? objectTypeLabel(activeScene.config.object.type) : '无需业务对象'}</strong><small>{activeScene.config.object ? `${objectModeLabel(activeScene.config.object.mode)} · 权限范围内查询` : '可由知识或固定规则直接处理'}</small></div>
                         <b>{activeScene.config.object?.required ? '必填' : '可选'}</b>
                     </div>
                 </FlowStage>
@@ -936,7 +1067,7 @@ function OrchestrationTab({ application, scenes, activeScene, admin, busy, onSce
             </div>
             <div className="sa-inspector-group">
                 <div className="sa-inspector-label"><span>处理能力</span></div>
-                {enabledHandlers.map((handler, index) => <CapabilityBinding key={handler.key} index={String(index + 1)} title={handler.label} hint={`${handlerTypeLabel(handler.type)}${handler.tool ? ` · ${handler.tool}` : ''}${handler.queue ? ` · ${handler.queue}` : ''}`} icon={handler.type === 'agent' ? <RobotOutlined/> : handler.type === 'human' ? <CustomerServiceOutlined/> : <ThunderboltOutlined/>} tone={handler.type === 'agent' ? 'violet' : handler.type === 'human' ? 'amber' : 'green'}/>)}
+                {enabledHandlers.map((handler, index) => <CapabilityBinding key={handler.key} index={String(index + 1)} title={handler.label} hint={`${handlerTypeLabel(handler.type)} · ${handlerProductHint(handler)}`} icon={handler.type === 'agent' ? <RobotOutlined/> : handler.type === 'human' ? <CustomerServiceOutlined/> : <ThunderboltOutlined/>} tone={handler.type === 'agent' ? 'violet' : handler.type === 'human' ? 'amber' : 'green'}/>)}
                 {!enabledHandlers.length && <p className="sa-muted-note">该场景尚未启用执行能力。</p>}
             </div>
             <div className="sa-inspector-group">
@@ -1405,7 +1536,7 @@ function PreviewTab({ application, scenes, debug, onDebug, onError }: {
             <section className="sa-preview-stage">
                 <div className="sa-preview-stage-bar">
                     <span><i/> {debug ? 'SERVER DEBUG' : 'CUSTOMER PREVIEW'}</span>
-                    <span><InfoCircleOutlined/> 所有对象、订单与结果均为模拟数据</span>
+                    <span><InfoCircleOutlined/> 所有业务对象与结果均为模拟数据</span>
                 </div>
                 <div className="sa-preview-device">
                     <header className="sa-customer-head">
@@ -1420,7 +1551,7 @@ function PreviewTab({ application, scenes, debug, onDebug, onError }: {
                         {trace?.object_ref && <OrderPicker objectRef={trace.object_ref}/>}
                         {trace && <ChatBubble role="assistant">
                             <div className="sa-result-inline">
-                                <span><CheckCircleFilled/> {trace.result.status}</span>
+                                <span><CheckCircleFilled/> {serviceResultLabel(trace.result.status)}</span>
                                 <strong>{String(trace.handler?.label || trace.scenario_name)}</strong>
                                 <p>{resultContent}</p>
                             </div>
@@ -1603,14 +1734,20 @@ interface ChannelFormValues {
     status: ApplicationChannelStatus;
 }
 
-function DeployTab({ application, versions, traces, admin, busy, onNavigate, onPublish, onRefresh, onSave }: {
+function DeployTab({ application, scenes, versions, traces, readiness, readinessLoading, readinessError, canPublish, admin, busy, onNavigate, onPublish, onInspectScene, onRefresh, onSave }: {
     application: ServiceApplicationSummary;
+    scenes: AppScenario[];
     versions?: ServiceApplicationVersionPage | null;
     traces?: ServiceTracePage | null;
+    readiness: ServiceApplicationReadiness | null;
+    readinessLoading: boolean;
+    readinessError: string;
+    canPublish: boolean;
     admin: boolean;
     busy: boolean;
     onNavigate: (path: string) => void;
     onPublish: () => Promise<void>;
+    onInspectScene: (sceneKey: string) => void;
     onRefresh: () => void;
     onSave: (next: ServiceApplicationConfig, message?: string) => Promise<void>;
 }) {
@@ -1621,6 +1758,24 @@ function DeployTab({ application, versions, traces, admin, busy, onNavigate, onP
     const [error, setError] = useState('');
     const channels = application.config.channels;
     const latestVersions = versions?.items.slice(0, 5) || [];
+    const gateItems = useMemo(() => (readiness?.scenarios || []).map(item => {
+        const scene = scenes.find(candidate => candidate.key === item.key);
+        return {
+            key: item.key,
+            name: scene?.name || item.name,
+            category: scene?.category || '',
+            result: scenarioReadinessResultFromApi(item),
+        };
+    }), [readiness, scenes]);
+    const blockedCount = gateItems.filter(item => item.result.status === 'blocked').length;
+    const simulateOnlyCount = gateItems.filter(item => item.result.status === 'simulate_only').length;
+    const readinessMessage = readinessError
+        ? t('完整性检查不可用，暂不能发布。')
+        : readinessLoading
+            ? t('正在加载完整性检查…')
+            : readiness
+                ? applicationReadinessGateMessage(readiness)
+                : t('完整性检查不可用，暂不能发布。');
 
     function openCreate() {
         setEditingKey(null);
@@ -1720,13 +1875,60 @@ function DeployTab({ application, versions, traces, admin, busy, onNavigate, onP
                 <h3>把应用草稿交付到客户触点</h3>
                 <p>当前草稿 revision {application.revision}，{application.published_version ? `生产版本 v${application.published_version}` : '尚未发布'}。客户触点、发布版本与模拟轨迹都来自后端。</p>
                 <div className="sa-hero-actions">
-                    <Button type="primary" icon={<SendOutlined/>} loading={busy} disabled={!admin} onClick={() => void onPublish()}>发布新版本</Button>
+                    <Tooltip title={readinessMessage}>
+                        <span>
+                            <Button type="primary" icon={<SendOutlined/>} loading={busy} disabled={!admin || busy || !canPublish} onClick={() => void onPublish()}>发布新版本</Button>
+                        </span>
+                    </Tooltip>
                     <Button icon={<EyeOutlined/>} onClick={() => onNavigate(`/service-apps/${application.key}/experience`)}>打开统一体验</Button>
                 </div>
+                {!canPublish && <p className="sa-release-gate-warning">{readinessMessage}</p>}
+                {canPublish && <p className="sa-release-gate-notice">{readinessMessage}</p>}
             </div>
             <span className={`sa-app-state ${application.status === 'published' ? '' : 'waiting'}`}><i/>{applicationStatusLabel[application.status]}</span>
         </section>
         <Alert error={error}/>
+
+        <section className="sa-release-gate">
+            <div className="sa-panel-head">
+                <div><span className="sa-eyebrow">RELEASE GATE</span><h3>{t('发布前完整性检查')}</h3></div>
+                <span className="sa-muted-note">
+                    {readinessError
+                        ? t('完整性检查不可用，暂不能发布。')
+                        : readinessLoading
+                            ? t('正在加载完整性检查…')
+                            : t('{{v0}} 个阻断 · {{v1}} 个待处理', { v0: blockedCount, v1: simulateOnlyCount })}
+                </span>
+            </div>
+            {readinessError
+                ? <div className="sa-release-gate-state error">
+                    <SafetyCertificateOutlined/>
+                    <div>
+                        <strong>{t('完整性检查不可用，暂不能发布。')}</strong>
+                        <p>{readinessError}</p>
+                    </div>
+                </div>
+                : readinessLoading
+                    ? <div className="sa-release-gate-state loading">
+                        <Spin size="small"/>
+                        <span>{t('正在加载完整性检查…')}</span>
+                    </div>
+                    : <div className="sa-release-gate-list">
+                        {gateItems.map(item => <button
+                            type="button"
+                            key={item.key}
+                            className={`sa-release-scene ${item.result.status}`}
+                            aria-label={t('在业务编排中查看 {{v0}}', { v0: item.name })}
+                            onClick={() => onInspectScene(item.key)}
+                        >
+                            <span className="sa-release-scene-icon"><i/></span>
+                            <span><strong>{item.name}</strong><small>{item.category ? `${item.category} · ` : ''}{item.result.description}</small></span>
+                            <b>{item.result.label}</b>
+                        </button>)}
+                        {!gateItems.length && <p className="sa-muted-note">{t('应用还没有可检查的服务场景。')}</p>}
+                    </div>}
+            <p className="sa-release-gate-foot">{t('检查只覆盖业务配置、客户触点、人工承接和发布状态；点击场景可在业务编排中定位。')}</p>
+        </section>
 
         <section className="sa-environment-grid">
             <EnvironmentCard title="当前草稿" badge={`r${application.revision}`} value={application.has_unpublished_changes ? '有未发布修改' : '与发布一致'} detail={`${application.scenario_count} 个场景 · ${application.capability_count} 个能力`} tone="blue" action={<Button size="small" disabled={!admin || actionBusy} onClick={() => void changeStatus('review')}>标记待发布</Button>}/>
@@ -1745,7 +1947,7 @@ function DeployTab({ application, versions, traces, admin, busy, onNavigate, onP
                 <div className="sa-panel-head"><div><span className="sa-eyebrow">RELEASES</span><h3>发布版本</h3></div><Button type="link" onClick={onRefresh}>刷新</Button></div>
                 {latestVersions.map(version => <ReleaseRow key={version.id} version={version} admin={admin} busy={actionBusy} onRollback={() => void rollback(version.version)}/>)}
                 {!latestVersions.length && <p className="sa-muted-note">尚无应用发布版本。</p>}
-                <div className="sa-release-foot"><span>{versions?.published_version ? `当前生产版本 v${versions.published_version}` : '当前没有生产版本'}</span><Button type="link" disabled={!admin || busy} onClick={() => void onPublish()}>发布新版本 →</Button></div>
+                <div className="sa-release-foot"><span>{versions?.published_version ? `当前生产版本 v${versions.published_version}` : '当前没有生产版本'}</span><Tooltip title={readinessMessage}><span><Button type="link" disabled={!admin || busy || !canPublish} onClick={() => void onPublish()}>发布新版本 →</Button></span></Tooltip></div>
             </section>
         </div>
 

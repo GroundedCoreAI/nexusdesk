@@ -7,6 +7,7 @@ industry entities and no code branches on the pack key.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from ..scenarios.models import ObjectMode, SimulatedObject
@@ -908,8 +909,8 @@ def build_local_life_pack() -> IndustryPackManifest:
             CatalogCategoryTemplate(key="merchant-service", name="商家与门店", order=40),
             CatalogCategoryTemplate(key="general", name="通用服务", order=50),
         ],
-        object_templates=_OBJECT_TEMPLATES,
-        scenario_templates=_SCENARIOS,
+        object_templates=deepcopy(_OBJECT_TEMPLATES),
+        scenario_templates=deepcopy(_SCENARIOS),
         sample_data=_samples(),
         acceptance_cases=_acceptance_cases(),
         application_blueprint=_application_blueprint(),

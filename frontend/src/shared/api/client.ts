@@ -185,6 +185,48 @@ export interface ServiceApplicationVersionPage {
   items: ServiceApplicationVersion[];
   published_version: number | null;
 }
+export type ServiceReadinessState = 'ready' | 'simulate_only' | 'blocked';
+export type ServiceReadinessCheckStatus = 'pass' | 'warning' | 'blocked';
+export type ServiceReadinessCheckSeverity = 'blocking' | 'warning' | 'info';
+export interface ServiceReadinessCheck {
+  key: string;
+  title: string;
+  detail: string;
+  status: ServiceReadinessCheckStatus;
+  severity: ServiceReadinessCheckSeverity;
+}
+export interface ServiceReadinessCounts {
+  pass: number;
+  warning: number;
+  blocked: number;
+}
+export interface ServiceScenarioReadiness {
+  key: string;
+  name: string;
+  version: number | null;
+  scenario_status: string;
+  status: ServiceReadinessState;
+  label: string;
+  description: string;
+  checks: ServiceReadinessCheck[];
+  counts: ServiceReadinessCounts;
+  can_publish: boolean;
+  can_simulate: boolean;
+}
+export interface ServiceApplicationReadiness {
+  key: string;
+  name: string;
+  revision: number;
+  application_status: string;
+  status: ServiceReadinessState;
+  label: string;
+  description: string;
+  checks: ServiceReadinessCheck[];
+  counts: ServiceReadinessCounts;
+  can_publish: boolean;
+  can_simulate: boolean;
+  scenarios: ServiceScenarioReadiness[];
+}
 export interface ServiceScenarioMetrics {
   volume: number;
   auto_resolved: number;
@@ -312,6 +354,122 @@ export interface ServiceTraceItem {
   created_at: string;
 }
 export interface ServiceTracePage { items: ServiceTraceItem[] }
+export type IndustryPackMaturity = 'alpha' | 'beta' | 'ga';
+export interface IndustryPackSummary {
+  pack_key: string;
+  name: string;
+  description: string;
+  pack_version: string;
+  maturity: IndustryPackMaturity;
+  digest: string;
+  object_count: number;
+  scenario_count: number;
+  application_key: string | null;
+  installation_count: number;
+}
+export interface IndustryPackCatalog {
+  items: IndustryPackSummary[];
+  total: number;
+}
+export interface IndustryPackDetail extends IndustryPackSummary {
+  manifest: Record<string, unknown>;
+  compiled_application: Record<string, unknown> | null;
+  installations: IndustryPackInstallation[];
+}
+export type IndustryPackInstallationStatus = 'installed' | 'upgrading' | 'conflicted' | 'blocked';
+export interface IndustryPackInstallation {
+  id: string;
+  pack_key: string;
+  pack_version: string;
+  pack_digest: string;
+  maturity: IndustryPackMaturity;
+  application_key: string;
+  status: IndustryPackInstallationStatus;
+  scenario_template_versions: Record<string, string>;
+  scenario_template_digests: Record<string, string>;
+  installed_scenarios: Record<string, string>;
+  revision: number;
+  installed_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+export interface IndustryPackInstallationPage {
+  items: IndustryPackInstallation[];
+  total: number;
+}
+export interface IndustryPackInstallInput {
+  pack_version?: string;
+  application_key?: string;
+  install_scenarios?: boolean;
+}
+export interface IndustryPackInstallResult {
+  created: boolean;
+  installation: IndustryPackInstallation;
+}
+export type IndustryPackUpgradeStatus = 'clean' | 'conflicted' | 'blocked';
+export interface IndustryPackMergeConflict {
+  path: string;
+  base?: unknown;
+  local?: unknown;
+  incoming?: unknown;
+}
+export interface IndustryPackScenarioUpgrade {
+  template_key: string;
+  scenario_key: string;
+  status: IndustryPackUpgradeStatus;
+  conflicts: IndustryPackMergeConflict[];
+  auto_merged_fields: string[];
+  kept_local_fields: string[];
+  incoming_fields: string[];
+  current_revision: number | null;
+  merged_config: Record<string, unknown> | null;
+  detail: string;
+}
+export interface IndustryPackUpgradePreview {
+  id: string;
+  installation_id: string;
+  from_version: string;
+  to_version: string;
+  status: IndustryPackUpgradeStatus;
+  scenarios: IndustryPackScenarioUpgrade[];
+  application: Record<string, unknown> | null;
+  application_conflicts: IndustryPackMergeConflict[];
+  created_at: string | null;
+}
+export interface IndustryPackUpgradeResult {
+  applied: boolean;
+  installation: IndustryPackInstallation;
+  preview_id: string;
+  upgraded_scenarios: string[];
+  application_key: string;
+}
+export type ServiceProviderKind = 'object' | 'tool' | 'human_queue';
+export interface ServiceProvider {
+  id: string;
+  key: string;
+  kind: ServiceProviderKind;
+  name: string;
+  description: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  source: string;
+  source_ref: string | null;
+  revision: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+export interface ServiceProviderPage {
+  items: ServiceProvider[];
+  total: number;
+}
+export interface ServiceProviderInput {
+  key: string;
+  kind: ServiceProviderKind;
+  name: string;
+  description: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+}
 export interface AgentScenarioReference {
   key: string;
   name: string;
@@ -364,6 +522,105 @@ export interface Message { id: string; seq: number; role: string; content: strin
 export interface Action { id: string; status: string; payload: { title: string; description: string }; expires_at: string }
 export interface ConversationDetail extends Conversation { messages: Message[]; runs: Run[]; actions: Action[] }
 export interface Handoff { revision?: number; id: string; conversation_id: string; external_id: string; reason: string; summary: string; status: string; assignee: string | null }
+/** Operator-facing context aggregated by GET /handoffs/{id}/context. */
+export interface HandoffContextFact {
+  key: string;
+  label: string;
+  value: unknown;
+  format: string;
+  masked: boolean;
+}
+export interface HandoffContextDecisionOption { value: string; label: string }
+export interface HandoffContextDecision {
+  key: string;
+  kind: string;
+  label: string;
+  required: boolean;
+  confirm: boolean;
+  state: 'selected' | 'pending' | string;
+  options: HandoffContextDecisionOption[];
+}
+export interface HandoffContextAction {
+  id: string;
+  kind: string;
+  status: string;
+  valid: boolean;
+  summary: string;
+  created_at: string | null;
+  expires_at: string | null;
+}
+export interface HandoffContextRun {
+  id: string;
+  status: string;
+  error_code: string | null;
+  cancel_requested: boolean;
+  created_at: string | null;
+  finished_at: string | null;
+}
+export interface HandoffContextRouting {
+  disposition: string;
+  action: string;
+  execution_tier: string | null;
+  reason_code: string;
+  matched_rule_id: string | null;
+  decider: string | null;
+  created_at: string | null;
+}
+export interface HandoffContextTrace {
+  id: string;
+  scenario_key: string;
+  scenario_version: number | null;
+  simulation: boolean;
+  entry: string | null;
+  handler_type: string | null;
+  outcome: string | null;
+  reason_code: string | null;
+  result_summary: string;
+  message_excerpt: string;
+  created_at: string | null;
+}
+export interface HandoffContext {
+  handoff: {
+    id: string;
+    conversation_id: string;
+    status: string;
+    assignee: string | null;
+    reason: string;
+    summary: string;
+    revision?: number | null;
+    created_at: string | null;
+    closed_at: string | null;
+  };
+  conversation: {
+    id: string;
+    external_id: string;
+    mode: string | null;
+    source: string | null;
+    assigned_to: string | null;
+    has_customer: boolean;
+    summary: string;
+    created_at: string | null;
+    updated_at: string | null;
+  } | null;
+  application: { key: string; name: string | null; version: number | null; source: string | null } | null;
+  scenario: {
+    key: string;
+    name: string;
+    version: number | null;
+    status: string | null;
+    resolved_by: string | null;
+    handler_type: string | null;
+    outcome: string | null;
+    reason_code: string | null;
+  } | null;
+  object: { type: string | null; id: string; status: string } | null;
+  facts: HandoffContextFact[];
+  decisions: HandoffContextDecision[];
+  actions: HandoffContextAction[];
+  runs: HandoffContextRun[];
+  routing: HandoffContextRouting[];
+  traces: HandoffContextTrace[];
+}
 export interface Ticket { ticket_no?: string; priority?: number; assignee_id?: string | null; customer_id?: string | null; customer_active?: boolean; due_at?: string | null; created_at?: string; updated_at?: string; resolution?: string | null; id: string; title: string; description: string; status: string; note: string; revision: number }
 export type ApprovalStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'cancelled';
 export type ApprovalDecision = 'approve' | 'reject';
@@ -799,6 +1056,8 @@ export const updateServiceCatalog = (
     categories,
     category_changes: categoryChanges,
   });
+export const getServiceApplicationReadiness = (key: string, signal?: AbortSignal) =>
+  api<ServiceApplicationReadiness>(`/service-apps/${key}/readiness`, { signal });
 export const publishServiceApplication = (key: string, revision: number) =>
   post<ServiceApplicationSummary>(`/service-apps/${key}/publish`, { revision });
 export const setServiceApplicationStatus = (
@@ -810,6 +1069,56 @@ export const rollbackServiceApplication = (key: string, version: number, revisio
   post<ServiceApplicationSummary>(`/service-apps/${key}/rollback`, { version, revision });
 export const simulateServiceApplication = (key: string, body: SimulationRequestInput) =>
   post<SimulationTrace>(`/service-apps/${key}/simulate`, body);
+export const getIndustryPacks = (signal?: AbortSignal) =>
+  api<IndustryPackCatalog>('/industry-packs', { signal });
+export const getIndustryPack = (packKey: string, signal?: AbortSignal) =>
+  api<IndustryPackDetail>(`/industry-packs/${encodeURIComponent(packKey)}`, { signal });
+export const getIndustryPackInstallations = (signal?: AbortSignal) =>
+  api<IndustryPackInstallationPage>('/industry-packs/installations', { signal });
+export const installIndustryPack = (packKey: string, body: IndustryPackInstallInput) =>
+  post<IndustryPackInstallResult>(`/industry-packs/${encodeURIComponent(packKey)}/install`, body);
+export const previewIndustryPackUpgrade = (
+  installationId: string,
+  targetVersion?: string,
+) =>
+  post<IndustryPackUpgradePreview>(
+    `/industry-packs/installations/${encodeURIComponent(installationId)}/upgrade-preview`,
+    targetVersion ? { target_version: targetVersion } : {},
+  );
+export const applyIndustryPackUpgrade = (
+  installationId: string,
+  previewId: string,
+  targetVersion?: string,
+) =>
+  post<IndustryPackUpgradeResult>(
+    `/industry-packs/installations/${encodeURIComponent(installationId)}/upgrade`,
+    {
+      preview_id: previewId,
+      ...(targetVersion ? { target_version: targetVersion } : {}),
+    },
+  );
+export function getServiceProviders(
+  kind?: ServiceProviderKind,
+  query = '',
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams();
+  if (kind) params.set('kind', kind);
+  if (query.trim()) params.set('q', query.trim());
+  const suffix = params.toString();
+  return api<ServiceProviderPage>(`/service-providers${suffix ? `?${suffix}` : ''}`, { signal });
+}
+export const createServiceProvider = (body: ServiceProviderInput) =>
+  post<ServiceProvider>('/service-providers', body);
+export const updateServiceProvider = (
+  kind: ServiceProviderKind,
+  key: string,
+  body: ServiceProviderInput & { revision: number },
+) =>
+  put<ServiceProvider>(
+    `/service-providers/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`,
+    body,
+  );
 export const updateServiceScenario = (key: string, config: ScenarioConfig, revision: number) =>
   put<ServiceScenarioSummary>(`/service-scenarios/${key}`, { config, revision });
 export const createServiceScenario = (key: string, config: ScenarioConfig) =>

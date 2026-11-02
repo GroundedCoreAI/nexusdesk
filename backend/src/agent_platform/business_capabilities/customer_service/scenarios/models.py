@@ -279,6 +279,9 @@ class SimulationRequest(ScenarioModel):
     object: SimulatedObject | None = None
     selected_decision: str | None = None
     selected_handler: str | None = None
+    # Optional binding so a trace recorded while serving a real conversation can
+    # be replayed by the human workbench. Simulator-only traces keep it empty.
+    conversation_id: UUID | None = None
 
 
 class SimulationTrace(ScenarioModel):
