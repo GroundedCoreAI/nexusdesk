@@ -148,12 +148,15 @@ def register_builtin_ui_extensions(
     registry: UiExtensionRegistry,
     contributions=None,
 ) -> None:
-    """Register UI contributions shipped with the modular monolith."""
+    """Register UI contributions shipped with the modular monolith.
+
+    Approval remains a backend capability but is intentionally hidden from UI
+    navigation until its standalone workbench is ready for release.
+    """
 
     for manifest in (
         CUSTOMER_SERVICE_UI_MANIFEST,
         KNOWLEDGE_UI_MANIFEST,
-        APPROVAL_UI_MANIFEST,
     ):
         if contributions is None:
             registry.register(manifest)

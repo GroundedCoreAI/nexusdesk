@@ -16,6 +16,8 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
 )
 from agent_platform.extension_contracts import BusinessScope
 
+from .context import build_handoff_context
+
 
 class HandoffService:
     def __init__(self, engine, repository):
@@ -36,6 +38,30 @@ class HandoffService:
                 t=tenant,
                 **scope_params,
             )
+
+    async def context(self, tenant, hid, scope: BusinessScope | None = None):
+        """Aggregate scenario, object, facts, decisions and execution evidence.
+
+        The handoff row is read with the caller's tenant and business scope, so a
+        cross-scope identifier always resolves to 404 instead of partial data.
+        """
+
+        resolved = resolve_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved)
+        async with self.engine.connect() as c:
+            handoff = required(
+                await one(
+                    c,
+                    """SELECT * FROM handoffs
+                    WHERE id=:id AND tenant_id=:t AND """
+                    + scope_sql,
+                    id=hid,
+                    t=tenant,
+                    **scope_params,
+                ),
+                "handoff_not_found",
+            )
+            return await build_handoff_context(c, tenant, resolved, handoff)
 
     async def request(
         self,

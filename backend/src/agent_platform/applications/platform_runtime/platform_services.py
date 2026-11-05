@@ -6,7 +6,22 @@ from agent_platform.business_capabilities.conversation.service import Conversati
 from agent_platform.business_capabilities.customer_service.confirmation import (
     CustomerConfirmationAdapter,
 )
+from agent_platform.business_capabilities.customer_service.industry_packs.installations import (
+    IndustryPackService,
+)
+from agent_platform.business_capabilities.customer_service.providers.service import (
+    ServiceProviderRegistry,
+)
+from agent_platform.business_capabilities.customer_service.routing.settings import (
+    load_customer_service_routing_settings,
+)
+from agent_platform.business_capabilities.customer_service.scenarios.service import (
+    ScenarioService,
+)
 from agent_platform.business_capabilities.customer_service.service import CustomerService
+from agent_platform.business_capabilities.customer_service.service_apps.service import (
+    ServiceApplicationService,
+)
 from agent_platform.business_capabilities.customer_service.tools import (
     CustomerServiceToolContribution,
 )
@@ -77,6 +92,15 @@ class PlatformServices:
         self.policy = ExecutionPolicy(self.tools, contributions)
         self.gateway = ModelGateway(engine, settings, model_client)
         self.agents = AgentService(engine, self.tools, self.gateway.catalog)
+        self.scenarios = ScenarioService(engine, self.agents)
+        self.providers = ServiceProviderRegistry(engine)
+        self.industry_packs = IndustryPackService(engine, self.providers)
+        self.service_apps = ServiceApplicationService(
+            engine,
+            self.agents,
+            self.scenarios,
+            self.providers,
+        )
         self.knowledge = KnowledgeService(engine)
         self.ingestion = IngestionService(engine, self.knowledge, settings, model_client)
         self.vector_index = VectorIndex(engine, self.gateway, settings, model_client)
@@ -91,6 +115,7 @@ class PlatformServices:
         self.memory_store = TsVectorStore(engine, settings)
         self.conversations = ConversationService(engine, settings.history_turns, self.memory)
         self.handoffs = HandoffService(engine, repository)
+        self.customer_routing_settings = load_customer_service_routing_settings()
         self.customer = CustomerService(
             engine,
             repository,
@@ -100,6 +125,7 @@ class PlatformServices:
             snapshot,
             self.memory,
             events=self.event_bus,
+            routing_settings=self.customer_routing_settings,
         )
         self.confirmation = CustomerConfirmationAdapter(self.customer)
         self.channels = ChannelService(

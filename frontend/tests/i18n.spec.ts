@@ -1,4 +1,21 @@
 import { test, expect, type Page } from '@playwright/test';
+import { signInAsAdmin } from './e2e-auth';
+
+const filterAgent={
+  id:'filter-agent',name:'玩家客服助手',description:'游戏玩家服务',industry:'gaming',tags:['after_sales'],is_example:true,
+  draft:{system_prompt:'test',tool_names:[],knowledge_base_ids:[],max_model_rounds:6,reply_language:'auto'},
+  draft_revision:1,published_version:null,archived:false,
+};
+
+async function mockAuthenticatedPage(page:Page, agent:typeof filterAgent|null=null){
+  await page.route('**/api/v1/**',async route=>{
+    const path=new URL(route.request().url()).pathname.replace('/api/v1','');
+    if(path==='/me')return route.fulfill({json:{role:'admin',tenant:'test'}});
+    if(path==='/agents/catalog')return route.fulfill({json:{items:agent?[agent]:[],total:agent?1:0,page:1,page_size:12}});
+    if(path.startsWith('/model-gateway/catalog/'))return route.fulfill({json:{items:[],total:0}});
+    return route.fulfill({json:[]});
+  });
+}
 
 async function switchLanguage(page:Page, scope:string, name:string) {
  await page.locator(scope+' .language-switch').click();
@@ -45,12 +62,14 @@ test('language switch preserves draft, reply policy and hash; preference survive
 for(const [browserLanguage,expected] of [['en-US','en'],['zh-HK','zh-TW'],['zh-CN','zh-CN'],['hi-IN','hi'],['fr-FR','zh-CN']]){
  test(`initial language follows browser: ${browserLanguage}`,async({browser})=>{
   const context=await browser.newContext({locale:browserLanguage,baseURL:process.env.E2E_BASE_URL || 'http://127.0.0.1:5173'});const page=await context.newPage();
+  await mockAuthenticatedPage(page);
   await page.goto('/#/agents');await expect(page.locator('html')).toHaveAttribute('lang',expected);
   await context.close();
  });
 }
 
 test('live filters retain stable codes across languages and refresh',async({page})=>{
+ await mockAuthenticatedPage(page,filterAgent);
  await page.goto('/#/agents?industry=gaming&tag=after_sales');
  await expect(page.locator('.agent-card')).toHaveCount(1);
  await switchLanguage(page, '.console-header', 'English');
@@ -62,8 +81,9 @@ test('live filters retain stable codes across languages and refresh',async({page
  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
 });
 
-for (const language of ['en','hi']) test(`${language} pages render without runtime errors`,async({page})=>{
+for (const language of ['en','hi']) test(`${language} pages render without runtime errors`,async({page,request})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+ await signInAsAdmin(page,request);
  await page.addInitScript(lang=>localStorage.setItem('agent-platform-language',lang),language);
  for(const route of ['overview','conversations','agents','knowledge','tools','handoff','tickets','channels','evaluation','observability','access','models/models','models/connections','models/profiles','models/playground','models/logs','models/monitor','models/access_keys','models/sensitive_words','models/alert_rules','models/quota']){
    await page.goto('/#/'+route);
@@ -75,6 +95,7 @@ for (const language of ['en','hi']) test(`${language} pages render without runti
 });
 
 test('Hindi filters preserve codes, refresh preference and fit mobile',async({page})=>{
+ await mockAuthenticatedPage(page,filterAgent);
  await page.goto('/#/agents?industry=gaming&tag=after_sales');
  await expect(page.locator('.agent-card')).toHaveCount(1);
  await switchLanguage(page, '.console-header', 'हिन्दी');

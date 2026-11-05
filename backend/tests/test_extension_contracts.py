@@ -1187,11 +1187,7 @@ def test_builtin_ui_extensions_are_registered_through_the_ui_contract():
     assert payload["navigation"][0]["labelKey"] == "服务工单"
     assert payload["routes"][0]["feature"] == "customer-service/tickets"
 
-    approval = registry.get("approval")
-    assert approval is not None
-    assert approval.navigation[0].path == "/approvals"
-    assert approval.navigation[0].required_capability == "approval"
-    assert approval.routes[0].feature == "approval/workbench"
+    assert registry.get("approval") is None
 
     with pytest.raises(UiExtensionRegistryError):
         register_builtin_ui_extensions(registry)

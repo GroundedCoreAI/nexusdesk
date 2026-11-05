@@ -185,6 +185,10 @@ def test_platform_services_exposes_explicit_service_groups_and_runtime_ports():
         "conversations": object(),
         "handoffs": object(),
         "customer": object(),
+        "scenarios": object(),
+        "providers": object(),
+        "industry_packs": object(),
+        "service_apps": object(),
         "confirmation": object(),
         "channels": object(),
         "staff": object(),
@@ -202,6 +206,9 @@ def test_platform_services_exposes_explicit_service_groups_and_runtime_ports():
     assert groups.tools.policy is values["policy"]
     assert groups.business.customer is values["customer"]
     assert groups.business.approval is values["approval"]
+    assert groups.business.providers is values["providers"]
+    assert groups.business.industry_packs is values["industry_packs"]
+    assert groups.business.service_apps is values["service_apps"]
     assert groups.application.open_platform is values["open_platform"]
 
     bindings = build_runtime_bindings(groups)

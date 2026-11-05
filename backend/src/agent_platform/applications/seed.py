@@ -89,7 +89,9 @@ async def main():
                             ),
                         ),
                     )
-                    await p.business.agents.publish(tenant, actor, agent["id"], agent["draft_revision"])
+                    await p.business.agents.publish(
+                        tenant, actor, agent["id"], agent["draft_revision"]
+                    )
                 async with p.runtime.engine.connect() as c:
                     exists = await one(
                         c,
@@ -97,8 +99,18 @@ async def main():
                         t=tenant,
                     )
                 if not exists:
-                    await p.business.conversations.create(tenant, actor, "sample-support", agent["id"])
+                    await p.business.conversations.create(
+                        tenant, actor, "sample-support", agent["id"]
+                    )
+                scenario_result = await p.business.scenarios.seed_defaults(tenant, actor)
+                application_result = await p.business.service_apps.seed_defaults(tenant, actor)
                 print(f"示例数据就绪，租户：{tenant}；请打开工作台的 sample-support 会话。")
+                print(
+                    "服务场景就绪："
+                    f"新增场景 {scenario_result['scenarios']} 个，"
+                    f"新增版本 {scenario_result['versions']} 个。"
+                )
+                print(f"服务应用就绪：新增应用 {application_result['applications']} 个。")
             finally:
                 await lock.execute(text("SELECT pg_advisory_unlock(71432020)"))
 
