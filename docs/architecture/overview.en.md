@@ -1,6 +1,6 @@
 # NexusDesk Architecture and Capability Planning Index
 
-NexusDesk is a Python modular monolith with an asynchronous LangGraph Runtime, PostgreSQL, and a React console. The code is organized into four layers: Core Platform, Extension Contracts, Business Capabilities, and Applications. The refactor decisions and acceptance evidence are documented in [Architecture Refactor Requirements](requirement/architecture-refactor/README.md).
+NexusDesk is a Python modular monolith with an asynchronous LangGraph Runtime, PostgreSQL, and a React console. The code is organized into four layers: Core Platform, Extension Contracts, Business Capabilities, and Applications. See [Agent Execution Platform v2](agent-execution-platform-v2.md) (Chinese) for the target architecture; the refactor decisions and acceptance evidence are documented in [Architecture Refactor Requirements](../requirement/architecture-refactor/README.md).
 
 ## Four-layer architecture
 
@@ -27,7 +27,7 @@ agent_platform/
 
 See the linked README files in the Chinese source document for the current detailed planning index. The planning documents cover current status, ownership, contracts, boundaries, constraints, UI, implementation stages, and acceptance criteria.
 
-The shared development and extension rules are documented in [Capability Development and Platform Extension Rules](module-development.en.md). Operational documentation is available in [Platform Guide](platform.md), [Runtime](runtime.md), and [Platform Validation](platform-validation.md).
+The shared development and extension rules are documented in [Capability Development and Platform Extension Rules](../development/module-development.en.md). Operational documentation is available in the [Platform Guide](../guides/platform.md) and [Runtime](runtime.md). Current implementation status comes from the code and section 1 of each module README; early delivery and validation snapshots are kept in the [historical archive](../archive/README.en.md).
 
 ## Architecture rules
 

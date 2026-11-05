@@ -155,7 +155,7 @@ QA 第 3 轮复核未发现新缺陷；回归面确认 `summary.py`/`engine.py`/
 
 ### 10.5 R3 关闭的实现方式与测试证据（验收侧复核）
 
-§8 R3 行已登记关闭，此处补验收复核记录。实现方式：claim 单事务内「reaper 前置 + `FOR UPDATE SKIP LOCKED` 子查询」，写 owner + `lease_expires_at=now()+120s`；执行期间 30s 心跳续约（相对 120s 租约 4 倍冗余）；`_finish` 以 id+owner 为守卫防止租约被收割后误写状态/审计；`reset_running` 按 owner 无条件重置，独立/内嵌两种形态的优雅停机均覆盖；生产侧独立容器 `apps/worker/memory.py` + production compose `memory-worker` 服务（复用后端镜像锚点、无新中间件）。测试证据：P1-IT-15~21、P1-CM-05、P1-UT-12、`test_deployment.py` 拓扑断言（§10.1）。验收代理代码复核结论与开发自述一致，SQL 语义对照 `knowledge/ingestion.py` 先例（`docs/modules-delivery.md` §知识库 Worker：SKIP LOCKED + 120s 租约 + reap + 三次失联置 failed）逐点相符。
+§8 R3 行已登记关闭，此处补验收复核记录。实现方式：claim 单事务内「reaper 前置 + `FOR UPDATE SKIP LOCKED` 子查询」，写 owner + `lease_expires_at=now()+120s`；执行期间 30s 心跳续约（相对 120s 租约 4 倍冗余）；`_finish` 以 id+owner 为守卫防止租约被收割后误写状态/审计；`reset_running` 按 owner 无条件重置，独立/内嵌两种形态的优雅停机均覆盖；生产侧独立容器 `apps/worker/memory.py` + production compose `memory-worker` 服务（复用后端镜像锚点、无新中间件）。测试证据：P1-IT-15~21、P1-CM-05、P1-UT-12、`test_deployment.py` 拓扑断言（§10.1）。验收代理代码复核结论与开发自述一致，SQL 语义对照 `knowledge/ingestion.py` 先例（`docs/archive/modules-delivery.md` §知识库 Worker：SKIP LOCKED + 120s 租约 + reap + 三次失联置 failed）逐点相符。
 
 ## 附录 A 本地执行输出快照（2026-10-10，工作目录 `backend/`）
 

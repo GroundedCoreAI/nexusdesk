@@ -47,6 +47,7 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
     TenantScopeService,
 )
 from agent_platform.core_platform.policy_harness.service import ExecutionPolicy
+from agent_platform.core_platform.tool_gateway.egress import ToolEgressPolicy
 from agent_platform.core_platform.tool_gateway.ledger import ToolOperationLedger
 from agent_platform.core_platform.tool_gateway.registry import ToolRegistry
 from agent_platform.core_platform.tool_gateway.replay import DurableToolReplayCache
@@ -63,6 +64,8 @@ class PlatformServices:
         file_specs,
         model_client,
         contributions=None,
+        tool_client=None,
+        tool_network_policy: ToolEgressPolicy | None = None,
     ):
         self.engine, self.repository, self.settings, self.snapshot = (
             engine,
@@ -76,7 +79,11 @@ class PlatformServices:
         self.tools = ToolRegistry(engine, settings, file_specs)
         self.ledger = ToolOperationLedger(engine)
         self.replay = DurableToolReplayCache(engine)
-        self.tool_workspace = ToolWorkspace(self.tools, model_client)
+        self.tool_workspace = ToolWorkspace(
+            self.tools,
+            tool_client if tool_client is not None else model_client,
+            network_policy=tool_network_policy,
+        )
         self.tools.workspace = self.tool_workspace
         self.staff = StaffDirectory(engine)
         self.members = MemberDirectory(engine)

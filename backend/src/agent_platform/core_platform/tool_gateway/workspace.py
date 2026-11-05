@@ -18,6 +18,7 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     required,
 )
 
+from .egress import ToolEgressPolicy
 from .service import HttpTool, ToolInput
 
 
@@ -88,8 +89,9 @@ def fingerprint(group, row):
 
 
 class ToolWorkspace:
-    def __init__(self, registry, client):
+    def __init__(self, registry, client, network_policy=None):
         self.registry, self.engine, self.client = registry, registry.engine, client
+        self.network_policy = network_policy or ToolEgressPolicy.from_settings(registry.settings)
         self.test_limit = asyncio.Semaphore(registry.settings.tool_concurrency)
 
     async def group(self, c, tenant, gid, lock=False):

@@ -59,26 +59,27 @@ revert
 --no-issue
 ```
 
-`summary` 中英文皆可，必须具体，不以 `。 . ！ ! ？ ?` 结尾。
+`summary` 必须英文（中文说明放正文），必须具体，不以 `。 . ！ ! ？ ?` 结尾。
 
 Valid examples：
 
 ```text
-feat(memory): --issue=42 新增记忆种子数据多语言注入脚本
-fix(conversation): --issue=108 修复会话流式消息重试后顺序错乱的问题
-refactor(backend): --no-issue 调整认证模块 JWT 校验逻辑以复用统一异常处理
-docs(docs): --no-issue 补充部署指南中英文对照版本
+feat(memory): --issue=42 add multilingual injection script for memory seeds
+fix(conversation): --issue=108 keep streamed message order stable after a retry
+refactor(backend): --no-issue reuse the shared exception handler in JWT validation
+docs(docs): --no-issue add the bilingual deployment guide
 build(deps): --no-issue bump certifi from 2026.7.22 to 2026.10.19
 ```
 
 Invalid examples：
 
 ```text
-fix: 修复bug                                  # 缺 scope、缺 issue-ref、summary 空泛
+fix: fix bug                                  # 缺 scope、缺 issue-ref、summary 空泛
 chore: update code                            # 缺 scope、缺 issue-ref、summary 空泛
 feat(auth): support token refresh             # 缺 issue-ref
-fix(user): 修复手机号参数未做格式校验。          # 缺 issue-ref，且 summary 以标点结尾
-feat(memory): --issue=abc 新增种子脚本          # issue 编号必须是数字
+fix(user): --no-issue 修复手机号参数未做格式校验   # summary 不是英文
+fix(user): --no-issue validate the phone field.  # summary 以标点结尾
+feat(memory): --issue=abc add seed script     # issue 编号必须是数字
 ```
 
 ## Body

@@ -1,6 +1,6 @@
 # Asynchronous Customer-Service Runtime
 
-The runtime uses LangGraph for model/tool execution and PostgreSQL for conversations, queues, terminal run state, and events.
+The runtime uses LangGraph for model/tool execution and PostgreSQL for conversations, queues, terminal run state, and durable events. It supports administrator-configured GET and JSON POST tools. SSE uses LISTEN/NOTIFY for durable-event wakeups and transient `model.delta` text; deltas are not persisted or replayed, while `run.completed` retains the complete answer.
 
 Start the API with:
 

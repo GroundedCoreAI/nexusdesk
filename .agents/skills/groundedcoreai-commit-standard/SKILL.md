@@ -57,8 +57,8 @@ Subject：
   用：`backend` `frontend` `memory` `knowledge` `conversation` `deploy` `sdk`
   `deps` `docs` `repo`）
 - `issue-ref`：`--issue=<编号>` 或 `--no-issue`
-- `summary`：中英文皆可，必须具体、不以标点结尾、禁用空泛措辞（如"修复
-  bug""update code"）
+- `summary`：**必须英文**（便于跨语言协作与检索，中文说明放正文），必须具体、
+  不以标点结尾、禁用空泛措辞（如 `fix bug`、`update code`）
 
 Body：
 

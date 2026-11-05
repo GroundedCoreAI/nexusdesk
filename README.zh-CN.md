@@ -246,7 +246,7 @@ AI 客服是这一业务架构的首个参考应用：它将 Agent 执行、知�
 | 知识存储 | Milvus、MinIO / S3（按需配置） |
 | 部署 | Docker Compose、Nginx |
 
-使用外部模型服务时，应用服务器无需 GPU。详细依赖见[中间件说明](docs/middleware.md)。
+使用外部模型服务时，应用服务器无需 GPU。详细依赖见[中间件说明](docs/operations/middleware.md)。
 
 #### 渠道与集成
 
@@ -269,21 +269,22 @@ NexusDesk 仍在持续开发中，以下能力边界需要注意：
 - **部署形态**：目前仅提供 Docker Compose，暂无 Kubernetes / Helm。
 - **整体状态**：项目仍在持续开发，尚未达到开箱即用的生产可用程度。
 
-具体模块交付情况见[模块交付说明](docs/modules-delivery.md)。
+具体模块交付情况见[模块交付说明](docs/archive/modules-delivery.md)。
 
 ## 文档导航
 
 | 我想要…… | 文档 |
 | --- | --- |
-| 使用客服工作台 | [平台使用说明](docs/platform.md) |
+| 浏览全部文档 | [文档总索引](docs/README.md) |
+| 使用客服工作台 | [平台使用说明](docs/guides/platform.md) |
 | 部署、升级或迁移数据 | [Docker 部署手册](deploy/README.md) |
-| 了解中间件与配置 | [中间件说明](docs/middleware.md) |
-| 启动本地开发环境 | [本地开发](docs/local-development.md) |
-| 了解架构和扩展模块 | [模块架构](docs/architecture.md) |
-| 理解 Agent 执行机制 | [Runtime 文档](docs/runtime.md) |
-| 配置知识库 | [知识库工作台](docs/knowledge-workspace.md) |
+| 了解中间件与配置 | [中间件说明](docs/operations/middleware.md) |
+| 启动本地开发环境 | [本地开发](docs/development/local-development.md) |
+| 了解架构和扩展模块 | [模块架构](docs/architecture/overview.md) |
+| 理解 Agent 执行机制 | [Runtime 文档](docs/architecture/runtime.md) |
+| 配置知识库 | [知识库工作台](docs/guides/knowledge-workspace.md) |
 | 接入模型服务 | [模型网关协议](backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md) |
-| 接入业务应用 | [API 说明](docs/api.md) · [开放平台](docs/open-platform.md) |
+| 接入业务应用 | [API 说明](docs/reference/api.md) · [开放平台](docs/guides/open-platform.md) |
 | 查看版本更新 | [更新日志](CHANGELOG.md) |
 
 ## 开源与后续方向
@@ -299,7 +300,7 @@ NexusDesk 将保持开放、可自托管和可扩展的项目方向，通过真�
 | Platform Roadmap | 建设稳定、可信、可扩展的 Agent 执行与治理能力，包括任务生命周期、模块边界与扩展契约、权限、人工确认、审计、可观测性、评估与失败恢复。 |
 | Open-source Application Roadmap | 将 AI 客服做成完整、真实可用的开源参考应用，包括带引用的知识问答、工单与人工接管、业务工具、渠道接入、部署、监控、评估和用户文档。 |
 
-各模块规划见[模块架构](docs/architecture.md)。
+各模块规划见[模块架构](docs/architecture/overview.md)。
 
 ## 参与贡献
 

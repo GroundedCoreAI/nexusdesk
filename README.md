@@ -297,7 +297,7 @@ business experience for real users.
 | Deployment | Docker Compose, Nginx |
 
 Using external model services requires no GPU on the application server. See the
-[middleware guide](docs/middleware.md) for detailed dependencies.
+[middleware guide](docs/operations/middleware.md) for detailed dependencies.
 
 #### Channels and integrations
 
@@ -324,21 +324,22 @@ NexusDesk is still under active development. Note the following capability bound
 - **Overall status**: the project is under continuous development and not yet production ready out
   of the box.
 
-See the [module delivery notes](docs/modules-delivery.md) for module-level delivery status.
+See the [module delivery notes](docs/archive/modules-delivery.md) for module-level delivery status.
 
 ## Documentation
 
 | I want to... | Document |
 | --- | --- |
-| Use the customer service workbench | [Platform guide](docs/platform.md) |
+| Browse all documentation | [Documentation index](docs/README.en.md) |
+| Use the customer service workbench | [Platform guide](docs/guides/platform.md) |
 | Deploy, upgrade, or migrate data | [Docker deployment guide](deploy/README.md) |
-| Understand middleware and configuration | [Middleware guide](docs/middleware.md) |
-| Start a local development environment | [Local development](docs/local-development.md) |
-| Understand the architecture and extension modules | [Module architecture](docs/architecture.md) |
-| Understand agent execution | [Runtime documentation](docs/runtime.md) |
-| Configure the knowledge base | [Knowledge workspace](docs/knowledge-workspace.md) |
+| Understand middleware and configuration | [Middleware guide](docs/operations/middleware.md) |
+| Start a local development environment | [Local development](docs/development/local-development.md) |
+| Understand the architecture and extension modules | [Module architecture](docs/architecture/overview.md) |
+| Understand agent execution | [Runtime documentation](docs/architecture/runtime.md) |
+| Configure the knowledge base | [Knowledge workspace](docs/guides/knowledge-workspace.md) |
 | Integrate model services | [Model gateway protocol](backend/src/agent_platform/core_platform/platform_services/model_gateway/PROTOCOL.md) |
-| Integrate business applications | [API reference](docs/api.md) · [Open platform](docs/open-platform.md) |
+| Integrate business applications | [API reference](docs/reference/api.md) · [Open platform](docs/guides/open-platform.md) |
 | See what changed in a release | [Changelog](CHANGELOG.md) |
 
 ## Open source and next steps
@@ -359,7 +360,7 @@ Further development follows two complementary tracks:
 | Platform Roadmap | Build stable, trustworthy, and extensible agent execution and governance capabilities, including task lifecycle, module boundaries and extension contracts, permissions, human confirmation, audit, observability, evaluation, and failure recovery. |
 | Open-source Application Roadmap | Make AI customer service a complete, real-world open-source reference application, including knowledge Q&A with citations, tickets and human takeover, business tools, channel integration, deployment, monitoring, evaluation, and user documentation. |
 
-See the [module architecture](docs/architecture.md) for module-level plans.
+See the [module architecture](docs/architecture/overview.md) for module-level plans.
 
 ## Contributing
 
