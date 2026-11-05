@@ -1,8 +1,8 @@
 # NexusDesk
 
-**English** · [简体中文](README.zh-CN.md) · [Website](https://www.aidet.top/en/index.html)
+**English** · [简体中文](README.zh-CN.md) · [Documentation](https://groundedcoreai.github.io/nexusdesk/en/) · [Website](https://www.aidet.top/en/index.html)
 
-[![CI](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCoreAI/nexusdesk)](https://github.com/GroundedCoreAI/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top)
+[![docs](https://img.shields.io/badge/docs-online-1c74c4)](https://groundedcoreai.github.io/nexusdesk/en/) [![CI](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCoreAI/nexusdesk)](https://github.com/GroundedCoreAI/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top)
 
 > **Join us! Kill the Staff.**
 
@@ -72,6 +72,8 @@ Once it is running, open **https://localhost:8080** and enter the `sample-suppor
 Quickstart mode ships with a self-signed certificate, so the first visit warns that the certificate
 is untrusted. See the [deployment guide](deploy/README.md#体验模式的-https) for certificate
 setup and LAN access.
+
+Prefer not to deploy locally? Read the [online documentation](https://groundedcoreai.github.io/nexusdesk/en/) for features, configuration and the API.
 
 Nine industry case sets are also preloaded: 9 knowledge bases, 18 Agent drafts, and 36 documents.
 Every resource name carries the `[案例]` (case) prefix, and the agent list can be filtered with
