@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="NexusDesk">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c74c4" />
+      <stop offset="1" stop-color="#14335f" />
+    </linearGradient>
+  </defs>
+  <path d="M24 3 42 13v22L24 45 6 35V13z" fill="url(#g)" />
+  <path d="M24 3 42 13 24 23 6 13z" fill="#ffffff" opacity="0.22" />
+  <path d="M24 23v22L6 35V13z" fill="#ffffff" opacity="0.12" />
+  <path d="M24 12.5 32.5 19v10L24 35.5 15.5 29V19z" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" />
+</svg>

@@ -330,6 +330,7 @@ See the [module delivery notes](docs/archive/modules-delivery.md) for module-lev
 
 | I want to... | Document |
 | --- | --- |
+| Browse the online docs | [Documentation site](https://groundedcoreai.github.io/nexusdesk/en/) |
 | Browse all documentation | [Documentation index](docs/README.en.md) |
 | Use the customer service workbench | [Platform guide](docs/guides/platform.md) |
 | Deploy, upgrade, or migrate data | [Docker deployment guide](deploy/README.md) |

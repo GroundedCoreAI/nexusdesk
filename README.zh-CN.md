@@ -275,6 +275,7 @@ NexusDesk 仍在持续开发中，以下能力边界需要注意：
 
 | 我想要…… | 文档 |
 | --- | --- |
+| 浏览在线文档 | [文档站](https://groundedcoreai.github.io/nexusdesk/) |
 | 浏览全部文档 | [文档总索引](docs/README.md) |
 | 使用客服工作台 | [平台使用说明](docs/guides/platform.md) |
 | 部署、升级或迁移数据 | [Docker 部署手册](deploy/README.md) |

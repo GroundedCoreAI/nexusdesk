@@ -1,0 +1,15 @@
+{
+  "name": "nexusdesk-docs-site",
+  "private": true,
+  "type": "module",
+  "description": "NexusDesk documentation site (VitePress). Content lives in ../docs; `doc-sync` maps it into .build.",
+  "scripts": {
+    "doc-sync": "node scripts/doc-sync.mjs",
+    "dev": "npm run doc-sync && vitepress dev",
+    "build": "npm run doc-sync && vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3"
+  }
+}
