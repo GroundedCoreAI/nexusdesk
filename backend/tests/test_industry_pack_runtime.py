@@ -8,6 +8,9 @@ from uuid import UUID
 import pytest
 from test_platform_postgres import platform as _platform
 
+from agent_platform.business_capabilities.customer_service.industry_packs.compiler import (
+    IndustryPackCompiler,
+)
 from agent_platform.business_capabilities.customer_service.industry_packs.content_community import (
     build_content_community_pack,
 )
@@ -18,10 +21,22 @@ from agent_platform.business_capabilities.customer_service.industry_packs.runtim
     IndustryPackUpgradeInput,
     IndustryPackUpgradePreviewRequest,
 )
+from agent_platform.core_platform.platform_services.persistence.store import DomainError
 from agent_platform.extension_contracts import BusinessScope
 
 platform = _platform
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
+
+
+def _target_manifest(version: str = "1.1.0"):
+    manifest = deepcopy(build_content_community_pack())
+    manifest.pack_version = version
+    for template in manifest.scenario_templates:
+        template.template_version = version
+    assert manifest.application_blueprint is not None
+    for key in manifest.application_blueprint.scenario_template_versions:
+        manifest.application_blueprint.scenario_template_versions[key] = version
+    return manifest
 
 
 async def test_provider_registry_crud_and_revision_conflict(platform):
@@ -92,6 +107,9 @@ async def test_install_pack_is_idempotent_and_creates_drafts_and_provider_requir
     assert installation["application_key"] == "content-community-service"
     assert installation["status"] == "installed"
     assert len(installation["installed_scenarios"]) == 11
+    assert installation["pack_digest"] == IndustryPackCompiler(
+        build_content_community_pack()
+    ).digest
 
     repeated = await client.post(
         "/api/v1/industry-packs/content-community/install",
@@ -163,16 +181,12 @@ async def test_upgrade_preview_and_apply_merge_template_with_local_edit(platform
     )
     assert updated.status_code == 200, updated.text
 
-    target_manifest = deepcopy(build_content_community_pack())
-    target_manifest.pack_version = "1.1.0"
+    target_manifest = _target_manifest()
     for template in target_manifest.scenario_templates:
-        template.template_version = "1.1.0"
         if template.template_key == "account-status-query":
             template.name = "账号状态查询（新版）"
             template.config["handlers"][0]["tool"] = "community.account.status.v2"
-    assert target_manifest.application_blueprint is not None
-    for key in target_manifest.application_blueprint.scenario_template_versions:
-        target_manifest.application_blueprint.scenario_template_versions[key] = "1.1.0"
+    target_manifest.application_blueprint.name = "内容社区服务（新版）"
 
     scope = BusinessScope(
         tenant_id=settings.tenant_id,
@@ -214,14 +228,112 @@ async def test_upgrade_preview_and_apply_merge_template_with_local_edit(platform
 
     upgraded = await client.get("/api/v1/service-scenarios/account-status-query")
     assert upgraded.status_code == 200, upgraded.text
+    assert upgraded.json()["name"] == "账号状态查询（新版）"
     assert upgraded.json()["config"]["name"] == "账号状态查询（新版）"
     assert upgraded.json()["config"]["description"] == "租户自定义的账号状态说明"
+    upgraded_application = await client.get("/api/v1/service-apps/content-community-service")
+    assert upgraded_application.status_code == 200, upgraded_application.text
+    assert upgraded_application.json()["name"] == "内容社区服务（新版）"
+    assert upgraded_application.json()["config"]["name"] == "内容社区服务（新版）"
     upgraded_providers = await client.get(
         "/api/v1/service-providers?kind=tool&q=community.account.status.v2"
     )
     assert upgraded_providers.status_code == 200, upgraded_providers.text
     assert upgraded_providers.json()["total"] == 1
     assert upgraded_providers.json()["items"][0]["enabled"] is False
+
+
+async def test_upgrade_apply_rejects_revision_drift_after_preview(platform):
+    client, services, settings = platform
+    installed = await client.post(
+        "/api/v1/industry-packs/content-community/install",
+        json={"install_scenarios": False},
+    )
+    assert installed.status_code == 201, installed.text
+    installation = installed.json()["installation"]
+    scenario = await client.get("/api/v1/service-scenarios/account-status-query")
+    assert scenario.status_code == 200, scenario.text
+
+    scope = BusinessScope(
+        tenant_id=settings.tenant_id,
+        business_id="customer-service",
+        workspace_id="default",
+    )
+    pack_service = IndustryPackService(
+        services.repository.engine,
+        services.groups.business.providers,
+        packs={"content-community": _target_manifest()},
+    )
+    preview = await pack_service.preview_upgrade(
+        settings.tenant_id,
+        "platform-admin",
+        UUID(installation["id"]),
+        IndustryPackUpgradePreviewRequest(target_version="1.1.0"),
+        scope=scope,
+    )
+    assert preview["status"] == "clean", preview
+
+    local_config = dict(scenario.json()["config"])
+    local_config["description"] = "预览后发生的本地修改"
+    changed = await client.put(
+        "/api/v1/service-scenarios/account-status-query",
+        json={"config": local_config, "revision": scenario.json()["revision"]},
+    )
+    assert changed.status_code == 200, changed.text
+
+    with pytest.raises(DomainError) as caught:
+        await pack_service.apply_upgrade(
+            settings.tenant_id,
+            "platform-admin",
+            UUID(installation["id"]),
+            IndustryPackUpgradeInput(
+                preview_id=UUID(preview["id"]),
+                target_version="1.1.0",
+            ),
+            scope=scope,
+        )
+    assert caught.value.code == "industry_pack_upgrade_preview_stale"
+
+    unchanged = await client.get("/api/v1/service-scenarios/account-status-query")
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json()["config"]["description"] == "预览后发生的本地修改"
+
+    second_preview = await pack_service.preview_upgrade(
+        settings.tenant_id,
+        "platform-admin",
+        UUID(installation["id"]),
+        IndustryPackUpgradePreviewRequest(target_version="1.1.0"),
+        scope=scope,
+    )
+    assert second_preview["status"] == "clean", second_preview
+    application = await client.get("/api/v1/service-apps/content-community-service")
+    assert application.status_code == 200, application.text
+    application_config = dict(application.json()["config"])
+    application_config["description"] = "应用在预览后发生的本地修改"
+    changed_application = await client.put(
+        "/api/v1/service-apps/content-community-service",
+        json={
+            "config": application_config,
+            "revision": application.json()["revision"],
+        },
+    )
+    assert changed_application.status_code == 200, changed_application.text
+
+    with pytest.raises(DomainError) as app_drift:
+        await pack_service.apply_upgrade(
+            settings.tenant_id,
+            "platform-admin",
+            UUID(installation["id"]),
+            IndustryPackUpgradeInput(
+                preview_id=UUID(second_preview["id"]),
+                target_version="1.1.0",
+            ),
+            scope=scope,
+        )
+    assert app_drift.value.code == "industry_pack_upgrade_preview_stale"
+    assert (await client.get("/api/v1/service-scenarios/account-status-query")).json()["config"][
+        "description"
+    ] == "预览后发生的本地修改"
 
 
 async def test_install_requires_admin(platform):

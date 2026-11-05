@@ -402,7 +402,7 @@ FOR UPDATE
                 **scope_params,
             )
             if existing is not None:
-                if existing["pack_digest"] == compiled.digest:
+                if existing["pack_digest"] == compiler.digest:
                     return IndustryPackInstallResult(
                         created=False,
                         installation=_installation(existing),
@@ -536,7 +536,7 @@ RETURNING *
                 tenant=tenant,
                 pack_key=pack_key,
                 pack_version=manifest.pack_version,
-                pack_digest=compiled.digest,
+                pack_digest=compiler.digest,
                 maturity=manifest.maturity.value,
                 application_key=application_key,
                 versions=_json(versions),
@@ -827,7 +827,7 @@ RETURNING *
                 to_version=target_version,
                 status=status,
                 base_digest=installation["pack_digest"],
-                target_digest=compiled_application.digest,
+                target_digest=compiler.digest,
                 plan=_json(plan),
                 actor=actor,
                 **scope_params,
@@ -901,6 +901,7 @@ FOR UPDATE
             for item in plan.get("scenarios", []):
                 if item.get("status") != "clean":
                     raise DomainError("industry_pack_upgrade_conflicted", 409)
+                merged_config = ScenarioConfig.model_validate(item["merged_config"])
                 current = await one(
                     connection,
                     """
@@ -920,17 +921,23 @@ FOR UPDATE
                     connection,
                     """
 UPDATE service_scenarios
-SET draft=CAST(:config AS jsonb),draft_revision=draft_revision+1,
+SET name=:name,description=:description,domain=:domain,template=:template,
+    draft=CAST(:config AS jsonb),draft_revision=draft_revision+1,
     updated_by=:actor,updated_at=now()
 WHERE id=:id AND tenant_id=:tenant
 """,
                     id=current["id"],
                     tenant=tenant,
-                    config=_json(item["merged_config"]),
+                    name=merged_config.name,
+                    description=merged_config.description,
+                    domain=merged_config.domain,
+                    template=merged_config.template,
+                    config=merged_config.model_dump_json(),
                     actor=actor,
                 )
                 upgraded.append(item["scenario_key"])
 
+            merged_application = ServiceApplicationConfig.model_validate(plan["application"])
             app = await one(
                 connection,
                 """
@@ -950,13 +957,16 @@ FOR UPDATE
                 connection,
                 """
 UPDATE service_applications
-SET draft=CAST(:config AS jsonb),draft_revision=draft_revision+1,
+SET name=:name,description=:description,draft=CAST(:config AS jsonb),
+    draft_revision=draft_revision+1,
     updated_by=:actor,updated_at=now()
 WHERE id=:id AND tenant_id=:tenant
 """,
                 id=app["id"],
                 tenant=tenant,
-                config=_json(plan["application"]),
+                name=merged_application.name,
+                description=merged_application.description,
+                config=merged_application.model_dump_json(),
                 actor=actor,
             )
             compiler = self._compiler(installation["pack_key"])
