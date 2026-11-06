@@ -16,7 +16,7 @@ Documentation is grouped by purpose. The code and section 1 of each module READM
 | Document | Contents |
 |---|---|
 | [Module architecture](architecture/overview.en.md) | Module boundaries, dependencies, and platform responsibilities |
-| [Agent execution platform v2](architecture/agent-execution-platform-v2.md) (Chinese) | Target architecture for the Agent execution platform |
+| [Agent execution platform v2](architecture/agent-execution-platform-v2.en.md) | Target architecture for the Agent execution platform |
 | [Runtime documentation](architecture/runtime.en.md) | Agent Runtime, tool calls, and the standalone worker |
 | [Streaming design](architecture/streaming-design.en.md) | Streaming execution and response protocol design |
 

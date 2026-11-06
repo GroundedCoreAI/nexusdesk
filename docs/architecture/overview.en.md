@@ -1,6 +1,6 @@
 # NexusDesk Architecture and Capability Planning Index
 
-NexusDesk is a Python modular monolith with an asynchronous LangGraph Runtime, PostgreSQL, and a React console. The code is organized into four layers: Core Platform, Extension Contracts, Business Capabilities, and Applications. See [Agent Execution Platform v2](agent-execution-platform-v2.md) (Chinese) for the target architecture; the refactor decisions and acceptance evidence are documented in [Architecture Refactor Requirements](../requirement/architecture-refactor/README.md).
+NexusDesk is a Python modular monolith with an asynchronous LangGraph Runtime, PostgreSQL, and a React console. The code is organized into four layers: Core Platform, Extension Contracts, Business Capabilities, and Applications. See [Agent Execution Platform v2](agent-execution-platform-v2.en.md) for the target architecture; the refactor decisions and acceptance evidence are documented in [Architecture Refactor Requirements](../requirement/architecture-refactor/README.md).
 
 ## Four-layer architecture
 
