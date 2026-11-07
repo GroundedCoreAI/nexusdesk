@@ -16,7 +16,7 @@ Documentation is grouped by purpose. The code and section 1 of each module READM
 | Document | Contents |
 |---|---|
 | [Module architecture](architecture/overview.en.md) | Module boundaries, dependencies, and platform responsibilities |
-| [Agent execution platform v2](architecture/agent-execution-platform-v2.md) (Chinese) | Target architecture for the Agent execution platform |
+| [Agent execution platform v2](architecture/agent-execution-platform-v2.en.md) | Target architecture for the Agent execution platform |
 | [Runtime documentation](architecture/runtime.en.md) | Agent Runtime, tool calls, and the standalone worker |
 | [Streaming design](architecture/streaming-design.en.md) | Streaming execution and response protocol design |
 
@@ -57,5 +57,5 @@ Documentation is grouped by purpose. The code and section 1 of each module READM
 
 ## Requirements and historical records
 
-- Requirement lifecycle documentation: [Agent Memory](requirement/agent-memory/README.md), [Architecture Refactor](requirement/architecture-refactor/README.en.md), [Agent Evaluation](requirement/agent-evaluation/01-p2-roadmap.md), [P0 Production Readiness](requirement/p0-production-readiness/README.md) (some documents are Chinese only)
+- Requirement lifecycle documentation: [Agent Memory](requirement/agent-memory/README.md), [Architecture Refactor](requirement/architecture-refactor/README.en.md), [Agent Execution Platform v2](requirement/agent-execution-platform-v2/README.en.md), [Agent Evaluation](requirement/agent-evaluation/01-p2-roadmap.md), [P0 Production Readiness](requirement/p0-production-readiness/README.md) (some documents are Chinese only)
 - [Historical archive](archive/README.en.md): superseded implementation progress, early validation, and environment-specific records; these are not sources of current status
