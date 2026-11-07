@@ -1,9 +1,28 @@
 # Phase 7 · Advanced Engine Capabilities and Scale — Requirements
 
-> Status: Planning (FR/AC are unified contracts; implement, test, and accept each slice independently)
+> Status: Deferred (early-stage project; FR/AC remain deferred requirement contracts and are not entering implementation, testing, or acceptance)
+> Deferral decision: 2026-11-07; FR-1~FR-11 are tracked as lowest-priority P4 issues under “Deferral and Requirement Tracking” below
 > Created: 2026-11-02
 > Basis: `01-business-goals.en.md` (G1~G11), architecture §17 Phase 7, §18 continuous backlog, §19 quality gates, and §22 architecture acceptance; current-code findings are in `03-technical-design.en.md`
 > Baseline statement: Current performance and behavioral baselines are unmeasured pending Phase 0; targets here are not current test results
+
+## Deferral and Requirement Tracking
+
+Because NexusDesk is in its early stage, all Phase 7 requirements are deferred as of 2026-11-07 and assigned the lowest priority, P4. These issues preserve the requirements for future scheduling only. Until the phase is explicitly reactivated, no implementation, testing, or acceptance will start, and nothing here represents delivered functionality.
+
+| Requirement | Topic | Slice | P4 issue |
+|---|---|---|---|
+| FR-1 | Adapter ecosystem and common contracts | S7-01 | [#110](https://github.com/GroundedCoreAI/nexusdesk/issues/110) |
+| FR-2 | Policy routing and safe fallback | S7-02 | [#111](https://github.com/GroundedCoreAI/nexusdesk/issues/111) |
+| FR-3 | Effective capabilities and basic-execution degradation | S7-02 | [#112](https://github.com/GroundedCoreAI/nexusdesk/issues/112) |
+| FR-4 | Engine Session Resume and reauthorization | S7-03 | [#113](https://github.com/GroundedCoreAI/nexusdesk/issues/113) |
+| FR-5 | Human approval, interactive input, and durable waiting | S7-04 | [#114](https://github.com/GroundedCoreAI/nexusdesk/issues/114) |
+| FR-6 | Dynamic model selection | S7-05 | [#115](https://github.com/GroundedCoreAI/nexusdesk/issues/115) |
+| FR-7 | Unified Engine usage and cost | S7-06 | [#116](https://github.com/GroundedCoreAI/nexusdesk/issues/116) |
+| FR-8 | Tenant fairness and global quotas | S7-07 | [#117](https://github.com/GroundedCoreAI/nexusdesk/issues/117) |
+| FR-9 | Skills and Artifacts | S7-08 | [#118](https://github.com/GroundedCoreAI/nexusdesk/issues/118) |
+| FR-10 | Runtime Profiles, health checks, and circuit breaking | S7-09 | [#119](https://github.com/GroundedCoreAI/nexusdesk/issues/119) |
+| FR-11 | Configuration flags and slice-by-slice release | S7-01~S7-09 | [#120](https://github.com/GroundedCoreAI/nexusdesk/issues/120) |
 
 ## User Stories
 

@@ -64,7 +64,7 @@ The current model-gateway Vault is not an Execution-level Credential Broker, and
 
 - Complete Credential Broker, full short-lived credential lifecycle, strong sandbox, network egress, and cross-log/event/artifact redaction: Phase 6 and blockers before opening to untrusted tenants.
 - Fencing Tokens, transactional Event Outbox, event deduplication/general replay governance, and idempotent usage aggregation: Phase 6; Phase 5 only collects and correlates data.
-- Claude Code, ACP, OpenClaw, multi-Engine routing/fallback, and large-scale scheduling: Phase 7 or later.
+- Claude Code, ACP, OpenClaw, multi-Engine routing/fallback, and large-scale scheduling: Phase 7 or later; [Phase 7](../phase-7-advanced-engines-scale/02-requirements.en.md#deferral-and-requirement-tracking) is deferred as of 2026-11-07 because the project is in its early stage, with related requirements tracked only as lowest-priority P4 issues.
 - A custom Codex reasoning loop, exposing the native Codex protocol as a NexusDesk public API, or unconstrained support for every Codex release.
 - This phase does not modify historical migrations or claim that currently absent Codex functionality is already available.
 

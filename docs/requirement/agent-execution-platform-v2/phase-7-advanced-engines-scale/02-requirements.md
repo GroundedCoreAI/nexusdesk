@@ -1,9 +1,28 @@
 # Phase 7 · 高级 Engine 能力与规模化 — 需求文档
 
-> 状态：规划中（FR/AC 为统一契约；按切片独立实施、测试与验收）
+> 状态：暂缓执行（项目起步阶段；FR/AC 仅保留为延期需求契约，不进入实施、测试或验收）
+> 暂缓决定：2026-11-07；FR-1~FR-11 均已登记为最低优先级 P4 issue，详见下方「暂缓与需求跟踪」
 > 创建：2026-11-02
 > 依据：`01-business-goals.md`（G1~G11）、架构第 17 节 Phase 7、第 18 节持续待办、第 19 节质量门禁、第 22 节架构验收；当前代码核查结果见 `03-technical-design.md`
 > 基线声明：现状性能与行为基线未测，待 Phase 0；本文目标不是现状测试结论
+
+## 暂缓与需求跟踪
+
+因项目处于起步阶段，Phase 7 全部需求自 2026-11-07 起暂缓执行，统一调整为最低优先级 P4。以下 issue 仅用于保留需求和后续排期；在明确重新激活本阶段前，不开展实施、测试或验收，也不表示任何功能已经交付。
+
+| 需求 | 主题 | 切片 | P4 issue |
+|---|---|---|---|
+| FR-1 | Adapter 生态与公共契约 | S7-01 | [#110](https://github.com/GroundedCoreAI/nexusdesk/issues/110) |
+| FR-2 | 策略路由与安全回退 | S7-02 | [#111](https://github.com/GroundedCoreAI/nexusdesk/issues/111) |
+| FR-3 | Effective 能力与基础执行降级 | S7-02 | [#112](https://github.com/GroundedCoreAI/nexusdesk/issues/112) |
+| FR-4 | Engine Session Resume 与重新授权 | S7-03 | [#113](https://github.com/GroundedCoreAI/nexusdesk/issues/113) |
+| FR-5 | 人工审批、交互输入与持久等待 | S7-04 | [#114](https://github.com/GroundedCoreAI/nexusdesk/issues/114) |
+| FR-6 | 动态模型选择 | S7-05 | [#115](https://github.com/GroundedCoreAI/nexusdesk/issues/115) |
+| FR-7 | 统一 Engine 用量与成本 | S7-06 | [#116](https://github.com/GroundedCoreAI/nexusdesk/issues/116) |
+| FR-8 | 租户公平与全局配额 | S7-07 | [#117](https://github.com/GroundedCoreAI/nexusdesk/issues/117) |
+| FR-9 | Skill 与 Artifact | S7-08 | [#118](https://github.com/GroundedCoreAI/nexusdesk/issues/118) |
+| FR-10 | Runtime Profile、健康检查与熔断 | S7-09 | [#119](https://github.com/GroundedCoreAI/nexusdesk/issues/119) |
+| FR-11 | 配置开关与逐切片发布 | S7-01~S7-09 | [#120](https://github.com/GroundedCoreAI/nexusdesk/issues/120) |
 
 ## 用户故事
 

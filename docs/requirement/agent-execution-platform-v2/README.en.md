@@ -1,6 +1,6 @@
 # NexusDesk Agent Execution Platform v2 · Phased Planning Documents
 
-> Status: Phase 0–7 requirements-analysis documents are pending review; implementation has not started
+> Status: Phase 0–6 requirements-analysis documents are pending review and implementation has not started; Phase 7 is deferred as of 2026-11-07 because the project is in its early stage, with requirements retained as lowest-priority P4 issues
 > Created: 2026-11-02
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 17, 19, 20, and 22
 
@@ -30,7 +30,9 @@ This directory is the single planning root for Agent Execution Platform v2. Docu
 | Phase 4 | Runtime Host, process supervision, and Workspace | Managed processes and isolated work directories for external Engines | P1 | ~3–4 weeks | [phase-4-runtime-host-workspace/](phase-4-runtime-host-workspace/) |
 | Phase 5 | Codex integration | Validate the multi-protocol architecture with CLI, then App-Server | P1 | ~8 weeks (A/B serial) | [phase-5-codex-integration/](phase-5-codex-integration/) |
 | Phase 6 | Security, reliability, and event governance | Meet the production gate for untrusted multi-tenant execution | P1 | ~4–6 weeks | [phase-6-security-reliability-events/](phase-6-security-reliability-events/) |
-| Phase 7 | Advanced Engine capabilities and scale | Expand the ecosystem, governance, and cost controls in independent slices | P2 | Review per slice | [phase-7-advanced-engines-scale/](phase-7-advanced-engines-scale/) |
+| Phase 7 | Advanced Engine capabilities and scale | Expand the ecosystem, governance, and cost controls in independent slices | P4 (deferred) | Review per slice after rescheduling | [phase-7-advanced-engines-scale/](phase-7-advanced-engines-scale/) |
+
+> **Phase 7 deferral (2026-11-07)**: Because the project is in its early stage, no Phase 7 requirement is entering implementation, testing, or acceptance. All requirements are tracked at the lowest priority, P4. FR-1~FR-11 map to #110~#120; see [Deferral and Requirement Tracking](phase-7-advanced-engines-scale/02-requirements.en.md#deferral-and-requirement-tracking). The plans are not delivery commitments unless the phase is explicitly reactivated.
 
 \* Estimates support planning discussions only and are not delivery commitments; re-estimate after the Phase 0 baseline.
 
@@ -46,7 +48,7 @@ Each phase contains:
 
 ## Dependency and Migration Conventions
 
-- The default order is Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7. Security items may be reviewed earlier, but later launch gates must not be weakened.
+- The default order is Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7. Security items may be reviewed earlier, but later launch gates must not be weakened. Phase 7 is currently deferred and excluded from the active implementation sequence.
 - The migration head verified during planning is `0052_memory_tasks_tenant_index`. Numbers `0053+` in these documents are **planned identifiers**. Revalidate the head and adjust `down_revision` against the target commit; never edit an applied historical migration.
 - Phase 0 dependency maps, lifecycle records, and compatibility baselines remain under this root in the corresponding phase, avoiding a second documentation source.
 - If a design conflicts with code reality, record a decision and revise the affected documents before changing implementation.
@@ -70,4 +72,4 @@ Each phase contains:
 - Phase 4: process-tree cleanup, path/symlink isolation, and resource limits survive failure and adversarial tests.
 - Phase 5: App-Server starts only after CLI stabilizes; native protocols stay inside Providers; untrusted execution remains gated.
 - Phase 6: Fencing, Outbox, deduplication, and SSE replay cover races; secrets are masked across logs, events, and artifacts.
-- Phase 7: delivery remains sliced; routing and fallback re-evaluate policy; Engines without advanced capabilities retain basic execution.
+- Phase 7 (currently deferred; applies after reactivation): delivery remains sliced; routing and fallback re-evaluate policy; Engines without advanced capabilities retain basic execution.

@@ -67,7 +67,7 @@
 
 **不包含**（属于后续阶段 / 明确不做）：
 
-- 新 Engine、多 Engine 路由/回退、全局公平调度与完整成本报表：属于 Phase 7 或后续。
+- 新 Engine、多 Engine 路由/回退、全局公平调度与完整成本报表：属于 Phase 7 或后续；[Phase 7](../phase-7-advanced-engines-scale/02-requirements.md#暂缓与需求跟踪) 自 2026-11-07 起因项目起步阶段暂缓执行，相关需求仅以最低优先级 P4 issue 跟踪。
 - 微服务拆分、独立 Task/Execution 双表模型或整体重写调度器：沿用模块化单体和 Run=一次 Execution 尝试。
 - 外部 KMS/Secret Manager 的具体厂商集成：本阶段定义可替换 Vault/Broker 接口与安装密钥实现；厂商适配按部署需求后续落地。
 - 无限期保存原始事件、未脱敏 payload 或 Secret；不承诺跨保留期的完整 SSE 重放。

@@ -67,7 +67,7 @@ Events and Runs currently commit in one transaction and SSE supports cursor repl
 
 **Excluded** (later phase / explicitly out of scope):
 
-- New Engines, multi-Engine routing/fallback, global fair scheduling, and complete cost reporting: Phase 7 or later.
+- New Engines, multi-Engine routing/fallback, global fair scheduling, and complete cost reporting: Phase 7 or later; [Phase 7](../phase-7-advanced-engines-scale/02-requirements.en.md#deferral-and-requirement-tracking) is deferred as of 2026-11-07 because the project is in its early stage, with related requirements tracked only as lowest-priority P4 issues.
 - Microservice decomposition, separate Task/Execution dual-table model, or wholesale scheduler rewrite: retain the modular monolith and Run=one Execution attempt.
 - Vendor-specific external KMS/Secret Manager integration: this phase defines replaceable Vault/Broker interfaces and an installation-key implementation; vendor adapters follow deployment demand.
 - Indefinite retention of raw events, unredacted payloads, or Secrets; no promise of complete SSE replay beyond retention.

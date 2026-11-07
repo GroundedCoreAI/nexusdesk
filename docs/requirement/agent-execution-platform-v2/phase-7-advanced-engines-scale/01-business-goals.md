@@ -1,9 +1,10 @@
 # Phase 7 · 高级 Engine 能力与规模化 — 业务目标
 
-> 状态：规划中（统一契约草案；任何实际上线范围均须逐切片评审）
+> 状态：暂缓执行（项目起步阶段；保留规划，不进入实施、测试或验收）
+> 暂缓决定：2026-11-07；FR-1~FR-11 已登记为最低优先级 P4 GitHub issue（#110~#120），索引见 `02-requirements.md`「暂缓与需求跟踪」
 > 创建：2026-11-02
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 17 节 Phase 7、第 18 节、第 19 节、第 22 节；2026-11-02 对当前代码与 Alembic 迁移的核查
-> 阶段：Phase 7（高级能力，P2；依赖 Phase 0~6 的已验收能力）
+> 阶段：Phase 7（高级能力，P4 最低优先级；依赖 Phase 0~6 的已验收能力）
 > 预估工期：按 9 个独立小 PR/切片分别估算，不给出 Big Bang 总工期承诺
 > 依赖：Phase 0 基线与回归证据、Phase 1~2 公共执行契约与编排器、Phase 3 能力/指令、Phase 4 Workspace/Runtime Host、Phase 6 安全与事件治理；未满足依赖的切片不得上线
 

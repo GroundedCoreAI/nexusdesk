@@ -1,6 +1,7 @@
 # Phase 7 · Advanced Engine Capabilities and Scale — Technical Design
 
-> Status: Planning (target design; no claim that modules, APIs, tables, or migrations exist; actual launch scope is reviewed per slice)
+> Status: Deferred (early-stage project; the target design is backlog reference only and is not entering implementation)
+> Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; do not start development or migrations from this design before rescheduling
 > Created: 2026-11-02
 > Basis: `01-business-goals.en.md` (G1~G11), `02-requirements.en.md` (FR-1~FR-11, AC-1~AC-22), architecture §4~19 and §22, and current-code review
 > Baseline statement: The latest reviewed migration head is `0052_memory_tasks_tenant_index`; behavioral/performance baselines are unmeasured pending Phase 0. Every `0058+` identifier here is a planning number; recheck head, renumber, and set real dependencies before implementation

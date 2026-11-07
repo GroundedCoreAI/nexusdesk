@@ -1216,7 +1216,9 @@ Acceptance:
 
 ## Phase 7 — Advanced Engine Capabilities and Scale
 
-**Priority: P2**
+**Priority: P4 (lowest; deferred as of 2026-11-07)**
+
+> Deferral: Because the project is in its early stage, no Phase 7 requirement is entering implementation, testing, or acceptance. The goals and potential work below remain backlog only and are not delivery commitments before rescheduling. FR-1~FR-11 are tracked as P4 issues #110~#120, indexed in the [Phase 7 requirements](../requirement/agent-execution-platform-v2/phase-7-advanced-engines-scale/02-requirements.en.md#deferral-and-requirement-tracking).
 
 Goal: expand the Engine ecosystem and support advanced workflows.
 
@@ -1232,7 +1234,7 @@ Potential work:
 - Shared Skill Store and Artifact Store.
 - Runtime Profiles and Adapter health / circuit breaking.
 
-Acceptance:
+Acceptance (applies only after the phase is reactivated):
 
 - Adding an Engine does not require changes to Worker core logic.
 - Adding a Protocol does not require changes to the public Engine contract.
@@ -1244,7 +1246,7 @@ Acceptance:
 
 # 18. Continuous Improvement Backlog
 
-These items should be tracked continuously; they are not all prerequisites for the first migration.
+These items should be tracked continuously; they are not all prerequisites for the first migration. Items within Phase 7 scope are deferred with Phase 7 as of 2026-11-07 and remain tracked through the P4 issues above; other backlog items are still assessed under their own phases and quality gates.
 
 ## 18.1 Engine ecosystem
 

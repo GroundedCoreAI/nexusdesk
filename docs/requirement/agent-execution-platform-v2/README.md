@@ -1,6 +1,6 @@
 # NexusDesk Agent 执行平台 v2 · 分阶段规划文档
 
-> 状态：Phase 0–7 需求分析文档待评审；均未开始实施
+> 状态：Phase 0–6 需求分析文档待评审、均未开始实施；Phase 7 自 2026-11-07 起因项目起步阶段暂缓执行，需求以最低优先级 P4 issue 保留
 > 创建：2026-11-02
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 17、19、20、22 节
 
@@ -30,7 +30,9 @@
 | Phase 4 | Runtime Host、进程监管与 Workspace | 外部 Engine 的受管进程和隔离工作目录 | P1 | ~3–4 周 | [phase-4-runtime-host-workspace/](phase-4-runtime-host-workspace/) |
 | Phase 5 | Codex 集成 | 以 CLI、再以 App-Server 验证多协议架构 | P1 | ~8 周（A/B 串行） | [phase-5-codex-integration/](phase-5-codex-integration/) |
 | Phase 6 | 安全、可靠性与事件治理 | 达到不可信多租户执行的生产门槛 | P1 | ~4–6 周 | [phase-6-security-reliability-events/](phase-6-security-reliability-events/) |
-| Phase 7 | 高级 Engine 能力与规模化 | 按独立能力切片扩展生态、治理与成本 | P2 | 按切片评审 | [phase-7-advanced-engines-scale/](phase-7-advanced-engines-scale/) |
+| Phase 7 | 高级 Engine 能力与规模化 | 按独立能力切片扩展生态、治理与成本 | P4（暂缓） | 重新排期后按切片评审 | [phase-7-advanced-engines-scale/](phase-7-advanced-engines-scale/) |
+
+> **Phase 7 暂缓说明（2026-11-07）**：因项目处于起步阶段，本阶段全部需求暂不进入实施、测试或验收，统一以最低优先级 P4 issue 跟踪。FR-1～FR-11 对应 #110～#120，详见[暂缓与需求跟踪](phase-7-advanced-engines-scale/02-requirements.md#暂缓与需求跟踪)；明确重新激活前，相关规划不作为交付承诺。
 
 \* 预估仅用于排期讨论，不是交付承诺；Phase 0 基线完成后应重新估算。
 
@@ -46,7 +48,7 @@
 
 ## 依赖与迁移约定
 
-- 阶段顺序默认为 Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7；安全子项可提前评审，但不能削弱后续上线门槛。
+- 阶段顺序默认为 Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7；安全子项可提前评审，但不能削弱后续上线门槛。Phase 7 当前暂缓，不纳入现阶段实施顺序。
 - 当前核查到的迁移头为 `0052_memory_tasks_tenant_index`。文档中的 `0053+` 均为**规划编号**，实施时必须基于目标提交重新核查 head、调整 `down_revision`，禁止修改已应用的历史迁移。
 - Phase 0 产出的依赖图、生命周期与兼容基线继续放在本总目录对应阶段下，避免形成第二套文档源。
 - 任一阶段发现设计与代码现实不一致，先登记裁定并修订相关文档，再修改实现。
@@ -70,4 +72,4 @@
 - Phase 4：进程树清理、路径/软链隔离和资源限额是否经故障与对抗测试。
 - Phase 5：CLI 稳定后再启用 App-Server；原生协议是否封装在 Provider 内；不可信执行是否仍受安全门槛约束。
 - Phase 6：Fencing、Outbox、去重和 SSE 重放是否覆盖竞态；Secret 是否跨日志、事件、产物全链路脱敏。
-- Phase 7：是否按小切片交付；路由与回退是否重新执行策略；无高级能力的 Engine 是否仍可基本执行。
+- Phase 7（当前暂缓，重新激活后适用）：是否按小切片交付；路由与回退是否重新执行策略；无高级能力的 Engine 是否仍可基本执行。

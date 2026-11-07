@@ -1216,7 +1216,9 @@ backend/src/agent_platform/
 
 ## 阶段 7 — 高级 Engine 能力与规模化
 
-**优先级：P2**
+**优先级：P4（最低；2026-11-07 起暂缓执行）**
+
+> 暂缓说明：因项目处于起步阶段，本阶段全部需求暂不进入实施、测试或验收。以下目标和潜在工作仅保留为 backlog，重新排期前不作为交付承诺。FR-1~FR-11 已登记为 P4 issue #110~#120，索引见 [Phase 7 需求文档](../requirement/agent-execution-platform-v2/phase-7-advanced-engines-scale/02-requirements.md#暂缓与需求跟踪)。
 
 目标：扩展 Engine 生态并支持高级工作流。
 
@@ -1232,7 +1234,7 @@ backend/src/agent_platform/
 - 共享 Skill Store 与 Artifact Store。
 - Runtime Profile 以及 Adapter 健康检查 / 熔断。
 
-验收：
+验收（仅在阶段重新激活后适用）：
 
 - 增加 Engine 无需修改 Worker 核心逻辑。
 - 增加 Protocol 无需修改公共 Engine 契约。
@@ -1244,7 +1246,7 @@ backend/src/agent_platform/
 
 # 18. 持续改进待办
 
-以下事项应持续跟踪，并非首次迁移的全部前置条件。
+以下事项应持续跟踪，并非首次迁移的全部前置条件。其中属于 Phase 7 范围的条目随 Phase 7 于 2026-11-07 起暂缓，按上述 P4 issue 保留跟踪；其余待办仍按各自阶段与质量门禁评估。
 
 ## 18.1 Engine 生态
 

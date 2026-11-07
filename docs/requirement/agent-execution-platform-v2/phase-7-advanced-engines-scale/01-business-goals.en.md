@@ -1,9 +1,10 @@
 # Phase 7 · Advanced Engine Capabilities and Scale — Business Goals
 
-> Status: Planning (unified contract draft; every actual launch scope requires slice-by-slice review)
+> Status: Deferred (early-stage project; planning is retained, but implementation, testing, and acceptance are not starting)
+> Deferral decision: 2026-11-07; FR-1~FR-11 are tracked as lowest-priority P4 GitHub issues (#110~#120), indexed under “Deferral and Requirement Tracking” in `02-requirements.en.md`
 > Created: 2026-11-02
 > Basis: `docs/architecture/agent-execution-platform-v2.md` §17 Phase 7, §18, §19, and §22; code and Alembic migration review performed on 2026-11-02
-> Phase: Phase 7 (advanced capabilities, P2; depends on accepted Phase 0~6 capabilities)
+> Phase: Phase 7 (advanced capabilities, lowest priority P4; depends on accepted Phase 0~6 capabilities)
 > Estimated effort: Estimate the 9 independent small-PR slices separately; no Big Bang overall schedule commitment
 > Dependencies: Phase 0 baseline and regression evidence, Phase 1~2 common execution contracts and orchestrator, Phase 3 capabilities/instructions, Phase 4 Workspace/Runtime Host, and Phase 6 security/event governance; a slice with unmet dependencies must not launch
 

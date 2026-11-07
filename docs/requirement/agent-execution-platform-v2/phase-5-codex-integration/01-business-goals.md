@@ -64,7 +64,7 @@ CLI Exec 与 App-Server 是同一 `codex` Engine 的不同 Protocol。若复用 
 
 - 完整 Credential Broker、短期凭据全生命周期、强沙箱、网络出口与跨日志/事件/产物脱敏体系：属于 Phase 6，是开放不可信租户前的阻断项。
 - Fencing Token、事务性 Event Outbox、事件去重/通用重放治理与 usage 幂等聚合：属于 Phase 6；Phase 5 只保证采集和关联。
-- Claude Code、ACP、OpenClaw、多 Engine 路由/回退及规模化调度：属于 Phase 7 或后续。
+- Claude Code、ACP、OpenClaw、多 Engine 路由/回退及规模化调度：属于 Phase 7 或后续；[Phase 7](../phase-7-advanced-engines-scale/02-requirements.md#暂缓与需求跟踪) 自 2026-11-07 起因项目起步阶段暂缓执行，相关需求仅以最低优先级 P4 issue 跟踪。
 - 自研 Codex 推理循环、把 Codex 原生协议暴露为 NexusDesk 公共 API、无版本约束地支持所有 Codex 发布版。
 - 本阶段不修改历史迁移，不承诺当前不存在的 Codex 功能已经可用。
 

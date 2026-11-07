@@ -1,6 +1,7 @@
 # Phase 7 · Advanced Engine Capabilities and Scale — Test Plan
 
-> Status: Pending implementation (execute applicable cases after each slice is developed; unexecuted cases must not be recorded as passed)
+> Status: Deferred (early-stage project; this test plan is not being executed, no cases have run, and none may be recorded as passed)
+> Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; run applicable cases only after the phase is reactivated and the corresponding slice is developed
 > Created: 2026-11-02
 > Basis: `02-requirements.en.md` (FR-1~FR-11, AC-1~AC-22), `03-technical-design.en.md` (S7-01~S7-09, planned migrations, and core flows), architecture §19 and §22
 > Baseline statement: Current behavioral, coverage, performance, and capacity baselines are unmeasured pending Phase 0; every comparative test must first cite accepted Phase 0 data

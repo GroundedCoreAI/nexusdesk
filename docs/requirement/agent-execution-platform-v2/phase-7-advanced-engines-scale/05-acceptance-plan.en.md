@@ -1,6 +1,7 @@
 # Phase 7 · Advanced Engine Capabilities and Scale — Acceptance Plan
 
-> Status: Pending implementation (execute independently before each slice launches; this document is neither launch approval nor an acceptance result)
+> Status: Deferred (early-stage project; acceptance is not starting, and this document is neither launch approval nor an acceptance result)
+> Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; acceptance runs independently per slice only after the phase is reactivated
 > Created: 2026-11-02
 > Basis: `01-business-goals.en.md` (G1~G11 and success metrics), `02-requirements.en.md` (AC-1~AC-22), `03-technical-design.en.md` (S7-01~S7-09), and `04-test-plan.en.md` (P7-UT/IT/CM)
 > Baseline statement: Business and performance baselines are unmeasured pending Phase 0; comparative metrics without baselines remain pending and cannot pass
