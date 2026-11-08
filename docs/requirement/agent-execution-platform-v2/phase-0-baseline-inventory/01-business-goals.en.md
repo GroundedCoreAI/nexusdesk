@@ -1,6 +1,6 @@
 # Phase 0 · Baseline and Inventory — Business Goals
 
-> Status: Pending review (implementation has not started)
+> Status: In progress (implementation started on 2026-11-07)
 > Created: 2026-11-02
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 15 and 17 (Phase 0); all later phases depend on these findings
 > Estimated effort: ~1–1.5 weeks

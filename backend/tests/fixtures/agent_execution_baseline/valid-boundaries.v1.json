@@ -1,0 +1,99 @@
+{
+  "cases": [
+    {
+      "id": "lower-numeric-boundaries",
+      "config": {
+        "system_prompt": "L",
+        "tool_names": [
+          "synthetic.lookup"
+        ],
+        "knowledge_base_ids": [],
+        "max_model_rounds": 1,
+        "model_profile_id": "00000000-0000-4000-8000-000000000201",
+        "model_profile_version": 1,
+        "reply_language": "en",
+        "memory_types": [
+          "profile"
+        ],
+        "memory_inject_max_items": 1,
+        "memory_search_limit": 1
+      }
+    },
+    {
+      "id": "upper-numeric-and-collection-boundaries",
+      "config": {
+        "system_prompt": "Exercise synthetic upper boundaries without production data.",
+        "tool_names": [
+          "synthetic.tool.00",
+          "synthetic.tool.01",
+          "synthetic.tool.02",
+          "synthetic.tool.03",
+          "synthetic.tool.04",
+          "synthetic.tool.05",
+          "synthetic.tool.06",
+          "synthetic.tool.07",
+          "synthetic.tool.08",
+          "synthetic.tool.09",
+          "synthetic.tool.10",
+          "synthetic.tool.11",
+          "synthetic.tool.12",
+          "synthetic.tool.13",
+          "synthetic.tool.14",
+          "synthetic.tool.15",
+          "synthetic.tool.16",
+          "synthetic.tool.17",
+          "synthetic.tool.18",
+          "synthetic.tool.19",
+          "synthetic.tool.20",
+          "synthetic.tool.21",
+          "synthetic.tool.22",
+          "synthetic.tool.23",
+          "synthetic.tool.24",
+          "synthetic.tool.25",
+          "synthetic.tool.26",
+          "synthetic.tool.27",
+          "synthetic.tool.28",
+          "synthetic.tool.29"
+        ],
+        "knowledge_base_ids": [
+          "00000000-0000-4000-8000-000000000300",
+          "00000000-0000-4000-8000-000000000301",
+          "00000000-0000-4000-8000-000000000302",
+          "00000000-0000-4000-8000-000000000303",
+          "00000000-0000-4000-8000-000000000304",
+          "00000000-0000-4000-8000-000000000305",
+          "00000000-0000-4000-8000-000000000306",
+          "00000000-0000-4000-8000-000000000307",
+          "00000000-0000-4000-8000-000000000308",
+          "00000000-0000-4000-8000-000000000309",
+          "00000000-0000-4000-8000-000000000310",
+          "00000000-0000-4000-8000-000000000311",
+          "00000000-0000-4000-8000-000000000312",
+          "00000000-0000-4000-8000-000000000313",
+          "00000000-0000-4000-8000-000000000314",
+          "00000000-0000-4000-8000-000000000315",
+          "00000000-0000-4000-8000-000000000316",
+          "00000000-0000-4000-8000-000000000317",
+          "00000000-0000-4000-8000-000000000318",
+          "00000000-0000-4000-8000-000000000319",
+          "00000000-0000-4000-8000-000000000320",
+          "00000000-0000-4000-8000-000000000321",
+          "00000000-0000-4000-8000-000000000322",
+          "00000000-0000-4000-8000-000000000323",
+          "00000000-0000-4000-8000-000000000324",
+          "00000000-0000-4000-8000-000000000325",
+          "00000000-0000-4000-8000-000000000326",
+          "00000000-0000-4000-8000-000000000327",
+          "00000000-0000-4000-8000-000000000328",
+          "00000000-0000-4000-8000-000000000329"
+        ],
+        "max_model_rounds": 30,
+        "model_profile_id": null,
+        "model_profile_version": null,
+        "reply_language": "hi",
+        "memory_inject_max_items": 999,
+        "memory_search_limit": 999
+      }
+    }
+  ]
+}

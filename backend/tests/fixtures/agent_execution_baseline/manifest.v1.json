@@ -1,0 +1,240 @@
+{
+  "schema": "nexusdesk.agent-execution-baseline.manifest/v1",
+  "fixture_version": "v1",
+  "target_revision": "c6c47dec39025ebd4d1176c1e9925bac9c99c4fd",
+  "production_samples": false,
+  "value_policy": "All values are synthetic. Historical provenance describes field shape only, never captured production content.",
+  "payload_kinds": {
+    "agent_config": "The top-level JSON object is passed directly to AgentConfig.model_validate.",
+    "case_collection": "Each item in the top-level cases array has an id and a config passed to AgentConfig.model_validate."
+  },
+  "files": [
+    {
+      "file": "minimal-defaults.v1.json",
+      "fixture_version": "v1",
+      "payload_kind": "agent_config",
+      "source_category": "current_default",
+      "provenance": "Synthetic minimal input constructed against AgentConfig at the target revision.",
+      "covered_fields": [
+        "system_prompt",
+        "tool_names",
+        "knowledge_base_ids",
+        "max_model_rounds",
+        "model_profile_id",
+        "model_profile_version",
+        "reply_language",
+        "summary_enabled",
+        "memory_enabled",
+        "memory_write",
+        "memory_read_enabled",
+        "memory_types",
+        "memory_search_enabled",
+        "memory_write_mode",
+        "memory_inject_max_items",
+        "memory_search_limit",
+        "memory_blacklist_auto_handoff"
+      ],
+      "covered_cases": [
+        "required-system-prompt",
+        "all-current-defaults"
+      ],
+      "expected_result": {
+        "status": "valid",
+        "defaults": {
+          "tool_names": [],
+          "knowledge_base_ids": [],
+          "max_model_rounds": 6,
+          "model_profile_id": null,
+          "model_profile_version": null,
+          "reply_language": "auto",
+          "summary_enabled": true,
+          "memory_enabled": true,
+          "memory_write": true,
+          "memory_read_enabled": true,
+          "memory_types": [
+            "profile",
+            "preference",
+            "event"
+          ],
+          "memory_search_enabled": true,
+          "memory_write_mode": "auto",
+          "memory_inject_max_items": null,
+          "memory_search_limit": null,
+          "memory_blacklist_auto_handoff": false
+        }
+      }
+    },
+    {
+      "file": "legacy-core-shape.v1.json",
+      "fixture_version": "v1",
+      "payload_kind": "agent_config",
+      "source_category": "repository_historical_field_shape",
+      "provenance": "Field set verified with git show 7dce7ba473622b209329ccd058b42b74b5538bdc:backend/src/agent_platform/modules/agent_config/service.py; all values are synthetic.",
+      "covered_fields": [
+        "system_prompt",
+        "tool_names",
+        "knowledge_base_ids",
+        "max_model_rounds",
+        "model_profile_id",
+        "model_profile_version",
+        "reply_language"
+      ],
+      "covered_cases": [
+        "initial-core-field-shape",
+        "new-memory-fields-default-on-read",
+        "publish-integration-core-keys-retained"
+      ],
+      "required_publish_keys": [
+        "system_prompt",
+        "tool_names",
+        "knowledge_base_ids",
+        "max_model_rounds",
+        "model_profile_id",
+        "model_profile_version",
+        "reply_language"
+      ],
+      "expected_result": {
+        "status": "valid"
+      }
+    },
+    {
+      "file": "legacy-memory-shape.v1.json",
+      "fixture_version": "v1",
+      "payload_kind": "agent_config",
+      "source_category": "repository_historical_field_shape",
+      "provenance": "Field set verified with git show 7250aa0e83a48b7b43340b8fa0db4666eb83e7b7:backend/src/agent_platform/modules/agent_config/service.py; all values are synthetic.",
+      "covered_fields": [
+        "system_prompt",
+        "tool_names",
+        "knowledge_base_ids",
+        "max_model_rounds",
+        "model_profile_id",
+        "model_profile_version",
+        "reply_language",
+        "summary_enabled",
+        "memory_enabled",
+        "memory_write"
+      ],
+      "covered_cases": [
+        "pre-phase-five-memory-field-shape",
+        "phase-five-memory-fields-default-on-read",
+        "publish-integration-tool-names-retained"
+      ],
+      "required_publish_keys": [
+        "system_prompt",
+        "tool_names",
+        "knowledge_base_ids",
+        "max_model_rounds",
+        "model_profile_id",
+        "model_profile_version",
+        "reply_language",
+        "summary_enabled",
+        "memory_enabled",
+        "memory_write"
+      ],
+      "expected_result": {
+        "status": "valid"
+      }
+    },
+    {
+      "file": "valid-boundaries.v1.json",
+      "fixture_version": "v1",
+      "payload_kind": "case_collection",
+      "source_category": "current_boundary",
+      "provenance": "Synthetic boundary inputs constructed from current AgentConfig constraints.",
+      "covered_fields": [
+        "system_prompt",
+        "tool_names",
+        "knowledge_base_ids",
+        "max_model_rounds",
+        "model_profile_id",
+        "model_profile_version",
+        "reply_language",
+        "memory_types",
+        "memory_inject_max_items",
+        "memory_search_limit"
+      ],
+      "covered_cases": [
+        "lower-numeric-boundaries",
+        "upper-numeric-and-collection-boundaries",
+        "thirty-tool-names",
+        "thirty-knowledge-base-ids",
+        "above-platform-memory-caps-accepted-for-runtime-truncation"
+      ],
+      "expected_result": {
+        "status": "valid",
+        "case_ids": [
+          "lower-numeric-boundaries",
+          "upper-numeric-and-collection-boundaries"
+        ]
+      }
+    },
+    {
+      "file": "unknown-engine-field.v1.json",
+      "fixture_version": "v1",
+      "payload_kind": "agent_config",
+      "source_category": "invalid_construction",
+      "provenance": "Synthetic unsupported engine object added to an otherwise valid current config.",
+      "covered_fields": [
+        "system_prompt",
+        "tool_names",
+        "engine"
+      ],
+      "covered_cases": [
+        "extra-forbid-rejects-unknown-engine-field"
+      ],
+      "expected_result": {
+        "status": "invalid",
+        "error_type": "pydantic.ValidationError",
+        "expected_error_locations": [
+          [
+            "engine"
+          ]
+        ]
+      }
+    },
+    {
+      "file": "invalid-cases.v1.json",
+      "fixture_version": "v1",
+      "payload_kind": "case_collection",
+      "source_category": "invalid_construction",
+      "provenance": "Synthetic invalid values constructed from current AgentConfig enum, type, range, and model-binding constraints.",
+      "covered_fields": [
+        "system_prompt",
+        "tool_names",
+        "knowledge_base_ids",
+        "max_model_rounds",
+        "model_profile_id",
+        "model_profile_version",
+        "reply_language",
+        "summary_enabled",
+        "memory_types",
+        "memory_write_mode",
+        "memory_inject_max_items",
+        "memory_search_limit"
+      ],
+      "covered_cases": [
+        "empty-system-prompt",
+        "tool-names-wrong-type",
+        "model-rounds-wrong-type",
+        "model-rounds-below-lower-bound",
+        "model-rounds-above-upper-bound",
+        "model-profile-version-below-lower-bound",
+        "model-profile-binding-is-incomplete",
+        "invalid-reply-language-enum",
+        "invalid-memory-type-enum",
+        "empty-memory-types",
+        "invalid-memory-write-mode-enum",
+        "memory-inject-limit-below-lower-bound",
+        "memory-search-limit-below-lower-bound",
+        "invalid-knowledge-base-uuid",
+        "summary-enabled-wrong-type"
+      ],
+      "expected_result": {
+        "status": "invalid_for_every_case",
+        "error_type": "pydantic.ValidationError",
+        "case_error_locations_source": "Each case declares expected_error_locations as exact Pydantic loc arrays; [] unambiguously represents a root-level model validation error."
+      }
+    }
+  ]
+}

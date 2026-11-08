@@ -1,6 +1,6 @@
 # NexusDesk Agent Execution Platform v2 · Phased Planning Documents
 
-> Status: Phase 0–6 requirements-analysis documents are pending review and implementation has not started; Phase 7 is deferred as of 2026-11-07 because the project is in its early stage, with requirements retained as lowest-priority P4 issues
+> Status: Phase 0 implementation started on 2026-11-07; Phase 1–6 requirements-analysis documents remain pending review and implementation has not started; Phase 7 is deferred as of 2026-11-07 because the project is in its early stage, with requirements retained as lowest-priority P4 issues
 > Created: 2026-11-02
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 17, 19, 20, and 22
 
@@ -49,7 +49,7 @@ Each phase contains:
 ## Dependency and Migration Conventions
 
 - The default order is Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7. Security items may be reviewed earlier, but later launch gates must not be weakened. Phase 7 is currently deferred and excluded from the active implementation sequence.
-- The migration head verified during planning is `0052_memory_tasks_tenant_index`. Numbers `0053+` in these documents are **planned identifiers**. Revalidate the head and adjust `down_revision` against the target commit; never edit an applied historical migration.
+- The migration head observed during planning on 2026-11-02 was `0052_memory_tasks_tenant_index`; the Phase 0 implementation check on 2026-11-07 found `0057_industry_pack_runtime`. Numbers `0053+` in these documents are **planned identifiers**. Each phase must revalidate the head and adjust `down_revision` against its target commit, never edit an applied historical migration, and never treat a historical planning number as a permanent acceptance value.
 - Phase 0 dependency maps, lifecycle records, and compatibility baselines remain under this root in the corresponding phase, avoiding a second documentation source.
 - If a design conflicts with code reality, record a decision and revise the affected documents before changing implementation.
 

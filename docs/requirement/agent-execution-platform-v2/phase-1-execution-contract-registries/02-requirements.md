@@ -79,7 +79,7 @@
 ## 非功能需求
 
 - **性能**：注册与 DTO 校验只进行进程内操作，不在解析中执行 I/O；Phase 1 不改变生产 Run 延迟，性能基线待 Phase 0 测量。
-- **兼容**：现有 Agent 快照、RunRequest/RunSnapshot、RunStatus、Runtime Event 和 API 不变；当前迁移 head `0052` 不变。
+- **兼容**：现有 Agent 快照、RunRequest/RunSnapshot、RunStatus、Runtime Event 和 API 不变；迁移 head 与实施入口记录的目标提交实际值一致。
 - **多租户**：request 中 tenant_id 只能来自可信上下文；注册中心不按不可信输入跨租户查找实现，日志和错误不得输出 config、凭据或原始输入。
 - **可维护性**：Engine/Protocol/Adapter 身份与版本清晰，公共契约不 import Factory、Worker、Repository 或任何具体 Engine。
 - **可靠性**：取消幂等、实例隔离、事件顺序与错误语义可重复测试；不宣称本阶段已提供持久事件去重或进程清理。
@@ -95,4 +95,4 @@
 | AC-5 | 独立注册一个 Engine、两个 Protocol 和对应版本化 Adapter，再按有效三元组解析 | Engine 与 Protocol 不需绑死注册；有效组合返回独立且身份匹配的 Adapter，不修改公共契约或 Worker |
 | AC-6 | 解析未知 Engine/Protocol/版本、未声明组合、禁用项，并执行重复冲突注册和身份不匹配工厂 | 全部以稳定配置错误拒绝，无隐式 latest、跨版本或其他 Engine 回退 |
 | AC-7 | 重放 LocalTestAdapter 的重复事件、延迟事件、超时、资源耗尽及模拟进程故障 | 事件异常被准确保留供上层处理；其余场景产生确定终态/错误；测试无真实外部依赖和悬挂任务 |
-| AC-8 | 检查迁移 head、生产 Worker/Factory 接线并运行既有 Runtime/API/SSE 回归 | head 仍为 `0052`，新路径未接入生产 Worker，既有 API、事件名、状态及测试行为无变化 |
+| AC-8 | 检查迁移 head、生产 Worker/Factory 接线并运行既有 Runtime/API/SSE 回归 | head 与实施入口记录的目标提交实际值一致，新路径未接入生产 Worker，既有 API、事件名、状态及测试行为无变化 |

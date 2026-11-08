@@ -63,7 +63,7 @@
 
 | 编号 | 核对项 | 通过标准 | 溯源 |
 |---|---|---|---|
-| P1-CM-01 | 数据库迁移不变 | Alembic head 仍为 `0052`，无新增/修改版本文件，无 downgrade 需求 | AC-8、G4 |
+| P1-CM-01 | 数据库迁移不变 | Alembic head 与实施入口记录的目标提交实际值一致，无新增/修改版本文件，无 downgrade 需求 | AC-8、G4 |
 | P1-CM-02 | 生产零接线与配置不变 | Worker/Factory/组合根未调用新执行路径，无新运行时开关，旧路径默认且唯一 | AC-8、FR-6 |
 | P1-CM-03 | 公共 API/SSE/Run 契约兼容 | RunRequest/RunSnapshot/RunStatus、事件名和路由未改；相关既有测试全绿 | AC-8、FR-6 |
 | P1-CM-04 | 敏感信息与日志 | DTO/注册/Adapter 错误输出不含 secret-marker、凭据、连接串、原始堆栈或客户输入 | AC-4、非功能 |

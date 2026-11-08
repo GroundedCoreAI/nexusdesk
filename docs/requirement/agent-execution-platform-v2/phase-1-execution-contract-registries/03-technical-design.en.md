@@ -10,7 +10,7 @@ Current state: `RuntimeEngine.run()` is in `core_platform/agent_runtime/engine.p
 
 | Layer | File | Change |
 |---|---|---|
-| Migration | `backend/migrations/versions/` | Add or modify no migration; current head `0052_memory_tasks_tenant_index.py` remains unchanged |
+| Migration | `backend/migrations/versions/` | Add or modify no migration; record the actual target head at implementation entry and leave it identical after this phase |
 | New module | `backend/src/agent_platform/core_platform/agent_execution/contracts/{request,handle,result,events,capabilities,errors}.py` | Six versioned DTO groups and error categories; no Runtime/application dependency |
 | New module | `backend/src/agent_platform/core_platform/agent_execution/contracts/adapter.py` | AgentEngineAdapter Protocol and identity/lifecycle constraints |
 | New module | `backend/src/agent_platform/core_platform/agent_execution/registry/{engine_registry,protocol_registry,adapter_registry}.py` | Descriptors, independent registration, compatibility matrix, and exact-tuple resolution |
@@ -71,7 +71,7 @@ get_capabilities → start(request) → concurrently consume stream_events(handl
 
 ### 3. LocalTestAdapter scenario driving (`adapters/testing/local_test_adapter.py`)
 
-A scenario defines identity, capabilities, start error, event script, result, completion/cancellation gates, and late events. A test clock advances timeout, while event gates control long-running and cancellation cases. Every scenario verifies five methods and three identity properties and cleans up async iterators/tasks after failure.
+A scenario defines identity, capabilities, start error, event script, result, completion/cancellation gates, and late events. A test clock advances timeout, while event gates control long-running and cancellation cases. LocalTestAdapter has the fixed identity `(local-test,scripted,v1)`, independent of production `(react,native,v1)`, and never becomes a production Agent default. Every scenario verifies five methods and three identity properties and cleans up async iterators/tasks after failure.
 
 ### 4. Error and event boundaries
 

@@ -1,0 +1,14 @@
+{
+  "system_prompt": "Handle the synthetic conversation using the legacy memory switches.",
+  "tool_names": [
+    "synthetic.memory.lookup"
+  ],
+  "knowledge_base_ids": [],
+  "max_model_rounds": 6,
+  "model_profile_id": null,
+  "model_profile_version": null,
+  "reply_language": "zh-CN",
+  "summary_enabled": true,
+  "memory_enabled": true,
+  "memory_write": true
+}
