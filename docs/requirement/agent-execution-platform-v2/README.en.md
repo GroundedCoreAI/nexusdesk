@@ -1,6 +1,6 @@
 # NexusDesk Agent Execution Platform v2 · Phased Planning Documents
 
-> Status: Phase 0 implementation started on 2026-11-07; Phase 1–6 requirements-analysis documents remain pending review and implementation has not started; Phase 7 is deferred as of 2026-11-07 because the project is in its early stage, with requirements retained as lowest-priority P4 issues
+> Status: Phase 0 implementation is committed and pushed, but clean committed-artifact CI double-runs, authorized real historical samples, and human sign-offs remain open, so formal acceptance is incomplete; Phase 1 design decisions are frozen and implementation started on 2026-11-08, without testing or acceptance; Phases 2–6 are not being implemented; Phase 7 is deferred as of 2026-11-07 because the project is in its early stage, with requirements retained as lowest-priority P4 issues
 > Created: 2026-11-02
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 17, 19, 20, and 22
 
@@ -51,6 +51,7 @@ Each phase contains:
 - The default order is Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7. Security items may be reviewed earlier, but later launch gates must not be weakened. Phase 7 is currently deferred and excluded from the active implementation sequence.
 - The migration head observed during planning on 2026-11-02 was `0052_memory_tasks_tenant_index`; the Phase 0 implementation check on 2026-11-07 found `0057_industry_pack_runtime`. Numbers `0053+` in these documents are **planned identifiers**. Each phase must revalidate the head and adjust `down_revision` against its target commit, never edit an applied historical migration, and never treat a historical planning number as a permanent acceptance value.
 - Phase 0 dependency maps, lifecycle records, and compatibility baselines remain under this root in the corresponding phase, avoiding a second documentation source.
+- The user explicitly requested Phase 1 startup on 2026-11-08; open Phase 0 items are only an accepted entry risk tracked by the product owner and QA, not formal Phase 0 acceptance, sign-off, or approval.
 - If a design conflicts with code reality, record a decision and revise the affected documents before changing implementation.
 
 ## Explicit Overall Non-Goals
