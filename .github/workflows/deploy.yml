@@ -234,15 +234,19 @@ jobs:
             export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"
             trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
             printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
-            if ! docker compose -f deploy/quickstart/compose.yaml pull; then
+            # Only the published images are pulled. mock-business is a bundled
+            # demo upstream with no registry image, and the public demo site
+            # must not run an upstream that authenticates nobody and can be
+            # told to inject 5xx, so it is named away from both pull and up.
+            if ! docker compose -f deploy/quickstart/compose.yaml pull app postgres; then
               echo "::warning::Primary registry pull failed; retrying from GHCR."
               export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"
-              docker compose -f deploy/quickstart/compose.yaml pull
+              docker compose -f deploy/quickstart/compose.yaml pull app postgres
             fi
             # Recreates the app container on the new image; the container
             # bootstrap runs migrations before serving traffic. --wait fails
             # the deploy if the healthcheck does not pass in time.
-            docker compose -f deploy/quickstart/compose.yaml up -d --wait --wait-timeout 300
+            docker compose -f deploy/quickstart/compose.yaml up -d --wait --wait-timeout 300 postgres app
             docker compose -f deploy/quickstart/compose.yaml ps
             docker image prune -f
             # Record the actually running commit on the host for audit and

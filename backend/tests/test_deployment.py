@@ -73,6 +73,83 @@ def test_seed_industries_defaults_off_and_is_env_overridable(monkeypatch):
     )
 
 
+def test_seed_industry_packs_is_opt_in_for_production(monkeypatch):
+    """A fresh production database opens to an empty console unless enabled."""
+
+    assert configuration().seed_industry_packs is False
+    monkeypatch.setenv("AGENT_SEED_INDUSTRY_PACKS", "true")
+    assert (
+        Settings(
+            _env_file=None,
+            database_url="postgresql+asyncpg://test:test@localhost/test",
+        ).seed_industry_packs
+        is True
+    )
+    # The production template ships it off, documented next to the case switch.
+    template = (ROOT / "deploy/production/.env.example").read_text(encoding="utf-8")
+    assert "AGENT_SEED_INDUSTRY_PACKS=false" in template
+
+
+def test_migrate_installs_demo_packs_only_when_opted_in(monkeypatch):
+    """The production migrate step owns initialization, packs included."""
+
+    import types
+
+    seeds = []
+
+    class FakeAsyncio:
+        @staticmethod
+        def run(coroutine):
+            # Startup helpers only need to be *known*; the smoke DB proves they work.
+            coroutine.close()
+
+    monkeypatch.setattr(bootstrap, "asyncio", FakeAsyncio)
+    monkeypatch.setattr(
+        bootstrap, "subprocess", types.SimpleNamespace(run=lambda *args, **kwargs: None)
+    )
+    monkeypatch.setattr(bootstrap, "seed_demo_packs", lambda: seeds.append("packs"))
+
+    monkeypatch.setattr(bootstrap, "Settings", lambda: configuration())
+    bootstrap.main("migrate")
+    assert seeds == []
+
+    monkeypatch.setattr(
+        bootstrap, "Settings", lambda: configuration(seed_industry_packs=True)
+    )
+    bootstrap.main("migrate")
+    assert seeds == ["packs"]
+
+
+def test_demo_pack_seed_never_blocks_startup(monkeypatch, capsys):
+    """Demo data may fail; the console still has to come up."""
+
+    import subprocess as subprocess_module
+
+    class FakeSubprocess:
+        CalledProcessError = subprocess_module.CalledProcessError
+
+        def __init__(self, error=None):
+            self.error = error
+            self.calls = []
+
+        def run(self, command, check=False):
+            self.calls.append(command)
+            if self.error is not None:
+                raise self.error
+            return subprocess_module.CompletedProcess(command, 0)
+
+    failing = FakeSubprocess(error=subprocess_module.CalledProcessError(1, "seed"))
+    monkeypatch.setattr(bootstrap, "subprocess", failing)
+    assert bootstrap.seed_demo_packs() is False
+    assert "seed_demo_packs" in capsys.readouterr().err
+    assert failing.calls[0][-1] == "agent_platform.applications.seed_demo_packs"
+
+    succeeding = FakeSubprocess()
+    monkeypatch.setattr(bootstrap, "subprocess", succeeding)
+    assert bootstrap.seed_demo_packs() is True
+    assert capsys.readouterr().err == ""
+
+
 @pytest.mark.asyncio
 async def test_resolve_published_chat_selection_rules():
     from agent_platform.applications.seed_industries import resolve_published_chat
@@ -159,10 +236,13 @@ def test_deployment_topologies_and_no_secret_copy():
     prod = yaml.safe_load(
         (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
     )
-    assert set(quick["services"]) == {"postgres", "app"}
+    assert set(quick["services"]) == {"postgres", "app", "mock-business"}
     # Quickstart must default to loopback-only; NEXUSDESK_BIND may widen it.
     assert quick["services"]["app"]["ports"][0].startswith("${NEXUSDESK_BIND:-127.0.0.1}:")
     assert "ports" not in quick["services"]["postgres"]
+    # The demo business upstream ships with quickstart for local trials only: it
+    # authenticates nobody, so it must stay loopback-bound.
+    assert quick["services"]["mock-business"]["ports"][0].startswith("127.0.0.1:")
     assert set(prod["services"]) == {
         "migrate",
         "api",
@@ -171,7 +251,11 @@ def test_deployment_topologies_and_no_secret_copy():
         "channel-worker",
         "knowledge-worker",
         "memory-worker",
+        "mock-business",
     }
+    # Production keeps the demo upstream on the internal network only; it must
+    # never publish a host port, and real deployments remove it before go-live.
+    assert "ports" not in prod["services"]["mock-business"]
     for name in ("api", "runtime-worker", "channel-worker", "knowledge-worker", "memory-worker"):
         assert prod["services"][name]["environment"]["AGENT_EMBEDDED_WORKER"] == "false"
         assert (

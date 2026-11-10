@@ -1,8 +1,9 @@
 """PostgreSQL integration tests for versioned service applications."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import text
 from test_platform_postgres import create_agent
 from test_platform_postgres import platform as _platform
 
@@ -266,3 +267,111 @@ async def test_service_catalog_reorder_rename_and_merge_update_scenario_drafts(p
     )
     assert missing_reference.status_code == 422
     assert missing_reference.json()["detail"] == "service_catalog_category_required"
+
+
+async def test_application_archive_hides_requires_offline_and_restores(platform):
+    client, services, settings = platform
+    await services.groups.business.scenarios.seed_defaults(settings.tenant_id)
+    key = "archive-" + uuid4().hex[:10]
+    created = await _create_application(client, key, _config())
+
+    # A draft that never shipped can be archived straight away.
+    archived = await client.post(
+        f"/api/v1/service-apps/{key}/archive",
+        json={"revision": created["revision"]},
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["archived"] is True
+    assert (await client.get("/api/v1/service-apps")).json()["items"] == []
+    archived_page = (await client.get("/api/v1/service-apps?archived=true")).json()
+    assert [item["key"] for item in archived_page["items"]] == [key]
+    # Archived rows are invisible to every direct read path.
+    assert (await client.get(f"/api/v1/service-apps/{key}")).status_code == 404
+
+    restored = await client.post(f"/api/v1/service-apps/{key}/restore")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["archived"] is False
+    assert (await client.get(f"/api/v1/service-apps/{key}")).status_code == 200
+    # Restoring something that is not archived is a missing row, not a silent no-op.
+    assert (await client.post(f"/api/v1/service-apps/{key}/restore")).status_code == 404
+
+    published = await client.post(
+        f"/api/v1/service-apps/{key}/publish",
+        json={"revision": restored.json()["revision"]},
+    )
+    assert published.status_code == 200, published.text
+    # A live release has to be taken offline first; archiving must not hide it.
+    blocked = await client.post(
+        f"/api/v1/service-apps/{key}/archive",
+        json={"revision": published.json()["revision"]},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "service_application_must_be_offline"
+
+    offline = await client.post(
+        f"/api/v1/service-apps/{key}/status",
+        json={"status": "offline", "revision": published.json()["revision"]},
+    )
+    assert offline.status_code == 200, offline.text
+    final = await client.post(
+        f"/api/v1/service-apps/{key}/archive",
+        json={"revision": offline.json()["revision"]},
+    )
+    assert final.status_code == 200, final.text
+    # Archiving hides the row; it never drops the release it points at.
+    assert final.json()["published_version"] == published.json()["version"]
+
+
+async def test_application_purge_needs_archive_and_drops_version_history(platform):
+    client, services, settings = platform
+    await services.groups.business.scenarios.seed_defaults(settings.tenant_id)
+    key = "purge-" + uuid4().hex[:10]
+    created = await _create_application(client, key, _config())
+
+    # A live row is not deletable: purge only touches what archive already hid.
+    refused = await client.delete(f"/api/v1/service-apps/{key}")
+    assert refused.status_code == 404
+    assert refused.json()["detail"] == "service_application_archived_not_found"
+
+    published = await client.post(
+        f"/api/v1/service-apps/{key}/publish",
+        json={"revision": created["revision"]},
+    )
+    assert published.status_code == 200, published.text
+    offline = await client.post(
+        f"/api/v1/service-apps/{key}/status",
+        json={"status": "offline", "revision": published.json()["revision"]},
+    )
+    assert offline.status_code == 200, offline.text
+    archived = await client.post(
+        f"/api/v1/service-apps/{key}/archive",
+        json={"revision": offline.json()["revision"]},
+    )
+    assert archived.status_code == 200, archived.text
+
+    engine = services.repository.engine
+
+    async def version_rows() -> int:
+        async with engine.connect() as connection:
+            return await connection.scalar(
+                text(
+                    "SELECT count(*) FROM service_application_versions "
+                    "WHERE tenant_id=:tenant AND application_id=:id"
+                ),
+                {"tenant": settings.tenant_id, "id": UUID(created["id"])},
+            )
+
+    assert await version_rows() >= 1
+
+    purged = await client.delete(f"/api/v1/service-apps/{key}")
+    assert purged.status_code == 200, purged.text
+    assert purged.json() == {"key": key, "deleted": True}
+    assert (await client.get("/api/v1/service-apps?archived=true")).json()["items"] == []
+    assert (await client.get(f"/api/v1/service-apps/{key}")).status_code == 404
+    # Second purge is a missing row, not a silent success.
+    assert (await client.delete(f"/api/v1/service-apps/{key}")).status_code == 404
+    # Version snapshots go with the application; the FK cascades.
+    assert await version_rows() == 0
+    # And the key is free again.
+    again = await _create_application(client, key, _config())
+    assert again["revision"] == 1

@@ -3,6 +3,11 @@
 Industry packs are versioned content assets.  They are compiled into the
 existing service-scenario and service-application contracts; they are not
 runtime tenant entities and must not introduce industry-specific dispatch.
+
+Four demo packs ship by default (shopping / gaming / creator / mobility).  They
+share one skeleton from :mod:`demo_kit`: three common catalog categories plus a
+business-specific one, six fixed capabilities, four channels and GA-only
+scenarios, so a freshly installed pack can pass the release gate as-is.
 """
 
 from .compiler import (
@@ -13,8 +18,9 @@ from .compiler import (
     compile_scenario_template,
     stable_digest,
 )
-from .content_community import CONTENT_COMMUNITY_PACK, build_content_community_pack
-from .local_life import LOCAL_LIFE_PACK, build_local_life_pack
+from .creator import CREATOR_PACK, build_creator_pack
+from .gaming import GAMING_PACK, build_gaming_pack
+from .mobility import MOBILITY_PACK, build_mobility_pack
 from .models import (
     AcceptanceCase,
     AcceptanceExpectation,
@@ -27,10 +33,13 @@ from .models import (
     ScenarioKind,
     ScenarioTemplate,
 )
+from .shopping import SHOPPING_PACK, build_shopping_pack
 
 __all__ = [
-    "CONTENT_COMMUNITY_PACK",
-    "LOCAL_LIFE_PACK",
+    "CREATOR_PACK",
+    "GAMING_PACK",
+    "MOBILITY_PACK",
+    "SHOPPING_PACK",
     "AcceptanceCase",
     "AcceptanceExpectation",
     "ApplicationBlueprint",
@@ -44,8 +53,10 @@ __all__ = [
     "PackSample",
     "ScenarioKind",
     "ScenarioTemplate",
-    "build_content_community_pack",
-    "build_local_life_pack",
+    "build_creator_pack",
+    "build_gaming_pack",
+    "build_mobility_pack",
+    "build_shopping_pack",
     "compile_scenario",
     "compile_scenario_template",
     "stable_digest",

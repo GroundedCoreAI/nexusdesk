@@ -1,4 +1,8 @@
-"""Create an optional sample workspace after migrations; safe to run again."""
+"""Create an optional sample workspace after migrations; safe to run again.
+
+Demo applications are no longer seeded here: the consumer-service shell is gone
+and the four demo industry packs are promoted by ``seed_demo_packs`` instead.
+"""
 
 import asyncio
 
@@ -102,15 +106,7 @@ async def main():
                     await p.business.conversations.create(
                         tenant, actor, "sample-support", agent["id"]
                     )
-                scenario_result = await p.business.scenarios.seed_defaults(tenant, actor)
-                application_result = await p.business.service_apps.seed_defaults(tenant, actor)
                 print(f"示例数据就绪，租户：{tenant}；请打开工作台的 sample-support 会话。")
-                print(
-                    "服务场景就绪："
-                    f"新增场景 {scenario_result['scenarios']} 个，"
-                    f"新增版本 {scenario_result['versions']} 个。"
-                )
-                print(f"服务应用就绪：新增应用 {application_result['applications']} 个。")
             finally:
                 await lock.execute(text("SELECT pg_advisory_unlock(71432020)"))
 

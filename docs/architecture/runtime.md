@@ -59,6 +59,20 @@ cd C:\code\ai-project\backend
 uv run uvicorn examples.mock_business:app --host 127.0.0.1 --port 8010
 ```
 
+也可以用容器启动同一份服务（覆盖 15 个业务对象、25 个接口，供「接入能力」的数据执行器调用）：
+
+```bash
+docker compose up -d mock-business
+```
+
+接入到工具目录与 provider 执行器：
+
+```bash
+python scripts/mock_tools.py       # 导入 OpenAPI，发布 25 个工具
+python scripts/mock_executors.py   # 回填 15 个对象 provider 的 config.executors
+python scripts/mock_smoke.py       # 14 个场景端到端验证
+```
+
 默认 `.env.example` 配置 DemoModel 和 `examples/tools.demo.json`。发送“查询演示”会通过真实 HTTP 请求查询演示服务，不调用收费模型。演示数据明确标记为 demo。
 
 分离 API 和 Worker：API 设置 `AGENT_EMBEDDED_WORKER=false`，另开进程执行：

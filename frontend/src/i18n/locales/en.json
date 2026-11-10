@@ -226,7 +226,7 @@
   "搜索会话标识": "Search conversation identifiers",
   "刷新": "Refresh",
   "暂无对话记录": "No conversation history",
-  "会话": "Conversation",
+  "会话": "Sessions",
   "最近消息": "Latest message",
   "来源": "Source",
   "业务": "Business",
@@ -496,7 +496,7 @@
   "尝试次数": "Attempts",
   "模型每日统计.csv": "model-daily-statistics.csv",
   "日期 UTC": "Date (UTC)",
-  "失败次数": "Failures",
+  "失败次数": "Failure count",
   "已知费用估算 CNY": "Estimated known cost (CNY)",
   "导出每日统计": "Export daily statistics",
   "执行诊断": "Execution diagnostics",
@@ -548,7 +548,7 @@
   "模型筛选": "Model filters",
   "筛选接入渠道": "Filter connections",
   "全部渠道": "All connections",
-  "工具调用": "Tool calling",
+  "工具调用": "Tool calls",
   "支持工具调用的模型会在卡片中显示能力标签。": "Models that support tools show a capability tag on their cards.",
   "接入模型的三个步骤": "Three steps to connect a model",
   "创建渠道 → 登记模型 → 发布配置方案": "Create connection → Register model → Publish profile",
@@ -613,7 +613,6 @@
   "近 24 小时网关计量": "Gateway usage in the last 24 hours",
   "按操作、结果和计量单位分别统计；未返回的用量不按零计算。": "Grouped by operation, result, and unit. Missing usage is not counted as zero.",
   "模型调用": "Model calls",
-  "工具调用": "Tool calls",
   "适配器": "Adapter",
   "效果": "Outcome",
   "P95 耗时": "P95 duration",
@@ -920,7 +919,7 @@
   "有未发布修改": "Unpublished changes",
   "未支持的接口": "Unsupported endpoints",
   "本次发布不会自动更新已有 Agent，请在 Agent 管理中重新发布。": "Existing Agents are not updated automatically. Republish them in Agent management.",
-  "权限": "Permissions",
+  "权限": "Permission",
   "查看变更": "View changes",
   "查询工单状态": "Look up ticket status",
   "检查 Schema": "Validate schema",
@@ -1006,7 +1005,7 @@
   "已复制": "Copied",
   "只看失败请求": "Failed requests only",
   "响应耗时": "Response latency",
-  "运行状态": "Run status",
+  "运行状态": "Runtime status",
   "运行耗时": "Run duration",
   "接口": "Endpoint",
   "应用配置": "Application settings",
@@ -1157,7 +1156,7 @@
   "连接企业知识、业务工具与服务团队": "Connect enterprise knowledge, tools and service teams",
   "欢迎回来": "Welcome back",
   "登录你的企业智能服务平台": "Sign in to your enterprise service platform",
-  "账号登录": "Account login",
+  "账号登录": "Account sign-in",
   "企业登录": "Enterprise login",
   "账号": "Account",
   "密码": "Password",
@@ -1552,7 +1551,6 @@
   "仅管理员可管理成员": "Only administrators can manage members",
   "仅管理员可查看角色与权限": "Only administrators can view roles and permissions",
   "全部角色": "All roles",
-  "全部状态": "All statuses",
   "新增成员": "Add member",
   "共 {{v0}} 名成员": "{{v0}} members",
   "启用 {{v0}}": "{{v0}} enabled",
@@ -1561,16 +1559,9 @@
   "成员": "Member",
   "认证来源": "Authentication source",
   "最近登录": "Last sign-in",
-  "操作": "Actions",
-  "已启用": "Enabled",
-  "已停用": "Disabled",
   "应急管理员": "Emergency administrator",
   "待分配": "Pending assignment",
-  "编辑": "Edit",
-  "会话": "Sessions",
   "重置密码": "Reset password",
-  "停用": "Disable",
-  "启用": "Enable",
   "暂无成员": "No members",
   "临时密码已生成": "Temporary password generated",
   "请让 {{v0}} 登录后立即修改密码。该密码不会再次显示。": "Ask {{v0}} to change this password immediately after signing in. It will not be shown again.",
@@ -1583,9 +1574,7 @@
   "成员已更新": "Member updated",
   "成员已停用": "Member disabled",
   "成员已启用": "Member enabled",
-  "未授权": "Not authorized",
   "修改角色或停用会立即撤销该成员现有会话。": "Changing the role or disabling the member revokes all current sessions immediately.",
-  "账号登录": "Account sign-in",
   "登录方式": "Sign-in method",
   "企业 SSO": "Enterprise SSO",
   "本地账号": "Local account",
@@ -1593,7 +1582,6 @@
   "活动会话": "Active sessions",
   "最近活动": "Last active",
   "当前会话": "Current session",
-  "撤销": "Revoke",
   "暂无活动会话": "No active sessions",
   "撤销全部会话": "Revoke all sessions",
   "全部会话已撤销": "All sessions revoked",
@@ -1603,76 +1591,74 @@
   "查看当前账号的登录设备，并在发现异常时立即撤销。": "Review devices signed in to your account and revoke anything suspicious.",
   "P0 固定角色权限矩阵": "P0 fixed-role permission matrix",
   "当前阶段提供固定三角色。资源级授权、自定义角色和团队范围将在后续阶段开放。": "This phase provides three fixed roles. Resource-level grants, custom roles, and team scopes will follow.",
-  "权限": "Permission",
   "管理员": "Administrator",
-  "客服操作员": "Support operator",
   "允许": "Allowed",
   "不允许": "Not allowed",
   "成员与权限": "Members & Permissions",
   "搜索姓名、用户名、身份或 ID": "Search name, username, identity, or ID",
   "现有会话会立即失效，新密码只显示一次。": "Current sessions will be revoked and the new password will only be shown once.",
-  "重置成员密码？": "Reset member password?"
-  ,"成员不存在或已被删除。": "The member does not exist or has been deleted."
-  ,"成员信息已更新，请刷新后重试。": "Member details have changed. Refresh and try again."
-  ,"不能停用或降级最后一名管理员。": "You cannot disable or demote the last administrator."
-  ,"不能修改自己的角色或启停状态。": "You cannot change your own role or enabled status."
-  ,"登录账号已存在，请更换。": "That username already exists. Choose another one."
-  ,"登录账号格式不正确。": "The username format is invalid."
-  ,"该成员没有本地登录账号，无法重置密码。": "This member has no local sign-in account, so the password cannot be reset."
-  ,"应急管理员受保护，不能修改角色、停用或关联企业身份。": "The emergency administrator is protected and cannot be demoted, disabled, or linked to an enterprise identity."
-  ,"请通过账户安全修改自己的密码。": "Change your own password from Sessions & Security."
-  ,"会话不存在或已失效。": "The session does not exist or has expired."
-  ,"当前凭据不支持成员会话管理。": "The current credential does not support member session management."
-  ,"任务健康": "Task health"
-  ,"待处理任务": "Pending tasks"
-  ,"执行中任务": "Running tasks"
-  ,"近 15 分钟失败": "Failed in last 15m"
-  ,"最老待办年龄": "Oldest pending age"
-  ,"任务类型": "Task kind"
-  ,"完成": "Done"
-  ,"Embedding 失败积压": "Failed embedding backlog"
-  ,"重试扫描（7 天）": "Retry scanned (7d)"
-  ,"重试成功（7 天）": "Retry succeeded (7d)"
-  ,"向量检索": "Vector search"
-  ,"文本检索": "Text search"
-  ,"关键词降级": "Keyword fallback"
-  ,"降级率": "Fallback rate"
-  ,"空结果率": "Empty rate"
-  ,"平均返回条数": "Avg returned"
-  ,"维护任务": "Maintenance jobs"
-  ,"TTL 清理": "TTL cleanup"
-  ,"规则扫描": "Rule scan"
-  ,"Embedding 重试": "Embedding retry"
-  ,"Worker 心跳": "Worker heartbeat"
-  ,"以下维护任务已超期：{{v0}}": "Overdue maintenance jobs: {{v0}}"
-  ,"Agent 维度": "Per agent"
-  ,"客户运行": "Customer runs"
-  ,"注入运行": "Injected runs"
-  ,"注入率": "Injection rate"
-  ,"写入条数": "Items written"
-  ,"任务失败": "Failed tasks"
-  ,"未归属 Agent": "Unattributed"
-  ,"记忆注入": "Memory injection"
-  ,"平均注入条数": "Avg injected items"
-  ,"记忆质量": "Memory quality"
-  ,"7 天确认": "Confirmed (7d)"
-  ,"7 天拒绝": "Rejected (7d)"
-  ,"确认率": "Confirm rate"
-  ,"记忆告警": "Memory alerts"
-  ,"当前值": "Value"
-  ,"阈值": "Threshold"
-  ,"近 24 小时": "Last 24 hours"
-  ,"近 7 天": "Last 7 days"
-  ,"统计窗口": "Stats window"
-  ,"记忆任务执行失败": "Memory task failed"
-  ,"待办任务停留过久": "Pending task too old"
-  ,"Embedding 积压持续增长": "Embedding backlog keeps growing"
-  ,"向量检索频繁降级": "Frequent vector fallback"
-  ,"维护任务长时间未运行": "Maintenance silent"
-  ,"规则扫描未按周期执行": "Rule scan missed its cycle"
-  ,"待确认记忆积压过多": "Too many pending memories"
-  ,"记忆 Worker 心跳失联": "Memory worker heartbeat lost"
-  ,"Embedding": "Embedding",
+  "重置成员密码？": "Reset member password?",
+  "成员不存在或已被删除。": "The member does not exist or has been deleted.",
+  "成员信息已更新，请刷新后重试。": "Member details have changed. Refresh and try again.",
+  "不能停用或降级最后一名管理员。": "You cannot disable or demote the last administrator.",
+  "不能修改自己的角色或启停状态。": "You cannot change your own role or enabled status.",
+  "登录账号已存在，请更换。": "That username already exists. Choose another one.",
+  "登录账号格式不正确。": "The username format is invalid.",
+  "该成员没有本地登录账号，无法重置密码。": "This member has no local sign-in account, so the password cannot be reset.",
+  "应急管理员受保护，不能修改角色、停用或关联企业身份。": "The emergency administrator is protected and cannot be demoted, disabled, or linked to an enterprise identity.",
+  "请通过账户安全修改自己的密码。": "Change your own password from Sessions & Security.",
+  "会话不存在或已失效。": "The session does not exist or has expired.",
+  "当前凭据不支持成员会话管理。": "The current credential does not support member session management.",
+  "任务健康": "Task health",
+  "待处理任务": "Pending tasks",
+  "执行中任务": "Running tasks",
+  "近 15 分钟失败": "Failed in last 15m",
+  "最老待办年龄": "Oldest pending age",
+  "任务类型": "Task kind",
+  "完成": "Done",
+  "Embedding 失败积压": "Failed embedding backlog",
+  "重试扫描（7 天）": "Retry scanned (7d)",
+  "重试成功（7 天）": "Retry succeeded (7d)",
+  "向量检索": "Vector search",
+  "文本检索": "Text search",
+  "关键词降级": "Keyword fallback",
+  "降级率": "Fallback rate",
+  "空结果率": "Empty rate",
+  "平均返回条数": "Avg returned",
+  "维护任务": "Maintenance jobs",
+  "TTL 清理": "TTL cleanup",
+  "规则扫描": "Rule scan",
+  "Embedding 重试": "Embedding retry",
+  "Worker 心跳": "Worker heartbeat",
+  "以下维护任务已超期：{{v0}}": "Overdue maintenance jobs: {{v0}}",
+  "Agent 维度": "Per agent",
+  "客户运行": "Customer runs",
+  "注入运行": "Injected runs",
+  "注入率": "Injection rate",
+  "写入条数": "Items written",
+  "任务失败": "Failed tasks",
+  "未归属 Agent": "Unattributed",
+  "记忆注入": "Memory injection",
+  "平均注入条数": "Avg injected items",
+  "记忆质量": "Memory quality",
+  "7 天确认": "Confirmed (7d)",
+  "7 天拒绝": "Rejected (7d)",
+  "确认率": "Confirm rate",
+  "记忆告警": "Memory alerts",
+  "当前值": "Value",
+  "阈值": "Threshold",
+  "近 24 小时": "Last 24 hours",
+  "近 7 天": "Last 7 days",
+  "统计窗口": "Stats window",
+  "记忆任务执行失败": "Memory task failed",
+  "待办任务停留过久": "Pending task too old",
+  "Embedding 积压持续增长": "Embedding backlog keeps growing",
+  "向量检索频繁降级": "Frequent vector fallback",
+  "维护任务长时间未运行": "Maintenance silent",
+  "规则扫描未按周期执行": "Rule scan missed its cycle",
+  "待确认记忆积压过多": "Too many pending memories",
+  "记忆 Worker 心跳失联": "Memory worker heartbeat lost",
+  "Embedding": "Embedding",
   "已注册": "Registered",
   "启动中": "Starting",
   "就绪": "Ready",
@@ -1736,12 +1722,7 @@
   "示例插件状态": "Sample plugin status",
   "示例插件": "Sample plugin",
   "这是一个用于验证外部插件生命周期、工具、事件、策略和 UI 扩展的参考插件。": "A reference plugin for validating external lifecycle, tool, event, policy, and UI extensions.",
-  "版本": "Version",
-  "运行状态": "Runtime status",
   "启用状态": "Enabled state",
-  "已启用": "Enabled",
-  "已停用": "Disabled",
-  "失败次数": "Failure count",
   "示例插件尚未注册。": "The sample plugin is not registered.",
   "插件生命周期、配置版本和运行状态。": "Manage plugin lifecycle, configuration versions, and runtime status.",
   "管理插件生命周期、配置版本和运行状态。": "Manage plugin lifecycle, configuration versions, and runtime status.",
@@ -1753,7 +1734,6 @@
   "当前版本": "Current version",
   "尚未配置": "Not configured",
   "插件配置 JSON": "Plugin configuration JSON",
-  "保存配置": "Save configuration",
   "插件配置已保存": "Plugin configuration saved",
   "插件配置已回滚": "Plugin configuration rolled back",
   "插件已启用": "Plugin enabled",
@@ -1765,7 +1745,6 @@
   "回滚": "Rollback",
   "暂无配置版本": "No configuration versions",
   "配置必须是 JSON 对象": "Configuration must be a JSON object",
-  "时间": "Time",
   "服务场景": "Service scenarios",
   "查询我的订单": "Find my order",
   "场景模拟器": "Scenario simulator",
@@ -2013,5 +1992,35 @@
   "返回服务应用": "Back to service applications",
   "连接配置（JSON）": "Connection configuration (JSON)",
   "需要灰度渠道才能发布": "A canary channel is required for release",
-  "预览合并": "Preview merge"
+  "预览合并": "Preview merge",
+  "读取单个对象": "Read one object",
+  "列出候选对象": "List candidate objects",
+  "返回失败": "Return failure",
+  "忽略并继续": "Ignore and continue",
+  "数据执行器": "Data executor",
+  "声明后，场景会真的调用工具网关读取数据；留空则保持模拟。": "Once declared, scenarios call the tool gateway for real data; leave empty to keep the simulation.",
+  "工具标识": "Tool name",
+  "必须是工具网关里已发布的工具名": "Must be a published tool name in the tool gateway",
+  "结果路径": "Result path",
+  "从响应里取出业务对象的路径，留空表示整个响应": "Path to the business object inside the response; leave empty for the whole response",
+  "参数模板（JSON）": "Arguments template (JSON)",
+  "可引用 $object.<字段>、$customer.<字段>、$decision.selected；$$ 开头表示字面量。": "May reference $object.<field>, $customer.<field>, $decision.selected; a leading $$ escapes a literal.",
+  "失败策略": "Failure policy",
+  "已接入 {{v0}} 个执行器": "{{v0}} executors connected",
+  "模拟数据": "Simulated data",
+  "需已在工具网关发布": "Publish it in the tool gateway first",
+  "留空表示整个响应": "Leave empty for the whole response",
+  "从已发布的工具中选择": "Choose a published tool",
+  "可用工具 {{v0}} 个": "{{v0}} tools available",
+  "无可用工具": "No tools available",
+  "去工具网关": "Go to tool gateway",
+  "未注册": "Not registered",
+  "没有匹配的工具": "No matching tool",
+  "工具网关里还没有可用工具，先创建并发布一个 HTTP 工具，再回来选择。": "The tool gateway has no usable tool yet. Create and publish an HTTP tool first, then come back.",
+  "{{v0}} 个执行器工具不可用": "{{v0}} executor tools unavailable",
+  "未接入执行器": "No executors",
+  "没有匹配的接入能力": "No matching capability",
+  "服务器允许的主机：{{v0}}": "Hosts allowed by the server: {{v0}}",
+  "{{v0}} 不在允许列表中，当前允许：{{v1}}": "{{v0}} is not in the allowlist. Currently allowed: {{v1}}",
+  "请填写完整地址，例如 https://api.example.com": "Enter a complete address, e.g. https://api.example.com"
 }

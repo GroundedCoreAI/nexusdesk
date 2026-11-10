@@ -54,12 +54,14 @@ async def list_applications(
     user: Reader,
     status: Literal["all", "draft", "review", "published", "offline"] = "all",
     q: str = Query(default=""),
+    archived: bool = Query(default=False),
 ):
     return await _applications(request).list(
         user.tenant,
         status=status,
         q=q,
         scope=request.state.business_scope,
+        archived=archived,
     )
 
 
@@ -165,6 +167,43 @@ async def publish_application(
         user.actor,
         key,
         body.revision,
+        scope=request.state.business_scope,
+    )
+
+
+@router.post("/{key}/archive")
+async def archive_application(
+    key: str,
+    body: RevisionInput,
+    request: Request,
+    user: Admin,
+):
+    return await _applications(request).archive(
+        user.tenant,
+        user.actor,
+        key,
+        body.revision,
+        scope=request.state.business_scope,
+    )
+
+
+@router.post("/{key}/restore")
+async def restore_application(key: str, request: Request, user: Admin):
+    return await _applications(request).restore(
+        user.tenant,
+        user.actor,
+        key,
+        scope=request.state.business_scope,
+    )
+
+
+@router.delete("/{key}")
+async def purge_application(key: str, request: Request, user: Admin):
+    """Permanently delete an archived application. Not reversible."""
+    return await _applications(request).purge(
+        user.tenant,
+        user.actor,
+        key,
         scope=request.state.business_scope,
     )
 
