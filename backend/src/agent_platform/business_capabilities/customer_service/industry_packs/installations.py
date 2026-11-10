@@ -32,8 +32,10 @@ from .compiler import (
     IndustryPackCompiler,
     stable_digest,
 )
+from .content_community import build_content_community_pack
 from .creator import build_creator_pack
 from .gaming import build_gaming_pack
+from .local_life import build_local_life_pack
 from .merge import MergeResult, three_way_merge
 from .mobility import build_mobility_pack
 from .models import IndustryPackManifest
@@ -57,6 +59,8 @@ from .shopping import build_shopping_pack
 
 def _default_packs() -> dict[str, IndustryPackManifest]:
     packs = (
+        build_content_community_pack(),
+        build_local_life_pack(),
         build_shopping_pack(),
         build_gaming_pack(),
         build_creator_pack(),
