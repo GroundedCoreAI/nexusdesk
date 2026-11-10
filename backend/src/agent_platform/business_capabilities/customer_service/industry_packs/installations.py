@@ -56,11 +56,18 @@ from .runtime_models import (
 )
 from .shopping import build_shopping_pack
 
+# Installed packs outlive catalog curation. Tenants that installed one of these
+# before the demo catalog replaced it must still be able to upgrade or reinstall
+# it, so the builders stay resolvable even though the catalog no longer lists
+# them.
+_LEGACY_PACK_BUILDERS = {
+    "content-community": build_content_community_pack,
+    "local-life": build_local_life_pack,
+}
+
 
 def _default_packs() -> dict[str, IndustryPackManifest]:
     packs = (
-        build_content_community_pack(),
-        build_local_life_pack(),
         build_shopping_pack(),
         build_gaming_pack(),
         build_creator_pack(),
@@ -281,6 +288,9 @@ class IndustryPackService:
 
     def _compiler(self, pack_key: str) -> IndustryPackCompiler:
         manifest = self.packs.get(pack_key)
+        if manifest is None:
+            builder = _LEGACY_PACK_BUILDERS.get(pack_key)
+            manifest = builder() if builder is not None else None
         if manifest is None:
             raise DomainError("industry_pack_not_found", 404)
         return IndustryPackCompiler(manifest)
