@@ -1,110 +1,110 @@
-# NexusDesk Agent Execution Platform
+# NexusDesk Agent 执行平台
 
-## Technical Architecture & Evolution Plan v2.0
+## 技术架构与演进方案 v2.0
 
-| Item | Value |
+| 项目 | 内容 |
 |---|---|
-| Project | NexusDesk |
-| Architecture | Extensible Agent Execution Platform |
-| Status | Architecture Baseline |
-| Version | 2.0 |
-| Target branch | `integration` |
-| Implementation strategy | Incremental refactoring, backward compatibility, security by design |
+| 项目 | NexusDesk |
+| 架构 | 可扩展的 Agent 执行平台 |
+| 状态 | 架构基线 |
+| 版本 | 2.0 |
+| 目标分支 | `integration` |
+| 实施策略 | 渐进式重构、向后兼容、安全设计先行 |
 
-> This document defines the target architecture and an incremental implementation plan. It is not a claim that every component described here already exists. Existing implementation details must be revalidated against the target commit before each implementation phase.
+> 本文定义目标架构和渐进式实施方案，不表示文中描述的每个组件都已存在。每个实施阶段开始前，都必须针对目标提交重新核验现有实现细节。
 
 ---
 
-# 1. Background and Goals
+# 1. 背景与目标
 
-## 1.1 Current architectural constraints
+## 1.1 当前架构约束
 
-NexusDesk already has a useful execution foundation: Agent Runtime, persistent Worker queue, Lease/Heartbeat, Run lifecycle management, runtime events, Agent configuration, and runtime composition.
+NexusDesk 已具备实用的执行基础：Agent Runtime、持久化 Worker 队列、Lease/Heartbeat、Run 生命周期管理、运行时事件、Agent 配置以及运行时组合。
 
-The current execution path is nevertheless centered on the LangGraph ReAct Runtime:
+但当前执行路径仍以 LangGraph ReAct Runtime 为中心：
 
-- The Runtime Engine owns model invocation, reasoning loops, tool calling, and execution budgets.
-- Worker invokes the existing Runtime directly and depends on its output/history shape.
-- Runtime Factory constructs a fixed Runtime implementation.
-- The runtime extension contract does not yet provide a complete, independent Engine Provider contract.
-- Engine Session, Run, Workspace, and Engine Native Events do not yet have a complete cross-engine lifecycle model.
-- External CLI process management, credential injection, and isolated execution environments need dedicated abstractions.
+- Runtime Engine 负责模型调用、推理循环、工具调用和执行预算。
+- Worker 直接调用现有 Runtime，并依赖其输出及历史记录结构。
+- Runtime Factory 构造固定的 Runtime 实现。
+- 运行时扩展契约尚未提供完整、独立的 Engine Provider 契约。
+- Engine Session、Run、Workspace 和 Engine 原生事件尚无完整的跨引擎生命周期模型。
+- 外部 CLI 进程管理、凭据注入和隔离执行环境需要专门的抽象。
 
-Directly adding Codex, Claude Code, OpenClaw, ACP, or other agent engines on top of this structure would risk creating parallel execution paths and engine-specific branches in Worker and Runtime.
+如果直接在此结构上增加 Codex、Claude Code、OpenClaw、ACP 或其他 Agent 引擎，可能形成并行执行路径，并使 Worker 和 Runtime 中出现引擎专属分支。
 
-## 1.2 Target
+## 1.2 目标
 
-Evolve from:
+从：
 
-`Platform Runtime = LangGraph ReAct Engine`
+`平台 Runtime = LangGraph ReAct Engine`
 
-to:
+演进为：
 
-`Platform Runtime = Agent Execution Platform`
+`平台 Runtime = Agent 执行平台`
 
-The platform owns execution governance and infrastructure:
+平台负责执行治理与基础设施：
 
-- Agent and configuration lifecycle
-- Engine / Protocol / Adapter registration and resolution
-- Execution orchestration and lifecycle
-- Worker scheduling and reliability
-- Capability resolution and policy enforcement
-- Engine Session management
-- Runtime Host and process supervision
-- Workspace and execution isolation
-- Credential management
-- Events, artifacts, usage, audit, and observability
+- Agent 与配置生命周期
+- Engine / Protocol / Adapter 注册与解析
+- 执行编排与生命周期
+- Worker 调度与可靠性
+- 能力解析与策略执行
+- Engine Session 管理
+- Runtime Host 与进程监管
+- Workspace 与执行隔离
+- 凭据管理
+- 事件、产物、用量、审计与可观测性
 
-Each Engine retains its own reasoning loop, tool execution model, and native protocol.
+每个 Engine 保留自己的推理循环、工具执行模型和原生协议。
 
-**Unify platform governance; do not force every Engine to use the same internal reasoning or tool-calling implementation.**
+**统一平台治理，不强制所有 Engine 使用相同的内部推理或工具调用实现。**
 
-## 1.3 Design principles
+## 1.3 设计原则
 
-| Principle | Meaning |
+| 原则 | 含义 |
 |---|---|
-| Engine agnostic | The platform is not coupled to one Agent Engine |
-| Protocol agnostic | One Engine may be integrated through multiple protocols |
-| Incremental evolution | Refactor existing components; avoid a big-bang rewrite |
-| Contract first | Stabilize public execution contracts before adding providers |
-| Capability driven | Effective functionality depends on engine support and platform policy |
-| Security by design | Workspace, credentials, sandbox, and network boundaries are architectural concerns |
-| Event driven | Standardize the event envelope while preserving native events |
-| Backward compatible | Existing Agent configurations and historical Runs remain usable |
-| Modular monolith first | Establish module boundaries before considering microservices |
+| 引擎无关 | 平台不与某一个 Agent Engine 耦合 |
+| 协议无关 | 一个 Engine 可以通过多种协议接入 |
+| 渐进演进 | 重构现有组件，避免一次性整体重写 |
+| 契约优先 | 增加 Provider 前先稳定公共执行契约 |
+| 能力驱动 | 实际可用功能取决于引擎支持和平台策略 |
+| 安全设计先行 | Workspace、凭据、沙箱和网络边界都是架构问题 |
+| 事件驱动 | 统一事件外层结构，同时保留原生事件 |
+| 向后兼容 | 现有 Agent 配置和历史 Run 保持可用 |
+| 模块化单体优先 | 先建立模块边界，再考虑微服务 |
 
 ---
 
-# 2. Target Architecture
+# 2. 目标架构
 
-## 2.1 Logical architecture
+## 2.1 逻辑架构
 
 ```mermaid
 flowchart TB
-    subgraph Experience["Experience Layer"]
+    subgraph Experience["体验层"]
         UI["Web UI"]
-        API["Backend API"]
+        API["后端 API"]
     end
 
-    subgraph Business["Platform Business Layer"]
-        AGENT["Agent Service"]
-        CONFIG["Agent Configuration"]
-        SKILL["Skill Service"]
-        WS["Workspace Service"]
-        CONV["Conversation Service"]
+    subgraph Business["平台业务层"]
+        AGENT["Agent 服务"]
+        CONFIG["Agent 配置"]
+        SKILL["Skill 服务"]
+        WS["Workspace 服务"]
+        CONV["会话服务"]
     end
 
-    subgraph Control["Execution Control Layer"]
-        ORCH["Execution Orchestrator"]
-        WORKER["Worker / Queue"]
-        REG["Engine Registry"]
-        RESOLVE["Engine & Protocol Resolver"]
-        CAP["Capability Resolver"]
-        POLICY["Policy / Approval"]
-        SESSION["Engine Session Manager"]
+    subgraph Control["执行控制层"]
+        ORCH["执行编排器"]
+        WORKER["Worker / 队列"]
+        REG["Engine 注册中心"]
+        RESOLVE["Engine 与 Protocol 解析器"]
+        CAP["能力解析器"]
+        POLICY["策略 / 审批"]
+        SESSION["Engine Session 管理器"]
     end
 
-    subgraph Contract["Execution Contract"]
+    subgraph Contract["执行契约"]
         REQ["ExecutionRequest"]
         HANDLE["ExecutionHandle"]
         RESULT["ExecutionResult"]
@@ -112,28 +112,28 @@ flowchart TB
         ERROR["ExecutionError"]
     end
 
-    subgraph Adapters["Engine Adapter Layer"]
+    subgraph Adapters["Engine 适配层"]
         REACT["React Provider"]
         CODEX["Codex Provider"]
         CLAUDE["Claude Code Provider"]
-        OTHER["Other Providers"]
+        OTHER["其他 Provider"]
     end
 
-    subgraph Infrastructure["Execution Infrastructure"]
+    subgraph Infrastructure["执行基础设施"]
         HOST["Runtime Host"]
-        PROCESS["Process Supervisor"]
-        SANDBOX["Sandbox / Policy Enforcement"]
-        CRED["Credential Broker"]
-        WORKDIR["Workspace / Execution Workdir"]
-        NET["Network Egress Policy"]
+        PROCESS["进程监管器"]
+        SANDBOX["沙箱 / 策略执行"]
+        CRED["凭据代理"]
+        WORKDIR["Workspace / 执行工作目录"]
+        NET["网络出口策略"]
     end
 
-    subgraph Data["Persistence & Observability"]
+    subgraph Data["持久化与可观测性"]
         DB[("PostgreSQL")]
-        EVENTS[("Event Store")]
-        ARTIFACT[("Artifact Storage")]
-        AUDIT[("Audit Log")]
-        OTEL["Logs / Metrics / Traces"]
+        EVENTS[("事件存储")]
+        ARTIFACT[("产物存储")]
+        AUDIT[("审计日志")]
+        OTEL["日志 / 指标 / 链路追踪"]
     end
 
     UI --> API --> Business
@@ -158,51 +158,51 @@ flowchart TB
     WORKER --> DB
 ```
 
-## 2.2 Layer responsibilities
+## 2.2 分层职责
 
-### Platform Business Layer
+### 平台业务层
 
-Owns product and domain concepts: Agent / Agent Version, Agent Configuration, Conversation, Skill Catalog / Binding, Workspace, and Task. It does not start Engine processes or implement protocol details.
+负责产品与领域概念：Agent / Agent Version、Agent 配置、会话、Skill Catalog / Binding、Workspace 和 Task。不启动 Engine 进程，也不实现协议细节。
 
-### Execution Control Layer
+### 执行控制层
 
-Owns Engine resolution, capability and policy evaluation, Session coordination, Worker integration, and the Execution lifecycle. It determines which Engine runs, which capabilities are effective, and how execution is governed.
+负责 Engine 解析、能力与策略评估、Session 协调、Worker 集成以及 Execution 生命周期。决定运行哪个 Engine、哪些能力生效以及如何治理执行。
 
-### Execution Contract
+### 执行契约
 
-Defines the stable boundary between the platform and Engine Adapters: Request, Handle, Result, Event, Capabilities, and Error. Native Engine details remain in adapter-owned metadata or native events.
+定义平台与 Engine Adapter 之间的稳定边界：Request、Handle、Result、Event、Capabilities 和 Error。Engine 原生细节保留在 Adapter 自有的元数据或原生事件中。
 
-### Engine Adapter Layer
+### Engine 适配层
 
-Implements a specific Engine + Protocol integration. Adapters translate requests, native events, cancellation, and results. They do not own tenant authorization, global scheduling, or Run persistence.
+实现特定 Engine + Protocol 的集成。Adapter 负责转换请求、原生事件、取消操作和结果，不负责租户授权、全局调度或 Run 持久化。
 
-### Execution Infrastructure
+### 执行基础设施
 
-Provides process lifecycle management, work directories, sandboxing, credentials, network policy, and resource limits.
+提供进程生命周期管理、工作目录、沙箱、凭据、网络策略和资源限制。
 
-### Persistence and Observability
+### 持久化与可观测性
 
-Persists Runs / Executions, Sessions, Events, Artifacts, Usage, Audit, and telemetry.
+持久化 Run / Execution、Session、Event、Artifact、Usage、Audit 和遥测数据。
 
 ---
 
-# 3. Core Domain Model
+# 3. 核心领域模型
 
-## 3.1 Task, Execution, and Run
+## 3.1 Task、Execution 与 Run
 
-These concepts should be distinguished:
+应区分以下概念：
 
-- **Task**: the user's intent or requested unit of work.
-- **Execution**: one concrete attempt to perform a Task.
-- **Run**: the existing NexusDesk runtime record and lifecycle abstraction.
+- **Task**：用户意图或请求的工作单元。
+- **Execution**：执行某个 Task 的一次具体尝试。
+- **Run**：NexusDesk 现有的运行时记录与生命周期抽象。
 
-For the first migration, define:
+首次迁移时定义：
 
-`Run = one Execution attempt`
+`Run = 一次 Execution 尝试`
 
-Do not introduce a separate Task table immediately. Reuse the existing Run model and add the required execution metadata. Introduce a first-class Task entity later when cross-engine retries, task aggregation, or multiple executions per user intent become real product requirements.
+暂不引入独立的 Task 表。复用现有 Run 模型并增加必要的执行元数据。当跨引擎重试、任务聚合或一个用户意图对应多次执行成为真实产品需求时，再引入一等 Task 实体。
 
-Potential Run metadata:
+可能的 Run 元数据：
 
 - `engine_id`
 - `protocol_id`
@@ -213,30 +213,30 @@ Potential Run metadata:
 - `effective_capabilities_snapshot`
 - `execution_metadata`
 
-## 3.2 Conversation, Engine Session, and Run
+## 3.2 Conversation、Engine Session 与 Run
 
-| Entity | Responsibility | Lifecycle |
+| 实体 | 职责 | 生命周期 |
 |---|---|---|
-| Conversation | Business conversation between user and Agent | Long-lived |
-| Engine Session | Native session owned by a specific Engine | Engine-dependent |
-| Run / Execution | One execution attempt | Short-lived |
+| Conversation | 用户与 Agent 之间的业务会话 | 长生命周期 |
+| Engine Session | 特定 Engine 持有的原生会话 | 取决于 Engine |
+| Run / Execution | 一次执行尝试 | 短生命周期 |
 
-A Conversation may have multiple Engine Sessions. An Engine Session may be associated with multiple Runs. Engines without persistent sessions may create a new session for each Run. Session persistence and resume are optional capabilities, not universal requirements.
+一个 Conversation 可以有多个 Engine Session，一个 Engine Session 可以关联多个 Run。不支持持久会话的 Engine 可以为每个 Run 创建新会话。Session 持久化与恢复属于可选能力，不是通用要求。
 
-## 3.3 Workspace and execution storage
+## 3.3 Workspace 与执行存储
 
-Keep these concepts separate:
+以下概念应保持独立：
 
-| Resource | Responsibility |
+| 资源 | 职责 |
 |---|---|
-| Workspace | Long-lived user or Agent working area |
-| Execution Workdir | Isolated directory for one execution |
-| Skill Store | Shared, versioned Skill content |
-| Runtime Cache | Engine runtime cache |
-| Artifact Store | Execution outputs and generated artifacts |
-| Credential Mount | Temporary, authorized credential exposure |
+| Workspace | 用户或 Agent 的长期工作区域 |
+| Execution Workdir | 单次执行的隔离目录 |
+| Skill Store | 共享且带版本的 Skill 内容 |
+| Runtime Cache | Engine 运行时缓存 |
+| Artifact Store | 执行输出与生成的产物 |
+| Credential Mount | 临时、经授权的凭据暴露 |
 
-A typical logical layout:
+典型的逻辑布局：
 
 ```text
 workspace/<tenant>/<workspace-id>/
@@ -245,26 +245,26 @@ skills/{shared,tenant}/
 artifacts/<execution-id>/
 ```
 
-The physical storage layout may differ. Execution directories must not be confused with durable Workspace data. Define explicit export, retention, and cleanup policies.
+物理存储布局可以不同。执行目录不得与持久化 Workspace 数据混淆，并应定义明确的导出、保留和清理策略。
 
 ---
 
-# 4. Engine, Protocol, and Adapter
+# 4. Engine、Protocol 与 Adapter
 
-## 4.1 Separate the concepts
+## 4.1 分离概念
 
-An Engine is not the same thing as its connection protocol.
+Engine 与其连接协议不是同一概念。
 
-For example, Codex is an Engine and may be integrated through:
+例如，Codex 是一个 Engine，可以通过以下方式接入：
 
 - Codex CLI Exec
 - Codex App-Server
 
-Represent the integration as:
+集成方式表示为：
 
 `(engine_id, protocol_id, adapter_version)`
 
-Examples:
+示例：
 
 ```text
 (react, native, v1)
@@ -272,29 +272,29 @@ Examples:
 (codex, app_server, v1)
 ```
 
-| Concept | Responsibility | Example |
+| 概念 | 职责 | 示例 |
 |---|---|---|
-| Engine | Agent execution engine | `codex` |
-| Protocol | Communication / invocation mechanism | `cli_exec`, `app_server` |
-| Adapter | NexusDesk implementation of that protocol | `codex_cli_adapter` |
+| Engine | Agent 执行引擎 | `codex` |
+| Protocol | 通信 / 调用机制 | `cli_exec`、`app_server` |
+| Adapter | 该协议在 NexusDesk 中的实现 | `codex_cli_adapter` |
 
-This allows one Engine to expose multiple protocols without duplicating the Engine identity.
+这样，一个 Engine 可以暴露多种协议，而无需重复定义 Engine 身份。
 
-## 4.2 Registry responsibilities
+## 4.2 注册中心职责
 
-Introduce an Engine Registry, Protocol Registry, and Adapter Registry. They should:
+引入 Engine Registry、Protocol Registry 和 Adapter Registry，它们应当：
 
-1. Register Engine, Protocol, and Adapter metadata.
-2. Validate supported Engine / Protocol combinations.
-3. Resolve an adapter from a versioned identifier.
-4. Expose adapter availability and health.
-5. Reject unknown or incompatible configurations clearly.
+1. 注册 Engine、Protocol 和 Adapter 元数据。
+2. 校验受支持的 Engine / Protocol 组合。
+3. 根据带版本的标识解析 Adapter。
+4. 暴露 Adapter 可用性与健康状态。
+5. 明确拒绝未知或不兼容的配置。
 
-Do not put all discovery, construction, and execution logic into the existing Runtime Factory.
+不要将所有发现、构造和执行逻辑都放入现有 Runtime Factory。
 
-## 4.3 Adapter contract
+## 4.3 Adapter 契约
 
-The following is an interface sketch, not an implementation claim:
+以下只是接口草图，不表示已经实现：
 
 ```python
 class AgentEngineAdapter(Protocol):
@@ -324,25 +324,25 @@ class AgentEngineAdapter(Protocol):
     ) -> ExecutionResult: ...
 ```
 
-Contract requirements:
+契约要求：
 
-- Adapter does not operate the Worker queue.
-- Adapter does not decide tenant permissions.
-- Adapter does not commit the platform Run's final state.
-- Adapter does not bypass Runtime Host for host process lifecycle management.
-- Adapter may preserve native Session identifiers and metadata.
-- Adapter must define error and cancellation semantics.
-- Unsupported capabilities must be explicit.
+- Adapter 不操作 Worker 队列。
+- Adapter 不决定租户权限。
+- Adapter 不提交平台 Run 的最终状态。
+- Adapter 不绕过 Runtime Host 管理宿主进程生命周期。
+- Adapter 可以保留原生 Session 标识和元数据。
+- Adapter 必须定义错误与取消语义。
+- 不支持的能力必须显式表达。
 
-The exact method shape may be refined to accommodate streaming, long-running process handles, and protocol-specific interaction.
+具体方法形式可以进一步调整，以支持流式处理、长运行进程句柄和协议专属交互。
 
 ---
 
-# 5. Execution Contract
+# 5. 执行契约
 
 ## 5.1 ExecutionRequest
 
-Suggested initial model:
+建议的初始模型：
 
 ```python
 class ExecutionRequest(BaseModel):
@@ -367,17 +367,17 @@ class ExecutionRequest(BaseModel):
     trace_id: str | None = None
 ```
 
-Security and consistency rules:
+安全与一致性规则：
 
-- `config` is produced from validated typed configuration.
-- `effective_capabilities` is calculated by the platform, never trusted from the client.
-- `tenant_id` comes from trusted authentication context.
-- Persist the configuration and policy snapshot used for each Execution.
-- Do not expose host process details to untrusted clients.
+- `config` 由经过校验的类型化配置生成。
+- `effective_capabilities` 由平台计算，绝不信任客户端传入的值。
+- `tenant_id` 来自可信认证上下文。
+- 持久化每次 Execution 使用的配置与策略快照。
+- 不向不可信客户端暴露宿主进程细节。
 
 ## 5.2 ExecutionHandle
 
-Represents a running execution:
+表示正在运行的执行：
 
 ```python
 class ExecutionHandle(BaseModel):
@@ -390,7 +390,7 @@ class ExecutionHandle(BaseModel):
     metadata: dict = {}
 ```
 
-Process identifiers and host-specific fields are internal infrastructure details and should not be exposed through public APIs.
+进程标识和宿主专属字段属于内部基础设施细节，不应通过公共 API 暴露。
 
 ## 5.3 ExecutionResult
 
@@ -405,53 +405,53 @@ class ExecutionResult(BaseModel):
     error: dict | None = None
 ```
 
-Keep common fields stable. Store Engine-specific result data in adapter-owned metadata.
+保持公共字段稳定，将 Engine 专属结果数据存放在 Adapter 自有的元数据中。
 
-## 5.4 Error taxonomy
+## 5.4 错误分类
 
-| Error | Example | Default retry |
+| 错误 | 示例 | 默认重试 |
 |---|---|---|
-| ConfigurationError | Invalid Engine config | No |
-| EngineUnavailable | Engine not installed / unavailable | Policy-dependent |
-| ProtocolError | Invalid protocol response | Policy-dependent |
-| AuthenticationError | Invalid credential | No |
-| PermissionDenied | Policy denies operation | No |
-| ResourceExhausted | Resource quota reached | Possibly after delay |
-| Timeout | Execution exceeded deadline | Task-dependent |
-| Cancelled | User cancellation | No |
-| WorkspaceError | Workdir setup / access failure | Policy-dependent |
-| InternalError | Platform internal failure | Conditional |
+| ConfigurationError | Engine 配置无效 | 否 |
+| EngineUnavailable | Engine 未安装 / 不可用 | 取决于策略 |
+| ProtocolError | 协议响应无效 | 取决于策略 |
+| AuthenticationError | 凭据无效 | 否 |
+| PermissionDenied | 策略拒绝操作 | 否 |
+| ResourceExhausted | 达到资源配额 | 可能延迟后重试 |
+| Timeout | 执行超过截止时间 | 取决于 Task |
+| Cancelled | 用户取消 | 否 |
+| WorkspaceError | 工作目录准备 / 访问失败 | 取决于策略 |
+| InternalError | 平台内部故障 | 视情况而定 |
 
-Retry policy must account for side effects. A timeout does not prove that an Engine performed no work.
+重试策略必须考虑副作用。超时并不能证明 Engine 没有执行任何工作。
 
 ---
 
-# 6. Capability Model
+# 6. 能力模型
 
-## 6.1 Three capability layers
+## 6.1 三层能力
 
-Do not treat an Engine's declared technical capabilities as authorization.
+不得将 Engine 声明的技术能力视为授权。
 
-1. **Declared**: what the Adapter claims to support.
-2. **Available**: what the current deployment and runtime environment can actually provide.
-3. **Effective**: what the platform permits for this particular Execution after policy evaluation.
+1. **Declared（已声明）**：Adapter 声称支持的能力。
+2. **Available（可用）**：当前部署和运行时环境实际能够提供的能力。
+3. **Effective（生效）**：经过策略评估后，平台允许本次 Execution 使用的能力。
 
 ```text
-Declared
+Declared（已声明）
    |
    v
-Available
+Available（可用）
    |
    v
-Policy Resolution
+Policy Resolution（策略解析）
    |
    v
-Effective
+Effective（生效）
 ```
 
-Example: Codex may technically support terminal execution, but a tenant policy may prohibit arbitrary shell execution. The Effective capability must then deny it.
+例如，Codex 技术上可能支持终端执行，但租户策略可能禁止任意 Shell 执行，此时 Effective 能力必须拒绝该操作。
 
-## 6.2 Initial capability schema
+## 6.2 初始能力模型
 
 ```python
 class EngineCapabilities(BaseModel):
@@ -468,42 +468,42 @@ class EngineCapabilities(BaseModel):
     workspace_required: bool = False
 ```
 
-This Boolean model is a starting point. More complex capabilities may later require structured parameters, constraints, and protocol-version metadata.
+布尔模型只是起点。更复杂的能力以后可能需要结构化参数、约束和协议版本元数据。
 
-## 6.3 Capability Resolver
+## 6.3 能力解析器
 
-Introduce a dedicated resolver to:
+引入专门的解析器，用于：
 
-1. Read Adapter-declared capabilities.
-2. Check environment availability and version compatibility.
-3. Load tenant, Agent, and Execution policies.
-4. Calculate Effective capabilities.
-5. Persist the effective capability snapshot.
-6. Expose the task's available features to the UI.
+1. 读取 Adapter 声明的能力。
+2. 检查环境可用性与版本兼容性。
+3. 加载租户、Agent 和 Execution 策略。
+4. 计算 Effective 能力。
+5. 持久化生效能力快照。
+6. 向 UI 暴露任务可用功能。
 
-**Capability describes technical support; Policy decides whether the platform allows it.**
+**Capability 描述技术支持，Policy 决定平台是否允许。**
 
 ---
 
-# 7. Execution Orchestrator and Worker
+# 7. 执行编排器与 Worker
 
-## 7.1 Orchestrator responsibilities
+## 7.1 编排器职责
 
-The Execution Orchestrator is the platform execution control center. It coordinates:
+Execution Orchestrator 是平台的执行控制中心，负责协调：
 
-- Run lifecycle
-- Engine / Protocol resolution
-- Capability and policy evaluation
-- Session coordination
-- Workspace preparation
-- Adapter invocation
-- Event collection
-- Result submission
-- Cancellation and timeout
+- Run 生命周期
+- Engine / Protocol 解析
+- 能力与策略评估
+- Session 协调
+- Workspace 准备
+- Adapter 调用
+- 事件收集
+- 结果提交
+- 取消与超时
 
-It does not implement the Engine's reasoning loop.
+它不实现 Engine 的推理循环。
 
-## 7.2 Execution flow
+## 7.2 执行流程
 
 ```mermaid
 sequenceDiagram
@@ -516,68 +516,68 @@ sequenceDiagram
     participant Host
     participant Repository
 
-    API->>Repository: Create Run
-    Worker->>Repository: Claim Run + Lease
-    Worker->>Orchestrator: Execute Run
-    Orchestrator->>Resolver: Resolve Engine / Protocol
+    API->>Repository: 创建 Run
+    Worker->>Repository: 认领 Run + Lease
+    Worker->>Orchestrator: 执行 Run
+    Orchestrator->>Resolver: 解析 Engine / Protocol
     Resolver-->>Orchestrator: Adapter
-    Orchestrator->>Policy: Resolve Effective Capabilities
-    Policy-->>Orchestrator: Effective Capabilities
-    Orchestrator->>Adapter: Start Execution
-    Adapter->>Host: Launch / Connect
-    Host-->>Adapter: Execution Handle
-    Adapter-->>Orchestrator: Execution Handle
-    loop Execution Events
+    Orchestrator->>Policy: 解析 Effective 能力
+    Policy-->>Orchestrator: Effective 能力
+    Orchestrator->>Adapter: 启动执行
+    Adapter->>Host: 启动 / 连接
+    Host-->>Adapter: 执行句柄
+    Adapter-->>Orchestrator: 执行句柄
+    loop 执行事件
         Adapter-->>Orchestrator: AgentEvent
-        Orchestrator->>Repository: Persist Event
+        Orchestrator->>Repository: 持久化事件
     end
     Adapter-->>Orchestrator: ExecutionResult
-    Orchestrator->>Repository: Commit Final Result
-    Orchestrator-->>Worker: Execution Completed
+    Orchestrator->>Repository: 提交最终结果
+    Orchestrator-->>Worker: 执行完成
 ```
 
-## 7.3 Worker migration
+## 7.3 Worker 迁移
 
-Keep the existing Worker queue, Lease / Heartbeat, cancellation, timeout, event persistence, and terminal-state responsibilities.
+保留现有 Worker 队列、Lease / Heartbeat、取消、超时、事件持久化和终态职责。
 
-The main change is:
+主要变化是：
 
-**Worker calls the Orchestrator instead of directly invoking a concrete Runtime Engine.**
+**Worker 调用编排器，而不是直接调用具体的 Runtime Engine。**
 
-Target interaction:
+目标交互方式：
 
 ```python
 result = await orchestrator.execute(run_context)
 ```
 
-Worker should not need to know whether the current Engine is React or Codex, whether it uses CLI or App-Server, or how its internal reasoning loop works.
+Worker 无需知道当前 Engine 是 React 还是 Codex、使用 CLI 还是 App-Server，也无需了解其内部推理循环。
 
-## 7.4 Terminal-state protection
+## 7.4 终态保护
 
-A cancelled or timed-out Run must not be overwritten by a late success result. A Worker that has lost its Lease must not submit a valid state transition. Implement this with repository-level conditional updates and, as the reliability phase matures, Lease Epoch / Fencing Token.
+已取消或超时的 Run 不得被迟到的成功结果覆盖。失去 Lease 的 Worker 不得提交有效的状态转换。通过 Repository 层条件更新实现这一点，并在可靠性阶段逐步引入 Lease Epoch / Fencing Token。
 
 ---
 
-# 8. Runtime Host and Process Supervisor
+# 8. Runtime Host 与进程监管器
 
-## 8.1 Why a Runtime Host is required
+## 8.1 为什么需要 Runtime Host
 
-CLI-based Engines may require OS processes, stdin/stdout/stderr handling, process-tree cleanup, workdir management, environment injection, timeouts, resource controls, and network restrictions.
+基于 CLI 的 Engine 可能需要 OS 进程、stdin/stdout/stderr 处理、进程树清理、工作目录管理、环境变量注入、超时、资源控制和网络限制。
 
-These concerns should not be embedded in each Engine Adapter.
+这些关注点不应嵌入每个 Engine Adapter。
 
-## 8.2 Responsibility boundaries
+## 8.2 职责边界
 
-| Component | Responsibility |
+| 组件 | 职责 |
 |---|---|
-| Engine Adapter | Understands Engine and Protocol |
-| Runtime Host | Provides a managed execution environment |
-| Process Supervisor | Owns process lifecycle and cleanup |
-| Sandbox | Enforces isolation and execution policy |
-| Credential Broker | Authorizes and injects credentials |
-| Workspace Provider | Prepares work directories and mounts |
+| Engine Adapter | 理解 Engine 与 Protocol |
+| Runtime Host | 提供受管理的执行环境 |
+| Process Supervisor | 负责进程生命周期与清理 |
+| Sandbox | 实施隔离与执行策略 |
+| Credential Broker | 授权并注入凭据 |
+| Workspace Provider | 准备工作目录与挂载 |
 
-Suggested module boundary:
+建议的模块边界：
 
 ```text
 agent_execution/host/
@@ -589,9 +589,9 @@ agent_execution/host/
   host_models.py
 ```
 
-## 8.3 Process lifecycle
+## 8.3 进程生命周期
 
-Define explicit states:
+定义明确的状态：
 
 ```text
 Start -> Ready -> Running
@@ -601,36 +601,36 @@ Start -> Ready -> Running
                   +-> Timeout -> Terminating -> Exited
 ```
 
-Coroutine cancellation is not equivalent to process termination. Cancellation must:
+协程取消不等于进程终止。取消操作必须：
 
-1. Signal the Engine process.
-2. Escalate to forced termination after a deadline.
-3. Clean up child processes and process groups.
-4. Release allocated resources.
-5. Persist a correct terminal state.
+1. 向 Engine 进程发送信号。
+2. 超过截止时间后升级为强制终止。
+3. 清理子进程和进程组。
+4. 释放已分配资源。
+5. 持久化正确的终态。
 
-## 8.4 Isolation
+## 8.4 隔离
 
-Do not run untrusted Agent commands with the full permissions of the NexusDesk API or Worker host.
+不得以 NexusDesk API 或 Worker 宿主的完整权限运行不可信 Agent 命令。
 
-Build toward:
+逐步建设：
 
-- Isolated Runtime Host.
-- Container or equivalent sandbox.
-- CPU, memory, PID, disk, and time limits.
-- Workspace path restrictions.
-- Network egress policy.
-- Task-scoped credentials.
+- 隔离的 Runtime Host。
+- 容器或等效沙箱。
+- CPU、内存、PID、磁盘和时间限制。
+- Workspace 路径限制。
+- 网络出口策略。
+- Task 级凭据。
 
-If untrusted users can submit code-execution tasks, sandboxing, tenant isolation, credential isolation, and network policy are launch blockers for that capability, not optional future enhancements.
+如果不可信用户可以提交代码执行任务，那么沙箱、租户隔离、凭据隔离和网络策略是该能力上线的阻断条件，而不是可选的未来增强项。
 
 ---
 
-# 9. Workspace and File Management
+# 9. Workspace 与文件管理
 
-Introduce a Workspace Provider responsible for Workspace access, Execution Workdir creation, file mounts, Skill mounts, artifact export, and cleanup.
+引入 Workspace Provider，负责 Workspace 访问、Execution Workdir 创建、文件挂载、Skill 挂载、产物导出和清理。
 
-Suggested boundary:
+建议的边界：
 
 ```text
 agent_execution/workspace/
@@ -640,91 +640,91 @@ agent_execution/workspace/
   workspace_policy.py
 ```
 
-Execution lifecycle:
+执行生命周期：
 
 ```text
-Create / Resolve Workspace
+创建 / 解析 Workspace
           |
           v
-Prepare Execution Workdir
+准备 Execution Workdir
           |
           v
-Mount Repository / Skills
+挂载代码仓库 / Skills
           |
           v
-Run Engine
+运行 Engine
           |
           v
-Collect Changes / Artifacts
+收集变更 / 产物
           |
           v
-Persist Results
+持久化结果
           |
           v
-Cleanup or Retain
+清理或保留
 ```
 
-Initially reuse existing storage where safe. Evaluate dedicated volumes, tenant volumes with execution subdirectories, shared read-only Skill Store, overlays / snapshots, and object storage only after measuring capacity, latency, and cost.
+初期在安全的前提下复用现有存储。只有在评估容量、延迟和成本后，才考虑专用卷、带执行子目录的租户卷、共享只读 Skill Store、Overlay / 快照和对象存储。
 
-All filesystem operations must prevent path traversal, symlink escape, cross-tenant access, and unauthorized overwrites.
+所有文件系统操作都必须防止路径穿越、符号链接逃逸、跨租户访问和未授权覆盖。
 
 ---
 
-# 10. Credential Broker and Security
+# 10. 凭据代理与安全
 
-## 10.1 Target flow
+## 10.1 目标流程
 
 ```text
-Credential Vault
+凭据保险库
        |
        v
-Credential Broker
+凭据代理
        |
        v
-Tenant / Execution Authorization
+租户 / Execution 授权
        |
        v
-Short-lived Credential
+短期凭据
        |
        v
-Runtime Host / Sandbox
+Runtime Host / 沙箱
 ```
 
-Vault responsibilities:
+保险库职责：
 
-- Encrypted credential storage.
-- Credential versioning.
-- Rotation and revocation.
-- Future integration with KMS / Secret Manager.
+- 加密存储凭据。
+- 凭据版本管理。
+- 轮换与吊销。
+- 未来与 KMS / Secret Manager 集成。
 
-Broker responsibilities:
+代理职责：
 
-- Verify tenant identity.
-- Verify Agent / Execution authorization.
-- Verify target Engine and credential scope.
-- Inject short-lived credentials.
-- Record usage audit.
+- 验证租户身份。
+- 验证 Agent / Execution 授权。
+- 验证目标 Engine 与凭据范围。
+- 注入短期凭据。
+- 记录使用审计。
 
-## 10.2 Security requirements
+## 10.2 安全要求
 
-Never:
+严禁：
 
-- Store plaintext API keys in Agent Configuration.
-- Write tokens to logs or ordinary Runtime Events.
-- Copy the host's `~/.codex/auth.json` into tenant execution environments by default.
-- Share credential directories across tenants without isolation.
+- 在 Agent 配置中存储明文 API Key。
+- 将 Token 写入日志或普通 Runtime Event。
+- 默认将宿主的 `~/.codex/auth.json` 复制到租户执行环境。
+- 在无隔离的情况下跨租户共享凭据目录。
 
-An initial implementation may use controlled environment-variable injection or secret mounts, but its interface should allow evolution to a dedicated Credential Broker.
+初始实现可以使用受控的环境变量注入或 Secret 挂载，但接口应支持未来演进为独立的 Credential Broker。
 
 ---
 
-# 11. Engine Instructions and Skills
+# 11. Engine 指令与 Skill
 
-## 11.1 Engine Instruction Provider
+## 11.1 Engine 指令 Provider
 
-Different Engines may use different instruction filenames, discovery rules, Skill formats, and context injection mechanisms.
+不同 Engine 可能使用不同的指令文件名、发现规则、Skill 格式和上下文注入机制。
 
-Introduce an Instruction Provider boundary:
+引入 Instruction Provider 边界：
 
 ```text
 agent_execution/instructions/
@@ -734,33 +734,33 @@ agent_execution/instructions/
   instruction_renderer.py
 ```
 
-Common inputs may include System Prompt, Conversation Context, Memory / Summary, Skill Definitions, and Workspace Context. Each provider renders these into the format expected by its Engine.
+公共输入可以包括 System Prompt、Conversation Context、Memory / Summary、Skill Definitions 和 Workspace Context。每个 Provider 将这些输入渲染为其 Engine 所需的格式。
 
-## 11.2 Platform Skills and Engine Skill Adapters
+## 11.2 平台 Skill 与 Engine Skill Adapter
 
-A Platform Skill should have at least:
+平台 Skill 至少应包含：
 
-- name
-- description
-- version
-- content
-- permissions
-- source
-- checksum
+- 名称
+- 描述
+- 版本
+- 内容
+- 权限
+- 来源
+- 校验和
 
-Engine Skill Adapters convert Platform Skills into Engine-specific directory layouts and instruction formats.
+Engine Skill Adapter 将平台 Skill 转换为 Engine 专属的目录布局和指令格式。
 
-Do not make one Engine's Skill file format the platform-wide standard. Skills require versioning, source validation, and permission checks.
+不要将某一个 Engine 的 Skill 文件格式作为全平台标准。Skill 需要版本管理、来源验证和权限检查。
 
 ---
 
-# 12. Event Architecture
+# 12. 事件架构
 
-## 12.1 Unified event envelope
+## 12.1 统一事件外层结构
 
-Extend existing Runtime Events rather than replacing the event system wholesale.
+扩展现有 Runtime Event，而不是整体替换事件系统。
 
-Suggested envelope:
+建议的外层结构：
 
 ```python
 class AgentEvent(BaseModel):
@@ -776,17 +776,17 @@ class AgentEvent(BaseModel):
     trace_id: str | None = None
 ```
 
-Fields:
+字段说明：
 
-- `event_id`: globally unique event identity for deduplication.
-- `schema_version`: event schema version.
-- `sequence`: ordering within an Execution.
-- `source`: platform or engine_native.
-- `payload`: event-specific content.
+- `event_id`：全局唯一的事件标识，用于去重。
+- `schema_version`：事件模型版本。
+- `sequence`：单次 Execution 内的顺序。
+- `source`：platform 或 engine_native。
+- `payload`：事件专属内容。
 
-## 12.2 Platform Events and Native Events
+## 12.2 平台事件与原生事件
 
-Platform Events represent stable business semantics, for example:
+平台事件表示稳定的业务语义，例如：
 
 ```text
 run.started
@@ -805,7 +805,7 @@ usage.updated
 execution.error
 ```
 
-Native Events preserve Engine-specific semantics, for example:
+原生事件保留 Engine 专属语义，例如：
 
 ```text
 codex.turn.started
@@ -815,64 +815,64 @@ codex.file.changed
 codex.approval.requested
 ```
 
-Do not convert every native command or event into a ReAct Tool Calling abstraction.
+不要将每个原生命令或事件都转换为 ReAct Tool Calling 抽象。
 
-## 12.3 Reliability improvements
+## 12.3 可靠性改进
 
-Continuously improve:
+持续改进：
 
-- Event schema versioning.
-- Sequence and duplicate detection.
-- Event persistence and transactional outbox.
-- SSE reconnect and cursor-based replay.
-- Native event retention.
-- Parser failure diagnostics.
-- Idempotent usage aggregation.
-- Consistency between terminal Run state and final events.
+- 事件模型版本管理。
+- 顺序与重复检测。
+- 事件持久化与事务性 Outbox。
+- SSE 重连与基于游标的重放。
+- 原生事件保留。
+- 解析失败诊断。
+- 幂等用量聚合。
+- Run 终态与最终事件的一致性。
 
 ---
 
-# 13. Engine Session Management
+# 13. Engine Session 管理
 
-Introduce a dedicated Session Manager and repository when the first persistent-session Engine requires it.
+当第一个支持持久会话的 Engine 需要时，引入专门的 Session Manager 和 Repository。
 
-Suggested table: `agent_engine_sessions`
+建议表：`agent_engine_sessions`
 
-| Field | Description |
+| 字段 | 说明 |
 |---|---|
-| id | Platform Session ID |
-| tenant_id | Tenant |
-| conversation_id | Related Conversation |
+| id | 平台 Session ID |
+| tenant_id | 租户 |
+| conversation_id | 关联会话 |
 | engine_id | Engine |
 | protocol_id | Protocol |
-| adapter_version | Adapter version |
-| provider_session_id | Native Engine Session ID |
+| adapter_version | Adapter 版本 |
+| provider_session_id | Engine 原生 Session ID |
 | workspace_id | Workspace |
-| status | Session status |
-| metadata | Engine-specific metadata |
-| created_at / updated_at | Timestamps |
-| expires_at | Expiration time |
+| status | Session 状态 |
+| metadata | Engine 专属元数据 |
+| created_at / updated_at | 时间戳 |
+| expires_at | 过期时间 |
 
-Requirements:
+要求：
 
-- Session persistence is optional per Engine.
-- Resume must re-check authorization and policy.
-- Expired Sessions must release associated resources.
-- Engine-specific metadata must remain versioned and adapter-owned.
+- 每个 Engine 可以选择是否支持 Session 持久化。
+- 恢复时必须重新检查授权与策略。
+- 过期 Session 必须释放关联资源。
+- Engine 专属元数据必须保持版本化并归 Adapter 管理。
 
 ---
 
-# 14. Agent Configuration Evolution
+# 14. Agent 配置演进
 
-## 14.1 Backward compatibility
+## 14.1 向后兼容
 
-Existing Agent configuration includes fields such as `system_prompt`, `tool_names`, `knowledge_base_ids`, `max_model_rounds`, model profile identifiers and versions, reply language, and summary / memory settings.
+现有 Agent 配置包含 `system_prompt`、`tool_names`、`knowledge_base_ids`、`max_model_rounds`、模型 Profile 标识与版本、回复语言以及摘要 / 记忆设置等字段。
 
-Do not break existing published Agent snapshots or force users to edit all existing configurations.
+不得破坏现有已发布 Agent 快照，也不得强制用户修改所有现有配置。
 
-## 14.2 Target configuration shape
+## 14.2 目标配置结构
 
-Illustrative YAML:
+示例 YAML：
 
 ```yaml
 engine:
@@ -891,46 +891,46 @@ codex:
   timeout_seconds: 1800
 ```
 
-Requirements:
+要求：
 
-- `engine` selects the generic Engine / Protocol.
-- Engine-specific sections use typed configuration.
-- Default missing Engine selection to `react`.
-- Map legacy fields through a compatibility layer.
-- Avoid an unbounded generic configuration dictionary.
-- Snapshot the resolved configuration, Adapter version, policy version, and Effective capabilities for every Execution.
+- `engine` 选择通用 Engine / Protocol。
+- Engine 专属部分使用类型化配置。
+- 缺少 Engine 选择时默认使用 `react`。
+- 通过兼容层映射旧字段。
+- 避免使用无边界的通用配置字典。
+- 为每次 Execution 快照保存解析后的配置、Adapter 版本、策略版本和 Effective 能力。
 
 ---
 
-# 15. Mapping to Existing NexusDesk Modules
+# 15. 与现有 NexusDesk 模块的映射
 
-The following mapping is based on the previously inspected `integration` branch. Revalidate against the target commit before implementation.
+以下映射基于此前检查的 `integration` 分支。实施前必须针对目标提交重新核验。
 
-| Existing module | Current responsibility | Target evolution |
+| 现有模块 | 当前职责 | 目标演进 |
 |---|---|---|
-| `agent_runtime/engine.py` | LangGraph ReAct execution | Wrap / migrate as React Engine Provider |
-| `agent_runtime/worker.py` | Queue, Lease, Run lifecycle | Keep; call Orchestrator |
-| `agent_runtime/repository.py` | Run and event persistence | Extend execution metadata, Session, event reliability |
-| `agent_runtime/schemas.py` | Runtime schemas | Gradually separate public execution contracts |
-| `runtime_factory.py` | Fixed Runtime construction | Engine / Protocol resolution |
-| `runtime_composition.py` | Runtime dependency composition | Compose Orchestrator, Registry, Host, and providers |
-| `extension_contracts/runtime.py` | Run / Runtime contract | Preserve compatibility; extract Engine contract |
-| `agent_config/service.py` | Agent config and validation | Add typed Engine / Protocol configuration |
-| Runtime Events | Runtime events and SSE | Add versioned envelope and native event support |
+| `agent_runtime/engine.py` | LangGraph ReAct 执行 | 封装 / 迁移为 React Engine Provider |
+| `agent_runtime/worker.py` | 队列、Lease、Run 生命周期 | 保留；改为调用编排器 |
+| `agent_runtime/repository.py` | Run 与事件持久化 | 扩展执行元数据、Session 和事件可靠性 |
+| `agent_runtime/schemas.py` | Runtime 模型 | 逐步分离公共执行契约 |
+| `runtime_factory.py` | 构造固定 Runtime | Engine / Protocol 解析 |
+| `runtime_composition.py` | Runtime 依赖组合 | 组合编排器、注册中心、Host 和 Provider |
+| `extension_contracts/runtime.py` | Run / Runtime 契约 | 保持兼容；抽取 Engine 契约 |
+| `agent_config/service.py` | Agent 配置与校验 | 增加类型化 Engine / Protocol 配置 |
+| Runtime Events | Runtime 事件与 SSE | 增加带版本的外层结构和原生事件支持 |
 
-Guardrails:
+约束：
 
-1. Do not delete the current LangGraph Runtime in Phase 1.
-2. Do not make Worker responsible for Engine resolution and process supervision.
-3. Do not model Engine as a subtype of ordinary Capability Plugin.
-4. Do not turn the Extension Registry into a container for all execution logic.
-5. Do not break existing React invocation or historical data to accommodate Codex.
+1. 第一阶段不得删除当前 LangGraph Runtime。
+2. 不得让 Worker 负责 Engine 解析和进程监管。
+3. 不得将 Engine 建模为普通 Capability Plugin 的子类型。
+4. 不得将 Extension Registry 变成容纳所有执行逻辑的容器。
+5. 不得为了接入 Codex 而破坏现有 React 调用或历史数据。
 
 ---
 
-# 16. Suggested Code Structure
+# 16. 建议的代码结构
 
-The following is a target logical structure, not a requirement to create every file at once.
+以下是目标逻辑结构，不要求一次性创建所有文件。
 
 ```text
 backend/src/agent_platform/
@@ -979,537 +979,539 @@ backend/src/agent_platform/
         └── service.py
 ```
 
-Start with `contracts`, `registry`, `orchestration`, and `adapters/react`. Add other packages as their phase begins.
+从 `contracts`、`registry`、`orchestration` 和 `adapters/react` 开始，其他包在对应阶段启动时再增加。
 
 ---
 
-# 17. Phased Implementation Roadmap
+# 17. 分阶段实施路线图
 
-## Phase 0 — Baseline and Inventory
+## 阶段 0 — 基线与盘点
 
-**Priority: P0**
+**优先级：P0**
 
-Goal: establish a verified baseline before refactoring.
+目标：重构前建立经过核验的基线。
 
-Work:
+工作：
 
-1. Reinspect the latest `integration` branch.
-2. Map Runtime Engine, Worker, Repository, Factory, and composition dependencies.
-3. Document Run state transitions and current event semantics.
-4. Inventory Agent Config and published snapshot compatibility.
-5. Agree Engine / Protocol / Adapter identifiers.
-6. Record test coverage and current ReAct behavior.
-7. Establish regression tests for existing execution behavior.
+1. 重新检查最新的 `integration` 分支。
+2. 梳理 Runtime Engine、Worker、Repository、Factory 和组合依赖。
+3. 记录 Run 状态转换与当前事件语义。
+4. 盘点 Agent 配置和已发布快照的兼容性。
+5. 确定 Engine / Protocol / Adapter 标识。
+6. 记录测试覆盖率和当前 ReAct 行为。
+7. 为现有执行行为建立回归测试。
 
-Deliverables:
+交付物：
 
-- Architecture baseline.
-- Runtime dependency map.
-- Run lifecycle diagram.
-- Agent configuration compatibility plan.
-- Refactoring checklist.
+- 架构基线。
+- Runtime 依赖图。
+- Run 生命周期图。
+- Agent 配置兼容方案。
+- 重构检查清单。
 
-Acceptance:
+验收：
 
-- Existing Run creation-to-terminal flow is documented.
-- Worker / Runtime responsibilities are explicit.
-- Existing Agent configurations remain loadable.
-- Existing ReAct behavior has automated regression coverage.
+- 现有 Run 从创建到终态的流程已记录。
+- Worker / Runtime 职责明确。
+- 现有 Agent 配置仍可加载。
+- 现有 ReAct 行为有自动化回归覆盖。
 
-## Phase 1 — Execution Contract and Registries
+## 阶段 1 — 执行契约与注册中心
 
-**Priority: P0**
+**优先级：P0**
 
-Goal: establish the standard integration boundary.
+目标：建立标准集成边界。
 
-Work:
+工作：
 
-1. Define ExecutionRequest, ExecutionHandle, ExecutionResult, ExecutionError, AgentEvent, and EngineCapabilities.
-2. Define contract and Adapter versioning.
-3. Implement Engine Registry.
-4. Implement Protocol Registry.
-5. Implement Adapter Registry.
-6. Validate Engine / Protocol compatibility.
-7. Build LocalTestAdapter and initial Contract Tests.
+1. 定义 ExecutionRequest、ExecutionHandle、ExecutionResult、ExecutionError、AgentEvent 和 EngineCapabilities。
+2. 定义契约与 Adapter 版本管理。
+3. 实现 Engine Registry。
+4. 实现 Protocol Registry。
+5. 实现 Adapter Registry。
+6. 校验 Engine / Protocol 兼容性。
+7. 构建 LocalTestAdapter 和初版契约测试。
 
-Not in scope yet:
+暂不包含：
 
-- Codex integration.
-- Full Runtime Host.
-- Complex Scheduler.
-- Separate Task / Execution tables.
+- Codex 集成。
+- 完整 Runtime Host。
+- 复杂调度器。
+- 独立 Task / Execution 表。
 
-Acceptance:
+验收：
 
-- A new Engine can be added without changing the public contract.
-- Engine and Protocol can be registered independently.
-- Registry resolves a valid Adapter.
-- Unsupported capabilities are explicit.
-- Contract tests run independently of external Engines.
+- 无需修改公共契约即可增加新 Engine。
+- Engine 和 Protocol 可以独立注册。
+- 注册中心能够解析有效的 Adapter。
+- 不支持的能力能够显式表达。
+- 契约测试可以独立于外部 Engine 运行。
 
-## Phase 2 — React Provider and Execution Orchestrator
+## 阶段 2 — React Provider 与执行编排器
 
-**Priority: P0 — first major refactoring milestone**
+**优先级：P0 — 首个主要重构里程碑**
 
-Goal: make the existing LangGraph Runtime the first Engine Provider.
+目标：让现有 LangGraph Runtime 成为第一个 Engine Provider。
 
-Work:
+工作：
 
-1. Preserve the existing ReAct reasoning implementation.
-2. Add a React Engine Adapter around it.
-3. Extract Engine selection from the fixed Runtime Factory.
-4. Implement Execution Orchestrator.
-5. Change Worker to invoke the Orchestrator.
-6. Normalize ExecutionResult and ExecutionError.
-7. Map existing Runtime Events to AgentEvent incrementally.
-8. Preserve existing API and SSE behavior.
-9. Add a feature flag for controlled migration and rollback.
+1. 保留现有 ReAct 推理实现。
+2. 在其外部增加 React Engine Adapter。
+3. 从固定 Runtime Factory 中抽取 Engine 选择逻辑。
+4. 实现执行编排器。
+5. 修改 Worker 以调用编排器。
+6. 统一 ExecutionResult 和 ExecutionError。
+7. 逐步将现有 Runtime Event 映射为 AgentEvent。
+8. 保持现有 API 与 SSE 行为。
+9. 增加功能开关，支持受控迁移和回滚。
 
-Acceptance:
+验收：
 
-- Existing Agents continue to execute.
-- Worker no longer depends directly on a concrete Engine.
-- React resolves through the Registry.
-- Orchestrator manages a complete Execution.
-- Existing Run and event behavior has no regression.
-- New and old paths can be switched during migration.
+- 现有 Agent 继续正常执行。
+- Worker 不再直接依赖具体 Engine。
+- React 通过注册中心解析。
+- 编排器管理完整 Execution。
+- 现有 Run 和事件行为无回归。
+- 迁移期间可以切换新旧路径。
 
-## Phase 3 — Capability, Configuration, and Instructions
+## 阶段 3 — 能力、配置与指令
 
-**Priority: P0**
+**优先级：P0**
 
-Goal: enable multi-Engine configuration and capability governance.
+目标：支持多 Engine 配置与能力治理。
 
-Work:
+工作：
 
-1. Add Engine ID, Protocol ID, and Adapter version to Agent configuration.
-2. Default legacy configurations to React.
-3. Introduce typed Engine-specific configuration.
-4. Implement Declared, Available, and Effective capability resolution.
-5. Add Capability Resolver and policy integration.
-6. Introduce Engine Instruction Provider.
-7. Adapt existing Context / Summary / Memory injection to Engine-specific formats.
-8. Persist resolved configuration and capability snapshots.
-
-Acceptance:
-
-- Legacy Agents run without manual edits.
-- New Agents can select Engine and Protocol.
-- Engine-specific settings are validated by typed schemas.
-- Clients cannot dictate Effective capabilities.
-- Instruction rendering can vary by Engine.
-- Each Execution can be traced to its resolved configuration and policy.
-
-## Phase 4 — Runtime Host, Process Supervisor, and Workspace
-
-**Priority: P1**
-
-Goal: provide a managed execution environment for external Engines.
-
-Work:
-
-1. Define Runtime Host interface.
-2. Implement Process Runner and Process Supervisor.
-3. Implement timeout, cancellation, and process-tree cleanup.
-4. Introduce Workspace Provider and Execution Workdir.
-5. Define mount and cleanup policies.
-6. Add resource limits.
-7. Define Sandbox Provider interface.
-8. Add host health and process observability.
-
-Acceptance:
-
-- External Engine lifecycle is not tied only to a Worker coroutine.
-- Orphan processes can be detected and cleaned up.
-- Cancellation stops the actual Engine process.
-- Each Execution receives an isolated work directory.
-- Cross-tenant path access is blocked.
-- CPU, memory, PID, disk, and time limits are configurable.
-- Runtime Host is independent of specific Engine Adapters.
-
-## Phase 5 — Codex Integration
-
-**Priority: P1**
-
-Goal: validate the architecture with the first external Engine.
-
-### Stage A: Codex CLI Exec
-
-Start with the simpler CLI execution path:
-
-1. Implement Codex CLI Adapter.
-2. Validate supported Codex versions.
-3. Map request and Engine configuration.
-4. Launch through Runtime Host.
-5. Parse stdout / stderr into platform events where appropriate.
-6. Preserve raw or normalized Native Events.
-7. Collect final result and usage.
-8. Implement timeout and cancellation.
-9. Integrate Workspace.
-10. Enforce credentials and execution policy.
-
-### Stage B: Codex App-Server
-
-Only after the CLI path is stable:
-
-1. Implement App-Server Protocol Adapter.
-2. Manage JSON-RPC connection lifecycle.
-3. Manage native Sessions.
-4. Map Session / Turn / Run.
-5. Implement streaming.
-6. Adapt approval and interactive input.
-7. Add Session Resume where supported.
-8. Manage protocol-version compatibility.
-
-Keep App-Server protocol details inside the provider. Do not expose its private JSON-RPC protocol as the NexusDesk public API.
-
-Acceptance:
-
-- Codex executes inside an isolated Workspace.
-- CLI and App-Server share the Codex Engine identity.
-- Protocols register independently.
-- Native events are preserved.
-- Cancellation, timeout, and errors propagate correctly.
-- React remains unaffected.
-- Credential and file access are policy-controlled.
-
-## Phase 6 — Security, Reliability, and Event Governance
-
-**Priority: P1; required before untrusted multi-tenant code execution**
-
-Work:
-
-Security:
-- Credential Vault and Broker.
-- Execution-scoped credential authorization.
-- Secret masking.
-- Sandbox and network egress policy.
-- Filesystem isolation.
-- Credential rotation, revocation, and audit.
-
-Reliability:
-- Lease Epoch / Fencing Token.
-- Worker-loss detection.
-- Late-result protection.
-- Terminal-state protection.
-- Cancellation confirmation.
-- Timeout cleanup.
-- Retry classification.
-- Quota release and recovery.
-
-Events:
-- Schema versioning.
-- Sequence and event deduplication.
-- Event Store / Outbox.
-- SSE replay and reconnect.
-- Idempotent usage aggregation.
-- Native event parser diagnostics.
-
-Acceptance:
-
-- A stale Worker cannot overwrite a newer execution result.
-- Duplicate events do not duplicate usage or billing.
-- Credentials do not leak into logs or events.
-- Tenant workspaces remain isolated.
-- Worker failure results in a recoverable or terminal execution state.
-- Process cleanup, quota release, and terminal state remain consistent.
-
-## Phase 7 — Advanced Engine Capabilities and Scale
-
-**Priority: P2**
-
-Goal: expand the Engine ecosystem and support advanced workflows.
-
-Potential work:
-
-- Claude Code, ACP, OpenClaw, remote, and custom Engine Adapters.
-- Multi-Engine routing and fallback.
-- Session Resume.
-- Human Approval and Interactive Input.
-- Dynamic model selection.
-- Unified Engine usage and cost reporting.
-- Tenant fairness and global quotas.
-- Shared Skill Store and Artifact Store.
-- Runtime Profiles and Adapter health / circuit breaking.
-
-Acceptance:
-
-- Adding an Engine does not require changes to Worker core logic.
-- Adding a Protocol does not require changes to the public Engine contract.
-- Basic execution remains available for Engines without advanced capabilities.
-- UI reflects Effective capabilities.
-- Fallback cannot bypass tenant policy or security boundaries.
+1. 在 Agent 配置中增加 Engine ID、Protocol ID 和 Adapter 版本。
+2. 旧配置默认使用 React。
+3. 引入类型化 Engine 专属配置。
+4. 实现 Declared、Available 和 Effective 能力解析。
+5. 增加能力解析器并集成策略。
+6. 引入 Engine Instruction Provider。
+7. 将现有 Context / Summary / Memory 注入适配为 Engine 专属格式。
+8. 持久化解析后的配置与能力快照。
+
+验收：
+
+- 旧 Agent 无需手工修改即可运行。
+- 新 Agent 可以选择 Engine 和 Protocol。
+- Engine 专属设置通过类型化模型校验。
+- 客户端不能指定 Effective 能力。
+- 指令渲染可以因 Engine 而异。
+- 每次 Execution 都可以追溯到其解析后的配置和策略。
+
+## 阶段 4 — Runtime Host、进程监管器与 Workspace
+
+**优先级：P1**
+
+目标：为外部 Engine 提供受管理的执行环境。
+
+工作：
+
+1. 定义 Runtime Host 接口。
+2. 实现 Process Runner 和 Process Supervisor。
+3. 实现超时、取消和进程树清理。
+4. 引入 Workspace Provider 和 Execution Workdir。
+5. 定义挂载与清理策略。
+6. 增加资源限制。
+7. 定义 Sandbox Provider 接口。
+8. 增加宿主健康状态与进程可观测性。
+
+验收：
+
+- 外部 Engine 生命周期不只绑定到 Worker 协程。
+- 可以检测并清理孤儿进程。
+- 取消操作会停止实际 Engine 进程。
+- 每次 Execution 都获得隔离的工作目录。
+- 阻止跨租户路径访问。
+- CPU、内存、PID、磁盘和时间限制可配置。
+- Runtime Host 独立于具体 Engine Adapter。
+
+## 阶段 5 — Codex 集成
+
+**优先级：P1**
+
+目标：通过第一个外部 Engine 验证架构。
+
+### 阶段 A：Codex CLI Exec
+
+从较简单的 CLI 执行路径开始：
+
+1. 实现 Codex CLI Adapter。
+2. 验证受支持的 Codex 版本。
+3. 映射请求与 Engine 配置。
+4. 通过 Runtime Host 启动。
+5. 在适当情况下将 stdout / stderr 解析为平台事件。
+6. 保留原始或规范化后的原生事件。
+7. 收集最终结果和用量。
+8. 实现超时与取消。
+9. 集成 Workspace。
+10. 执行凭据与执行策略。
+
+### 阶段 B：Codex App-Server
+
+仅在 CLI 路径稳定后：
+
+1. 实现 App-Server Protocol Adapter。
+2. 管理 JSON-RPC 连接生命周期。
+3. 管理原生 Session。
+4. 映射 Session / Turn / Run。
+5. 实现流式处理。
+6. 适配审批与交互输入。
+7. 在支持的情况下增加 Session Resume。
+8. 管理协议版本兼容性。
+
+将 App-Server 协议细节保留在 Provider 内部，不要将其私有 JSON-RPC 协议暴露为 NexusDesk 公共 API。
+
+验收：
+
+- Codex 在隔离的 Workspace 中执行。
+- CLI 和 App-Server 共享 Codex Engine 身份。
+- 各协议独立注册。
+- 保留原生事件。
+- 取消、超时和错误正确传播。
+- React 不受影响。
+- 凭据与文件访问受策略控制。
+
+## 阶段 6 — 安全、可靠性与事件治理
+
+**优先级：P1；不可信多租户代码执行前必须完成**
+
+工作：
+
+安全：
+- 凭据保险库与代理。
+- Execution 级凭据授权。
+- Secret 脱敏。
+- 沙箱与网络出口策略。
+- 文件系统隔离。
+- 凭据轮换、吊销与审计。
+
+可靠性：
+- Lease Epoch / Fencing Token。
+- Worker 丢失检测。
+- 迟到结果保护。
+- 终态保护。
+- 取消确认。
+- 超时清理。
+- 重试分类。
+- 配额释放与恢复。
+
+事件：
+- 模型版本管理。
+- 顺序与事件去重。
+- Event Store / Outbox。
+- SSE 重放与重连。
+- 幂等用量聚合。
+- 原生事件解析诊断。
+
+验收：
+
+- 过期 Worker 不能覆盖更新的执行结果。
+- 重复事件不会导致重复计算用量或计费。
+- 凭据不会泄漏到日志或事件。
+- 租户 Workspace 保持隔离。
+- Worker 故障后，执行进入可恢复状态或终态。
+- 进程清理、配额释放和终态保持一致。
+
+## 阶段 7 — 高级 Engine 能力与规模化
+
+**优先级：P4（最低；2026-11-07 起暂缓执行）**
+
+> 暂缓说明：因项目处于起步阶段，本阶段全部需求暂不进入实施、测试或验收。以下目标和潜在工作仅保留为 backlog，重新排期前不作为交付承诺。FR-1~FR-11 已登记为 P4 issue #110~#120，索引见 [Phase 7 需求文档](../requirement/agent-execution-platform-v2/phase-7-advanced-engines-scale/02-requirements.md#暂缓与需求跟踪)。
+
+目标：扩展 Engine 生态并支持高级工作流。
+
+潜在工作：
+
+- Claude Code、ACP、OpenClaw、远程及自定义 Engine Adapter。
+- 多 Engine 路由与回退。
+- Session Resume。
+- 人工审批与交互输入。
+- 动态模型选择。
+- 统一 Engine 用量与成本报告。
+- 租户公平性与全局配额。
+- 共享 Skill Store 与 Artifact Store。
+- Runtime Profile 以及 Adapter 健康检查 / 熔断。
+
+验收（仅在阶段重新激活后适用）：
+
+- 增加 Engine 无需修改 Worker 核心逻辑。
+- 增加 Protocol 无需修改公共 Engine 契约。
+- 不具备高级能力的 Engine 仍可完成基本执行。
+- UI 反映 Effective 能力。
+- 回退不能绕过租户策略或安全边界。
 
 ---
 
-# 18. Continuous Improvement Backlog
+# 18. 持续改进待办
 
-These items should be tracked continuously; they are not all prerequisites for the first migration.
+以下事项应持续跟踪，并非首次迁移的全部前置条件。其中属于 Phase 7 范围的条目随 Phase 7 于 2026-11-07 起暂缓，按上述 P4 issue 保留跟踪；其余待办仍按各自阶段与质量门禁评估。
 
-## 18.1 Engine ecosystem
+## 18.1 Engine 生态
 
-- [ ] Dynamic Engine discovery.
-- [ ] Engine / Protocol compatibility matrix.
-- [ ] Adapter version lifecycle.
-- [ ] Adapter health checks.
-- [ ] Adapter canary rollout.
-- [ ] Adapter degradation and circuit breaking.
-- [ ] Runtime Profiles.
-- [ ] Engine cost and usage reporting.
-- [ ] Engine capability documentation.
+- [ ] 动态 Engine 发现。
+- [ ] Engine / Protocol 兼容性矩阵。
+- [ ] Adapter 版本生命周期。
+- [ ] Adapter 健康检查。
+- [ ] Adapter 金丝雀发布。
+- [ ] Adapter 降级与熔断。
+- [ ] Runtime Profile。
+- [ ] Engine 成本与用量报告。
+- [ ] Engine 能力文档。
 
-## 18.2 Execution reliability
+## 18.2 执行可靠性
 
-- [ ] First-class Task / Execution separation when justified.
-- [ ] Idempotent Task creation.
-- [ ] Task priority.
-- [ ] Tenant fairness.
-- [ ] Global concurrency quotas.
-- [ ] Worker recovery.
-- [ ] Retry classification.
-- [ ] Side-effect idempotency.
-- [ ] Cross-Worker fencing.
-- [ ] Resource recovery and failure drills.
+- [ ] 在有充分依据时实现一等 Task / Execution 分离。
+- [ ] 幂等 Task 创建。
+- [ ] Task 优先级。
+- [ ] 租户公平性。
+- [ ] 全局并发配额。
+- [ ] Worker 恢复。
+- [ ] 重试分类。
+- [ ] 副作用幂等。
+- [ ] 跨 Worker Fencing。
+- [ ] 资源恢复与故障演练。
 
-## 18.3 Session management
+## 18.3 Session 管理
 
-- [ ] Session lifecycle.
-- [ ] Session expiration and cleanup.
-- [ ] Session Resume.
-- [ ] Session / Workspace binding.
-- [ ] Permission revalidation on resume.
-- [ ] Engine metadata versioning.
-- [ ] Multi-session policies.
+- [ ] Session 生命周期。
+- [ ] Session 过期与清理。
+- [ ] Session Resume。
+- [ ] Session / Workspace 绑定。
+- [ ] 恢复时重新校验权限。
+- [ ] Engine 元数据版本管理。
+- [ ] 多 Session 策略。
 
-## 18.4 Security
+## 18.4 安全
 
-- [ ] KMS / Secret Manager integration.
-- [ ] Credential Vault.
-- [ ] Credential Broker.
-- [ ] Short-lived credentials.
-- [ ] Credential rotation and revocation.
-- [ ] Network egress policy.
-- [ ] Strong sandbox isolation.
-- [ ] Container image scanning.
-- [ ] Workspace escape tests.
-- [ ] Secret scanning across logs, events, and artifacts.
-- [ ] Engine command audit.
+- [ ] KMS / Secret Manager 集成。
+- [ ] 凭据保险库。
+- [ ] 凭据代理。
+- [ ] 短期凭据。
+- [ ] 凭据轮换与吊销。
+- [ ] 网络出口策略。
+- [ ] 强沙箱隔离。
+- [ ] 容器镜像扫描。
+- [ ] Workspace 逃逸测试。
+- [ ] 跨日志、事件和产物的 Secret 扫描。
+- [ ] Engine 命令审计。
 
-## 18.5 Workspace, Skill, and Artifact
+## 18.5 Workspace、Skill 与 Artifact
 
-- [ ] Workspace snapshots.
-- [ ] Execution Workdir lifecycle.
-- [ ] Skill versioning and content hashes.
-- [ ] Skill source validation.
-- [ ] Shared read-only Skill Store.
-- [ ] Engine Skill Adapters.
-- [ ] Artifact authorization.
-- [ ] Artifact retention.
-- [ ] Object storage for large artifacts.
-- [ ] Workspace cost analysis.
+- [ ] Workspace 快照。
+- [ ] Execution Workdir 生命周期。
+- [ ] Skill 版本与内容哈希。
+- [ ] Skill 来源验证。
+- [ ] 共享只读 Skill Store。
+- [ ] Engine Skill Adapter。
+- [ ] Artifact 授权。
+- [ ] Artifact 保留。
+- [ ] 大型 Artifact 对象存储。
+- [ ] Workspace 成本分析。
 
-## 18.6 Observability
+## 18.6 可观测性
 
-- [ ] OpenTelemetry.
-- [ ] Trace propagation across API / Worker / Engine.
-- [ ] Execution duration.
-- [ ] Queue wait time.
-- [ ] Engine startup time.
-- [ ] Token and usage metrics.
-- [ ] Runtime Host resource metrics.
-- [ ] Process exit monitoring.
-- [ ] Adapter error rates.
-- [ ] Tenant-level cost analysis.
-- [ ] Audit retention.
-- [ ] Operational dashboards and alerts.
+- [ ] OpenTelemetry。
+- [ ] 跨 API / Worker / Engine 的链路传播。
+- [ ] 执行时长。
+- [ ] 队列等待时间。
+- [ ] Engine 启动时间。
+- [ ] Token 与用量指标。
+- [ ] Runtime Host 资源指标。
+- [ ] 进程退出监控。
+- [ ] Adapter 错误率。
+- [ ] 租户级成本分析。
+- [ ] 审计保留。
+- [ ] 运维仪表盘与告警。
 
-## 18.7 Developer experience
+## 18.7 开发者体验
 
-- [ ] Adapter development guide.
-- [ ] Adapter template.
-- [ ] LocalTestAdapter.
-- [ ] Contract Test suite.
-- [ ] Engine integration test harness.
-- [ ] Mock Runtime Host.
-- [ ] Local development setup.
-- [ ] Engine upgrade procedure.
-- [ ] Troubleshooting runbooks.
-- [ ] Adapter contribution guidelines.
+- [ ] Adapter 开发指南。
+- [ ] Adapter 模板。
+- [ ] LocalTestAdapter。
+- [ ] 契约测试套件。
+- [ ] Engine 集成测试工具。
+- [ ] Mock Runtime Host。
+- [ ] 本地开发环境搭建。
+- [ ] Engine 升级流程。
+- [ ] 故障排查手册。
+- [ ] Adapter 贡献指南。
 
 ---
 
-# 19. Testing and Quality Gates
+# 19. 测试与质量门禁
 
-## 19.1 Contract Tests
+## 19.1 契约测试
 
-Every Adapter must pass the common contract suite:
+每个 Adapter 都必须通过公共契约测试套件：
 
-- [ ] Start Execution.
-- [ ] Stream Events.
-- [ ] Collect Result.
-- [ ] Cancel Execution.
-- [ ] Timeout.
-- [ ] Engine Unavailable.
-- [ ] Invalid Configuration.
-- [ ] Protocol Error.
-- [ ] Duplicate Event.
-- [ ] Delayed Event.
-- [ ] Usage Collection.
+- [ ] 启动执行。
+- [ ] 流式事件。
+- [ ] 收集结果。
+- [ ] 取消执行。
+- [ ] 超时。
+- [ ] Engine 不可用。
+- [ ] 配置无效。
+- [ ] 协议错误。
+- [ ] 重复事件。
+- [ ] 延迟事件。
+- [ ] 用量收集。
 
 ## 19.2 LocalTestAdapter
 
-Provide a deterministic test Adapter that does not depend on external Engines. It should simulate success, failure, streaming, long-running execution, timeout, cancellation, process failure, duplicate and delayed events, and resource exhaustion.
+提供不依赖外部 Engine 的确定性测试 Adapter。它应能模拟成功、失败、流式处理、长运行执行、超时、取消、进程故障、重复与延迟事件以及资源耗尽。
 
-Use it for Orchestrator, Worker, Event, UI, and recovery tests.
+用于编排器、Worker、事件、UI 和恢复测试。
 
-## 19.3 Integration tests
+## 19.3 集成测试
 
-At minimum:
+至少包括：
 
-1. Complete React execution.
-2. Complete Codex CLI execution.
-3. Worker restart and recovery.
-4. Engine process crash.
-5. Execution timeout.
-6. User cancellation.
-7. Workspace isolation.
-8. Credential injection and revocation.
-9. Tenant authorization.
-10. Platform / Native Event correlation.
+1. 完整 React 执行。
+2. 完整 Codex CLI 执行。
+3. Worker 重启与恢复。
+4. Engine 进程崩溃。
+5. 执行超时。
+6. 用户取消。
+7. Workspace 隔离。
+8. 凭据注入与吊销。
+9. 租户授权。
+10. 平台事件 / 原生事件关联。
 
-## 19.4 CI quality gates
+## 19.4 CI 质量门禁
 
-Each phase must retain applicable checks:
+每个阶段都必须保留适用的检查：
 
-- Backend unit tests.
-- Contract tests.
-- Type checking.
-- Lint.
-- Database migration tests.
-- Integration tests.
-- Security tests for execution isolation and credentials.
+- 后端单元测试。
+- 契约测试。
+- 类型检查。
+- Lint。
+- 数据库迁移测试。
+- 集成测试。
+- 执行隔离与凭据安全测试。
 
-Keep architecture refactoring PRs small. Do not combine the core migration and multiple Engine feature implementations into one large PR.
-
----
-
-# 20. Explicit Non-Goals for the Initial Migration
-
-Avoid introducing complexity before there is a validated requirement.
-
-1. **No immediate microservices**: use a modular monolith first.
-2. **No immediate full Scheduler rewrite**: reuse the existing Worker Queue, Lease, and Heartbeat.
-3. **No immediate Task / Execution double-table model**: initially define Run as one Execution attempt.
-4. **No mandatory Session support**: Session Resume, Approval, and Interactive Input are optional capabilities.
-5. **No forced Native Event normalization**: standardize the envelope, preserve Engine semantics.
-6. **No premature shared-storage optimization**: benchmark before changing tenant storage boundaries.
-7. **No direct host execution for untrusted tasks**: isolation is a launch requirement for untrusted code execution.
+架构重构 PR 应保持小巧。不要将核心迁移和多个 Engine 功能实现合并到一个大型 PR 中。
 
 ---
 
-# 21. Recommended PR Sequence
+# 20. 首次迁移的明确非目标
 
-| Order | PR scope | Priority |
+在需求得到验证前，避免引入额外复杂度。
+
+1. **暂不拆微服务**：先采用模块化单体。
+2. **暂不整体重写调度器**：复用现有 Worker 队列、Lease 和 Heartbeat。
+3. **暂不采用 Task / Execution 双表模型**：初期将 Run 定义为一次 Execution 尝试。
+4. **不强制支持 Session**：Session Resume、审批和交互输入属于可选能力。
+5. **不强制规范化原生事件**：统一外层结构，保留 Engine 语义。
+6. **不提前优化共享存储**：更改租户存储边界前先进行基准测试。
+7. **不允许不可信任务直接在宿主执行**：隔离是不可信代码执行的上线要求。
+
+---
+
+# 21. 建议的 PR 顺序
+
+| 顺序 | PR 范围 | 优先级 |
 |---|---|---|
-| 1 | Execution Contract models | P0 |
-| 2 | Engine / Protocol / Adapter Registry | P0 |
-| 3 | LocalTestAdapter and Contract Tests | P0 |
+| 1 | 执行契约模型 | P0 |
+| 2 | Engine / Protocol / Adapter 注册中心 | P0 |
+| 3 | LocalTestAdapter 与契约测试 | P0 |
 | 4 | React Engine Adapter | P0 |
-| 5 | Execution Orchestrator | P0 |
-| 6 | Worker integration with Orchestrator | P0 |
-| 7 | Agent Config Engine / Protocol compatibility | P0 |
-| 8 | Capability Resolver | P0 |
+| 5 | 执行编排器 | P0 |
+| 6 | Worker 与编排器集成 | P0 |
+| 7 | Agent 配置的 Engine / Protocol 兼容 | P0 |
+| 8 | 能力解析器 | P0 |
 | 9 | Instruction Provider | P0 |
-| 10 | Runtime Host / Process Supervisor | P1 |
+| 10 | Runtime Host / 进程监管器 | P1 |
 | 11 | Workspace Provider | P1 |
 | 12 | Codex CLI Adapter | P1 |
-| 13 | Credential Broker / Sandbox | P1 |
-| 14 | Event reliability / Fencing Token | P1 |
+| 13 | 凭据代理 / 沙箱 | P1 |
+| 14 | 事件可靠性 / Fencing Token | P1 |
 | 15 | Codex App-Server Adapter | P1 |
-| 16 | Claude / ACP / other Engine Adapters | P2 |
+| 16 | Claude / ACP / 其他 Engine Adapter | P2 |
 
-Every PR should state:
+每个 PR 都应说明：
 
-- Scope and non-goals.
-- Files / modules changed.
-- Compatibility requirements.
-- Automated tests.
-- Database migration, if any.
-- Feature flag and rollback strategy, if relevant.
-- Acceptance criteria.
-
----
-
-# 22. Architecture Acceptance Criteria
-
-Do not measure success only by the number of integrated Engines.
-
-## Decoupling
-
-- [ ] React is no longer the only fixed Runtime implementation.
-- [ ] Worker does not directly depend on a concrete Engine.
-- [ ] Engine, Protocol, and Adapter are separate concepts.
-- [ ] Orchestrator manages the common Execution lifecycle.
-- [ ] Adding an Engine does not require changing Worker core logic.
-
-## Execution governance
-
-- [ ] Run / Execution has a common lifecycle.
-- [ ] Engine Sessions are independently managed where supported.
-- [ ] Events have a versioned common envelope.
-- [ ] Cancellation, timeout, and failure have explicit semantics.
-- [ ] Results have idempotency and terminal-state protection.
-
-## Security
-
-- [ ] Untrusted Engines do not run with unrestricted API host permissions.
-- [ ] Workspace access is tenant-isolated.
-- [ ] Each Execution has a controlled work directory.
-- [ ] Credentials do not enter ordinary logs or events.
-- [ ] Execution permissions are policy-checked.
-- [ ] Network and resource access are controlled.
-
-## Extensibility
-
-- [ ] React runs through the common contract.
-- [ ] Codex can be integrated through multiple Protocols.
-- [ ] New Engines can implement independent Adapters.
-- [ ] Capabilities are resolved for the Engine and task.
-- [ ] Native Events do not break the common contract.
-- [ ] Contract Tests validate new Adapters.
-
-## Operability
-
-- [ ] Engine processes can be monitored and reaped.
-- [ ] Worker failures are recoverable.
-- [ ] Events can be traced and deduplicated.
-- [ ] Executions are auditable.
-- [ ] Usage can be aggregated.
-- [ ] Critical failures have dashboards and alerts.
+- 范围与非目标。
+- 变更的文件 / 模块。
+- 兼容性要求。
+- 自动化测试。
+- 数据库迁移（如有）。
+- 功能开关与回滚策略（如适用）。
+- 验收标准。
 
 ---
 
-# 23. Final Architecture Position
+# 22. 架构验收标准
 
-NexusDesk is intended to become an **Extensible Agent Execution Platform**.
+不要仅以集成 Engine 的数量衡量成功。
 
-It is not merely a LangGraph ReAct Runtime, nor a thin API wrapper around several CLI agents. It is a platform that governs Agent Engines, Protocols, Executions, Sessions, Workspaces, Capabilities, Policies, and Runtime Infrastructure.
+## 解耦
 
-Core subsystems:
+- [ ] React 不再是唯一固定的 Runtime 实现。
+- [ ] Worker 不直接依赖具体 Engine。
+- [ ] Engine、Protocol 和 Adapter 是独立概念。
+- [ ] 编排器管理公共 Execution 生命周期。
+- [ ] 增加 Engine 无需修改 Worker 核心逻辑。
 
-1. **Agent Engine Registry** — registers and resolves Engine / Protocol / Adapter implementations.
-2. **Execution Contract** — defines the stable boundary between the platform and Engines.
-3. **Execution Orchestrator** — coordinates execution lifecycle and governance.
-4. **Capability & Policy** — resolves capabilities and enforces permissions and approvals.
-5. **Runtime Host** — manages processes, runtime environments, and isolation.
-6. **Workspace & Credential Infrastructure** — governs files, work directories, and credentials.
-7. **Observability** — manages Events, Usage, Audit, Logs, and Traces.
+## 执行治理
 
-Guiding principles:
+- [ ] Run / Execution 具有公共生命周期。
+- [ ] 在支持的情况下独立管理 Engine Session。
+- [ ] 事件具有带版本的公共外层结构。
+- [ ] 取消、超时和失败具有明确语义。
+- [ ] 结果具有幂等性和终态保护。
 
-> Unify platform governance, not Engine internals.  
-> Stabilize the execution contract before expanding Engines.  
-> Migrate React first, then integrate Codex.  
-> Establish security boundaries before enabling untrusted code execution.  
-> Modularize before considering service decomposition.  
-> Make every phase testable, reversible, and evolvable.
+## 安全
+
+- [ ] 不可信 Engine 不以不受限的 API 宿主权限运行。
+- [ ] Workspace 访问按租户隔离。
+- [ ] 每次 Execution 都有受控的工作目录。
+- [ ] 凭据不会进入普通日志或事件。
+- [ ] 执行权限经过策略检查。
+- [ ] 网络与资源访问受到控制。
+
+## 可扩展性
+
+- [ ] React 通过公共契约运行。
+- [ ] Codex 可以通过多种 Protocol 接入。
+- [ ] 新 Engine 可以实现独立 Adapter。
+- [ ] 根据 Engine 和任务解析能力。
+- [ ] 原生事件不会破坏公共契约。
+- [ ] 契约测试验证新 Adapter。
+
+## 可运维性
+
+- [ ] 可以监控并回收 Engine 进程。
+- [ ] Worker 故障可恢复。
+- [ ] 事件可追踪、可去重。
+- [ ] 执行可审计。
+- [ ] 用量可聚合。
+- [ ] 关键故障有仪表盘和告警。
+
+---
+
+# 23. 最终架构定位
+
+NexusDesk 的目标是成为一个**可扩展的 Agent 执行平台**。
+
+它不只是一个 LangGraph ReAct Runtime，也不是几个 CLI Agent 外面的薄 API 包装，而是一个治理 Agent Engine、Protocol、Execution、Session、Workspace、Capability、Policy 和 Runtime 基础设施的平台。
+
+核心子系统：
+
+1. **Agent Engine 注册中心**——注册并解析 Engine / Protocol / Adapter 实现。
+2. **执行契约**——定义平台与 Engine 之间的稳定边界。
+3. **执行编排器**——协调执行生命周期与治理。
+4. **能力与策略**——解析能力并执行权限与审批。
+5. **Runtime Host**——管理进程、运行时环境和隔离。
+6. **Workspace 与凭据基础设施**——治理文件、工作目录和凭据。
+7. **可观测性**——管理事件、用量、审计、日志和链路追踪。
+
+指导原则：
+
+> 统一平台治理，而不是统一 Engine 内部实现。
+> 扩展 Engine 之前，先稳定执行契约。
+> 先迁移 React，再接入 Codex。
+> 启用不可信代码执行之前，先建立安全边界。
+> 考虑服务拆分之前，先完成模块化。
+> 让每个阶段都可测试、可回退、可演进。

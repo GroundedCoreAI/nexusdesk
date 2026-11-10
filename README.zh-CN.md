@@ -1,8 +1,8 @@
 # NexusDesk
 
-**简体中文** · [English](README.md) · [官网](https://www.aidet.top)
+**简体中文** · [English](README.md) · [在线文档](https://groundedcoreai.github.io/nexusdesk/) · [官网](https://www.aidet.top)
 
-[![CI](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCoreAI/nexusdesk)](https://github.com/GroundedCoreAI/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top)
+[![docs](https://img.shields.io/badge/docs-online-1c74c4)](https://groundedcoreai.github.io/nexusdesk/) [![CI](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCoreAI/nexusdesk)](https://github.com/GroundedCoreAI/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top)
 
 > **Join us! Kill the Staff.**
 
@@ -55,6 +55,8 @@ NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
 - 输入「帮我创建工单」体验工单拟定、人工确认和创建流程。
 
 体验模式自带自签证书，首次访问会提示证书不受信任。证书配置和局域网访问说明见[部署手册](deploy/README.md#体验模式的-https)。
+
+不想本地部署?直接看[在线文档](https://groundedcoreai.github.io/nexusdesk/)了解全部功能、配置项和接口。
 
 同时预置 9 个行业案例：9 个知识库、18 个 Agent 草稿和 36 篇文档，资源名均带 `[案例]` 前缀，Agent 列表可用「范围 → 仅看案例」筛选。
 
@@ -285,6 +287,7 @@ NexusDesk 仍在持续开发中，以下能力边界需要注意：
 
 | 我想要…… | 文档 |
 | --- | --- |
+| 浏览在线文档 | [文档站](https://groundedcoreai.github.io/nexusdesk/) |
 | 浏览全部文档 | [文档总索引](docs/README.md) |
 | 使用客服工作台 | [平台使用说明](docs/guides/platform.md) |
 | 部署、升级或迁移数据 | [Docker 部署手册](deploy/README.md) |

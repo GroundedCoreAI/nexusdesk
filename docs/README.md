@@ -57,5 +57,5 @@
 
 ## 需求与历史记录
 
-- 需求全流程文档：[Agent Memory](requirement/agent-memory/README.md)、[架构重构](requirement/architecture-refactor/README.md)、[Agent Evaluation](requirement/agent-evaluation/01-p2-roadmap.md)、[P0 生产就绪](requirement/p0-production-readiness/README.md)
+- 需求全流程文档：[Agent Memory](requirement/agent-memory/README.md)、[架构重构](requirement/architecture-refactor/README.md)、[Agent 执行平台 v2](requirement/agent-execution-platform-v2/README.md)、[Agent Evaluation](requirement/agent-evaluation/01-p2-roadmap.md)、[P0 生产就绪](requirement/p0-production-readiness/README.md)
 - [历史文档归档](archive/README.md)：已被取代的实施进度、早期验证和特定环境记录，不作为当前状态依据

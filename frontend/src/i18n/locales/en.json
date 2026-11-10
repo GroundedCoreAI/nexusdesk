@@ -1230,6 +1230,8 @@
   "工作台转人工": "Handoff from workbench",
   "发送失败": "Send failed",
   "客户记忆": "Customer memory",
+  "客户管理": "Customer management",
+  "查看客户档案与记忆，处理待确认的写入。": "Review customer profiles and memories, and approve pending writes.",
   "客户列表": "Customers",
   "待确认队列": "Pending review",
   "客户列表加载失败": "Failed to load customers",
