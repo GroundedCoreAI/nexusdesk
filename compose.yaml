@@ -15,5 +15,26 @@ services:
       timeout: 3s
       retries: 10
 
+  # Demo upstream for the industry packs' object providers. Starts by default;
+  # `docker compose up -d postgres` brings up only the database.
+  # Backend on the host reaches it at 127.0.0.1:8010; a containerised backend
+  # reaches it at http://mock-business:8010.
+  mock-business:
+    build:
+      context: ./backend/examples/mock_business
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+    image: ${NEXUSDESK_MOCK_IMAGE:-nexusdesk/mock-business-api:local}
+    ports:
+      - "127.0.0.1:8010:8010"
+    environment:
+      MOCK_AUTH_TOKEN: ${MOCK_AUTH_TOKEN:-}
+      MOCK_LATENCY_MS: ${MOCK_LATENCY_MS:-0}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 volumes:
   agent_pg_data:

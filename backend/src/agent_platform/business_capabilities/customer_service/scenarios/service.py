@@ -23,6 +23,7 @@ from agent_platform.extension_contracts import BusinessScope
 
 from .models import ScenarioConfig, ScenarioStatus, SimulationRequest
 from .simulation import simulate as simulate_config
+from .tool_bridge import ObjectResolution, ScenarioToolBridge
 
 MAX_TRACE_LIMIT = 200
 
@@ -86,9 +87,17 @@ def _condition_label(condition: dict[str, Any]) -> str:
 class ScenarioService:
     """Tenant-scoped scene catalog, draft/publish lifecycle and evidence."""
 
-    def __init__(self, engine: object, agents: object) -> None:
+    def __init__(
+        self,
+        engine: object,
+        agents: object,
+        bridge: ScenarioToolBridge | None = None,
+    ) -> None:
         self.engine = engine
         self.agents = agents
+        # Absent bridge means every provider stays a placeholder, which is what
+        # the bundled demo packs and the unit tests rely on.
+        self.bridge = bridge
 
     @staticmethod
     def _verify_status(value: str) -> str:
@@ -725,7 +734,7 @@ INSERT INTO service_scenario_traces(
             raise DomainError("scenario_key_required_for_version", 422)
         resolved = persisted_scope(tenant, scope)
         scope_sql, scope_params = scope_predicate(resolved, alias="s")
-        async with self.engine.begin() as connection:
+        async with self.engine.connect() as connection:
             rows = await many(
                 connection,
                 f"""
@@ -747,42 +756,47 @@ ORDER BY s.domain,s.name,s.id
                 version=version,
                 **scope_params,
             )
-            if not rows:
-                raise DomainError("scenario_not_found", 404)
+        if not rows:
+            raise DomainError("scenario_not_found", 404)
 
-            target = rows[0]
-            if version is not None and target.get("published_config") is None:
-                raise DomainError("scenario_version_not_found", 404)
-            if key is None:
-                target = self._best_scenario(rows, body.message)
-            config = ScenarioConfig.model_validate(
-                target.get("published_config") or target["draft"]
-            )
-            all_scenarios = (
-                [
-                    {
-                        "key": row["scenario_key"],
-                        "name": row["name"],
-                        "config": row.get("published_config") or row["draft"],
-                    }
-                    for row in rows
-                ]
-                if key is None
-                else None
-            )
-            trace = simulate_config(
-                target["scenario_key"],
-                target["name"],
-                target["published_version"],
-                target["status"],
-                config,
-                body,
-                all_scenarios=all_scenarios,
-            )
-            trace_data = trace.model_dump(mode="json")
-            if trace_context:
-                trace_data["application"] = trace_context
-            conversation_id = body.conversation_id
+        target = rows[0]
+        if version is not None and target.get("published_config") is None:
+            raise DomainError("scenario_version_not_found", 404)
+        if key is None:
+            target = self._best_scenario(rows, body.message)
+        config = ScenarioConfig.model_validate(target.get("published_config") or target["draft"])
+        all_scenarios = (
+            [
+                {
+                    "key": row["scenario_key"],
+                    "name": row["name"],
+                    "config": row.get("published_config") or row["draft"],
+                }
+                for row in rows
+            ]
+            if key is None
+            else None
+        )
+        # Facts are resolved outside the transaction: a slow upstream must never
+        # hold a pooled connection or a row lock open.
+        resolution = await self._resolve_object(tenant, config, body, resolved)
+        if resolution is not None and resolution.object is not None:
+            body = body.model_copy(update={"object": resolution.object})
+        trace = simulate_config(
+            target["scenario_key"],
+            target["name"],
+            target["published_version"],
+            target["status"],
+            config,
+            body,
+            all_scenarios=all_scenarios,
+        )
+        trace_data = trace.model_dump(mode="json")
+        self._record_provider(trace_data, resolution)
+        if trace_context:
+            trace_data["application"] = trace_context
+        conversation_id = body.conversation_id
+        async with self.engine.begin() as connection:
             if conversation_id is not None:
                 # A trace may only be bound to a conversation the caller can
                 # already see; the scope check keeps tenants and workspaces apart.
@@ -817,6 +831,60 @@ ORDER BY s.domain,s.name,s.id
                 )
         trace_data["trace_id"] = str(trace_id) if trace_id else None
         return trace_data
+
+    async def _resolve_object(
+        self,
+        tenant: str,
+        config: ScenarioConfig,
+        body: SimulationRequest,
+        scope: Any,
+    ) -> ObjectResolution | None:
+        if self.bridge is None:
+            return None
+        return await self.bridge.resolve_object(tenant, config, body, scope=scope)
+
+    @staticmethod
+    def _record_provider(
+        trace_data: dict[str, Any],
+        resolution: ObjectResolution | None,
+    ) -> None:
+        """Attach provider evidence and apply the declared failure policy."""
+
+        if resolution is None:
+            return
+        outcome = resolution.outcome
+        if outcome is None and not resolution.candidates:
+            return
+        trace_data["provider"] = {
+            "object_source": resolution.source,
+            "candidates": resolution.candidates,
+            "execution": outcome.public() if outcome is not None else None,
+            "error_policy": resolution.on_error,
+        }
+        if outcome is None or outcome.ok:
+            return
+        # A 404/403 is a business fact about the object, not a broken provider,
+        # so the failure policy only governs genuine transport or upstream
+        # errors. The deterministic path already reports the missing object.
+        if outcome.missing or outcome.denied or resolution.on_error != "fail":
+            return
+        content = "业务数据暂时无法读取，请稍后重试或转人工。"
+        trace_data["result"] = {
+            **(trace_data.get("result") or {}),
+            "status": "failed",
+            "reason": "provider_unavailable",
+            "reason_code": "provider_unavailable",
+            "content": content,
+        }
+        for step in trace_data.get("steps") or []:
+            if step.get("step") == "result":
+                step.update(
+                    {
+                        "status": "failed",
+                        "reason": "provider_unavailable",
+                        "content": content,
+                    }
+                )
 
     @staticmethod
     def _best_scenario(rows: list[dict[str, Any]], message: str) -> dict[str, Any]:

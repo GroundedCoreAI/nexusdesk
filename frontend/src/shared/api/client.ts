@@ -160,6 +160,7 @@ export interface ServiceApplicationSummary {
   capability_count: number;
   channel_count: number;
   has_unpublished_changes: boolean;
+  archived?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -515,7 +516,7 @@ export interface MemoryConfigCaps {
 }
 export interface Agent { created_by?: string | null; industry?:string; tags?:string[]; is_example?:boolean; updated_at?: string; created_at?: string; id: string; name: string; description: string; draft: AgentConfig; draft_revision: number; published_version: number | null; archived?: boolean }
 export interface KnowledgeBase { id: string; name: string; document_count: number; enabled: boolean }
-export interface Tool { revision?: number; published_version?: number; id: string; name: string; enabled: boolean; source: string; spec: Record<string, unknown> }
+export interface Tool { revision?: number; published_version?: number; id: string; name: string; enabled: boolean; source: string; display_name?: string | null; relative_path?: string | null; archived?: boolean; spec: Record<string, unknown> }
 export interface Conversation { deleted_agent?: { id: string; name: string; published_version: number | null } | null; source?: "business" | "playground"; last_message?: string | null; revision?: number; id: string; external_id: string; mode: string; agent_id: string | null; assigned_to: string | null; customer_id?: string | null; updated_at: string }
 export interface Run { id: string; conversation_id: string; status: string; error_code: string | null; created_at: string; output?: string; ttfc_ms?: number | null }
 export interface Message { id: string; seq: number; role: string; content: string; created_at: string; run_id?: string | null }
@@ -1067,6 +1068,17 @@ export const setServiceApplicationStatus = (
 ) => post<ServiceApplicationSummary>(`/service-apps/${key}/status`, { status, revision });
 export const rollbackServiceApplication = (key: string, version: number, revision: number) =>
   post<ServiceApplicationSummary>(`/service-apps/${key}/rollback`, { version, revision });
+/** Soft delete: the application disappears from every list except `?archived=true`. */
+export const archiveServiceApplication = (key: string, revision: number) =>
+  post<ServiceApplicationSummary>(`/service-apps/${key}/archive`, { revision });
+export const restoreServiceApplication = (key: string) =>
+  post<ServiceApplicationSummary>(`/service-apps/${key}/restore`, {});
+/**
+ * Hard delete. Only archived applications can be purged, and the version
+ * history goes with them; execution traces are kept.
+ */
+export const deleteServiceApplication = (key: string) =>
+  api<{ key: string; deleted: boolean }>(`/service-apps/${key}`, { method: 'DELETE' });
 export const simulateServiceApplication = (key: string, body: SimulationRequestInput) =>
   post<SimulationTrace>(`/service-apps/${key}/simulate`, body);
 export const getIndustryPacks = (signal?: AbortSignal) =>

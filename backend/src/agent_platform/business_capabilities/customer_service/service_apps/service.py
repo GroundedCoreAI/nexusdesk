@@ -111,6 +111,7 @@ class ServiceApplicationService:
         status: str = "all",
         q: str = "",
         scope: BusinessScope | None = None,
+        archived: bool = False,
     ) -> dict[str, Any]:
         resolved = persisted_scope(tenant, scope)
         scope_sql, scope_params = scope_predicate(resolved, alias="a")
@@ -123,7 +124,7 @@ SELECT a.*
 FROM service_applications a
 WHERE a.tenant_id=:tenant
   AND {scope_sql}
-  AND NOT a.archived
+  AND a.archived=:archived
   AND (:status='all' OR a.status=:status)
   AND (
       :q=''
@@ -135,6 +136,7 @@ ORDER BY a.updated_at DESC,a.name,a.id
 """,
                 tenant=tenant,
                 status=status,
+                archived=archived,
                 q=q,
                 pattern=f"%{q}%",
                 **scope_params,
@@ -525,6 +527,188 @@ RETURNING a.*
                 revision=row["draft_revision"],
             )
         return self._summary(row)
+
+    async def archive(
+        self,
+        tenant: str,
+        actor: str,
+        key: str,
+        revision: int,
+        *,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, Any]:
+        """Hide the application from every list and lookup. Reversible.
+
+        A published application has to be taken offline first: archiving is a
+        configuration decision, not a shortcut for dropping a live release without
+        notice. Published versions, traces and audit records stay in place, and
+        ``restore`` brings the application back under the same revision chain.
+        """
+        resolved = persisted_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, alias="a")
+        async with self.engine.begin() as connection:
+            current = required(
+                await one(
+                    connection,
+                    f"""
+SELECT a.* FROM service_applications a
+WHERE a.tenant_id=:tenant AND {scope_sql} AND a.application_key=:key
+  AND NOT a.archived
+FOR UPDATE
+""",
+                    tenant=tenant,
+                    key=key,
+                    **scope_params,
+                ),
+                "service_application_not_found",
+            )
+            if current["draft_revision"] != revision:
+                raise DomainError("service_application_revision_conflict", 409)
+            if (
+                current["published_version"] is not None
+                and current["status"] != "offline"
+            ):
+                raise DomainError("service_application_must_be_offline", 409)
+            row = await one(
+                connection,
+                f"""
+UPDATE service_applications a
+SET archived=true,draft_revision=draft_revision+1,
+    updated_by=:actor,updated_at=now()
+WHERE a.id=:id AND a.tenant_id=:tenant AND {scope_sql}
+RETURNING a.*
+""",
+                id=current["id"],
+                tenant=tenant,
+                actor=actor,
+                **scope_params,
+            )
+            await audit(
+                connection,
+                tenant,
+                actor,
+                "service_application.archived",
+                current["id"],
+                key=key,
+                published_version=current["published_version"],
+                revision=row["draft_revision"],
+            )
+        return self._summary(row)
+
+    async def restore(
+        self,
+        tenant: str,
+        actor: str,
+        key: str,
+        *,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, Any]:
+        """Bring an archived application back into the catalog.
+
+        No revision is required: an archived row is invisible to every read path,
+        so the caller has no revision to echo. The row comes back as it was, which
+        for a released application means ``offline`` until it is published again.
+        """
+        resolved = persisted_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, alias="a")
+        async with self.engine.begin() as connection:
+            current = required(
+                await one(
+                    connection,
+                    f"""
+SELECT a.* FROM service_applications a
+WHERE a.tenant_id=:tenant AND {scope_sql} AND a.application_key=:key
+  AND a.archived
+FOR UPDATE
+""",
+                    tenant=tenant,
+                    key=key,
+                    **scope_params,
+                ),
+                "service_application_archived_not_found",
+            )
+            row = await one(
+                connection,
+                f"""
+UPDATE service_applications a
+SET archived=false,draft_revision=draft_revision+1,
+    updated_by=:actor,updated_at=now()
+WHERE a.id=:id AND a.tenant_id=:tenant AND {scope_sql}
+RETURNING a.*
+""",
+                id=current["id"],
+                tenant=tenant,
+                actor=actor,
+                **scope_params,
+            )
+            await audit(
+                connection,
+                tenant,
+                actor,
+                "service_application.restored",
+                current["id"],
+                key=key,
+                revision=row["draft_revision"],
+            )
+        return self._summary(row)
+
+    async def purge(
+        self,
+        tenant: str,
+        actor: str,
+        key: str,
+        *,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, Any]:
+        """Delete an archived application for good, version history included.
+
+        Only archived rows can be purged, which keeps a misclick in the catalog
+        from dropping a live application: the operator has to archive first, and
+        archiving refuses to touch a release that is still running. Execution
+        traces survive on purpose -- they record what customers actually got and
+        reference the application by key only, so they stay readable afterwards.
+        """
+        resolved = persisted_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, alias="a")
+        async with self.engine.begin() as connection:
+            current = required(
+                await one(
+                    connection,
+                    f"""
+SELECT a.* FROM service_applications a
+WHERE a.tenant_id=:tenant AND {scope_sql} AND a.application_key=:key
+  AND a.archived
+FOR UPDATE
+""",
+                    tenant=tenant,
+                    key=key,
+                    **scope_params,
+                ),
+                "service_application_archived_not_found",
+            )
+            # Audit first: the row is gone after the delete, so this is the only
+            # place that still knows the version it shipped.
+            await audit(
+                connection,
+                tenant,
+                actor,
+                "service_application.purged",
+                current["id"],
+                key=key,
+                published_version=current["published_version"],
+                revision=current["draft_revision"],
+            )
+            await execute(
+                connection,
+                f"""
+DELETE FROM service_applications a
+WHERE a.id=:id AND a.tenant_id=:tenant AND {scope_sql}
+""",
+                id=current["id"],
+                tenant=tenant,
+                **scope_params,
+            )
+        return {"key": key, "deleted": True}
 
     async def _scenario_row(
         self,

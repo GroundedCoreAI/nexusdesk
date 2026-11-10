@@ -111,6 +111,21 @@ gateway, bind it to an agent, and then you can start a conversation.
 The production topology includes six long-running services — API, Runtime Worker, Channel Worker,
 Knowledge Worker, Memory Worker, and Web — plus a one-shot migration job.
 
+Both Compose files ship a demo business upstream (`mock-business`, started with the stack by
+default) for wiring up the industry packs' data executors: 25 business endpoints, a uniform
+`{code,message,data}` envelope, and on-demand 5xx injection. Inside the Compose network it answers
+at `http://mock-business:8010`; from the host use `http://127.0.0.1:8010`.
+
+To start only the app and its database, name the services explicitly:
+
+```bash
+docker compose -f deploy/quickstart/compose.yaml up -d postgres app
+```
+
+It authenticates nobody, so remove it from the production topology once real business systems are
+wired up. See the [deployment guide](deploy/README.md#演示业务接口mock-business) for details and
+caveats.
+
 See the [deployment guide](deploy/README.md) for HTTPS, backup, upgrade, and external access
 configuration.
 

@@ -277,6 +277,9 @@ class SimulationRequest(ScenarioModel):
     message: str = Field(min_length=1, max_length=8000)
     entry: EntryType = EntryType.NATURAL_LANGUAGE
     object: SimulatedObject | None = None
+    # Identity the request runs as. Executors may reference it as
+    # ``$customer.<path>`` so a candidate list is scoped to one customer.
+    customer: dict[str, Any] = Field(default_factory=dict)
     selected_decision: str | None = None
     selected_handler: str | None = None
     # Optional binding so a trace recorded while serving a real conversation can

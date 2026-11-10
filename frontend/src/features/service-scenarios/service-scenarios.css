@@ -1175,6 +1175,40 @@
   font-size: 8px;
 }
 
+/* Data source for the object: a provider key, picked from the registry. */
+.scene-object-provider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 7px 10px;
+  background: #fafbfc;
+  border: 1px solid #edeef3;
+  border-radius: 7px;
+}
+
+.scene-object-provider > span {
+  flex: 0 0 auto;
+  color: #9ba0ac;
+  font-size: 7px;
+}
+
+.scene-object-provider .ant-select {
+  flex: 0 1 300px;
+  min-width: 0;
+}
+
+.scene-object-provider > small {
+  flex: 1;
+  min-width: 0;
+  color: #a0a5b0;
+  font-size: 7px;
+}
+
+.scene-object-provider > small.is-live {
+  color: #1f9d55;
+}
+
 .scene-fact-row {
   display: flex;
   align-items: center;

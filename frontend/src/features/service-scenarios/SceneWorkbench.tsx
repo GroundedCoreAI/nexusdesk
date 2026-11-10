@@ -27,11 +27,13 @@ import type {
     ScenarioHandlerType,
     ScenarioRecommendation,
     ServiceApplicationSummary,
+    ServiceProviderPage,
     ServiceScenarioPage,
     ServiceScenarioSummary,
 } from '../../shared/api/client';
 import { publishServiceScenario, updateServiceScenario } from '../../shared/api/client';
 import { Alert, useAccess, useResource, toast } from '../../shared/components/ui';
+import { executorCount, ProviderSelect } from '../service-apps/toolSelect';
 import { demoText as demo } from './data';
 import { ScenarioTabs, ScenarioTopline } from './ScenarioChrome';
 import { appBasePath, experienceBasePath, scenarioBasePath, scenarioKeyFromPath } from './routes';
@@ -70,6 +72,10 @@ export function SceneWorkbench({ route, onNavigate, onMetaChange, onScenarioChan
     const application = useResource<ServiceApplicationSummary>(`/service-apps/${appKey}`);
     const scenarioList = useResource<ServiceScenarioPage>('/service-scenarios');
     const agents = useResource<Agent[]>('/agents');
+    // Object facts and handler tools both point at registered providers; these
+    // two lists are what readiness compares the scene against.
+    const objectProviders = useResource<ServiceProviderPage>('/service-providers?kind=object');
+    const toolProviders = useResource<ServiceProviderPage>('/service-providers?kind=tool');
     const [draft, setDraft] = useState<ScenarioConfig | null>(null);
     const [saved, setSaved] = useState('');
     const [revision, setRevision] = useState(1);
@@ -113,6 +119,27 @@ export function SceneWorkbench({ route, onNavigate, onMetaChange, onScenarioChan
         return groupScenariosByCategory(items, serviceCategories)
             .map(([category, grouped]) => [category, grouped.map(item => item.scenario)] as const);
     }, [scopedScenarios, serviceCategories]);
+
+    const objectProviderItems = useMemo(
+        () => objectProviders.data?.items || [],
+        [objectProviders.data],
+    );
+    const toolProviderItems = useMemo(
+        () => toolProviders.data?.items || [],
+        [toolProviders.data],
+    );
+    /** The object provider currently wired to this scene, if it still exists. */
+    const activeObjectProvider = useMemo(
+        () => objectProviderItems.find(item => item.key === draft?.object?.provider),
+        [objectProviderItems, draft?.object?.provider],
+    );
+    /** Prefer a provider that already declares executors over a bare placeholder. */
+    const defaultObjectProvider = useMemo(() => {
+        const items = objectProviderItems;
+        return (items.find(item => item.enabled && executorCount(item) > 0)
+            || items.find(item => item.enabled)
+            || items[0])?.key || 'demo_provider';
+    }, [objectProviderItems]);
 
     function update(patch: Partial<ScenarioConfig>) {
         setDraft(current => current ? { ...current, ...patch } : current);
@@ -436,6 +463,23 @@ export function SceneWorkbench({ route, onNavigate, onMetaChange, onScenarioChan
                             </div>
                             <Switch checked={draft.object.required} disabled={!admin} onChange={checked => update({ object: { ...draft.object!, required: checked, mode: checked ? 'required' : 'optional' } })}/>
                         </div>
+                        <div className="scene-object-provider">
+                            <span>{demo('数据来源')}</span>
+                            <ProviderSelect
+                                items={objectProviderItems}
+                                loading={objectProviders.loading}
+                                value={draft.object.provider}
+                                onChange={provider => update({ object: { ...draft.object!, provider: provider || '' } })}
+                                placeholder="after_sale_ticket_provider"
+                            />
+                            <small className={activeObjectProvider && executorCount(activeObjectProvider) > 0 ? 'is-live' : ''}>
+                                {!activeObjectProvider
+                                    ? demo('该接入能力未在「行业能力」中登记，就绪检查会判为未接入。')
+                                    : executorCount(activeObjectProvider) > 0
+                                        ? demo('已声明 {{v0}} 个执行器，场景会通过工具网关读取真实数据。', { v0: executorCount(activeObjectProvider) })
+                                        : demo('该接入能力还没有声明执行器，事实仍是模拟值。')}
+                            </small>
+                        </div>
                         <div className="scene-fact-row">
                             <span>{demo('展示事实')}</span>
                             {draft.facts.map(fact => <span className="scene-fact-tag" key={fact.key}>
@@ -449,7 +493,7 @@ export function SceneWorkbench({ route, onNavigate, onMetaChange, onScenarioChan
                         <Button disabled={!admin} onClick={() => update({
                             object: {
                                 type: 'order',
-                                provider: 'demo_provider',
+                                provider: defaultObjectProvider,
                                 required: true,
                                 mode: 'required',
                                 candidate_strategy: {
@@ -613,7 +657,13 @@ export function SceneWorkbench({ route, onNavigate, onMetaChange, onScenarioChan
                             if (type === 'agent') return <Form.Item name="agent_id" label="Agent" rules={[{ required: true }]}><Select options={(agents.data || []).map(agent => ({ value: agent.id, label: `${agent.name}${agent.published_version ? ` · v${agent.published_version}` : ''}` }))}/></Form.Item>;
                             if (type === 'human') return <Form.Item name="queue" label="人工队列"><Input placeholder="order-support"/></Form.Item>;
                             if (type === 'knowledge') return null;
-                            return <Form.Item name="tool" label="工具标识"><Input placeholder="logistics_status"/></Form.Item>;
+                            return <Form.Item name="tool" label="工具标识" extra="承载这次办理的工具接入点，决定就绪检查里的「执行能力接入」。">
+                                <ProviderSelect
+                                    items={toolProviderItems}
+                                    loading={toolProviders.loading}
+                                    placeholder="creator.work.status"
+                                />
+                            </Form.Item>;
                         }}
                     </Form.Item>
                     <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch defaultChecked/></Form.Item>

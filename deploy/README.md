@@ -75,6 +75,14 @@ PowerShell 使用 `Copy-Item` 复制模板，再执行 `.\nexusdesk.ps1 deploy`�
 
 包含 Web、API、Runtime Worker、Knowledge Worker、Memory Worker 五个常驻容器，共用后端镜像；另有一次性 migrate 服务。Memory Worker 执行会话摘要等异步记忆任务（复用 `memory_tasks` 表认领，非新中间件），与 Runtime Worker 解耦、可独立伸缩。中间件由外部提供，不重复启动、不修改已有 PostgreSQL / Milvus / MinIO。脚本先构建镜像，停止应用服务，重新执行迁移与已配置存储连接检查，成功后启动全部服务；迁移失败不启动应用，默认不导入演示数据。如需在目标库预置行业案例，在 `.env` 设 `AGENT_SEED_INDUSTRIES=true`（写入 36 篇标注为虚构的演示文档，脚本不提供清理）。
 
+migrate 一次性服务本身就是初始化步骤：建表（Alembic 迁移到 head）、创建默认管理员（admin / nexusdesk，首次登录强制改密）、创建主密钥、检查已配置的 Milvus / S3 连通性。全新数据库初始化后服务应用列表是空的，需要预置四个演示行业包（购物消费 / 游戏业务 / 内容创作 / 出行服务，各产出一个已发布的应用）时，在 `.env` 设 `AGENT_SEED_INDUSTRY_PACKS=true`，下次 `sh nexusdesk deploy` 的 migrate 阶段会安装并发布它们；也可对已有库手动补跑：
+
+```sh
+docker compose --env-file deploy/production/.env -f deploy/production/compose.yaml run --rm --no-deps migrate python -m agent_platform.applications.seed_demo_packs
+```
+
+该命令幂等：已安装的包不重复安装，已发布的场景和应用不重复发布，只补齐缺失的部分，因此重复执行安全。包里的样例数据是虚构演示内容；对话要真正回答，仍需先在界面发布 Chat 模型方案。演示数据装载失败只会打印告警并以退出码 0 结束 migrate（控制台照常启动，只是列表为空），按上面命令重跑即可，不会拖垮部署。
+
 - PostgreSQL 必需；配置 `AGENT_DATABASE_URL`。
 - 默认使用 `AGENT_MODEL_BACKEND=unconfigured`，无需模型密钥即可启动。界面提示添加供应商连接、Chat 模型和发布配置方案，再绑定到 Agent；未配置时对话明确返回配置提示，不降级 Demo。可选的旧版默认模型通过 `openai` 后端配置。
 - 向量检索配置 Milvus 地址和凭据；仅关键词场景可以删除模板中的 Milvus 配置。
@@ -112,6 +120,47 @@ docker compose --env-file deploy/production/.env -f deploy/production/compose.ya
 API 就绪检查为 `/api/v1/ready`；它不代表模型调用一定成功。Worker 暂无独立 HTTP 健康接口，需结合容器日志、租约与任务进度判断。Nginx 已关闭流式缓冲，代理读超时为 650 秒；代理允许 100 MB，请求仍受后端上传限制约束。
 
 PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Milvus 内部推理/索引所需资源另行评估；生产 Compose 是部署拓扑，不等于高可用、SSO、监控、备份恢复等生产验收全部完成。
+
+## 演示业务接口（mock-business）
+
+行业能力里的「数据执行器」需要一个真实可访问的上游。仓库自带一个演示服务 `backend/examples/mock_business`，暴露 25 个业务接口（订单、工单、客户、账单等）与 15 个业务对象夹具，响应体统一为 `{code,message,data}`，并支持故障注入，用于验证超时、5xx 与降级路径。
+
+**三套 Compose（根目录 `compose.yaml`、体验模式、生产拓扑）都包含该服务，且默认启动。** 不需要它时用显式服务名启动其余部分：
+
+```sh
+# 体验模式只要应用和数据库
+docker compose -f deploy/quickstart/compose.yaml up -d postgres app
+# 本地开发只要数据库
+docker compose up -d postgres
+```
+
+体验模式直接 `up -d` 即可，服务在 Compose 网络内的地址是 `http://mock-business:8010`，宿主机调试用 `http://127.0.0.1:8010`（仅绑定回环，可用 `NEXUSDESK_MOCK_PORT` 改端口）。
+
+生产拓扑同样默认随 `sh nexusdesk deploy` 启动，不发布宿主机端口，只允许同网络的 `api` 访问。`.env.example` 已把 `mock-business` 放进 `AGENT_TOOL_ALLOWED_HOSTS` 并打开 `AGENT_TOOL_ALLOW_PRIVATE_NETWORKS`（该服务解析到私网 172.x 地址，两个都要），从模板复制的 `.env` 开箱可连通。
+
+**上线前必须清理**：这个服务不校验调用方，还能被外部触发注入 5xx，留在生产环境等于人为开了一个故障入口。接入真实业务系统后，从 `deploy/production/compose.yaml` 删除 `mock-business` 服务，并去掉 `.env` 里的 `mock-business` 白名单项与 `AGENT_TOOL_ALLOW_PRIVATE_NETWORKS`。
+
+镜像：
+
+```sh
+# 已有本地构建（三套 Compose 的默认值）
+docker build -t nexusdesk/mock-business-api:local backend/examples/mock_business
+# 内网无法直连 Docker Hub 时换基础镜像源
+docker build --build-arg PYTHON_IMAGE=<mirror>/library/python:3.12-slim-bookworm \
+  -t nexusdesk/mock-business-api:local backend/examples/mock_business
+```
+
+生产环境建议推送到私有仓库，再用 `NEXUSDESK_MOCK_IMAGE` 指向带 tag 的镜像，不要依赖服务器上的源码目录。
+
+**关键：服务地址写在数据里，不写在环境变量里。** 工具集的目标地址由界面配置（配置管理 → 工具集 → 服务地址），因此换拓扑后要同步改地址：
+
+| 平台跑在哪 | 工具集里填 |
+|---|---|
+| 宿主机（本地开发，`compose.yaml`） | `http://127.0.0.1:8010` |
+| quickstart 的 `app` 容器 | `http://mock-business:8010` |
+| production 的 `api` 容器 | `http://mock-business:8010` |
+
+地址填错的表现是工具集创建成功、执行时报连接失败或 404，不会在保存阶段拦截。演示接口的路径清单位于 `backend/examples/mock_business/README.md`，可用 `python scripts/mock_tools.py` 一键把 25 个接口导入并发布，`python scripts/mock_executors.py` 回填 15 个 provider 的执行器。
 
 ## 记忆检索：pgvector 与降级模式
 
@@ -166,6 +215,8 @@ HNSW 索引随列级联删除，无需单独处理。清理完成后设 `POSTGRE
 自动部署默认把端口绑定到 `0.0.0.0`（`NEXUSDESK_BIND`）。这意味着体验入口会直接对公网开放，请先用安全组/防火墙把 8080 限制到可信 IP。
 
 > **安全说明**：体验入口不再注入身份——未携带凭据的请求会被 API 以 401 拒绝，但登录口令 admin / nexusdesk 是公开写在仓库里的，因此这道防线只挡扫描器和误入者，不构成认证边界。服务器上建议保持默认的 `127.0.0.1` 绑定并只通过 SSH 隧道访问（`ssh -L 8080:127.0.0.1:8080 user@server`，本地用 `https://localhost:8080`）；确需对公网开放时，请在入口外加一层真正的认证（如 Nginx `auth_basic` 或 IP 白名单）。quickstart 使用演示模型（`AGENT_MODEL_BACKEND=demo`）、容器内嵌 PostgreSQL，定位是体验与小规模验证，不适合多人生产使用。
+
+自动部署（`deploy.yml`）只拉起 `postgres` 与 `app`，**不会启动 `mock-business`**：公网体验站不该运行一个不校验调用方、还能被注入 5xx 的上游。模板里的 `up -d` 会带上它，CD 的命令行则是显式的 `up -d postgres app`。要在服务器上手动启用，执行 `docker compose -f deploy/quickstart/compose.yaml up -d mock-business`。
 
 ### 服务器一次性准备
 

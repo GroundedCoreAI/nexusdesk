@@ -86,6 +86,16 @@ Copy-Item deploy/production/.env.example deploy/production/.env
 
 生产拓扑包含 API、Runtime Worker、Channel Worker、Knowledge Worker、Memory Worker、Web 六个常驻服务和一次性的迁移任务。
 
+两套 Compose 都自带演示业务接口（`mock-business`，默认随栈启动，无需额外参数），用于打通行业能力的数据执行器：25 个业务端点、统一 `{code,message,data}` 包体、支持 5xx 故障注入，容器内地址为 `http://mock-business:8010`，宿主机调试用 `http://127.0.0.1:8010`。
+
+只需要应用和数据库时，显式指定服务名即可跳过它：
+
+```bash
+docker compose -f deploy/quickstart/compose.yaml up -d postgres app
+```
+
+该服务不校验调用方，接入真实业务系统后应从生产拓扑中移除，详见[部署手册](deploy/README.md#演示业务接口mock-business)。
+
 HTTPS、备份、升级与外部访问配置见[部署手册](deploy/README.md)。
 
 ## 核心能力与架构

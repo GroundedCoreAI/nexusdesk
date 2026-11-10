@@ -18,6 +18,9 @@ from agent_platform.business_capabilities.customer_service.routing.settings impo
 from agent_platform.business_capabilities.customer_service.scenarios.service import (
     ScenarioService,
 )
+from agent_platform.business_capabilities.customer_service.scenarios.tool_bridge import (
+    ScenarioToolBridge,
+)
 from agent_platform.business_capabilities.customer_service.service import CustomerService
 from agent_platform.business_capabilities.customer_service.service_apps.service import (
     ServiceApplicationService,
@@ -92,8 +95,14 @@ class PlatformServices:
         self.policy = ExecutionPolicy(self.tools, contributions)
         self.gateway = ModelGateway(engine, settings, model_client)
         self.agents = AgentService(engine, self.tools, self.gateway.catalog)
-        self.scenarios = ScenarioService(engine, self.agents)
         self.providers = ServiceProviderRegistry(engine)
+        # Scenarios may declare provider executors; the bridge is the only path
+        # from a scenario handler to a real gateway call.
+        self.scenarios = ScenarioService(
+            engine,
+            self.agents,
+            ScenarioToolBridge(self.tools, self.providers, self.tool_workspace),
+        )
         self.industry_packs = IndustryPackService(engine, self.providers)
         self.service_apps = ServiceApplicationService(
             engine,
