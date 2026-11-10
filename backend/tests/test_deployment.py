@@ -236,10 +236,13 @@ def test_deployment_topologies_and_no_secret_copy():
     prod = yaml.safe_load(
         (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
     )
-    assert set(quick["services"]) == {"postgres", "app"}
+    assert set(quick["services"]) == {"postgres", "app", "mock-business"}
     # Quickstart must default to loopback-only; NEXUSDESK_BIND may widen it.
     assert quick["services"]["app"]["ports"][0].startswith("${NEXUSDESK_BIND:-127.0.0.1}:")
     assert "ports" not in quick["services"]["postgres"]
+    # The demo business upstream ships with quickstart for local trials only: it
+    # authenticates nobody, so it must stay loopback-bound.
+    assert quick["services"]["mock-business"]["ports"][0].startswith("127.0.0.1:")
     assert set(prod["services"]) == {
         "migrate",
         "api",
@@ -248,7 +251,11 @@ def test_deployment_topologies_and_no_secret_copy():
         "channel-worker",
         "knowledge-worker",
         "memory-worker",
+        "mock-business",
     }
+    # Production keeps the demo upstream on the internal network only; it must
+    # never publish a host port, and real deployments remove it before go-live.
+    assert "ports" not in prod["services"]["mock-business"]
     for name in ("api", "runtime-worker", "channel-worker", "knowledge-worker", "memory-worker"):
         assert prod["services"][name]["environment"]["AGENT_EMBEDDED_WORKER"] == "false"
         assert (
