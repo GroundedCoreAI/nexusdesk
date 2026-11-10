@@ -99,8 +99,7 @@ class ServiceApplicationService:
             }
         )
         item["has_unpublished_changes"] = (
-            row["published_version"] is None
-            or row.get("published_config") != row["draft"]
+            row["published_version"] is None or row.get("published_config") != row["draft"]
         )
         return item
 
@@ -396,16 +395,13 @@ FOR UPDATE
                 return name
 
             raw_config = dict(current["draft"])
-            raw_config["service_categories"] = [
-                item.model_dump(mode="json") for item in categories
-            ]
+            raw_config["service_categories"] = [item.model_dump(mode="json") for item in categories]
             config = ServiceApplicationConfig.model_validate(raw_config)
 
             reference_keys = [item.key for item in config.scenarios]
             if reference_keys:
                 key_params = {
-                    f"scenario_key_{index}": value
-                    for index, value in enumerate(reference_keys)
+                    f"scenario_key_{index}": value for index, value in enumerate(reference_keys)
                 }
                 placeholders = ",".join(f":{name}" for name in key_params)
                 scenario_rows = await many(
@@ -564,10 +560,7 @@ FOR UPDATE
             )
             if current["draft_revision"] != revision:
                 raise DomainError("service_application_revision_conflict", 409)
-            if (
-                current["published_version"] is not None
-                and current["status"] != "offline"
-            ):
+            if current["published_version"] is not None and current["status"] != "offline":
                 raise DomainError("service_application_must_be_offline", 409)
             row = await one(
                 connection,
@@ -792,9 +785,7 @@ WHERE s.tenant_id=:tenant AND {scope_sql}
         draft = row.get("draft")
         published_config = row.get("published_config")
         effective_version = (
-            reference.version
-            if reference.version is not None
-            else row.get("published_version")
+            reference.version if reference.version is not None else row.get("published_version")
         )
         effective_config: ScenarioConfig | None = None
         if version_config is not None:
@@ -1263,10 +1254,7 @@ WHERE a.tenant_id=:tenant AND {scope_sql} AND a.application_key=:key
         best_score = -1
         for candidate in candidates:
             config: ScenarioConfig = candidate["config"]
-            if any(
-                term.casefold() in normalized
-                for term in config.matching.negative_keywords
-            ):
+            if any(term.casefold() in normalized for term in config.matching.negative_keywords):
                 continue
             score = sum(
                 max(1, len(term))
@@ -1289,9 +1277,7 @@ WHERE a.tenant_id=:tenant AND {scope_sql} AND a.application_key=:key
             if not reference.enabled:
                 continue
             row = await self._scenario_row(connection, tenant, scope, reference)
-            scenario_config = ScenarioConfig.model_validate(
-                row["version_config"] or row["draft"]
-            )
+            scenario_config = ScenarioConfig.model_validate(row["version_config"] or row["draft"])
             candidates.append(
                 {
                     "key": reference.key,

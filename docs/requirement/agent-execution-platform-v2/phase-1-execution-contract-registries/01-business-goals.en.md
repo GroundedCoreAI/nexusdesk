@@ -1,8 +1,9 @@
 # Phase 1 · Execution Contracts and Registries — Business Goals
 
-> Status: Pending review / Pending implementation
-> Created: 2026-11-02
-> Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 4–6, 15–17, and 19–21, Phase 1
+> Status: Design decisions frozen (R1–R11); local test and local automated acceptance evidence exists, the full suite and CI remain pending, and formal human acceptance/sign-off is incomplete
+> Created: 2026-11-02; design frozen: 2026-11-08
+> Revised: 2026-11-09 (R11 owned-task documentation clarification; no lifecycle behavior change)
+> Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 4–6, 15–17, and 19–21, Phase 1; `08-implementation-breakdown.en.md` (R1–R11, T1–T8)
 
 ## Problems to Solve
 
@@ -54,6 +55,7 @@ The existing `RuntimeFault`, Run states, and Runtime Events serve the single ReA
 
 ## Risks and Constraints
 
+- **Accepted entry risk (not Phase 0 acceptance)**: The user explicitly requested Phase 1 startup on 2026-11-08. Phase 0 implementation is committed and pushed, but clean committed-artifact CI double-runs, authorized real historical samples, and human sign-offs remain open. The product owner and QA continue to track those Phase 0 closure items; Phase 1 must not describe them as passed or treat startup as formal acceptance.
 - **Over-designed contracts**: Including every Engine-private concept would undermine stability; fix only fields required across Engines and isolate the rest in versioned native metadata.
 - **Non-deterministic version resolution**: Automatically selecting the “latest” version makes a Run irreproducible; Phase 1 requires explicit `adapter_version` and forbids implicit latest.
 - **An overly permissive test double**: LocalTestAdapter could hide lifecycle errors; the common contract suite is mandatory for every later Adapter, not merely a test of the test implementation.

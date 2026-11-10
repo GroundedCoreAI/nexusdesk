@@ -89,6 +89,7 @@ class FareDispute(Body):
     fare_trip_no: str = Field(description="行程号")
     reason: str = Field(default="", description="异议说明")
 
+
 # Mutating calls land here so a reset restores the documented fixtures.
 CREATED: list[dict[str, Any]] = []
 FAULT = {"mode": "", "remaining": 0}
@@ -161,7 +162,9 @@ async def simulate(request: Request, call_next):
     }.get(mode)
     if injected:
         status, code, message = injected
-        return JSONResponse(status_code=status, content={"code": code, "message": message, "data": None})
+        return JSONResponse(
+            status_code=status, content={"code": code, "message": message, "data": None}
+        )
     return await call_next(request)
 
 
@@ -268,7 +271,11 @@ async def recharge_status(order_no: str = Query(..., description="充值单号")
     return not_found(f"充值单不存在: {order_no}") if record is None else ok(record)
 
 
-@app.post("/game/recharges/missing-report", operation_id="gaming_recharge_report", summary="上报充值未到账")
+@app.post(
+    "/game/recharges/missing-report",
+    operation_id="gaming_recharge_report",
+    summary="上报充值未到账",
+)
 async def recharge_report(body: RechargeReport) -> Any:
     order_no = body.order_no.strip()
     record = fx.RECHARGES.get(order_no)
@@ -352,7 +359,11 @@ async def review_appeal(body: ReviewAppeal) -> Any:
     return ok(appeal)
 
 
-@app.post("/creator/copyright/complaints", operation_id="creator_copyright_complaint", summary="提交版权投诉")
+@app.post(
+    "/creator/copyright/complaints",
+    operation_id="creator_copyright_complaint",
+    summary="提交版权投诉",
+)
 async def copyright_complaint(body: CopyrightComplaint) -> Any:
     work_id = body.work_id.strip()
     if work_id not in fx.WORKS:
@@ -372,7 +383,11 @@ async def revenue_status(
     creator_id: str = Query(..., description="创作者 ID"),
     period: str = Query("", description="结算周期，如 2026-10，留空取最近一期"),
 ) -> Any:
-    rows = [r for r in fx.REVENUE if r["creator_id"] == creator_id and (not period or r["period"] == period)]
+    rows = [
+        r
+        for r in fx.REVENUE
+        if r["creator_id"] == creator_id and (not period or r["period"] == period)
+    ]
     if not rows:
         return not_found(f"没有找到结算单: {creator_id} {period}".strip())
     return ok(rows[0])
@@ -389,7 +404,9 @@ async def trip_status(trip_no: str = Query(..., description="行程号，如 TR2
     return not_found(f"行程不存在: {trip_no}") if trip is None else ok(trip)
 
 
-@app.post("/mobility/trips/lost-items", operation_id="mobility_lost_item_report", summary="上报遗失物品")
+@app.post(
+    "/mobility/trips/lost-items", operation_id="mobility_lost_item_report", summary="上报遗失物品"
+)
 async def lost_item_report(body: LostItemReport) -> Any:
     trip_no = body.trip_no.strip()
     if trip_no not in fx.TRIPS:
@@ -432,7 +449,9 @@ async def fare_dispute(body: FareDispute) -> Any:
 
 
 @app.get("/community/accounts", operation_id="community_account_status", summary="查询社区账号")
-async def community_account(account_id: str = Query(..., description="账号 ID，如 ACC-3001")) -> Any:
+async def community_account(
+    account_id: str = Query(..., description="账号 ID，如 ACC-3001"),
+) -> Any:
     account = fx.COMMUNITY_ACCOUNTS.get(account_id)
     return not_found(f"账号不存在: {account_id}") if account is None else ok(account)
 
@@ -443,7 +462,11 @@ async def community_content(content_id: str = Query(..., description="内容 ID"
     return not_found(f"内容不存在: {content_id}") if content is None else ok(content)
 
 
-@app.get("/community/memberships", operation_id="community_membership_entitlement", summary="查询会员权益")
+@app.get(
+    "/community/memberships",
+    operation_id="community_membership_entitlement",
+    summary="查询会员权益",
+)
 async def membership_entitlement(account_id: str = Query(..., description="账号 ID")) -> Any:
     membership = fx.MEMBERSHIPS.get(account_id)
     return not_found(f"会员信息不存在: {account_id}") if membership is None else ok(membership)

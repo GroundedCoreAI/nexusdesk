@@ -26,9 +26,7 @@ DEMO_MANIFESTS = {
         build_mobility_pack(),
     )
 }
-EXPECTED_SCENARIOS = sum(
-    len(DEMO_MANIFESTS[key].scenario_templates) for key in DEMO_PACK_KEYS
-)
+EXPECTED_SCENARIOS = sum(len(DEMO_MANIFESTS[key].scenario_templates) for key in DEMO_PACK_KEYS)
 
 
 async def test_quickstart_seed_is_repeatable_and_scenarios_work(platform, monkeypatch):

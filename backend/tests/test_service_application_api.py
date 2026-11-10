@@ -82,9 +82,7 @@ class FakeApplicationService:
         self._record("update", tenant=tenant, actor=actor, key=key, body=body, scope=scope)
         return {"key": key, "revision": body.revision + 1}
 
-    async def update_service_catalog(
-        self, tenant: str, actor: str, key: str, body: Any, *, scope
-    ):
+    async def update_service_catalog(self, tenant: str, actor: str, key: str, body: Any, *, scope):
         self._record(
             "update_service_catalog",
             tenant=tenant,

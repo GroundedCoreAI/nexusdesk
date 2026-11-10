@@ -162,9 +162,7 @@ async def test_application_update_publish_rollback_and_scope(platform):
         workspace_id="default",
     )
     assert len((await applications.list(settings.tenant_id, scope=own_scope))["items"]) == 1
-    assert (
-        await applications.list(settings.tenant_id, scope=other_workspace)
-    )["items"] == []
+    assert (await applications.list(settings.tenant_id, scope=other_workspace))["items"] == []
     assert (await applications.list("another-tenant", scope=other_tenant))["items"] == []
 
 
@@ -200,9 +198,7 @@ async def test_service_catalog_reorder_rename_and_merge_update_scenario_drafts(p
     client, services, settings = platform
     await services.groups.business.scenarios.seed_defaults(settings.tenant_id)
     await services.groups.business.service_apps.seed_defaults(settings.tenant_id)
-    detail = (
-        await client.get("/api/v1/service-apps/consumer-service")
-    ).json()
+    detail = (await client.get("/api/v1/service-apps/consumer-service")).json()
 
     response = await client.put(
         "/api/v1/service-apps/consumer-service/service-catalog",
@@ -236,9 +232,7 @@ async def test_service_catalog_reorder_rename_and_merge_update_scenario_drafts(p
     ]
 
     for key in ("query-orders", "track-logistics", "after-sales"):
-        scenario = (
-            await client.get(f"/api/v1/service-scenarios/{key}")
-        ).json()
+        scenario = (await client.get(f"/api/v1/service-scenarios/{key}")).json()
         assert scenario["config"]["category"] == "交易服务"
 
     stale = await client.put(

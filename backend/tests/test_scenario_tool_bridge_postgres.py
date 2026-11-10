@@ -217,7 +217,9 @@ async def simulate(client, key, body):
 
 async def test_object_read_uses_upstream_facts(platform, orders_upstream):
     client, _, _ = platform
-    await publish_tool(client, orders_upstream, "order_status", "/orders", {"order_id": {"type": "string"}})
+    await publish_tool(
+        client, orders_upstream, "order_status", "/orders", {"order_id": {"type": "string"}}
+    )
     await publish_provider(
         client,
         executors={
@@ -253,7 +255,9 @@ async def test_object_read_uses_upstream_facts(platform, orders_upstream):
 
 async def test_missing_object_is_reported_from_upstream(platform, orders_upstream):
     client, _, _ = platform
-    await publish_tool(client, orders_upstream, "order_status", "/orders", {"order_id": {"type": "string"}})
+    await publish_tool(
+        client, orders_upstream, "order_status", "/orders", {"order_id": {"type": "string"}}
+    )
     await publish_provider(
         client,
         executors={
@@ -330,7 +334,12 @@ async def test_placeholder_provider_keeps_the_label_only_simulation(platform):
         key,
         {
             "message": "我的订单到哪了",
-            "object": {"id": "order-1", "type": "order", "status": "运输中", "facts": {"status": "运输中"}},
+            "object": {
+                "id": "order-1",
+                "type": "order",
+                "status": "运输中",
+                "facts": {"status": "运输中"},
+            },
         },
     )
 

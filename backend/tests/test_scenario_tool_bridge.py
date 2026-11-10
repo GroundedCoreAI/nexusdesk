@@ -208,7 +208,9 @@ def test_successful_read_replaces_facts_but_keeps_request_extras():
 
 
 def test_missing_object_is_reported_not_faked():
-    outcome = ToolOutcome(tool="order_status", ok=False, error="upstream_http_error", error_status=404)
+    outcome = ToolOutcome(
+        tool="order_status", ok=False, error="upstream_http_error", error_status=404
+    )
 
     resolution = ScenarioToolBridge._merged(
         object_ref(),
@@ -223,7 +225,9 @@ def test_missing_object_is_reported_not_faked():
 
 
 def test_forbidden_object_is_reported_not_dropped():
-    outcome = ToolOutcome(tool="order_status", ok=False, error="upstream_http_error", error_status=403)
+    outcome = ToolOutcome(
+        tool="order_status", ok=False, error="upstream_http_error", error_status=403
+    )
 
     resolution = ScenarioToolBridge._merged(
         object_ref(),

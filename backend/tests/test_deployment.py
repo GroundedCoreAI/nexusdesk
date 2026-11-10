@@ -113,9 +113,7 @@ def test_migrate_installs_demo_packs_only_when_opted_in(monkeypatch):
     bootstrap.main("migrate")
     assert seeds == []
 
-    monkeypatch.setattr(
-        bootstrap, "Settings", lambda: configuration(seed_industry_packs=True)
-    )
+    monkeypatch.setattr(bootstrap, "Settings", lambda: configuration(seed_industry_packs=True))
     bootstrap.main("migrate")
     assert seeds == ["packs"]
 
@@ -230,12 +228,8 @@ async def test_existing_encrypted_credentials_require_original_key(tmp_path, mon
 def test_deployment_topologies_and_no_secret_copy():
     import yaml
 
-    quick = yaml.safe_load(
-        (ROOT / "deploy/quickstart/compose.yaml").read_text(encoding="utf-8")
-    )
-    prod = yaml.safe_load(
-        (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
-    )
+    quick = yaml.safe_load((ROOT / "deploy/quickstart/compose.yaml").read_text(encoding="utf-8"))
+    prod = yaml.safe_load((ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8"))
     assert set(quick["services"]) == {"postgres", "app", "mock-business"}
     # Quickstart must default to loopback-only; NEXUSDESK_BIND may widen it.
     assert quick["services"]["app"]["ports"][0].startswith("${NEXUSDESK_BIND:-127.0.0.1}:")
@@ -273,21 +267,17 @@ def test_deployment_topologies_and_no_secret_copy():
         "-m",
         "agent_platform.applications.worker.memory",
     ]
-    assert (
-        "__LOCAL_TOKEN__"
-        not in (ROOT / "deploy/production/nginx.conf").read_text(encoding="utf-8")
+    assert "__LOCAL_TOKEN__" not in (ROOT / "deploy/production/nginx.conf").read_text(
+        encoding="utf-8"
     )
     # Quickstart loads the industry case set; production stays clean unless opted in.
     assert quick["services"]["app"]["environment"]["AGENT_SEED_INDUSTRIES"] == "true"
     for name in ("api", "runtime-worker", "channel-worker", "knowledge-worker", "memory-worker"):
         assert "AGENT_SEED_INDUSTRIES" not in prod["services"][name]["environment"]
-    assert (
-        "AGENT_SEED_INDUSTRIES=false"
-        in (ROOT / "deploy/production/.env.example").read_text(encoding="utf-8")
-    )
-    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text(
+    assert "AGENT_SEED_INDUSTRIES=false" in (ROOT / "deploy/production/.env.example").read_text(
         encoding="utf-8"
     )
+    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text(encoding="utf-8")
     assert "proxy_set_header Authorization $http_authorization;" in quick_nginx
     assert quick_nginx.count("proxy_set_header X-Real-IP $remote_addr;") == 2
     assert quick_nginx.count("proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;") == 2
@@ -302,12 +292,8 @@ def test_deployment_topologies_and_no_secret_copy():
 def test_quickstart_serves_https_and_production_leaves_tls_outside():
     import yaml
 
-    quick = yaml.safe_load(
-        (ROOT / "deploy/quickstart/compose.yaml").read_text(encoding="utf-8")
-    )
-    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text(
-        encoding="utf-8"
-    )
+    quick = yaml.safe_load((ROOT / "deploy/quickstart/compose.yaml").read_text(encoding="utf-8"))
+    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text(encoding="utf-8")
 
     # Quickstart terminates TLS itself so a LAN address is still a secure context.
     assert "listen 8080 ssl;" in quick_nginx
@@ -321,20 +307,14 @@ def test_quickstart_serves_https_and_production_leaves_tls_outside():
     # Production must stay untouched: TLS belongs to the host or an ingress proxy.
     production_nginx = (ROOT / "deploy/production/nginx.conf").read_text(encoding="utf-8")
     assert "ssl" not in production_nginx
-    prod = yaml.safe_load(
-        (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
-    )
+    prod = yaml.safe_load((ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8"))
     for name in ("api", "web"):
         assert "AGENT_TLS_HOSTS" not in prod["services"][name].get("environment", {})
 
-    assert (
-        "https://localhost:${NEXUSDESK_PORT:-8080}"
-        in (ROOT / "nexusdesk").read_text(encoding="utf-8")
+    assert "https://localhost:${NEXUSDESK_PORT:-8080}" in (ROOT / "nexusdesk").read_text(
+        encoding="utf-8"
     )
-    assert (
-        "https://localhost:$port"
-        in (ROOT / "nexusdesk.ps1").read_text(encoding="utf-8")
-    )
+    assert "https://localhost:$port" in (ROOT / "nexusdesk.ps1").read_text(encoding="utf-8")
 
 
 def test_healthcheck_matches_the_quickstart_scheme():
@@ -365,9 +345,7 @@ def test_tls_hosts_accepts_a_comma_separated_list(monkeypatch):
 def test_deploy_workflow_forwards_the_tls_host_list():
     import yaml
 
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
-    )
+    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
     deploy = workflow["jobs"]["deploy"]
     # The server is reached by its public address, so the certificate has to cover
     # it. Without this the SAN stays loopback-only and a browser reports a name
@@ -383,13 +361,9 @@ def test_deploy_workflow_forwards_the_tls_host_list():
 def test_docker_hub_mirror_cannot_fail_a_deploy():
     import yaml
 
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
-    )
+    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
     build = workflow["jobs"]["build"]
-    steps = {
-        step["name"]: step for step in build["steps"] if isinstance(step.get("name"), str)
-    }
+    steps = {step["name"]: step for step in build["steps"] if isinstance(step.get("name"), str)}
 
     login = steps["Login to Docker Hub"]
     # An expired Docker Hub token or an outage there must not fail the deploy.
@@ -419,16 +393,12 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     assert "image_registry=ghcr.io/" in select_registry
 
     deploy = workflow["jobs"]["deploy"]
-    deploy_step = next(
-        s for s in deploy["steps"] if s.get("name") == "Deploy to test server"
-    )
+    deploy_step = next(s for s in deploy["steps"] if s.get("name") == "Deploy to test server")
     assert "IMAGE_REGISTRY" in deploy_step["with"]["envs"].split(",")
+    assert 'export NEXUSDESK_IMAGE_REGISTRY="${IMAGE_REGISTRY}"' in deploy_step["with"]["script"]
     assert (
-        'export NEXUSDESK_IMAGE_REGISTRY="${IMAGE_REGISTRY}"'
-        in deploy_step["with"]["script"]
-    )
-    assert 'export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"' in (
-        deploy_step["with"]["script"]
+        'export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"'
+        in (deploy_step["with"]["script"])
     )
     assert deploy_step["with"]["command_timeout"] == "60m"
 
@@ -436,9 +406,7 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
 def test_deploy_workflow_only_deploys_ci_verified_integration_commits():
     import yaml
 
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
-    )
+    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
 
     # Branch-management spec V2: deploys happen only when the CI workflow
     # completes for a push to `integration`; `main` events, release tags and
@@ -457,9 +425,7 @@ def test_deploy_workflow_only_deploys_ci_verified_integration_commits():
     # The guard job re-validates the upstream run: push event on `integration`
     # with conclusion success, and resolves an immutable full commit SHA.
     guard = workflow["jobs"]["guard"]
-    guard_run = "\n".join(
-        step.get("run", "") for step in guard["steps"]
-    )
+    guard_run = "\n".join(step.get("run", "") for step in guard["steps"])
     assert '"${WR_EVENT}" != "push"' in guard_run
     assert '"${WR_BRANCH}" != "integration"' in guard_run
     assert '"${WR_CONCLUSION}" != "success"' in guard_run
@@ -468,9 +434,7 @@ def test_deploy_workflow_only_deploys_ci_verified_integration_commits():
     # The image is built from the exact commit the upstream CI verified,
     # tagged with that commit's short SHA — never the branch tip or `latest`.
     build = workflow["jobs"]["build"]
-    checkout = next(
-        s for s in build["steps"] if s.get("name") == "Checkout the verified commit"
-    )
+    checkout = next(s for s in build["steps"] if s.get("name") == "Checkout the verified commit")
     assert checkout["with"]["ref"] == "${{ needs.guard.outputs.commit_sha }}"
     build_push = next(
         s for s in build["steps"] if s.get("name") == "Build and push quickstart image"
