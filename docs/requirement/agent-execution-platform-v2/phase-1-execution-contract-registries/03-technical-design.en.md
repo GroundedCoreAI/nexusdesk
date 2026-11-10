@@ -2,7 +2,7 @@
 
 > Status: Design decisions frozen (R1–R11); local test and local automated acceptance evidence exists, the full suite and CI remain pending, and formal human acceptance/sign-off is incomplete
 > Created: 2026-11-02; design frozen: 2026-11-08
-> Revised: 2026-11-09 (R11 owned-task documentation clarification; no lifecycle behavior change)
+> Revised: 2026-11-09 (R11 owned-task documentation clarification; no lifecycle behavior change); 2026-11-10 (record the Phase 0 frozen production Adapter identity; no design or behavior change)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 4–6, 15–17, and 19, Phase 1; `02-requirements.en.md` (FR-1–FR-6, AC-1–AC-8); `08-implementation-breakdown.en.md` (R1–R11, T1–T8)
 
 ## Current-State Review and Change Overview
@@ -37,6 +37,8 @@ Reuse `extension_contracts.base.ContractModel` without modifying it. Add `Execut
 - Engine/Protocol IDs match `^[a-z0-9][a-z0-9_-]{0,63}$`; Adapter versions match `^v[1-9][0-9]*$`. Reject `latest`, `v0`, `v01`, surrounding whitespace, and non-strings.
 - Common opaque strings are nonempty, at most 200 characters, control-character-free, and free of leading/trailing whitespace; IDs are never trimmed. `input` is not an opaque ID: original newlines and other content are preserved verbatim.
 - `event_type` is at most 100 characters and matches `^[a-z0-9]+(?:[._-][a-z0-9]+)*$`; event sequence starts at 1.
+
+This phase preserves the Phase 0 frozen production Adapter identity `(react,native,v1)`, which remains independent of the LocalTestAdapter and ContractProbe test identities. Phase 1 fixes the common contracts and registration semantics only; this statement does not claim that production Adapter wiring is complete.
 
 | Model | Exact fields and defaults | Key invariants |
 |---|---|---|

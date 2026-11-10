@@ -2,7 +2,7 @@
 
 > 状态：设计决策已冻结（R1～R11）；本地测试与本地自动化验收证据已形成，完整套件与 CI 待执行，正式人工验收及签字未完成
 > 创建：2026-11-02；设计冻结：2026-11-08
-> 修订：2026-11-09（R11 owned-task 文档澄清，无生命周期行为变更）
+> 修订：2026-11-09（R11 owned-task 文档澄清，无生命周期行为变更）；2026-11-10（补录 Phase 0 冻结的生产 Adapter 精确身份，无设计或行为变更）
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 4～6、15～17、19 节，Phase 1；`02-requirements.md`（FR-1～FR-6、AC-1～AC-8）；`08-implementation-breakdown.md`（R1～R11、T1～T8）
 
 ## 现状核查与改动总览
@@ -37,6 +37,8 @@
 - Engine/Protocol ID 匹配 `^[a-z0-9][a-z0-9_-]{0,63}$`；Adapter 版本匹配 `^v[1-9][0-9]*$`。`latest`、`v0`、`v01`、首尾空白及非字符串均拒绝。
 - 公共 opaque 字符串非空、最大 200 字符、不含控制字符且无首尾空白，绝不 trim ID。`input` 不属于 opaque ID，允许原始换行等内容并逐字保留。
 - `event_type` 最长 100 字符，匹配 `^[a-z0-9]+(?:[._-][a-z0-9]+)*$`；事件序号从 1 开始。
+
+本阶段继续冻结 Phase 0 的生产 Adapter 身份 `(react,native,v1)`；它与 LocalTestAdapter、ContractProbe 的测试身份相互独立。Phase 1 只固定公共契约与注册语义，不据此宣称已完成生产 Adapter 接线。
 
 | 模型 | 精确字段与默认值 | 关键不变量 |
 |---|---|---|
