@@ -43,8 +43,23 @@ class FakeApplicationService:
     def _record(self, name: str, **values: Any) -> None:
         self.calls.setdefault(name, []).append(values)
 
-    async def list(self, tenant: str, *, status: str, q: str, scope: BusinessScope):
-        self._record("list", tenant=tenant, status=status, q=q, scope=scope)
+    async def list(
+        self,
+        tenant: str,
+        *,
+        status: str,
+        q: str,
+        scope: BusinessScope,
+        archived: bool = False,
+    ):
+        self._record(
+            "list",
+            tenant=tenant,
+            status=status,
+            q=q,
+            scope=scope,
+            archived=archived,
+        )
         return {"items": [], "total": 0}
 
     async def overview(self, tenant: str, *, scope: BusinessScope):
@@ -67,9 +82,7 @@ class FakeApplicationService:
         self._record("update", tenant=tenant, actor=actor, key=key, body=body, scope=scope)
         return {"key": key, "revision": body.revision + 1}
 
-    async def update_service_catalog(
-        self, tenant: str, actor: str, key: str, body: Any, *, scope
-    ):
+    async def update_service_catalog(self, tenant: str, actor: str, key: str, body: Any, *, scope):
         self._record(
             "update_service_catalog",
             tenant=tenant,
@@ -91,6 +104,25 @@ class FakeApplicationService:
             scope=scope,
         )
         return {"key": key, "status": status}
+
+    async def archive(self, tenant, actor, key, revision, *, scope):
+        self._record(
+            "archive",
+            tenant=tenant,
+            actor=actor,
+            key=key,
+            revision=revision,
+            scope=scope,
+        )
+        return {"key": key, "archived": True}
+
+    async def restore(self, tenant, actor, key, *, scope):
+        self._record("restore", tenant=tenant, actor=actor, key=key, scope=scope)
+        return {"key": key, "archived": False}
+
+    async def purge(self, tenant, actor, key, *, scope):
+        self._record("purge", tenant=tenant, actor=actor, key=key, scope=scope)
+        return {"key": key, "deleted": True}
 
     async def publish(self, tenant, actor, key, revision, *, scope):
         self._record(
@@ -172,6 +204,7 @@ def test_list_overview_and_get_forward_scope_filters_and_key():
         "status": "review",
         "q": "消费",
         "scope": SCOPE,
+        "archived": False,
     }
     assert applications.calls["overview"][0]["scope"] == SCOPE
     assert applications.calls["get"][0]["key"] == "consumer-service"
@@ -188,6 +221,11 @@ def test_write_routes_require_admin_and_forward_revisions():
     payload = {"key": "consumer-service", "config": _application_config()}
     with _client(applications, READER) as client:
         denied = client.post("/api/v1/service-apps", json=payload)
+        denied_archive = client.post(
+            "/api/v1/service-apps/consumer-service/archive", json={"revision": 1}
+        )
+        denied_restore = client.post("/api/v1/service-apps/consumer-service/restore")
+        denied_purge = client.delete("/api/v1/service-apps/consumer-service")
     with _client(applications, ADMIN) as client:
         created = client.post("/api/v1/service-apps", json=payload)
         updated = client.put(
@@ -206,6 +244,12 @@ def test_write_routes_require_admin_and_forward_revisions():
             "/api/v1/service-apps/consumer-service/rollback",
             json={"version": 1, "revision": 5},
         )
+        archived = client.post(
+            "/api/v1/service-apps/consumer-service/archive",
+            json={"revision": 7},
+        )
+        restored = client.post("/api/v1/service-apps/consumer-service/restore")
+        purged = client.delete("/api/v1/service-apps/consumer-service")
         catalog = client.put(
             "/api/v1/service-apps/consumer-service/service-catalog",
             json={
@@ -219,11 +263,17 @@ def test_write_routes_require_admin_and_forward_revisions():
         )
 
     assert denied.status_code == 403
+    assert denied_archive.status_code == 403
+    assert denied_restore.status_code == 403
+    assert denied_purge.status_code == 403
     assert created.status_code == 201
     assert updated.status_code == 200
     assert review.status_code == 200
     assert published.status_code == 200
     assert rolled_back.status_code == 200
+    assert archived.status_code == 200
+    assert restored.status_code == 200
+    assert purged.status_code == 200
     assert catalog.status_code == 200
     assert applications.calls["create"][0]["body"].key == "consumer-service"
     assert applications.calls["update"][0]["body"].revision == 2
@@ -241,6 +291,25 @@ def test_write_routes_require_admin_and_forward_revisions():
     assert catalog_call["body"].revision == 6
     assert catalog_call["body"].category_changes == {"订单服务": "交易服务"}
     assert catalog_call["scope"] == SCOPE
+    assert applications.calls["archive"][0] == {
+        "tenant": TENANT,
+        "actor": "admin",
+        "key": "consumer-service",
+        "revision": 7,
+        "scope": SCOPE,
+    }
+    assert applications.calls["restore"][0] == {
+        "tenant": TENANT,
+        "actor": "admin",
+        "key": "consumer-service",
+        "scope": SCOPE,
+    }
+    assert applications.calls["purge"][0] == {
+        "tenant": TENANT,
+        "actor": "admin",
+        "key": "consumer-service",
+        "scope": SCOPE,
+    }
 
 
 def test_service_catalog_write_requires_admin():

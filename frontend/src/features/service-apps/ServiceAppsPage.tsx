@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Spin, Switch, Tooltip } from 'antd';
+import { Button, Dropdown, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Spin, Switch, Tooltip } from 'antd';
+import type { MenuProps } from 'antd';
 import {
     ApartmentOutlined,
     ApiOutlined,
@@ -25,6 +26,7 @@ import {
     InfoCircleOutlined,
     LinkOutlined,
     MessageOutlined,
+    MoreOutlined,
     PlayCircleOutlined,
     PlusOutlined,
     ReloadOutlined,
@@ -60,12 +62,16 @@ import type {
     SimulationFact,
     SimulationStep,
     SimulationTrace,
+    ServiceProviderPage,
 } from '../../shared/api/client';
 import {
+    archiveServiceApplication,
     createServiceApplication,
     createServiceScenario,
+    deleteServiceApplication,
     getServiceApplicationReadiness,
     publishServiceApplication,
+    restoreServiceApplication,
     rollbackServiceApplication,
     setServiceApplicationStatus,
     simulateServiceApplication,
@@ -73,6 +79,7 @@ import {
 } from '../../shared/api/client';
 import { Alert, toast, useAccess, useResource } from '../../shared/components/ui';
 import { t } from '../../i18n/index';
+import { ProviderSelect } from './toolSelect';
 import { CustomerExperiencePreview } from '../service-scenarios/CustomerExperiencePreview';
 import { SceneSimulator } from '../service-scenarios/SceneSimulator';
 import { SceneWorkbench } from '../service-scenarios/SceneWorkbench';
@@ -156,6 +163,8 @@ const capabilityTypeLabel: Record<ApplicationCapabilityType, string> = {
 
 const applicationTones = ['violet', 'blue', 'green'] as const;
 
+const archivedPageSize = 6;
+
 function updatedLabel(value?: string) {
     if (!value) return '刚刚';
     const date = new Date(value);
@@ -230,7 +239,20 @@ function AppCatalog({ onNavigate }: { onNavigate: (path: string) => void }) {
     const [createOpen, setCreateOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
+    const [archiveOpen, setArchiveOpen] = useState(false);
+    const archivedApplications = useResource<ServiceApplicationPage>(archiveOpen ? '/service-apps?archived=true' : null);
+    const [restoring, setRestoring] = useState('');
+    const [purging, setPurging] = useState('');
+    const [archivePage, setArchivePage] = useState(1);
+    const [archiveTarget, setArchiveTarget] = useState<ServiceApplicationSummary | null>(null);
+    const [archiving, setArchiving] = useState(false);
     const items = applications.data?.items || [];
+    const archivedItems = archivedApplications.data?.items || [];
+    // The archived list is short by nature, so it pages on the client; the page
+    // is clamped because restoring or purging shrinks the list under the cursor.
+    const archivedPageCount = Math.max(1, Math.ceil(archivedItems.length / archivedPageSize));
+    const currentArchivePage = Math.min(archivePage, archivedPageCount);
+    const pagedArchivedItems = archivedItems.slice((currentArchivePage - 1) * archivedPageSize, currentArchivePage * archivedPageSize);
     const visibleItems = items.filter(app => {
         const term = query.trim().toLocaleLowerCase();
         const matchesQuery = !term || [app.name, app.description, app.key].some(value => value.toLocaleLowerCase().includes(term));
@@ -277,6 +299,73 @@ function AppCatalog({ onNavigate }: { onNavigate: (path: string) => void }) {
         }
     }
 
+    async function restoreArchived(key: string) {
+        setRestoring(key);
+        setError('');
+        try {
+            await restoreServiceApplication(key);
+            applications.refresh();
+            overview.refresh();
+            archivedApplications.refresh();
+            toast.success('服务应用已恢复');
+        }
+        catch (cause) {
+            setError(cause instanceof Error ? cause.message : '恢复服务应用失败');
+        }
+        finally {
+            setRestoring('');
+        }
+    }
+
+    async function purgeArchived(key: string) {
+        setPurging(key);
+        setError('');
+        try {
+            await deleteServiceApplication(key);
+            archivedApplications.refresh();
+            overview.refresh();
+            toast.success('服务应用已彻底删除');
+        }
+        catch (cause) {
+            setError(cause instanceof Error ? cause.message : '彻底删除服务应用失败');
+        }
+        finally {
+            setPurging('');
+        }
+    }
+
+    // A live release has to be taken offline first: archiving only hides the
+    // console row, it never detaches what customers are already talking to.
+    function archiveBlocked(app: ServiceApplicationSummary) {
+        return app.published_version !== null && app.status !== 'offline';
+    }
+
+    async function confirmArchive() {
+        if (!archiveTarget) return;
+        if (archiveBlocked(archiveTarget)) {
+            const key = archiveTarget.key;
+            setArchiveTarget(null);
+            onNavigate(`/service-apps/${key}`);
+            return;
+        }
+        setArchiving(true);
+        setError('');
+        try {
+            await archiveServiceApplication(archiveTarget.key, archiveTarget.revision);
+            setArchiveTarget(null);
+            applications.refresh();
+            overview.refresh();
+            if (archiveOpen) archivedApplications.refresh();
+            toast.success('服务应用已归档，可在「显示已归档」里恢复');
+        }
+        catch (cause) {
+            setError(cause instanceof Error ? cause.message : '归档服务应用失败');
+        }
+        finally {
+            setArchiving(false);
+        }
+    }
+
     return <div className="sa-catalog">
         <section className="sa-catalog-hero">
             <div>
@@ -308,32 +397,68 @@ function AppCatalog({ onNavigate }: { onNavigate: (path: string) => void }) {
                     { value: 'draft', label: '配置中' },
                     { value: 'published', label: '已发布' },
                 ]}/>
+                <Button className="sa-archived-entry" icon={<InboxOutlined/>} onClick={() => {
+                    setError('');
+                    setArchivePage(1);
+                    setArchiveOpen(true);
+                }}>已归档</Button>
             </div>
         </div>
 
         <div className="sa-app-grid">
-            {visibleItems.map((app, index) => <button
-                type="button"
-                className={`sa-app-card ${applicationTones[index % applicationTones.length]}`}
-                key={app.id}
-                onClick={() => onNavigate(`/service-apps/${app.key}`)}
-            >
-                <div className="sa-app-card-top">
-                    <span className="sa-app-icon"><ApartmentOutlined/></span>
-                    <span className={`sa-app-state ${app.status === 'published' ? '' : 'waiting'}`}><i/>{applicationStatusLabel[app.status]}</span>
-                </div>
-                <h3>{app.name}</h3>
-                <p>{app.description || '尚未填写应用描述'}</p>
-                <div className="sa-app-numbers">
-                    <span><strong>{app.scenario_count}</strong><small>业务场景</small></span>
-                    <span><strong>{app.capability_count}</strong><small>执行能力</small></span>
-                    <span><strong>{app.published_version ? `v${app.published_version}` : '未发布'}</strong><small>当前版本</small></span>
-                </div>
-                <div className="sa-app-card-foot">
-                    <span><ClockCircleOutlined/> 最近更新 {updatedLabel(app.updated_at)}</span>
-                    <b>打开应用 <ArrowRightOutlined/></b>
-                </div>
-            </button>)}
+            {visibleItems.map((app, index) => <div className="sa-app-cell" key={app.id}>
+                <button
+                    type="button"
+                    className={`sa-app-card ${applicationTones[index % applicationTones.length]}`}
+                    onClick={() => onNavigate(`/service-apps/${app.key}`)}
+                >
+                    <div className="sa-app-card-top">
+                        <span className="sa-app-icon"><ApartmentOutlined/></span>
+                        <span className={`sa-app-state ${app.status === 'published' ? '' : 'waiting'}`}><i/>{applicationStatusLabel[app.status]}</span>
+                    </div>
+                    <h3>{app.name}</h3>
+                    <p>{app.description || '尚未填写应用描述'}</p>
+                    <div className="sa-app-numbers">
+                        <span><strong>{app.scenario_count}</strong><small>业务场景</small></span>
+                        <span><strong>{app.capability_count}</strong><small>执行能力</small></span>
+                        <span><strong>{app.published_version ? `v${app.published_version}` : '未发布'}</strong><small>当前版本</small></span>
+                    </div>
+                    <div className="sa-app-card-foot">
+                        <span><ClockCircleOutlined/> 最近更新 {updatedLabel(app.updated_at)}</span>
+                        <b>打开应用 <ArrowRightOutlined/></b>
+                    </div>
+                </button>
+                {admin && <div className="sa-app-more">
+                    <Dropdown
+                        trigger={['click']}
+                        placement="bottomRight"
+                        menu={{
+                            items: [
+                                { key: 'open', label: '打开应用', icon: <ArrowRightOutlined/> },
+                                { key: 'experience', label: '打开统一体验', icon: <EyeOutlined/> },
+                                { type: 'divider' },
+                                {
+                                    key: 'archive',
+                                    label: '归档应用',
+                                    icon: <DeleteOutlined/>,
+                                    danger: true,
+                                    disabled: archiving,
+                                },
+                            ] as MenuProps['items'],
+                            onClick: ({ key }) => {
+                                if (key === 'archive') {
+                                    setError('');
+                                    setArchiveTarget(app);
+                                    return;
+                                }
+                                onNavigate(key === 'experience' ? `/service-apps/${app.key}/experience` : `/service-apps/${app.key}`);
+                            },
+                        }}
+                    >
+                        <Button type="text" size="small" aria-label={`${app.name} 更多操作`} icon={<MoreOutlined aria-hidden/>}/>
+                    </Dropdown>
+                </div>}
+            </div>)}
             {applications.loading && !applications.data && <div className="sa-catalog-loading"><Spin/></div>}
             {!applications.loading && !visibleItems.length && <div className="sa-app-empty">
                 <ApartmentOutlined/>
@@ -346,6 +471,55 @@ function AppCatalog({ onNavigate }: { onNavigate: (path: string) => void }) {
                 <p>从服务目录、业务对象和执行能力开始组装。</p>
             </button>}
         </div>
+
+        <Modal
+            open={archiveOpen}
+            destroyOnHidden
+            width={620}
+            title={archivedApplications.data ? `已归档应用（${archivedItems.length}）` : '已归档应用'}
+            onCancel={() => setArchiveOpen(false)}
+            footer={<Button onClick={() => setArchiveOpen(false)}>关闭</Button>}
+        >
+            <p className="sa-archived-lead">归档只隐藏应用，发布版本、模拟轨迹和审计记录都会保留；恢复后回到归档前的状态。彻底删除会连同发布版本历史一起移除，无法撤销。</p>
+            <Alert error={error}/>
+            {archivedApplications.loading && !archivedApplications.data
+                ? <div className="sa-catalog-loading"><Spin/></div>
+                : archivedItems.length
+                    ? <>
+                        <ul className="sa-archived-list">
+                            {pagedArchivedItems.map(app => <li key={app.id}>
+                                <div>
+                                    <strong>{app.name}</strong>
+                                    <small>/service-apps/{app.key} · {applicationStatusLabel[app.status]} · {app.published_version ? `v${app.published_version}` : '未发布'}</small>
+                                </div>
+                                <div className="sa-archived-actions">
+                                    <Button size="small" loading={restoring === app.key} disabled={!admin || Boolean(restoring || purging)} onClick={() => void restoreArchived(app.key)}>恢复</Button>
+                                    <Popconfirm
+                                        title="彻底删除这个服务应用？"
+                                        description="发布版本历史会一起删除，且无法恢复；模拟轨迹与审计记录保留。"
+                                        okText="彻底删除"
+                                        cancelText="取消"
+                                        okButtonProps={{ danger: true }}
+                                        disabled={!admin || Boolean(restoring || purging)}
+                                        onConfirm={() => void purgeArchived(app.key)}
+                                    >
+                                        <Button size="small" type="text" danger loading={purging === app.key} disabled={!admin || Boolean(restoring || purging)}>彻底删除</Button>
+                                    </Popconfirm>
+                                </div>
+                            </li>)}
+                        </ul>
+                        {archivedItems.length > archivedPageSize && <Pagination
+                            className="sa-archived-pager"
+                            size="small"
+                            current={currentArchivePage}
+                            pageSize={archivedPageSize}
+                            total={archivedItems.length}
+                            showSizeChanger={false}
+                            onChange={setArchivePage}
+                        />}
+                    </>
+                    : <p className="sa-muted-note">{archivedApplications.error || '没有已归档的服务应用。'}</p>}
+        </Modal>
 
         <Modal title="新建服务应用" open={createOpen} okText="创建应用" cancelText="取消" confirmLoading={busy} destroyOnHidden
             onCancel={() => {
@@ -373,6 +547,30 @@ function AppCatalog({ onNavigate }: { onNavigate: (path: string) => void }) {
                     <Input.TextArea rows={3} maxLength={1000} showCount placeholder="说明这个应用承接哪些客户服务。"/>
                 </Form.Item>
             </Form>
+        </Modal>
+
+        <Modal
+            open={archiveTarget !== null}
+            destroyOnHidden
+            title={archiveTarget && archiveBlocked(archiveTarget) ? '应用正在生产运行' : '归档这个服务应用？'}
+            okText={archiveTarget && archiveBlocked(archiveTarget) ? '去下线' : '确认归档'}
+            cancelText="取消"
+            confirmLoading={archiving}
+            okButtonProps={{ danger: !(archiveTarget && archiveBlocked(archiveTarget)) }}
+            cancelButtonProps={{ disabled: archiving }}
+            closable={!archiving}
+            mask={{ closable: !archiving }}
+            keyboard={!archiving}
+            onCancel={() => {
+                if (archiving) return;
+                setArchiveTarget(null);
+                setError('');
+            }}
+            onOk={() => void confirmArchive()}
+        >
+            {archiveTarget && (archiveBlocked(archiveTarget)
+                ? <p>「{archiveTarget.name}」仍在生产运行（v{archiveTarget.published_version}）。归档只隐藏应用，不会替你摘掉正在运行的发布 —— 请先到「接入与发布」把它下线后再归档。</p>
+                : <p>归档后「{archiveTarget.name}」会从所有列表消失，发布版本、模拟轨迹和审计记录都会保留，之后可在「显示已归档」里恢复。</p>)}
         </Modal>
     </div>;
 }
@@ -1120,12 +1318,20 @@ function CapabilitiesTab({ application, admin, busy, onSave, onNavigate }: {
     onNavigate: (path: string) => void;
 }) {
     const agents = useResource<Agent[]>('/agents');
+    // A capability's tool is a reference to a registered tool provider, so it
+    // is picked from the same list readiness checks against.
+    const toolProviders = useResource<ServiceProviderPage>('/service-providers?kind=tool');
     const [form] = Form.useForm<CapabilityFormValues>();
     const [modalOpen, setModalOpen] = useState(false);
     const [editingKey, setEditingKey] = useState<string | null>(null);
     const selectedType = Form.useWatch('type', form);
     const capabilities = application.config.capabilities;
     const nextPriority = capabilities.reduce((max, item) => Math.max(max, item.priority || 0), 0) + 10;
+    const toolItems = useMemo(() => toolProviders.data?.items || [], [toolProviders.data]);
+    const liveToolNames = useMemo(
+        () => new Set(toolItems.filter(item => item.enabled).map(item => item.key)),
+        [toolItems],
+    );
 
     function openCreate() {
         setEditingKey(null);
@@ -1256,7 +1462,9 @@ function CapabilitiesTab({ application, admin, busy, onSave, onNavigate }: {
                     <span>优先级 · {capability.priority ?? 0}</span>
                     {capability.agent_id && <span>Agent · {capability.agent_name || capability.agent_id}{capability.agent_version ? ` · v${capability.agent_version}` : ''}</span>}
                     {capability.queue && <span>人工队列 · {capability.queue}</span>}
-                    {capability.tool && <span>工具 · {capability.tool}</span>}
+                    {capability.tool && <span className={liveToolNames.has(capability.tool) ? undefined : 'sa-provider-stale'}>
+                        工具 · {capability.tool}{liveToolNames.has(capability.tool) ? '' : '（未接入）'}
+                    </span>}
                 </div>
                 <div className="sa-capability-foot">
                     <span>{capability.enabled === false ? '已停用' : '参与场景承接'}</span>
@@ -1342,8 +1550,18 @@ function CapabilitiesTab({ application, admin, busy, onSave, onNavigate }: {
                 {selectedType === 'human' && <Form.Item name="queue" label="人工队列">
                     <Input placeholder="order-support"/>
                 </Form.Item>}
-                {selectedType && ['query', 'action', 'tracking'].includes(selectedType) && <Form.Item name="tool" label="工具标识" extra="只保存工具引用，工具的实现和授权在工具目录中维护。">
-                    <Input placeholder="business_query"/>
+                {selectedType && ['query', 'action', 'tracking'].includes(selectedType) && <Form.Item
+                    name="tool"
+                    label="工具标识"
+                    extra={toolItems.length
+                        ? '承载这项能力的工具接入点；是否真的能读数据取决于它在行业能力里的执行器配置。'
+                        : '还没有登记任何工具接入能力，先到「行业能力 → 接入能力」创建。'}
+                >
+                    <ProviderSelect
+                        items={toolItems}
+                        loading={toolProviders.loading}
+                        placeholder="creator.work.status"
+                    />
                 </Form.Item>}
             </Form>
         </Modal>
@@ -1868,6 +2086,24 @@ function DeployTab({ application, scenes, versions, traces, readiness, readiness
         }
     }
 
+    const canArchive = admin && !actionBusy && !busy && (application.published_version === null || application.status === 'offline');
+
+    async function archive() {
+        setActionBusy(true);
+        setError('');
+        try {
+            await archiveServiceApplication(application.key, application.revision);
+            toast.success('服务应用已归档，可在列表打开「显示已归档」恢复');
+            onNavigate('/service-apps');
+        }
+        catch (cause) {
+            setError(cause instanceof Error ? cause.message : '归档应用失败');
+        }
+        finally {
+            setActionBusy(false);
+        }
+    }
+
     return <div className="sa-deploy">
         <section className="sa-deploy-hero">
             <div>
@@ -1881,6 +2117,19 @@ function DeployTab({ application, scenes, versions, traces, readiness, readiness
                         </span>
                     </Tooltip>
                     <Button icon={<EyeOutlined/>} onClick={() => onNavigate(`/service-apps/${application.key}/experience`)}>打开统一体验</Button>
+                    <Popconfirm
+                        title="归档这个服务应用？"
+                        description={application.published_version && application.status !== 'offline'
+                            ? '请先下线生产版本，归档不会替你摘掉正在运行的发布。'
+                            : '归档后应用从所有列表消失，发布版本、轨迹和审计记录保留，可随时恢复。'}
+                        okText="归档"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                        disabled={!canArchive}
+                        onConfirm={() => void archive()}
+                    >
+                        <Button danger icon={<DeleteOutlined/>} disabled={!canArchive}>归档应用</Button>
+                    </Popconfirm>
                 </div>
                 {!canPublish && <p className="sa-release-gate-warning">{readinessMessage}</p>}
                 {canPublish && <p className="sa-release-gate-notice">{readinessMessage}</p>}

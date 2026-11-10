@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # Bootstrap loads the full industry demo case set when enabled. Off by default so
     # production stays clean; deploy/quickstart enables it explicitly.
     seed_industries: bool = False
+    # Bootstrap installs and publishes the four demo industry packs (shopping,
+    # gaming, creator, mobility) when enabled. Off by default so production stays
+    # clean: quickstart always loads them, and a production deployment opts in via
+    # AGENT_SEED_INDUSTRY_PACKS=true. Idempotent, so re-running is safe.
+    seed_industry_packs: bool = False
     # Language of the seeded memory demo datasets, matching the console's i18n
     # bundles: zh-TW/zh-HK/zh-MO/zh-Hant* → Traditional Chinese, zh* → Simplified
     # Chinese, en* → English, hi* → Hindi, anything else → Simplified Chinese.

@@ -3,8 +3,31 @@ import { Button, Input, Select, Modal, Alert, Collapse } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { t, errorText } from '../../i18n';
 import { post, put } from '../../shared/api/client';
+import { useResource } from '../../shared/components/ui';
 import { ToolAuthentication, readHeaderReferences, serializeHeaderReferences, type HeaderReference } from './ToolAuthentication';
 import { ROOT, emptyParameters, type AuthKind, type Collection, type Definition, type ToolApi } from './workspaceTypes';
+
+/**
+ * Mirrors the server-side gate (`Settings.allows_tool_host`): the parsed
+ * hostname must match an entry of AGENT_TOOL_ALLOWED_HOSTS exactly, and `*`
+ * disables the check. Checking here turns a 400 after submit into an inline
+ * hint, which matters because the two failure modes — a URL without a scheme
+ * and a host that is simply not allowlisted — surface as the same error code.
+ */
+function checkServiceHost(value: string, allowed: string[]) {
+    const text = value.trim();
+    if (!text) return { host: '', missed: '' as const, blocked: false };
+    let host = '';
+    try {
+        host = new URL(text).hostname.toLowerCase();
+    }
+    catch {
+        return { host: '', missed: 'incomplete' as const, blocked: false };
+    }
+    if (!host) return { host: '', missed: 'incomplete' as const, blocked: false };
+    const open = allowed.includes('*');
+    return { host, missed: open || allowed.includes(host) ? '' as const : 'blocked' as const, blocked: !open && !allowed.includes(host) };
+}
 
 export function EditField({ label, children }: { label: string; children: React.ReactNode }) { return <label className="tw-field"><span>{label}</span>{children}</label>; }
 export function HeaderFields({ rows, setRows }: { rows: [string, string][]; setRows: (v: [string, string][]) => void }) {
@@ -36,8 +59,11 @@ function useEditorClose(onClose:()=>void,dirty:boolean,busy:boolean) {const {con
 
 export function CollectionEditor({ value, copy, onClose, onSaved }: { value: Collection | null; copy?: boolean; onClose:()=>void; onSaved:(id:string)=>void }) {
   const [name,setName]=useState((value?.name||'')+(copy?t(' 副本'):''));const [description,setDescription]=useState(value?.description||'');const [url,setUrl]=useState(value?.spec.url||'');const [icon,setIcon]=useState(value?.icon||'api');const [headers,setHeaders]=useState<[string,string][]>(Object.entries(value?.spec.headers||{}));const [auth,setAuth]=useState<AuthState>(readAuth(value?.spec));const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [dirty,setDirty]=useState(false);const close=useEditorClose(onClose,dirty,busy);
-  async function save(){setBusy(true);setError('');try{const body={name:name.trim(),description,icon,base_url:url.trim(),headers:headerMap(headers),...authBody(auth),revision:value?.revision};const result=copy?await post<Collection>(`${ROOT}/collections/${value!.id}/copy`,{name:name.trim()}):value?await put<Collection>(`${ROOT}/collections/${value.id}`,body):await post<Collection>(`${ROOT}/collections`,body);onSaved(result.id);}catch(e){setError(errorText((e as Error).message));}finally{setBusy(false)}}
-  return <Modal open title={copy?t('复制工具集'):value?t('编辑工具集'):t('新建工具集')} width={680} onCancel={close} footer={<><Button disabled={busy} onClick={close}>{t('取消')}</Button><Button form="tw-collection-form" type="primary" htmlType="submit" loading={busy}>{copy?t('复制'):value?t('保存草稿'):t('创建工具集')}</Button></>}><form id="tw-collection-form" className="tw-form" onChange={()=>setDirty(true)} onSubmit={e=>{e.preventDefault();void save();}}>{error&&<Alert type="error" title={error}/>}<div className="tw-two"><EditField label={t('图标')}><Select aria-label={t('图标')} value={icon} disabled={copy} onChange={v=>{setIcon(v);setDirty(true)}} options={['api','orders','support','inventory','policy'].map(v=>({value:v,label:{api:t('通用 API'),orders:t('订单物流'),support:t('客户服务'),inventory:t('库存'),policy:t('政策')}[v]}))}/></EditField><EditField label={t('工具集名称')}><Input autoFocus required maxLength={64} showCount value={name} onChange={e=>setName(e.target.value)}/></EditField></div>{copy?<Alert type="info" title={t('复制 API 定义与参数，不复制密钥、发布状态或 Agent 绑定。')}/>:<><EditField label={t('描述')}><Input.TextArea rows={2} maxLength={200} showCount value={description} onChange={e=>setDescription(e.target.value)}/></EditField><EditField label={t('服务地址')}><Input required type="url" placeholder="https://api.example.com" value={url} onChange={e=>setUrl(e.target.value)}/></EditField><small>{t('API 使用相对路径；服务地址支持 HTTP 和 HTTPS。')}</small><EditField label={t('公共请求头')}><HeaderFields rows={headers} setRows={v=>{setHeaders(v);setDirty(true)}}/></EditField><AuthFields state={auth} setState={v=>{setAuth(v);setDirty(true)}}/><small>{t('公共配置修改后，需要发布相关 API 并重新发布 Agent。')}</small></>}</form></Modal>;
+  const policy=useResource<{tool_allowed_hosts?:string[]}>('/policy');
+  const allowedHosts=policy.data?.tool_allowed_hosts||[];
+  const hostCheck=checkServiceHost(url,allowedHosts);
+  async function save(){if(hostCheck.missed){setError(hostCheck.missed==='incomplete'?t('请填写完整地址，例如 https://api.example.com'):t('服务地址不在服务器允许的主机列表中，请检查地址或联系管理员。'));return;}setBusy(true);setError('');try{const body={name:name.trim(),description,icon,base_url:url.trim(),headers:headerMap(headers),...authBody(auth),revision:value?.revision};const result=copy?await post<Collection>(`${ROOT}/collections/${value!.id}/copy`,{name:name.trim()}):value?await put<Collection>(`${ROOT}/collections/${value.id}`,body):await post<Collection>(`${ROOT}/collections`,body);onSaved(result.id);}catch(e){setError(errorText((e as Error).message));}finally{setBusy(false)}}
+  return <Modal open title={copy?t('复制工具集'):value?t('编辑工具集'):t('新建工具集')} width={680} onCancel={close} footer={<><Button disabled={busy} onClick={close}>{t('取消')}</Button><Button form="tw-collection-form" type="primary" htmlType="submit" loading={busy}>{copy?t('复制'):value?t('保存草稿'):t('创建工具集')}</Button></>}><form id="tw-collection-form" className="tw-form" onChange={()=>setDirty(true)} onSubmit={e=>{e.preventDefault();void save();}}>{error&&<Alert type="error" title={error}/>}<div className="tw-two"><EditField label={t('图标')}><Select aria-label={t('图标')} value={icon} disabled={copy} onChange={v=>{setIcon(v);setDirty(true)}} options={['api','orders','support','inventory','policy'].map(v=>({value:v,label:{api:t('通用 API'),orders:t('订单物流'),support:t('客户服务'),inventory:t('库存'),policy:t('政策')}[v]}))}/></EditField><EditField label={t('工具集名称')}><Input autoFocus required maxLength={64} showCount value={name} onChange={e=>setName(e.target.value)}/></EditField></div>{copy?<Alert type="info" title={t('复制 API 定义与参数，不复制密钥、发布状态或 Agent 绑定。')}/>:<><EditField label={t('描述')}><Input.TextArea rows={2} maxLength={200} showCount value={description} onChange={e=>setDescription(e.target.value)}/></EditField><EditField label={t('服务地址')}><Input required type="url" placeholder="https://api.example.com" value={url} onChange={e=>setUrl(e.target.value)}/></EditField>{hostCheck.missed==='blocked'?<Alert type="warning" title={t('{{v0}} 不在允许列表中，当前允许：{{v1}}',{v0:hostCheck.host,v1:allowedHosts.join('、')})}/>:<><small>{t('API 使用相对路径；服务地址支持 HTTP 和 HTTPS。')}</small>{hostCheck.missed==='incomplete'?<small className="tw-muted">{t('请填写完整地址，例如 https://api.example.com')}</small>:allowedHosts.length?<small className="tw-muted">{t('服务器允许的主机：{{v0}}',{v0:allowedHosts.includes('*')?t('全部'):allowedHosts.join('、')})}</small>:null}</>}<EditField label={t('公共请求头')}><HeaderFields rows={headers} setRows={v=>{setHeaders(v);setDirty(true)}}/></EditField><AuthFields state={auth} setState={v=>{setAuth(v);setDirty(true)}}/><small>{t('公共配置修改后，需要发布相关 API 并重新发布 Agent。')}</small></>}</form></Modal>;
 }
 
 export function ApiEditor({ group, value, onClose, onSaved }: {group:Collection;value:ToolApi|null;onClose:()=>void;onSaved:()=>void}) {

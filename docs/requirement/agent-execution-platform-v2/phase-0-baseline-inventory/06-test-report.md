@@ -1,9 +1,9 @@
 # Phase 0 · 基线与盘点 — 测试报告
 
-> 状态：修正后的本地正式双跑 310 节点比较与两轮 XPASS 日志审计通过；完整 Phase 0 验收 / Phase 1 入口尚未批准
+> 状态：2026-11-07 未提交树历史双跑与 2026-11-09 已提交产物本地 Docker 双跑均通过 310 节点比较及零 XPASS 审计；完整 Phase 0 验收 / Phase 1 入口尚未批准
 > 创建：2026-11-08
 > 依据：`04-test-plan.md`（P0-UT-01～10、P0-IT-01～10、P0-CM-01～05）、`02-requirements.md`（FR-1～FR-6、AC-1～AC-6）、`baseline/regression-baseline.md`
-> 执行：修正后的本地正式 Run 1 / Run 2 于 UTC 2026-11-07 完成；2026-11-08 仅复核实际产物并回填文档，未重跑或替换正式轮次
+> 执行：历史未提交树 Run 1 / Run 2 于 UTC 2026-11-07 完成；已提交产物 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 的独立本地 Docker/pgvector 双跑于 UTC 2026-11-09 完成；2026-11-10 仅回填文档，未重跑或替换任何历史轮次
 
 ## 1. 测试范围与环境
 
@@ -24,6 +24,8 @@
 
 ## 2. 执行总览
 
+### 2.1 历史：2026-11-07 未提交树本地双跑
+
 | 项 | Run 1 | Run 2 | 比较 / 证据 |
 |---|---|---|---|
 | base HEAD 元数据 | `c6c47dec39025ebd4d1176c1e9925bac9c99c4fd` | 同左 | 只是 base 元数据，**不是**被测未提交树的 SHA |
@@ -38,7 +40,24 @@
 | tree-after / 轮内 cmp / wrapper 退出码 | 0 / 0 / 0 | 0 / 0 / 0 | 轮内树身份均不变，包装器成功 |
 | 节点比较 | — | — | 比较门禁重新审计后 compare exit 0；`/tmp/nexusdesk-phase0-compare.json`：`identical=true`，四类差异均为空 |
 
-`/tmp/nexusdesk-phase0-identity-checks.json` 的 `run1_within`、`run2_within`、`cross_run_tree`、`cross_run_base` 全为 `true`。两轮之间没有仓库文件变化；比较是在身份门禁及两轮日志审计全部通过后进行的两份真实 JUnit 比较，不是 §7 所述早期 self-compare。被测产物当时是未提交工作树；最终产物提交 SHA 未创建，见 P0-CM-01 的 `pending_commit` 边界。本报告属于事后文档回填，不把上述哈希冒充为包含事后报告编辑的新树身份。本报告 60 个不同测试函数引用（含参数化函数的全部节点）已逐一映射到两轮 summary，均存在且 passed。
+`/tmp/nexusdesk-phase0-identity-checks.json` 的 `run1_within`、`run2_within`、`cross_run_tree`、`cross_run_base` 全为 `true`。两轮之间没有仓库文件变化；比较是在身份门禁及两轮日志审计全部通过后进行的两份真实 JUnit 比较，不是 §7 所述早期 self-compare。该轮被测产物当时是未提交工作树，以上哈希仅保留为该历史轮的树身份。本报告 60 个不同测试函数引用（含参数化函数的全部节点）已逐一映射到该历史双跑 summary，均存在且 passed。
+
+### 2.2 后续：2026-11-09 已提交产物本地 Docker 双跑
+
+被测实现/基线产物提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 已创建并推送。随后使用该**精确已提交产物**执行了两个相互独立的干净 Docker/pgvector PostgreSQL 17 容器、数据卷和临时凭据的后续双跑；它是本地支持证据，不是 GitHub Actions CI，也不替换 §2.1 历史。2026-11-10 的文档专用回填不在该被测 SHA 内，不得把该 SHA 或本轮证据称作后续 PR head 的测试/CI 证据；最终 PR head 的干净 CI 仍为 `pending_env`。
+
+| 项 | Run 1 | Run 2 | 比较 / 证据 |
+|---|---|---|---|
+| 提交 / 树身份 | `4dfcfb41e9cbb799753986c2d76134514bbd19be`；`sha256=063150feec809290c2945a6e305f133e41330518f9d3cda9ca60cd3c85b449ab files=1018` | 同左 | 两轮 before/after 及跨轮身份一致 |
+| UTC 起止 | 2026-11-09T14:29:13Z～14:30:42Z | 2026-11-09T14:32:00Z～14:33:34Z | 各自 metadata |
+| 范围 / Alembic | 相同顺序的 25 套件；`0057_industry_pack_runtime (head)` | 同左 | 两个独立空 pgvector 数据库 |
+| JUnit tests/failures/errors/skipped | 310 / 0 / 0 / 0 | 310 / 0 / 0 / 0 | 310 个唯一节点均 passed |
+| `-rA` 日志审计 | 310 条、零 XPASS、exit 0 | 310 条、零 XPASS、exit 0 | 不隐藏 non-strict XPASS |
+| JUnit time | 86.391s | 90.885s | 仅作观察 |
+| coverage | 9890/18534 = 53.36138987806194% | 9882/18534 = 53.318225963094854% | 8 文件 executed-line 差异见 §6 |
+| 节点比较 | — | — | `identical=true`；`added=[]`、`missing=[]`、`outcome_changes=[]`、`skip_reason_changes=[]`，compare exit 0 |
+
+Ruff、架构门禁、`backend/src` 与 `backend/migrations` 相对 base 的生产/迁移零漂移检查均通过。实际 `git revert --no-commit HEAD` 演练在独立 disposable clone 中执行，回退结果与 base `c6c47dec39025ebd4d1176c1e9925bac9c99c4fd` 无差异，主工作树未执行 revert。47 份正式文本证据的定向敏感信息扫描为 `findings=[]`、`read_errors=[]`；未读取凭据环境文件，二进制 coverage 数据明确排除。测试后 Docker 资源和临时凭据已清理。原始汇总与索引见 `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/ACCEPTANCE-RESULT.md`、`shared/acceptance-summary.json`、`shared/compare.json` 和 `shared/secret-scan.json`。
 
 ## 3. 单元测试（P0-UT）逐条结果
 
@@ -55,7 +74,7 @@
 | P0-UT-07 | 7 文件清单一一对应、版本/覆盖/脱敏；FR-3/FR-6 | 同上 manifest 测试；只读核查 `backend/tests/fixtures/agent_execution_baseline/manifest.v1.json`；§5 P0-CM-03 扫描 | 目录恰为 manifest + 6 个 payload；各 payload 均有 `fixture_version=v1`、`covered_fields`、`covered_cases`、预期与来源/合成值政策；无孤立文件 | 本地通过；`production_samples=false`，不能替代真实样本评审 |
 | P0-UT-08 | 冻结 ID、Run 术语、无 Worker Engine 分支；FR-5/AC-5 | `test_agent_config_execution_compat.py::test_p0_ut_08_frozen_identities_terminology_and_worker_neutrality` | 中英架构/Phase 1 设计/checklist 中 `(react,native,v1)`、`(local-test,scripted,v1)`、Run=一次 Execution、无双表/无 Engine 分支均匹配；AST 检查 Worker 无选择字段或 provider if | 本地通过；这是静态冻结证据，不是 Phase 1 已接线或已放行 |
 | P0-UT-09 | JUnit 计数、outcome、耗时与缺失值；FR-6 | `test_runtime_baseline_tooling.py::test_summary_aggregates_leaf_suites_without_double_counting`、`test_summary_single_suite_classifies_all_outcomes_and_skip_reasons`、`test_summary_output_is_deterministic_and_mirrors_output_file`、`test_summary_rejects_invalid_structure`（7 个参数节点）、`test_summary_rejects_malformed_xml_with_concise_error` | leaf 汇总不重复；passed/failed/error/skipped/xfail/xpass 与原因完整；耗时保留；缺 tests、非法 time/tests、空身份、重复、非 leaf 和坏 XML 均明确 exit 2，缺失值不填 0 | 本地通过 |
-| P0-UT-10 | 真正的节点级双跑比较；FR-6/AC-4 | `test_runtime_baseline_tooling.py::test_compare_reports_node_differences_and_count_metadata`、`test_compare_ignores_duration_only_changes`、`test_cli_subprocess_emits_json_and_node_diff_exit_code`；`/tmp/nexusdesk-phase0-compare.json` | 工具测试证明 added/missing/outcome/skip-reason 可检出、仅耗时变化可忽略、差异 exit 1；正式两份 JUnit 比较为 `identical=true`，added/missing/outcome_changes/skip_reason_changes 均 `[]` | 本地通过；不是早期 self-compare，也不是干净 CI 双跑 |
+| P0-UT-10 | 真正的节点级双跑比较；FR-6/AC-4 | `test_runtime_baseline_tooling.py::test_compare_reports_node_differences_and_count_metadata`、`test_compare_ignores_duration_only_changes`、`test_cli_subprocess_emits_json_and_node_diff_exit_code`；历史 `/tmp/nexusdesk-phase0-compare.json` 与后续 `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/shared/compare.json` | 工具测试证明 added/missing/outcome/skip-reason 可检出、仅耗时变化可忽略、差异 exit 1；历史未提交树及后续已提交产物 Docker 双跑均为 `identical=true`，四类差异均为 `[]` | 两轮本地证据均通过；不是早期 self-compare，也不是干净 CI 双跑 |
 
 P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifies_pytest_strict_xpass_skipped_message`、`test_real_pytest_strict_xpass_is_classified_as_xpass`、`test_real_pytest_non_strict_xpass_requires_and_fails_log_audit`、`test_audit_log_cli_accepts_real_clean_pytest_log`、`test_audit_log_cli_rejects_real_pytest_log_without_summary_evidence`，以及 `test_audit_log_accepts_pytest_long_duration_terminal_summary`、`test_audit_log_rejects_malformed_long_duration_terminal_summary`。前 5 个固定 strict JUnit 分类、non-strict JUnit 限制与 `-rA` 日志 exit 0/1/2 语义；后 2 个固定真实 `(0:02:24)` 长耗时后缀及 malformed 输入拒绝。两轮独立 spec/quality 评审分别批准 XPASS 修复和终端解析修复；当前 `test_runtime_baseline_tooling.py` 共 23 个节点，全部纳入并通过本次 310 节点正式双跑。
 
@@ -72,17 +91,17 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 | P0-IT-07 | 严格 SSE max、分页、transient 与 replay；FR-2/FR-4 | `test_runtime_postgres.py::test_p0_it_07_internal_sse_after_and_last_event_id_use_strict_max`、`test_p0_it_07_internal_sse_drains_more_than_200_events_before_terminal`、`test_p0_it_07_internal_sse_does_not_replay_transient_model_delta`、`test_p0_it_07_internal_sse_hides_terminal_tool_replay_and_advances_cursor` | `max(after,Last-Event-ID)` 边界正确；204 个事件可排空且 after=200 返回 201～204；delta 不重放；终态后专用 `tool.replay` 的 payload 被 SSE 隐藏且游标推进 | 本地 PostgreSQL 通过；P0-I4 的终态后 seq 消耗边界仍 P2/open，未安全修复 |
 | P0-IT-08 | 两个 legacy 发布/v2/跨租户/queued 快照/稀疏限制；AC-3 | `test_agent_config_execution_compat.py::test_p0_it_08_legacy_raw_draft_publishes_normalized_v1`（2 个参数节点）、`test_later_draft_and_v2_do_not_rewrite_v1_or_cross_tenant_boundary`、`test_queued_run_keeps_v1_snapshot_after_v2_is_published`、`test_sparse_raw_version_exposes_direct_snapshot_tool_names_limitation` | 两个 raw legacy draft 均发布为完整规范化 v1，v2 不改写 v1；跨租户分别得到既定 404；queued Run 保留 v1；手工稀疏 raw version 的直接 snapshot 抛 `KeyError("tool_names")` | 公开链路本地通过；P0-I7 存储阶段限制仍 P2/open，真实样本仍 `pending_env` |
 | P0-IT-09 | 完成 hook、mock ReAct、summary/memory/injection；FR-1/FR-4 | `test_runtime_postgres.py::test_p0_it_09_completion_hooks_run_only_for_completed_runs`、`test_worker_runs_real_graph_and_persists_events`；`test_memory_postgres.py::test_p1_it_01_truncation_dispatches_task_and_summary_is_written`；`test_memory_customers_postgres.py::test_p2_it_08_injection_sits_between_summary_and_history`；`test_memory_injection_postgres.py::test_p6_it_01_run_writes_one_row_per_injected_item`、`test_p6_it_02_event_counts_and_item_ids_match_detail_rows` | completed/failed/cancelled 三态仅 completed 调用完成 hook 并写 assistant/history；真实 graph 持久事件完成；summary 任务与写入、memory 注入位置、逐 item 明细和事件计数均符合断言 | 本地 PostgreSQL 通过；不需要外部 provider |
-| P0-IT-10 | 正式双跑、覆盖率与环境产物；AC-4/AC-6 | §2 全部正式产物；`baseline/regression-baseline.md` §5 的精确命令；`/tmp/nexusdesk-phase0-compare.json`、`/tmp/nexusdesk-phase0-coverage-diff.json` | 同一未提交树、两个独立空库、25 套件两轮均 310 passed，节点完全一致；两轮审计 310 条且零 XPASS，覆盖率与环境信息已保存 | **修正后本地双跑门禁通过**；同一已提交产物的干净 CI 双跑与链接仍 `pending_env`，不构成就 AC-4 的无限制完整验收 |
+| P0-IT-10 | 正式双跑、覆盖率与环境产物；AC-4/AC-6 | §2 两组产物；`baseline/regression-baseline.md` §5 的历史命令及 §6 的后续 Docker 证据；`/tmp/nexusdesk-phase0-compare.json`、`/tmp/nexusdesk-phase0-coverage-diff.json`、`/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/shared/compare.json` | 历史未提交树双跑与后续精确提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 的 Docker 双跑均覆盖同一有序 25 套件，每轮 310 passed、节点一致、零 XPASS；两组覆盖率与环境信息分别保存 | **历史及 committed-artifact 本地节点/XPASS 门禁通过**；最终 PR head 的干净 GitHub Actions CI 双跑与链接仍 `pending_env`，不构成 AC-4 无限制完整验收 |
 
 ## 5. 通用核对项（P0-CM）逐条结果
 
 | 编号 | 核对项 / 溯源 | 执行或产物证据 | 实际结果 | 状态 / 边界 |
 |---|---|---|---|---|
-| P0-CM-01 | 提交与证据完整性；FR-1/AC-1 | 两轮 `.base-commit.txt`、`.tree-before.txt`、`.tree-after.txt`、`.metadata.txt`；`/tmp/nexusdesk-phase0-identity-checks.json`；本报告逐条节点映射 | base + 确定性树哈希完整标识被测未提交树，四项身份检查全 true；报告保留具体节点/产物 | **本地证据通过；`pending_commit`**：未请求也未创建最终产物提交，故没有最终 committed-artifact SHA，不能伪称 base HEAD 就是该 SHA |
-| P0-CM-02 | 无生产执行/迁移漂移；FR-3/范围 | T9 只读执行 `git diff --name-only c6c47dec39025ebd4d1176c1e9925bac9c99c4fd -- backend/src backend/migrations`，并以同路径范围执行 `git ls-files --others --exclude-standard` | 两条命令输出均为空；现有变更中的后端执行相关文件是测试、基线脚本与 dev 测试依赖，不是生产执行重构或迁移 | 本地通过 |
-| P0-CM-03 | fixture、正式输出与回填文档敏感信息扫描；FR-3/非功能 | `/tmp/nexusdesk-phase0-doc-backfill-secret-scan.json`；manifest 合成值政策 | 对 7 个 fixture、两轮 log/XML/summary/audit/coverage JSON/base/tree/metadata、共享 identity/compare/coverage-diff/environment/wrapper/compare-gate 及八份回填文档共 40 文件，扫描数据库 URL、私钥、GitHub/OpenAI 风格 token、AWS key、非测试 Bearer 和凭据赋值等 8 类模式，`findings=[]`、`missing_files=[]` | 本地定向扫描通过；不是对所有秘密形式的数学证明，真实样本授权/代表性仍 `pending_env` |
-| P0-CM-04 | 本地节点确定性；AC-4 | 两轮 summary 与 audit；`/tmp/nexusdesk-phase0-compare.json`；`/tmp/nexusdesk-phase0-coverage-diff.json` | 310 个节点均 passed，added/missing/outcome/skip-reason 无差异，两轮审计均 310 条且零 XPASS；耗时差不参与等价 | 修正后本地节点与 XPASS 审计门禁通过。覆盖率行集合并非逐行等价，观察见 §6，不能据此证明或隐瞒 flaky |
-| P0-CM-05 | Phase 1 入口清单；FR-5/FR-6/AC-6 | 本报告 ID、计数、耗时、覆盖率、缺陷与边界；`baseline/refactoring-checklist.md` §1～§5 的冻结标识、通用门禁、Phase 1～7 映射和入口清单；`07-acceptance-report.md` | 本地记录已覆盖上述资料；两轮未暴露新的 P0/P1 实现缺陷 | **本地清单证据已登记，Phase 1 入口未批准**：07 已创建并明确为“待验收 / 未批准”；P0-I1 CI、P0-I2 真实样本、最终提交证据与人工验收/签字未完成；不虚构最终 P0/P1 验收计数，不给予有条件通过，不放行 Phase 1 |
+| P0-CM-01 | 提交与证据完整性；FR-1/AC-1 | 历史两轮 `.base-commit.txt`、`.tree-before.txt`、`.tree-after.txt`、`.metadata.txt` 与 `/tmp/nexusdesk-phase0-identity-checks.json`；后续 Docker `shared/acceptance-summary.json` 及逐轮身份产物 | 历史 base + tree hash 标识未提交树；后续精确提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 与 tree `063150fe…449ab files=1018` 绑定，两轮身份一致 | **被测产物的提交存在性/绑定关闭**：该提交已推送；后续文档回填不在被测 SHA 内，最终 PR head 的 CI 与人工签字仍是独立未决门禁 |
+| P0-CM-02 | 无生产执行/迁移漂移；FR-3/范围 | T9 历史只读检查；2026-11-09 对提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 重复 `backend/src`、`backend/migrations` 相对 base 的零漂移检查 | 历史及后续检查均无生产执行或迁移漂移；变更仍限于测试、基线工具、文档与 dev 测试依赖 | 本地通过；后续文档回填不在被测 SHA 内 |
+| P0-CM-03 | fixture、正式输出与回填文档敏感信息扫描；FR-3/非功能 | 历史 `/tmp/nexusdesk-phase0-doc-backfill-secret-scan.json`；后续 `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/shared/secret-scan.json`；manifest 合成值政策 | 历史 40 文件扫描无发现；后续对 47 份正式文本证据定向扫描为 `findings=[]`、`read_errors=[]`，未读取两个凭据环境文件并排除两份二进制 coverage 数据 | 两轮本地定向扫描通过；不是对所有秘密形式的数学证明，真实样本授权/代表性仍 `pending_env` |
+| P0-CM-04 | 本地节点确定性；AC-4 | 历史 summary/audit/compare/coverage-diff；后续 Docker `shared/compare.json`、`shared/acceptance-summary.json` | 两组双跑均为 310 节点全 passed、四类节点差异为空、每轮 310 条审计且零 XPASS；耗时差不参与等价 | 历史及 committed-artifact 本地节点与 XPASS 审计门禁通过；两组均各有 8 文件 executed-line 差异，见 §6，不能称为逐行一致或据此证明/隐瞒 flaky |
+| P0-CM-05 | Phase 1 入口清单；FR-5/FR-6/AC-6 | 本报告 ID、计数、耗时、覆盖率、缺陷与边界；`baseline/refactoring-checklist.md` §1～§5 的冻结标识、通用门禁、Phase 1～7 映射和入口清单；`07-acceptance-report.md`；后续 committed-artifact Docker 与实际回退证据 | 本地记录已覆盖上述资料；历史及后续正式双跑均未暴露新的 P0/P1 实现缺陷，被测提交存在且已绑定 | **本地清单证据已登记，Phase 1 入口未批准**：07 明确为“待验收 / 未批准”；P0-I1 最终 PR head 的干净 CI、P0-I2 真实样本与人工验收/签字未完成；不虚构最终 P0/P1 验收计数，不给予有条件通过，不放行 Phase 1 |
 
 ## 6. 回归、节点比较与覆盖率观察
 
@@ -90,10 +109,11 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 - `/tmp/nexusdesk-phase0-compare.json` 是 Run 1 JUnit 对 Run 2 JUnit 的真实比较：`identical=true`，`added=[]`、`missing=[]`、`outcome_changes=[]`、`skip_reason_changes=[]`，compare exit 0。JUnit time 从 145.281s 到 145.353s 的变化不属于等价判据，也不单独证明 flaky。
 - 覆盖率不是逐行等价：Run 1 为 9886/18534，Run 2 为 9900/18534，净多 14 条已覆盖行。`/tmp/nexusdesk-phase0-coverage-diff.json` 显示 8 个文件的 executed-line 集合存在差异：`channel/service.py`、`memory/decay.py`、`memory/service.py`、`open_platform/routes.py`、`open_platform/service.py`、`open_platform/webhooks.py`、`model_gateway/catalog.py`、`model_gateway/governance.py`。每文件的 run1-only/run2-only 精确行号保留在该 JSON。
 - 上述覆盖率差异与节点全一致同时如实保留；它是覆盖率观察，不是 flaky 测试证明，也不允许被 53.34%/53.42% 的两位小数展示或全绿节点总数掩盖。
+- 后续 Docker 双跑同样为 310/310 节点一致、零 XPASS，JUnit time 为 86.391s/90.885s；coverage 为 9890/18534 与 9882/18534。`/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/shared/acceptance-summary.json` 记录另一组 8 文件 executed-line 差异：`channel/service.py`、`memory/decay.py`、`memory/service.py`、`memory/worker.py`、`open_platform/service.py`、Runtime `worker.py`、`model_gateway/catalog.py`、`model_gateway/gateway.py`。精确行号保留在 JSON；该观察不隐藏、不称为逐行一致，也不单独证明 flaky。
 
 ## 7. 正式执行中发现的缺陷
 
-修正后的两轮正式执行**未暴露新的 P0/P1 实现缺陷**。这句话只描述两轮实际结果，不消除 CI、真实样本、最终提交或人工验收证据门槛，也不给出未经后续验收核定的最终 P0/P1 开放数量。以下工具门禁缺陷单独保留，不混入生产实现失败率：
+历史修正双跑与后续 committed-artifact Docker 正式双跑**均未暴露新的 P0/P1 实现缺陷**。这句话只描述正式轮次实际结果，不消除 CI、真实样本或人工验收证据门槛，也不给出未经后续验收核定的最终 P0/P1 开放数量。以下工具门禁缺陷单独保留，不混入生产实现失败率：
 
 | ID | 发现环节 | 实际缺陷与影响 | 修复、评审与回归 | 当前处置 |
 |---|---|---|---|---|
@@ -104,12 +124,14 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 
 另保留一项非正式历史：早期 24 套件演练中 pytest 已完成并生成完整产物，随后 zsh 包装器因 `read-only variable: status` 失败。该轮不是正式双跑；正式模板已改用 `test_rc`，当前两轮 pytest/summary/audit/tree/wrapper 退出码均为 0。此历史不能与正式失败率混合，也不能删除。
 
+后续 Docker harness 的被拒绝/失败尝试同样不计入正式双跑：首次镜像缺 `.git`，在 pytest 和迁移前以 exit 128 拒绝（`rejected-run1-no-git.*`）；修正后 Alembic 工作目录错误，在 pytest 前失败且未迁移数据库（`rejected-run1-migration-path-*`）；额外注入随机 `AGENT_API_TOKEN` 与开发模式端到端用例前提不兼容，得到 309 passed、1 failed（`test_runtime_postgres.py::test_end_to_end_demo_uses_real_http_and_persistent_events`，401 而非 202，见 `failed-run1-auth-*`）。这些均不是通过证据；清理旧容器/数据卷后，才以新临时凭据和两个独立空库形成 §2.2 正式双跑。
+
 ## 8. 残留风险与未决项
 
 | ID | 级别 / 状态 | 实际边界与处置 |
 |---|---|---|
-| P0-I1 | `pending_env` | 同一已提交产物的干净 CI 双跑、原始 artifact 与链接尚不存在；研发负责人 + QA 在 Phase 1 入口评审前补证。本地双跑不替代 CI AC-4 |
-| P0-I2 | `pending_env` | 未提供经授权的真实历史发布快照；现有 fixture 仅为合成字段形状。Agent 配置代表 + 安全代表须补样或形成正式范围裁定 |
+| P0-I1 | `pending_env` | 被测提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 已存在并推送，但最终 PR head 的干净 GitHub Actions CI 双跑、原始 artifact 与链接尚不存在；研发负责人 + QA 在 Phase 1 入口评审前补证。后续文档回填不在被测 SHA 内，本地 Docker 双跑不替代 CI AC-4 |
+| P0-I2 | `pending_env` | 未提供经授权、脱敏的真实历史草稿和已发布快照及来源清单；现有 fixture 仅为合成字段形状。Agent 配置代表 + 安全代表须补样或形成正式范围裁定 |
 | P0-I3 | P2 / open | 开放平台 stream 注释称无 token delta，实际会输出可见文本 delta；开放平台后端 owner 在 Phase 2 前处置 |
 | P0-I4 | P2 / open | 专用 `tool.replay` 可在终态后消耗 seq；专门 SSE 测试已证明 payload 隐藏与游标推进，但安全/行为边界未修复或裁定，最迟 Phase 6 安全门槛前处理 |
 | P0-I5 | P3 / open | 既有 `seed_memory_*` 全量格式检查差异保留给对应脚本 owner；不在 Phase 0 混入无关批量格式化 |
@@ -119,14 +141,14 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 ## 9. CI 证据与验收边界
 
 - 既有 CI run <https://github.com/GroundedCoreAI/nexusdesk/actions/runs/42227604191> 仅是 base 现状后端单次支持证据，head 为 `16aed12eb095f29bed5c536b5fcbf68e510136c4`；不包含本阶段新增测试、覆盖率、JUnit artifact 或双跑比较。
-- 含 Phase 0 产物的提交尚未创建、推送或运行 CI；正式干净 CI 双跑及链接保持 `pending_env`。本报告没有声称任何新 CI 成功。
+- 被测实现/基线提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 已创建并推送，§2.2 的本地 Docker 双跑正是基于该精确 SHA；但后续文档专用回填会形成不在该 SHA 内的新 PR head，且截至 2026-11-10 本次文档回填时尚未创建 PR。最终 PR head 的正式干净 GitHub Actions CI 双跑及链接保持 `pending_env`，本报告没有声称任何新 CI 成功，也不以 Docker 替代 CI。
 - 本报告不是 `07-acceptance-report.md`，没有人工签字，也不把本地测试通过改写成 AC-1～AC-6 全部无限制验收通过。Phase 0 完整验收和 Phase 1 入口仍须完成 §8 证据门槛与后续人工验收。
 
 ## 10. 结论
 
-**修正后的本地正式双跑 310 节点比较与两轮 XPASS 日志审计通过；完整 Phase 0 验收 / Phase 1 入口尚未批准。**
+**历史未提交树双跑与后续精确提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 的本地 Docker 双跑均通过 310 节点比较及零 XPASS 审计；完整 Phase 0 验收 / Phase 1 入口尚未批准。** 后续文档回填不在被测 SHA 内，最终 PR head 的干净 CI、真实样本和人工签字仍是独立门槛。
 
-## 附录 A 正式产物索引
+## 附录 A 历史正式产物索引（2026-11-07 未提交树）
 
 | 产物 | Run 1 | Run 2 |
 |---|---|---|
@@ -141,7 +163,7 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 | tree-after | `/tmp/nexusdesk-phase0-run1.tree-after.txt` | `/tmp/nexusdesk-phase0-run2.tree-after.txt` |
 | metadata | `/tmp/nexusdesk-phase0-run1.metadata.txt` | `/tmp/nexusdesk-phase0-run2.metadata.txt` |
 
-上表是当前修正后正式产物索引；两份审计均存在且 exit 0，比较门禁在节点比较前重新执行并确认相同结果。事后文档回填未重跑、覆盖或替换这些正式产物。
+上表是 2026-11-07 历史修正双跑的正式产物索引；两份审计均存在且 exit 0，比较门禁在节点比较前重新执行并确认相同结果。后续文档回填未重跑、覆盖或替换这些历史产物。
 
 共享产物：
 
@@ -152,3 +174,16 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 - `/tmp/nexusdesk-phase0-compare-gate.log`
 - `/tmp/nexusdesk-phase0-doc-backfill-secret-scan.json`（本次只读扫描，不属于两轮正式 pytest 产物）
 - `/tmp/nexusdesk-phase0-t9-secret-scan.json`（T9 历史只读扫描，不属于两轮正式 pytest 产物）
+
+## 附录 B 后续 committed-artifact Docker 产物索引（2026-11-09）
+
+根目录：`/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/`。
+
+- 执行结论与边界：`ACCEPTANCE-RESULT.md`
+- Run 1 / Run 2 原始日志、JUnit、summary、audit、coverage、迁移、树身份与 metadata：`run1-artifacts/`、`run2-artifacts/`
+- 节点比较：`shared/compare.json`
+- 汇总及 8 文件覆盖率行差异：`shared/acceptance-summary.json`
+- 47 份文本证据扫描：`shared/secret-scan.json`
+- 非正式失败/拒绝证据：`rejected-run1-no-git.*`、`rejected-run1-migration-path-*`、`failed-run1-auth-*`
+
+凭据环境文件未读取且已删除；二进制 coverage 数据不属于文本扫描范围。Docker 资源和临时凭据已清理。

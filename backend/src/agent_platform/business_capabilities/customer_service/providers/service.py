@@ -18,6 +18,7 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
 )
 from agent_platform.extension_contracts import BusinessScope
 
+from .executors import validate_executors
 from .models import (
     ProviderInput,
     ProviderKind,
@@ -123,6 +124,8 @@ WHERE p.tenant_id=:tenant AND {scope_sql}
         *,
         scope: BusinessScope | None = None,
     ) -> dict[str, Any]:
+        if body.kind in {ProviderKind.OBJECT, ProviderKind.TOOL}:
+            validate_executors(body.config)
         resolved = persisted_scope(tenant, scope)
         _, scope_params = scope_predicate(resolved, alias="p")
         async with self.engine.begin() as connection:
@@ -175,6 +178,8 @@ RETURNING *
     ) -> dict[str, Any]:
         if body.kind != kind or body.key != key:
             raise DomainError("service_provider_identity_immutable", 422)
+        if kind in {ProviderKind.OBJECT, ProviderKind.TOOL}:
+            validate_executors(body.config)
         resolved = persisted_scope(tenant, scope)
         scope_sql, scope_params = scope_predicate(resolved, alias="p")
         async with self.engine.begin() as connection:

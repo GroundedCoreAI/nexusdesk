@@ -43,6 +43,7 @@ import type {
   ServiceProviderInput,
   ServiceProviderKind,
   ServiceProviderPage,
+  Tool,
 } from '../../shared/api/client';
 import {
   applyIndustryPackUpgrade,
@@ -53,6 +54,7 @@ import {
 } from '../../shared/api/client';
 import { Alert, toast, useAccess, useResource } from '../../shared/components/ui';
 import { dateTime, t } from '../../i18n/index';
+import { executableTools, readyToolNames, ToolSelect } from './toolSelect';
 
 type IndustryTab = 'packs' | 'providers' | 'upgrades';
 
@@ -69,6 +71,54 @@ interface ProviderFormValues {
   description?: string;
   enabled: boolean;
   config_text: string;
+  get_tool?: string;
+  get_arguments?: string;
+  get_result_root?: string;
+  get_on_error?: ExecutorErrorPolicy;
+  list_tool?: string;
+  list_arguments?: string;
+  list_result_root?: string;
+  list_on_error?: ExecutorErrorPolicy;
+}
+
+type ExecutorRole = 'get' | 'list';
+type ExecutorErrorPolicy = 'human' | 'fail' | 'ignore';
+
+const executorRoles: ExecutorRole[] = ['get', 'list'];
+
+const executorRoleLabel: Record<ExecutorRole, string> = {
+  get: '读取单个对象',
+  list: '列出候选对象',
+};
+
+const executorErrorOptions = () => [
+  { value: 'human', label: t('转人工') },
+  { value: 'fail', label: t('返回失败') },
+  { value: 'ignore', label: t('忽略并继续') },
+];
+
+/** Tool names referenced by a provider's declared executors. */
+function executorToolNames(config?: Record<string, unknown>): string[] {
+  const executors = (config?.executors || {}) as Record<string, { tool?: unknown }>;
+  return Object.values(executors)
+    .map(item => String(item?.tool || '').trim())
+    .filter(Boolean);
+}
+
+/** Project provider.config.executors back into the flat form fields. */
+function executorFormValues(config?: Record<string, unknown>) {
+  const executors = (config?.executors || {}) as Record<string, Record<string, unknown>>;
+  const values: Record<string, unknown> = {};
+  for (const role of executorRoles) {
+    const spec = executors[role] || {};
+    values[`${role}_tool`] = String(spec.tool || '');
+    values[`${role}_arguments`] = spec.arguments
+      ? JSON.stringify(spec.arguments, null, 2)
+      : '';
+    values[`${role}_result_root`] = String(spec.result_root || '');
+    values[`${role}_on_error`] = String(spec.on_error || 'human');
+  }
+  return values;
 }
 
 interface Props {
@@ -176,6 +226,9 @@ export function IndustryCapabilitiesPage({ onNavigate }: Props) {
     return `/service-providers${suffix ? `?${suffix}` : ''}`;
   }, [providerKind, providerQuery]);
   const providers = useResource<ServiceProviderPage>(providerPath);
+  // The executor form picks from the gateway catalog instead of asking for a
+  // free-text name, so a typo can never be saved as a broken reference.
+  const tools = useResource<Tool[]>(tab === 'providers' ? '/tools' : null);
 
   const [installForm] = Form.useForm<InstallFormValues>();
   const [installPack, setInstallPack] = useState<IndustryPackSummary | null>(null);
@@ -184,6 +237,9 @@ export function IndustryCapabilitiesPage({ onNavigate }: Props) {
   const [installResult, setInstallResult] = useState<IndustryPackInstallResult | null>(null);
 
   const [providerForm] = Form.useForm<ProviderFormValues>();
+  const watchedProviderKind = Form.useWatch('kind', providerForm) as
+    | ServiceProviderKind
+    | undefined;
   const [providerOpen, setProviderOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<ServiceProvider | null>(null);
   const [providerBusy, setProviderBusy] = useState(false);
@@ -205,6 +261,11 @@ export function IndustryCapabilitiesPage({ onNavigate }: Props) {
   );
   const installedCount = installations.data?.total ?? installationItems.length;
   const enabledProviderCount = providerItems.filter(item => item.enabled).length;
+  const toolItems = useMemo(() => executableTools(tools.data), [tools.data]);
+  // Names that can actually be dispatched right now; the rest are shown as
+  // broken references on the provider cards.
+  const liveToolNames = useMemo(() => readyToolNames(toolItems), [toolItems]);
+  const readyToolCount = liveToolNames.size;
 
   function openInstall(pack: IndustryPackSummary) {
     setInstallPack(pack);
@@ -258,6 +319,7 @@ export function IndustryCapabilitiesPage({ onNavigate }: Props) {
       description: provider?.description || '',
       enabled: provider?.enabled ?? false,
       config_text: JSON.stringify(provider?.config || {}, null, 2),
+      ...executorFormValues(provider?.config),
     });
     setProviderOpen(true);
   }
@@ -268,6 +330,24 @@ export function IndustryCapabilitiesPage({ onNavigate }: Props) {
     setProviderError('');
     try {
       const config = parseConfig(values.config_text);
+      if (values.kind === 'object' || values.kind === 'tool') {
+        const executors: Record<string, unknown> = {};
+        for (const role of executorRoles) {
+          const tool = String(values[`${role}_tool`] || '').trim();
+          if (!tool) continue;
+          const rawArguments = String(values[`${role}_arguments`] || '').trim();
+          executors[role] = {
+            tool,
+            arguments: rawArguments ? parseConfig(rawArguments) : {},
+            result_root: String(values[`${role}_result_root`] || '').trim(),
+            on_error: values[`${role}_on_error`] || 'human',
+          };
+        }
+        // An empty declaration must remove the block, otherwise clearing the
+        // form would leave a stale executor behind.
+        if (Object.keys(executors).length) config.executors = executors;
+        else delete config.executors;
+      }
       const body: ServiceProviderInput = {
         key: values.key.trim(),
         kind: values.kind,
@@ -489,36 +569,51 @@ export function IndustryCapabilitiesPage({ onNavigate }: Props) {
         </Button>
       </div>
       <div className="sa-provider-grid">
-        {providerItems.map(provider => <article className="sa-provider-card" key={provider.id}>
-          <div className="sa-provider-card-head">
-            <span className={`sa-provider-icon ${provider.kind}`}>{providerIcon(provider.kind)}</span>
-            <span className={`sa-provider-state ${provider.enabled ? 'enabled' : 'disabled'}`}>
-              <i/>{provider.enabled ? t('已启用') : t('未启用')}
-            </span>
-          </div>
-          <div className="sa-provider-title">
-            <div>
-              <h3>{provider.name}</h3>
-              <small>{t(providerKindLabel[provider.kind])} · {provider.key}</small>
+        {providerItems.map(provider => {
+          const declared = Object.values(
+            (provider.config?.executors || {}) as Record<string, unknown>,
+          ).filter(Boolean).length;
+          const staleTools = executorToolNames(provider.config)
+            .filter(name => !liveToolNames.has(name));
+          return <article className="sa-provider-card" key={provider.id}>
+            <div className="sa-provider-card-head">
+              <span className={`sa-provider-icon ${provider.kind}`}>{providerIcon(provider.kind)}</span>
+              <span className={`sa-provider-state ${provider.enabled ? 'enabled' : 'disabled'}`}>
+                <i/>{provider.enabled ? t('已启用') : t('未启用')}
+              </span>
             </div>
-            <Button
-              type="text"
-              icon={<EditOutlined/>}
-              aria-label={t('编辑 {{v0}}', { v0: provider.name })}
-              disabled={!admin}
-              onClick={() => openProvider(provider)}
-            />
-          </div>
-          <p>{provider.description || t(providerKindDescription[provider.kind])}</p>
-          <div className="sa-provider-meta">
-            <span><CodeOutlined/> {t('{{v0}} 项配置', { v0: Object.keys(provider.config || {}).length })}</span>
-            <span>{t('版本 r{{v0}}', { v0: provider.revision })}</span>
-          </div>
-          <div className="sa-provider-foot">
-            <span>{t('来源：{{v0}}', { v0: provider.source || t('手工配置') })}</span>
-            {provider.source_ref && <span title={provider.source_ref}>{provider.source_ref}</span>}
-          </div>
-        </article>)}
+            <div className="sa-provider-title">
+              <div>
+                <h3>{provider.name}</h3>
+                <small>{t(providerKindLabel[provider.kind])} · {provider.key}</small>
+              </div>
+              <Button
+                type="text"
+                icon={<EditOutlined/>}
+                aria-label={t('编辑 {{v0}}', { v0: provider.name })}
+                disabled={!admin}
+                onClick={() => openProvider(provider)}
+              />
+            </div>
+            <p>{provider.description || t(providerKindDescription[provider.kind])}</p>
+            <div className="sa-provider-meta">
+              <span><CodeOutlined/> {t('{{v0}} 项配置', { v0: Object.keys(provider.config || {}).length })}</span>
+              <span className={declared ? 'sa-provider-live' : 'sa-provider-mock'}>
+                {declared
+                  ? t('已接入 {{v0}} 个执行器', { v0: declared })
+                  : t('模拟数据')}
+              </span>
+              {staleTools.length > 0 && <span className="sa-provider-stale">
+                {t('{{v0}} 个执行器工具不可用', { v0: staleTools.length })}
+              </span>}
+              <span>{t('版本 r{{v0}}', { v0: provider.revision })}</span>
+            </div>
+            <div className="sa-provider-foot">
+              <span>{t('来源：{{v0}}', { v0: provider.source || t('手工配置') })}</span>
+              {provider.source_ref && <span title={provider.source_ref}>{provider.source_ref}</span>}
+            </div>
+          </article>;
+        })}
         {providers.loading && !providers.data && <div className="sa-industry-loading"><Spin/></div>}
         {!providers.loading && !providerItems.length && <IndustryEmpty
           icon={<LinkOutlined/>}
@@ -718,9 +813,81 @@ export function IndustryCapabilitiesPage({ onNavigate }: Props) {
             placeholder={t('说明这个接入能力由谁提供、承接什么业务。')}
           />
         </Form.Item>
-        <Form.Item name="enabled" label={t('启用状态')} valuePropName="checked">
+        <Form.Item
+          name="enabled"
+          label={t('启用状态')}
+          valuePropName="checked"
+        >
           <Switch checkedChildren={t('已启用')} unCheckedChildren={t('未启用')}/>
         </Form.Item>
+        {(watchedProviderKind === 'object' || watchedProviderKind === 'tool') && <div className="sa-executor-block">
+          <div className="sa-executor-head">
+            <div>
+              <strong>{t('数据执行器')}</strong>
+              <small>{t('声明后，场景会真的调用工具网关读取数据；留空则保持模拟。')}</small>
+            </div>
+            <span className={`sa-executor-count${readyToolCount ? '' : ' empty'}`}>
+              {readyToolCount
+                ? t('可用工具 {{v0}} 个', { v0: readyToolCount })
+                : t('无可用工具')}
+            </span>
+          </div>
+          {!tools.loading && !toolItems.length && <div className="sa-executor-empty">
+            <span>{t('工具网关里还没有可用工具，先创建并发布一个 HTTP 工具，再回来选择。')}</span>
+            <Button type="link" size="small" onClick={() => onNavigate('/tools')}>
+              {t('去工具网关')}
+            </Button>
+          </div>}
+          {executorRoles.map(role => <div className="sa-executor-row" key={role}>
+            <span className="sa-executor-role">{t(executorRoleLabel[role])}</span>
+            <div className="sa-form-grid two">
+              <Form.Item
+                name={`${role}_tool`}
+                label={t('工具标识')}
+                extra={toolItems.length ? t('从已发布的工具中选择') : t('需已在工具网关发布')}
+              >
+                <ToolSelect
+                  items={toolItems}
+                  loading={tools.loading}
+                  placeholder={role === 'get' ? 'order_status' : 'order_list'}
+                />
+              </Form.Item>
+              <Form.Item
+                name={`${role}_result_root`}
+                label={t('结果路径')}
+                extra={t('留空表示整个响应')}
+              >
+                <Input placeholder="data.order"/>
+              </Form.Item>
+            </div>
+            <Form.Item
+              name={`${role}_arguments`}
+              label={t('参数模板（JSON）')}
+              extra={t('可引用 $object.<字段>、$customer.<字段>、$decision.selected；$$ 开头表示字面量。')}
+              rules={[{
+                validator: async (_, value: string) => {
+                  if (!value || !value.trim()) return;
+                  try {
+                    parseConfig(value);
+                  }
+                  catch {
+                    throw new Error(t('请输入有效的 JSON 对象。'));
+                  }
+                },
+              }]}
+            >
+              <Input.TextArea
+                className="sa-json-editor"
+                rows={3}
+                spellCheck={false}
+                placeholder={'{\n  "order_id": "$object.id"\n}'}
+              />
+            </Form.Item>
+            <Form.Item name={`${role}_on_error`} label={t('失败策略')}>
+              <Select options={executorErrorOptions()}/>
+            </Form.Item>
+          </div>)}
+        </div>}
         <Form.Item
           name="config_text"
           label={t('连接配置（JSON）')}

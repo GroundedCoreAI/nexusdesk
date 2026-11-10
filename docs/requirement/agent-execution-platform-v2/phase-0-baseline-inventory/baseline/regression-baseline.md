@@ -1,11 +1,12 @@
 # Phase 0 基线 · 回归环境、结果与复现命令
 
-> 状态：修正后的本地正式双跑已通过 310 节点比较与两轮 XPASS 日志审计；干净 CI、真实样本、最终提交证据与验收仍未预先判通过
-> 现状目标提交：`c6c47dec39025ebd4d1176c1e9925bac9c99c4fd`
-> 基线产物：正式被测特性分支**未提交工作树**；以 base 元数据与确定性 tree hash 标识，不赋予虚构产物 SHA，最终 committed-artifact 证据保持 `pending_commit`
-> 初次记录：2026-11-07；T8 扩充：2026-11-08；T9 正式结果及修正后双跑回填：2026-11-08
+> 状态：历史未提交树双跑与后续 committed-artifact 本地 Docker 双跑均通过 310 节点比较及零 XPASS 审计；最终 PR head 的干净 CI、真实样本与人工验收仍未通过或未完成
+> 现状 base：`c6c47dec39025ebd4d1176c1e9925bac9c99c4fd`
+> 历史基线产物：2026-11-07 正式被测特性分支**未提交工作树**，以 base 元数据与确定性 tree hash 标识，保留为历史
+> 后续被测实现/基线提交：`4dfcfb41e9cbb799753986c2d76134514bbd19be`（已推送）；2026-11-10 文档专用回填不在该被测 SHA 内，最终 PR head 不得沿用其测试/CI 证据
+> 初次记录：2026-11-07；T8 扩充：2026-11-08；T9 正式结果及修正后双跑回填：2026-11-08；Docker 证据回填：2026-11-10（执行于 UTC 2026-11-09）
 > 依据：`02-requirements.md`（FR-1～FR-6、AC-1～AC-6）与 `04-test-plan.md`
-> 证据目录：本机 `/tmp/nexusdesk-phase0-*`（不提交秘密、数据库连接串或大型临时日志）
+> 证据目录：历史本机 `/tmp/nexusdesk-phase0-*`；后续 `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/`（不提交秘密、数据库连接串或大型临时日志）
 
 ## 1. 环境指纹
 
@@ -88,7 +89,7 @@
 
 ## 5. 正式双跑可复现命令模板
 
-**§6 当前 310 节点 Run 1、Run 2 已使用修复后的模板完成，两轮审计与比较门禁均成功；旧 303 节点结果仅作为被取代历史另列。以下模板继续作为后续正式复现必须原样使用的命令。** 在仓库根目录对 Run 1、Run 2 分别启动独立 shell，并将 `run_id` 设为 `run1` 或 `run2`。每轮使用各自的环境文件和独立空库；两个文件均放在仓库外，含各自的 `TEST_DATABASE_URL`，权限仅当前用户可读写。不要复用校准库、预检库或另一轮的库，不要在终端打印环境文件。加载前清除继承变量；文件缺失/不可读、加载失败或缺少 `TEST_DATABASE_URL` 均必须在 Alembic/pytest 前失败，不得使用默认值。
+**§6.1 历史 310 节点 Run 1、Run 2 已使用修复后的模板完成，两轮审计与比较门禁均成功；旧 303 节点结果仅作为被取代历史另列，§6.2 后续 Docker 双跑单独记录。以下模板继续作为该本地路径后续正式复现必须原样使用的命令。** 在仓库根目录对 Run 1、Run 2 分别启动独立 shell，并将 `run_id` 设为 `run1` 或 `run2`。每轮使用各自的环境文件和独立空库；两个文件均放在仓库外，含各自的 `TEST_DATABASE_URL`，权限仅当前用户可读写。不要复用校准库、预检库或另一轮的库，不要在终端打印环境文件。加载前清除继承变量；文件缺失/不可读、加载失败或缺少 `TEST_DATABASE_URL` 均必须在 Alembic/pytest 前失败，不得使用默认值。
 
 ```bash
 set -uo pipefail
@@ -263,6 +264,8 @@ XPASS 证据分为两层，不能互相替代。JUnit `summary` 负责把 pytest
 
 ## 6. 正式双跑与覆盖率
 
+### 6.1 历史：2026-11-07 未提交树本地双跑
+
 修正后的本地正式双跑已完成并逐项复核。两轮均实际使用各自迁移到 `0057_industry_pack_runtime` 的独立空库，严格执行 §4 的同一有序 25 套件和 §5 的修正后模板；每轮 pytest、summary、日志审计、树身份和包装器均成功，比较门禁在重新审计两轮日志后才执行节点比较。完整逐用例溯源见 `../06-test-report.md`。
 
 | 项 | Run 1 | Run 2 | 比较/说明 |
@@ -280,19 +283,42 @@ XPASS 证据分为两层，不能互相替代。JUnit `summary` 负责把 pytest
 
 每轮均保存 `.log`、`.xml`、`.summary.json`、`.xpass-audit.json`、`.coverage.json`、`.coverage`、`.base-commit.txt`、`.tree-before.txt`、`.tree-after.txt`、`.metadata.txt`，完整逐文件路径见 `../06-test-report.md` 附录 A。共享身份检查为 `/tmp/nexusdesk-phase0-identity-checks.json`，环境指纹为 `/tmp/nexusdesk-phase0-environment.log`；比较门禁日志为 `/tmp/nexusdesk-phase0-compare-gate.log`。
 
-`/tmp/nexusdesk-phase0-coverage-diff.json` 显示 8 个文件的 executed-line 集合有差异，Run 2 净多 14 条已覆盖行；每文件 run1-only/run2-only 行号均保留。节点 outcome 仍完全一致。这只是覆盖率观察，不是 flaky 测试证明，也不得以两位小数覆盖率或全绿总数隐藏。被测树当时未提交，最终 committed-artifact SHA 保持 `pending_commit`；本地双跑通过不替代 §7 的干净 CI `pending_env`、真实授权样本 `pending_env` 或人工验收。
+`/tmp/nexusdesk-phase0-coverage-diff.json` 显示 8 个文件的 executed-line 集合有差异，Run 2 净多 14 条已覆盖行；每文件 run1-only/run2-only 行号均保留。节点 outcome 仍完全一致。这只是覆盖率观察，不是 flaky 测试证明，也不得以两位小数覆盖率或全绿总数隐藏。被测树当时未提交，这一历史身份不由后续提交或 Docker 双跑改写；后续 committed-artifact 证据见 §6.2，任何本地双跑都不替代 §7 的最终 PR head 干净 CI `pending_env`、真实授权样本 `pending_env` 或人工验收。
 
 **被取代的修复前 303 节点历史**完整保存在 `/tmp/nexusdesk-phase0-superseded-20261107-3d4f9b06/`：base 同上，tree 为 `sha256=3d4f9b06cbdd5de89250d888c0ea695d145e6051d4cc995c64107947fc14e729 files=1014`；两轮 UTC 分别为 2026-11-07T18:28:35Z～18:30:58Z、18:31:55Z～18:34:25Z，均为 303 passed、零 failure/error/skip，JUnit time 为 142.851s/148.877s，覆盖率为 9886/18534（53.34%）/9881/18534（53.31%），当时节点比较一致。所选源中没有实际 xfail 标记，但该轮没有 `audit-log` 产物，**不得作为修正后 XPASS 门禁通过的证据，也不得把其 tree hash 或计数冒充当前结果**。
 
 **另保留一次被拒绝的 Run 1 尝试**于 `/tmp/nexusdesk-phase0-rejected-run1-20261107-19548c1d/`：tree 为 `sha256=19548c1df1591a9fb084e4bb178694d782a50c74c870d0ab4c936975e42d11b9 files=1018`，UTC 为 2026-11-07T21:20:28Z～21:22:53Z；pytest exit 0、308 个 JUnit 节点全 passed、time 144.515s、轮内树稳定，但审计因不支持真实终端汇总 `(0:02:24)` 而 exit 2，未生成正式 audit JSON，Run 2/compare 未启动。它不是测试失败，也不是通过的正式轮次。解析器修复后的独立诊断对该日志得到 exit 0、308 条记录、零 XPASS，但未把该尝试提升为正式证据；随后以新 Run 1 空库重新启动上述当前 310 节点双跑。
 
-当前 310 节点 = 被取代的 303 节点 + 5 个 strict/non-strict XPASS 工具回归 + 2 个长耗时终端格式回归。本文及报告的数字回填发生在被测树完成之后，只修改文档；上述 tree hash 不代表包含这些事后文档编辑的新工作树，也不代表最终提交树。
+当前 310 节点 = 被取代的 303 节点 + 5 个 strict/non-strict XPASS 工具回归 + 2 个长耗时终端格式回归。本文及报告的数字回填发生在被测树完成之后，只修改文档；上述 tree hash 不代表包含这些事后文档编辑的新工作树，也不代表后续已提交产物。
+
+### 6.2 后续：2026-11-09 已提交产物本地 Docker 双跑
+
+被测实现/基线提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 已创建并推送。后续使用两个独立干净 Docker/pgvector PostgreSQL 17 容器、数据卷和临时凭据，在该精确提交上按 §4 的相同顺序执行 25 个套件。它是区别于 §6.1 的后续本地执行，不是 GitHub Actions CI，也不替换历史。2026-11-10 的文档专用回填不在被测 SHA 内；最终 PR head 的测试/CI 证据仍为 `pending_env`。
+
+| 项 | Run 1 | Run 2 | 比较/说明 |
+|---|---|---|---|
+| 提交 / 树身份 | `4dfcfb41e9cbb799753986c2d76134514bbd19be`；`sha256=063150feec809290c2945a6e305f133e41330518f9d3cda9ca60cd3c85b449ab files=1018` | 同左 | 两轮 before/after 与跨轮一致 |
+| UTC 起止 | 2026-11-09T14:29:13Z～14:30:42Z | 2026-11-09T14:32:00Z～14:33:34Z | 各自 metadata |
+| Alembic | `0057_industry_pack_runtime (head)` | 同左 | 两个独立空库，迁移/current 均 exit 0 |
+| tests/failures/errors/skipped | 310 / 0 / 0 / 0 | 310 / 0 / 0 / 0 | 310 个唯一节点均 passed |
+| `-rA` 审计 | 310 条、零 XPASS、exit 0 | 310 条、零 XPASS、exit 0 | 不以 JUnit passed 替代日志审计 |
+| JUnit time | 86.391s | 90.885s | 仅观察，不参与等价 |
+| coverage | 9890/18534 = 53.36138987806194% | 9882/18534 = 53.318225963094854% | 不宣称逐行一致 |
+| 节点比较 | — | — | `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/shared/compare.json`：`identical=true`，`added=[]`、`missing=[]`、`outcome_changes=[]`、`skip_reason_changes=[]`，compare exit 0 |
+
+`shared/acceptance-summary.json` 记录 8 个文件的 executed-line 差异：`channel/service.py`、`memory/decay.py`、`memory/service.py`、`memory/worker.py`、`open_platform/service.py`、Runtime `worker.py`、`model_gateway/catalog.py`、`model_gateway/gateway.py`，精确行号保留在 JSON。该观察不隐藏、不称为逐行一致，也不单独证明 flaky。
+
+静态与合规检查均通过：Ruff、架构门禁、`backend/src` 与 `backend/migrations` 相对 base 零漂移。实际 `git revert --no-commit HEAD` 在独立 disposable clone 中执行，结果与 base `c6c47dec39025ebd4d1176c1e9925bac9c99c4fd` 无差异，exit 0，主工作树未执行 revert。47 份正式文本证据定向扫描为 `findings=[]`、`read_errors=[]`；未读取两个凭据环境文件，排除两份二进制 coverage 数据。Docker 资源和临时凭据已清理。
+
+以下 harness 尝试**不计入正式双跑或通过证据**：缺 `.git` 的镜像在 pytest/迁移前以 exit 128 拒绝（`rejected-run1-no-git.*`）；Alembic 工作目录错误在 pytest 前失败且未迁移（`rejected-run1-migration-path-*`）；额外随机 `AGENT_API_TOKEN` 导致 309 passed、1 failed，失败节点为 `test_runtime_postgres.py::test_end_to_end_demo_uses_real_http_and_persistent_events`（401 而非 202，`failed-run1-auth-*`）。清理旧容器/数据卷后，才以新临时凭据和两个独立空库形成上表正式双跑。
+
+证据根目录为 `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/`：`ACCEPTANCE-RESULT.md`、`run1-artifacts/`、`run2-artifacts/`、`shared/compare.json`、`shared/acceptance-summary.json`、`shared/secret-scan.json`，以及上述失败/拒绝产物。
 
 ## 7. CI 支持证据与边界
 
 既有 CI run：<https://github.com/GroundedCoreAI/nexusdesk/actions/runs/42227604191>，2026-11-06 全部 job 成功，head 为 `16aed12eb095f29bed5c536b5fcbf68e510136c4`。目标提交 `c6c47de` 是该后端状态之后的文档合并，backend 树与该 CI head 一致；此前汇总计数为 949 passed、17 skipped。
 
-这只是**现状后端单次全量 CI 支持证据**，不包含本阶段新增测试、覆盖率、JUnit artifact 或双跑比较。含 Phase 0 产物的提交尚未推送/运行 CI，因此正式 CI 双跑和链接保持 `pending_env`，不得将上述 run 写成 Phase 0 验收通过证据。
+这只是**现状后端单次全量 CI 支持证据**，不包含本阶段新增测试、覆盖率、JUnit artifact 或双跑比较。被测实现/基线提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 已推送并完成 §6.2 本地 Docker 双跑，但截至 2026-11-10 本次文档回填时尚未创建 PR，后续文档回填会形成不在该 SHA 内的新 PR head；最终 PR head 的正式干净 GitHub Actions CI 双跑和链接保持 `pending_env`。不得把上述旧 run 或本地 Docker 写成 Phase 0 CI/完整验收通过证据。
 
 ## 8. 缺陷与确定性处置
 
