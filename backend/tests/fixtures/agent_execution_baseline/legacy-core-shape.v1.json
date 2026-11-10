@@ -1,0 +1,13 @@
+{
+  "system_prompt": "Use the configured synthetic lookup tool and state uncertain results.",
+  "tool_names": [
+    "synthetic.orders.lookup"
+  ],
+  "knowledge_base_ids": [
+    "00000000-0000-4000-8000-000000000101"
+  ],
+  "max_model_rounds": 6,
+  "model_profile_id": "00000000-0000-4000-8000-000000000102",
+  "model_profile_version": 1,
+  "reply_language": "auto"
+}

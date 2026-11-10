@@ -10,7 +10,7 @@
 
 | 层 | 文件 | 改动 |
 |---|---|---|
-| 迁移 | `backend/migrations/versions/` | 不新增或修改迁移；当前 head `0052_memory_tasks_tenant_index.py` 保持不变 |
+| 迁移 | `backend/migrations/versions/` | 不新增或修改迁移；实施时记录目标提交的实际 head，完成后与该入口值保持一致 |
 | 新模块 | `backend/src/agent_platform/core_platform/agent_execution/contracts/{request,handle,result,events,capabilities,errors}.py` | 六类版本化 DTO 与错误分类；不依赖 Runtime/应用层 |
 | 新模块 | `backend/src/agent_platform/core_platform/agent_execution/contracts/adapter.py` | AgentEngineAdapter Protocol 与身份/生命周期约束 |
 | 新模块 | `backend/src/agent_platform/core_platform/agent_execution/registry/{engine_registry,protocol_registry,adapter_registry}.py` | 描述符、独立注册、兼容矩阵和精确三元组解析 |
@@ -71,7 +71,7 @@ get_capabilities → start(request) → 并发消费 stream_events(handle)
 
 ### 3. LocalTestAdapter 场景驱动（`adapters/testing/local_test_adapter.py`）
 
-场景定义包含身份、能力、启动错误、事件脚本、结果、完成/取消闸门及延迟事件；测试时钟推进超时，事件闸门控制长运行与取消。每个场景验证五方法和三个身份属性，失败后清理异步迭代器与任务。
+场景定义包含身份、能力、启动错误、事件脚本、结果、完成/取消闸门及延迟事件；测试时钟推进超时，事件闸门控制长运行与取消。LocalTestAdapter 固定身份为 `(local-test,scripted,v1)`，与生产 `(react,native,v1)` 独立，且不得成为生产 Agent 默认值。每个场景验证五方法和三个身份属性，失败后清理异步迭代器与任务。
 
 ### 4. 错误与事件边界
 

@@ -1,9 +1,9 @@
 # Phase 0 · Baseline and Inventory — Technical Design
 
-> Status: Pending review (implementation has not started)
+> Status: In progress (implementation started on 2026-11-07)
 > Created: 2026-11-02
 > Basis: `02-requirements.md` (FR-1–FR-6, AC-1–AC-6), architecture Sections 15 and 17
-> Verification boundary: planning inspected `integration` at `fb3f424`; execution must record the SHA and working-tree state again on a clean target commit
+> Verification boundary: planning inspected `integration` at `fb3f424`; this current-state baseline is bound to `c6c47dec39025ebd4d1176c1e9925bac9c99c4fd`, with the later artifact commit recorded separately
 
 ## Change Overview
 
@@ -18,10 +18,12 @@
 | Tests | `backend/tests/test_runtime_postgres.py` | Add missing lifecycle/race baselines without duplicating existing coverage |
 | Tests | `backend/tests/test_agent_config_execution_compat.py` | Historical configuration, published-snapshot, and boundary-fixture compatibility |
 | Test data | `backend/tests/fixtures/agent_execution_baseline/` | Sanitized, versioned, minimal JSON fixtures and inventory |
+| Test tooling | `backend/scripts/runtime_baseline.py` | Parse JUnit counts, skip reasons, and `(classname, name)` outcomes; exit nonzero for added/missing/changed nodes between runs |
+| Dev dependencies | `backend/pyproject.toml`, `backend/uv.lock` | Add `pytest-cov` to the dev group only; production dependencies remain unchanged |
 | Current dependencies | `core_platform/agent_runtime/{engine,worker,repository,schemas}.py` | Read-only inspection; no production refactoring in this phase |
 | Current composition | `applications/platform_runtime/{runtime_factory,runtime_composition}.py`, `business_capabilities/agent_config/service.py`, `extension_contracts/runtime.py` | Read-only inspection and interface mapping |
 
-**Data model and migrations**: no new table, column, or backfill; no migration number is assigned. Do not alter existing `agents.draft`, `agent_versions.config`, or `runtime_runs.config` structures to fit a future model.
+**Data model and migrations**: no new table, column, or backfill; no migration number is assigned. The actual target head is `0057_industry_pack_runtime` and must remain unchanged after this phase; later phases revalidate their own implementation-time head. Do not alter existing `agents.draft`, `agent_versions.config`, or `runtime_runs.config` structures to fit a future model.
 
 ## Current Execution Dependency Baseline (Revalidate During Execution)
 
@@ -68,9 +70,11 @@ Inspect at least these current paths:
 | `running` | Cancel | Cancellation request; Worker/Repository cooperate toward `cancelled`; late completion cannot overwrite it |
 | `running` | Lease loss or reaper | `failed(worker_lost)` or the corresponding existing behavior |
 | `queued` | Queue deadline/reaper | `failed(queue_timeout)`; freeze cancellation precedence from code |
-| Any terminal state | Late finish/duplicate event | Repository conditional updates reject illegal transitions; retain test evidence |
+| Any terminal state | Ordinary late finish | The conditional `finish` update does not match and silently does nothing; it cannot overwrite the terminal state |
+| `running`/terminal | Ordinary illegal append | `append` fails its status/owner/lease/cancellation checks and raises `CancelledError` |
+| Any state | `DurableToolReplayCache.put` | Special internal `tool.replay` write path without all ordinary append protections; document separately rather than claiming uniform terminal protection |
 
-The event inventory separately records durable events and transient `model.delta` notifications, sequence origins, SSE `after` replay semantics, terminal-event fields, and secret boundaries. If this table differs from actual code, revise it with evidence before writing tests.
+The event inventory separately records durable events and transient `model.delta` notifications, sequence origins, strict-greater-than SSE `after`/`Last-Event-ID` replay, terminal-event fields, and secret boundaries. The internal `tool.replay` cache event may consume a durable sequence number; public SSE hides its payload while advancing the cursor. This does not establish that ordinary execution events can bypass protection. If this table differs from actual code, revise it with evidence before writing tests.
 
 ### 3. Build Configuration Compatibility Fixtures
 
@@ -79,22 +83,24 @@ Extract and sanitize authorized historical draft/published configs
   + construct default, minimal, maximum-boundary, unknown/invalid-field fixtures
   → Inventory fixture version, source category, covered fields, expected result (never secrets)
   → AgentConfig.model_validate + existing publish/snapshot paths
-  → Compare unchanged source input, existing defaults, and error semantics
+  → Compare raw reads, publication materialization, and Run snapshots separately
+  → Assert source drafts/existing versions are not rewritten by later operations; retain existing defaults and error semantics
 ```
 
-Fixtures contain no real tokens, URL credentials, customer content, or identifiable personal information. If a real sample cannot enter the repository, retain only field shapes and sanitized values and document the evidence limitation.
+Create/update/publish currently materialize defaults. Raw draft/version reads and `snapshot()` return stored JSON without guaranteeing that validation defaults are materialized in the returned object. Valid publication integration fixtures must retain the core keys that `snapshot()` reads before Pydantic validation; record the limitation of extremely sparse raw versions rather than rewriting samples to claim compatibility. Fixtures contain no real tokens, URL credentials, customer content, or identifiable personal information. If a real sample cannot enter the repository, retain only field shapes and sanitized values and document the evidence limitation.
 
 ### 4. Establish and Measure the Regression Baseline
 
 - Run existing `test_runtime_engine.py`, `test_runtime_postgres.py`, `test_runtime_availability.py`, `test_runtime_scope.py`, and Agent Config/API/SSE tests before filling gaps, avoiding duplication.
 - Mock models/tools cover success, empty output, budgets, errors, and cancellation; PostgreSQL cases construct lease/cancellation/terminal races directly rather than waiting in real time.
-- Measure with the project's existing coverage tooling; do not add meaningless tests for a percentage. Report behavioral coverage alongside line coverage.
-- Execute twice in the same clean environment; preserve full commands, UTC timestamps, dependency versions, pass/fail/skip/xfail counts, and duration. Add CI links when available.
+- The project initially has no coverage tooling. Add `pytest-cov` to the dev group and measure with `--cov=agent_platform --cov-report=term --cov-report=json:<external-evidence-path>`. Never record unmeasured coverage as 0%; do not add meaningless tests for a percentage. Report behavioral coverage alongside line coverage.
+- `runtime_baseline.py summary` reads tests/failures/errors/skipped/time and node outcomes from JUnit XML; missing counts must not default to zero. `compare` aligns `(classname, name)` nodes and reports added, missing, pass/failure/error/skipped/xfail/xpass changes, and skip-reason changes. Node differences exit nonzero; duration differences are not behavioral differences.
+- Execute twice in the same clean environment, each against its own migrated, isolated PostgreSQL database. Preserve full commands, UTC timestamps, dependency versions, `-rA`, `--durations=0`, JUnit XML, coverage JSON, pass/fail/skip/xfail counts, and duration. Keep environment-calibration failures separate from the formal double run. Add CI links when available.
 
 ### 5. Freeze Identifiers and the Checklist
 
 - Initial production identifier: `(react, native, v1)`; Engine, Protocol, and Adapter dimensions are named independently, not by Python class name.
-- LocalTestAdapter uses distinct test Engine/Protocol identifiers that do not collide with production React; exact values are registered during Phase 1 contract review.
+- LocalTestAdapter uses the fixed independent test tuple `(local-test,scripted,v1)`, which must not collide with production React, become a production Agent default, or serve as evidence of real process supervision.
 - Initially `Run = one Execution attempt`; Phase 1 defines the mapping between `execution_id` and the existing Run ID without creating a Task table.
 - Map checklist entries to Phase 1–7 compatibility, rollback, migration, security, and regression requirements, identifying mandatory baseline tests.
 

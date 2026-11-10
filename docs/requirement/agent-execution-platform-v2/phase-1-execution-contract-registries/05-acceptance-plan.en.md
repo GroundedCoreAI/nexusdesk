@@ -36,7 +36,7 @@ Confirm that contracts and registries are **independently extensible, lifecycle-
 | A5 | For AC-5: the Adapter representative independently adds a test Engine, two Protocols, and versioned implementations, reuses the common suite, and resolves twice | No common-contract/Worker change is needed; valid combinations pass; resolutions are independent identity-matching instances |
 | A6 | For AC-6: execute unknown ID, unknown version, undeclared combination, disabled, conflicting duplicate, and identity-mismatched factory cases | Every case fails closed with stable error codes and no latest, alternate-version, or other-Engine fallback |
 | A7 | For AC-7: run duplicate/late events, timeout, resource exhaustion, and simulated process failure twice and inspect asyncio tasks | Semantics repeat, anomalous events are identifiable, timeout/failure categories are correct, and there is no external dependency or pending task |
-| A8 | For AC-8: inspect production Worker/Factory diff, run existing Runtime/API/SSE regression, and query migration head | No production wiring; old APIs/events/states show zero diff; head is `0052` and regression is green |
+| A8 | For AC-8: inspect production Worker/Factory diff, run existing Runtime/API/SSE regression, and query migration head | No production wiring; old APIs/events/states show zero diff; head equals the actual target value recorded at implementation entry and regression is green |
 
 Every scenario record must include executor, date, environment, fixtures, actual result, verdict, and CI/log link. A failed item cannot be marked passed or waived merely because it concerns the test implementation.
 
@@ -61,7 +61,7 @@ Every scenario record must include executor, date, environment, fixtures, actual
 | # | Check | Decision |
 |---|---|---|
 | C1 | DTOs, registries, errors, and logs contain no plaintext credential, connection string, raw stack, or customer input | Veto item |
-| C2 | Tenant boundaries, Run/Extension public ports, Agent snapshots, HTTP/SSE, and table structures remain unchanged; head remains `0052` | Must pass |
+| C2 | Tenant boundaries, Run/Extension public ports, Agent snapshots, HTTP/SSE, and table structures remain unchanged; head equals the actual target value recorded at implementation entry | Must pass |
 | C3 | The new path is absent from production composition; rollback only reverts unwired code and needs no migration or data repair | Must pass |
 | C4 | Effective capabilities are not conflated with Declared capabilities, and registries do not perform authorization, scheduling, or process supervision | Must pass |
 

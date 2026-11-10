@@ -1,0 +1,206 @@
+{
+  "cases": [
+    {
+      "id": "empty-system-prompt",
+      "config": {
+        "system_prompt": "",
+        "tool_names": []
+      },
+      "expected_error_locations": [
+        [
+          "system_prompt"
+        ]
+      ]
+    },
+    {
+      "id": "tool-names-wrong-type",
+      "config": {
+        "system_prompt": "Synthetic invalid tool collection.",
+        "tool_names": "synthetic.lookup"
+      },
+      "expected_error_locations": [
+        [
+          "tool_names"
+        ]
+      ]
+    },
+    {
+      "id": "model-rounds-wrong-type",
+      "config": {
+        "system_prompt": "Synthetic invalid numeric type.",
+        "tool_names": [],
+        "max_model_rounds": "many"
+      },
+      "expected_error_locations": [
+        [
+          "max_model_rounds"
+        ]
+      ]
+    },
+    {
+      "id": "model-rounds-below-lower-bound",
+      "config": {
+        "system_prompt": "Synthetic lower range violation.",
+        "tool_names": [],
+        "max_model_rounds": 0
+      },
+      "expected_error_locations": [
+        [
+          "max_model_rounds"
+        ]
+      ]
+    },
+    {
+      "id": "model-rounds-above-upper-bound",
+      "config": {
+        "system_prompt": "Synthetic upper range violation.",
+        "tool_names": [],
+        "max_model_rounds": 31
+      },
+      "expected_error_locations": [
+        [
+          "max_model_rounds"
+        ]
+      ]
+    },
+    {
+      "id": "model-profile-version-below-lower-bound",
+      "config": {
+        "system_prompt": "Synthetic model version range violation.",
+        "tool_names": [],
+        "model_profile_id": "00000000-0000-4000-8000-000000000401",
+        "model_profile_version": 0
+      },
+      "expected_error_locations": [
+        [
+          "model_profile_version"
+        ]
+      ]
+    },
+    {
+      "id": "model-profile-binding-is-incomplete",
+      "config": {
+        "system_prompt": "Synthetic half-bound model profile.",
+        "tool_names": [],
+        "model_profile_id": "00000000-0000-4000-8000-000000000402"
+      },
+      "expected_error_locations": [
+        []
+      ],
+      "related_fields": [
+        "model_profile_id",
+        "model_profile_version"
+      ]
+    },
+    {
+      "id": "invalid-reply-language-enum",
+      "config": {
+        "system_prompt": "Synthetic invalid language enum.",
+        "tool_names": [],
+        "reply_language": "fr"
+      },
+      "expected_error_locations": [
+        [
+          "reply_language"
+        ]
+      ]
+    },
+    {
+      "id": "invalid-memory-type-enum",
+      "config": {
+        "system_prompt": "Synthetic invalid memory type enum.",
+        "tool_names": [],
+        "memory_types": [
+          "flag"
+        ]
+      },
+      "expected_error_locations": [
+        [
+          "memory_types",
+          0
+        ]
+      ]
+    },
+    {
+      "id": "empty-memory-types",
+      "config": {
+        "system_prompt": "Synthetic empty memory type collection.",
+        "tool_names": [],
+        "memory_types": []
+      },
+      "expected_error_locations": [
+        [
+          "memory_types"
+        ]
+      ]
+    },
+    {
+      "id": "invalid-memory-write-mode-enum",
+      "config": {
+        "system_prompt": "Synthetic invalid memory write mode enum.",
+        "tool_names": [],
+        "memory_write_mode": "manual"
+      },
+      "expected_error_locations": [
+        [
+          "memory_write_mode"
+        ]
+      ]
+    },
+    {
+      "id": "memory-inject-limit-below-lower-bound",
+      "config": {
+        "system_prompt": "Synthetic injection limit range violation.",
+        "tool_names": [],
+        "memory_inject_max_items": 0
+      },
+      "expected_error_locations": [
+        [
+          "memory_inject_max_items"
+        ]
+      ]
+    },
+    {
+      "id": "memory-search-limit-below-lower-bound",
+      "config": {
+        "system_prompt": "Synthetic search limit range violation.",
+        "tool_names": [],
+        "memory_search_limit": 0
+      },
+      "expected_error_locations": [
+        [
+          "memory_search_limit"
+        ]
+      ]
+    },
+    {
+      "id": "invalid-knowledge-base-uuid",
+      "config": {
+        "system_prompt": "Synthetic invalid knowledge base identifier.",
+        "tool_names": [],
+        "knowledge_base_ids": [
+          "not-a-uuid"
+        ]
+      },
+      "expected_error_locations": [
+        [
+          "knowledge_base_ids",
+          0
+        ]
+      ]
+    },
+    {
+      "id": "summary-enabled-wrong-type",
+      "config": {
+        "system_prompt": "Synthetic invalid boolean type.",
+        "tool_names": [],
+        "summary_enabled": []
+      },
+      "expected_error_locations": [
+        [
+          "summary_enabled"
+        ]
+      ]
+    }
+  ]
+}

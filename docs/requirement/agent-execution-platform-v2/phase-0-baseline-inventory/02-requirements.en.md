@@ -1,6 +1,6 @@
 # Phase 0 · Baseline and Inventory — Requirements
 
-> Status: Pending review (implementation has not started)
+> Status: In progress (implementation started on 2026-11-07)
 > Created: 2026-11-02
 > Basis: `01-business-goals.md` (G1–G3), architecture Section 17 (Phase 0)
 

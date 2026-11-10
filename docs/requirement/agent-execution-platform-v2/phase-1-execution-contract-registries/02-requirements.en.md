@@ -79,7 +79,7 @@
 ## Non-Functional Requirements
 
 - **Performance**: Registration and DTO validation are in-process only and perform no I/O during resolution; Phase 1 does not change production Run latency, whose baseline is to be measured in Phase 0.
-- **Compatibility**: Existing Agent snapshots, RunRequest/RunSnapshot, RunStatus, Runtime Events, and APIs remain unchanged; migration head stays at `0052`.
+- **Compatibility**: Existing Agent snapshots, RunRequest/RunSnapshot, RunStatus, Runtime Events, and APIs remain unchanged; the migration head equals the actual target value recorded at implementation entry.
 - **Multi-tenancy**: request tenant_id comes only from trusted context; registries do not use untrusted input for cross-tenant lookup, and logs/errors never expose config, credentials, or raw input.
 - **Maintainability**: Engine/Protocol/Adapter identities and versions are explicit; common contracts do not import Factory, Worker, Repository, or any concrete Engine.
 - **Reliability**: Idempotent cancellation, instance isolation, event ordering, and error semantics are repeatable in tests; persistent event deduplication and process cleanup are not claimed in this phase.
@@ -95,4 +95,4 @@
 | AC-5 | Independently register one Engine, two Protocols, and versioned Adapters, then resolve valid tuples | Engine and Protocol registration are not hard-bound; valid combinations return independent identity-matching Adapters without changing common contracts or Worker |
 | AC-6 | Resolve unknown Engine/Protocol/version, undeclared combinations, and disabled entries; attempt conflicting duplicate registration and an identity-mismatched factory | All are rejected with stable configuration errors, with no implicit latest, cross-version, or other-Engine fallback |
 | AC-7 | Replay LocalTestAdapter duplicate events, late events, timeout, resource exhaustion, and simulated process failure | Event anomalies remain accurately visible to upper layers; other scenarios produce deterministic terminal results/errors without external dependencies or dangling tasks |
-| AC-8 | Inspect migration head and production Worker/Factory wiring, then run existing Runtime/API/SSE regression | Head remains `0052`, the new path is not connected to production Worker, and existing APIs, event names, states, and test behavior are unchanged |
+| AC-8 | Inspect migration head and production Worker/Factory wiring, then run existing Runtime/API/SSE regression | Head equals the actual target value recorded at implementation entry, the new path is not connected to production Worker, and existing APIs, event names, states, and test behavior are unchanged |

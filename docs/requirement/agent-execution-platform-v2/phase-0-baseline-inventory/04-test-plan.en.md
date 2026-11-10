@@ -1,6 +1,6 @@
 # Phase 0 · Baseline and Inventory — Test Plan
 
-> Status: Pending execution (during baseline construction)
+> Status: In progress (baseline construction started on 2026-11-07)
 > Created: 2026-11-02
 > Basis: `02-requirements.md` (FR-1–FR-6, AC-1–AC-6), `03-technical-design.md` (no migration, actual state machine, compatibility fixtures, two-run baseline)
 

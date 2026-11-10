@@ -63,7 +63,7 @@
 
 | ID | Check | Pass criterion | Traceability |
 |---|---|---|---|
-| P1-CM-01 | Database migrations unchanged | Alembic head remains `0052`; no version file added/modified and no downgrade required | AC-8, G4 |
+| P1-CM-01 | Database migrations unchanged | Alembic head equals the actual target value recorded at implementation entry; no version file added/modified and no downgrade required | AC-8, G4 |
 | P1-CM-02 | Zero production wiring and configuration unchanged | Worker/Factory/composition do not call the new path; no new runtime flag; legacy path remains the only path | AC-8, FR-6 |
 | P1-CM-03 | Public API/SSE/Run contract compatibility | RunRequest/RunSnapshot/RunStatus, event names, and routes unchanged; relevant existing tests are green | AC-8, FR-6 |
 | P1-CM-04 | Sensitive information and logs | DTO/registry/Adapter error output contains no secret-marker, credential, connection string, raw stack, or customer input | AC-4, non-functional |

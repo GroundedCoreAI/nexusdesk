@@ -1,0 +1,10 @@
+{
+  "system_prompt": "This synthetic config contains an unsupported engine key.",
+  "tool_names": [
+    "synthetic.lookup"
+  ],
+  "engine": {
+    "provider": "synthetic-provider",
+    "unsupported_option": true
+  }
+}
