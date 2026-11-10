@@ -1,11 +1,12 @@
 # Phase 0 Baseline · Regression Environment, Results, and Reproduction Commands
 
-> Status: The corrected local formal double run passed 310-node comparison and both XPASS log audits; clean CI, real samples, final commit evidence, and acceptance are not preclaimed as passed
-> Current-state target commit: `c6c47dec39025ebd4d1176c1e9925bac9c99c4fd`
-> Baseline artifacts: formally tested **uncommitted** feature-branch working tree, identified by base metadata and deterministic tree hash; no fictitious artifact SHA is assigned, and final committed-artifact evidence remains `pending_commit`
-> Initial record: 2026-11-07; T8 expansion: 2026-11-08; T9 formal-result and corrected-double-run update: 2026-11-08
+> Status: Both the historical uncommitted-tree double run and subsequent committed-artifact local Docker double run passed 310-node comparison and zero-XPASS audits; clean CI on the final PR head, real samples, and human acceptance remain unpassed or incomplete
+> Current-state base: `c6c47dec39025ebd4d1176c1e9925bac9c99c4fd`
+> Historical baseline artifact: the formally tested **uncommitted** feature-branch working tree of 2026-11-07, identified by base metadata and deterministic tree hash and retained as history
+> Subsequent tested implementation/baseline commit: `4dfcfb41e9cbb799753986c2d76134514bbd19be` (pushed); the documentation-only backfill of 2026-11-10 is outside that tested SHA, whose test/CI evidence must not be inherited by the final PR head
+> Initial record: 2026-11-07; T8 expansion: 2026-11-08; T9 formal-result and corrected-double-run update: 2026-11-08; Docker-evidence backfill: 2026-11-10 (executed on UTC 2026-11-09)
 > Basis: `02-requirements.md` (FR-1–FR-6, AC-1–AC-6) and `04-test-plan.md`
-> Evidence directory: local `/tmp/nexusdesk-phase0-*` (secrets, database connection strings, and large temporary logs are not committed)
+> Evidence directories: historical local `/tmp/nexusdesk-phase0-*`; subsequent `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/` (secrets, database connection strings, and large temporary logs are not committed)
 
 ## 1. Environment Fingerprint
 
@@ -88,7 +89,7 @@ The scope includes Runtime core and PostgreSQL/SSE/replay, baseline summary/comp
 
 ## 5. Reproducible Formal Double-Run Command Template
 
-**The current 310-node Run 1 / Run 2 in §6 completed under the corrected template, with successful audits and comparison gates in both rounds; the old 303-node results are listed separately as superseded history. The template below remains mandatory verbatim for later formal reproduction.** From the repository root, start a separate shell for Run 1 and Run 2 and set `run_id` to `run1` or `run2`, respectively. Each run uses its own environment file and independent empty database. Keep both files outside the repository, each containing its own `TEST_DATABASE_URL`, readable/writable only by the current user. Do not reuse the calibration database, a precheck database, or the other run's database, and do not print the environment files. Clear inherited variables before loading; a missing/unreadable file, failed load, or absent `TEST_DATABASE_URL` must fail before Alembic/pytest rather than use a default.
+**The historical 310-node Run 1 / Run 2 in §6.1 completed under the corrected template, with successful audits and comparison gates in both rounds; the old 303-node results are listed separately as superseded history, and the subsequent Docker double run is recorded independently in §6.2. The template below remains mandatory verbatim for later formal reproduction through this local path.** From the repository root, start a separate shell for Run 1 and Run 2 and set `run_id` to `run1` or `run2`, respectively. Each run uses its own environment file and independent empty database. Keep both files outside the repository, each containing its own `TEST_DATABASE_URL`, readable/writable only by the current user. Do not reuse the calibration database, a precheck database, or the other run's database, and do not print the environment files. Clear inherited variables before loading; a missing/unreadable file, failed load, or absent `TEST_DATABASE_URL` must fail before Alembic/pytest rather than use a default.
 
 ```bash
 set -uo pipefail
@@ -263,6 +264,8 @@ The comparator identifies every JUnit testcase by its exact **`(classname,name)`
 
 ## 6. Formal Double Run and Coverage
 
+### 6.1 History: 2026-11-07 uncommitted-tree local double run
+
 The corrected local formal double run is complete and has been checked item by item. Each run actually used its own independent empty database migrated to `0057_industry_pack_runtime`, with the exact ordered 25 suites in §4 and the corrected §5 template. Pytest, summary, log audit, tree identity, and wrapper succeeded in each run; the comparison gate reran both log audits before comparing nodes. Full per-case traceability is in `../06-test-report.en.md`.
 
 | Item | Run 1 | Run 2 | Comparison/note |
@@ -280,19 +283,42 @@ The corrected local formal double run is complete and has been checked item by i
 
 Each run retains `.log`, `.xml`, `.summary.json`, `.xpass-audit.json`, `.coverage.json`, `.coverage`, `.base-commit.txt`, `.tree-before.txt`, `.tree-after.txt`, and `.metadata.txt`; exact per-file paths are in `../06-test-report.en.md` Appendix A. The shared identity check is `/tmp/nexusdesk-phase0-identity-checks.json`, the environment fingerprint is `/tmp/nexusdesk-phase0-environment.log`, and the comparison-gate log is `/tmp/nexusdesk-phase0-compare-gate.log`.
 
-`/tmp/nexusdesk-phase0-coverage-diff.json` reports executed-line-set differences in eight files, with a net 14 more covered lines in Run 2; per-file run1-only/run2-only line numbers are retained. Node outcomes remain identical. This is a coverage observation, not proof of flaky tests, and must not be hidden by two-decimal coverage displays or green aggregate counts. The tested tree was uncommitted, so final committed-artifact SHA evidence remains `pending_commit`; local double-run success does not replace the clean-CI `pending_env` in §7, authorized-real-sample `pending_env`, or human acceptance.
+`/tmp/nexusdesk-phase0-coverage-diff.json` reports executed-line-set differences in eight files, with a net 14 more covered lines in Run 2; per-file run1-only/run2-only line numbers are retained. Node outcomes remain identical. This is a coverage observation, not proof of flaky tests, and must not be hidden by two-decimal coverage displays or green aggregate counts. The tested tree was then uncommitted, and that historical identity is not rewritten by the later commit or Docker double run. Subsequent committed-artifact evidence is in §6.2; no local double run replaces the final-PR-head clean-CI `pending_env` in §7, authorized-real-sample `pending_env`, or human acceptance.
 
 **Superseded pre-fix 303-node history** is preserved in `/tmp/nexusdesk-phase0-superseded-20261107-3d4f9b06/`: the same base, tree `sha256=3d4f9b06cbdd5de89250d888c0ea695d145e6051d4cc995c64107947fc14e729 files=1014`; UTC ranges 2026-11-07T18:28:35Z–18:30:58Z and 18:31:55Z–18:34:25Z; 303 passed with zero failures/errors/skips in each run; JUnit times 142.851s/148.877s; coverage 9886/18534 (53.34%)/9881/18534 (53.31%); and identical node comparison at that time. The selected sources had no actual xfail markers, but this run had no `audit-log` artifacts. **It is not evidence that the corrected XPASS gate passed, and its tree hash or counts must not be presented as current.**
 
 **A separate rejected Run 1 attempt** is preserved in `/tmp/nexusdesk-phase0-rejected-run1-20261107-19548c1d/`: tree `sha256=19548c1df1591a9fb084e4bb178694d782a50c74c870d0ab4c936975e42d11b9 files=1018`, UTC 2026-11-07T21:20:28Z–21:22:53Z; pytest exit 0, all 308 JUnit nodes passed, time 144.515s, and stable within-run tree. The audit exited 2 because it did not accept the real terminal suffix `(0:02:24)`; no formal audit JSON was produced, and Run 2/compare were not started. It was neither a test failure nor a passing formal run. A separate post-fix diagnosis of its log returned exit 0 with 308 entries and zero XPASS, but the attempt was not promoted; the current 310-node double run above was subsequently restarted with a fresh Run 1 database.
 
-The current 310 nodes equal the superseded 303 nodes plus five strict/non-strict XPASS tooling regressions and two long-duration terminal-format regressions. This document and the reports were backfilled after the tested tree and changed documentation only. The tree hash above identifies neither a newer working tree containing those subsequent documentation edits nor a final committed tree.
+The current 310 nodes equal the superseded 303 nodes plus five strict/non-strict XPASS tooling regressions and two long-duration terminal-format regressions. This document and the reports were backfilled after the tested tree and changed documentation only. The tree hash above identifies neither a newer working tree containing those subsequent documentation edits nor the later committed artifact.
+
+### 6.2 Subsequent: 2026-11-09 committed-artifact local Docker double run
+
+The tested implementation/baseline commit `4dfcfb41e9cbb799753986c2d76134514bbd19be` has been created and pushed. The subsequent execution used two independent clean Docker/pgvector PostgreSQL 17 containers, volumes, and temporary credentials to run the 25 suites in §4's identical order on that exact commit. It is a distinct later local execution, not GitHub Actions CI, and does not replace §6.1 history. The documentation-only backfill of 2026-11-10 is outside the tested SHA; test/CI evidence for the final PR head remains `pending_env`.
+
+| Item | Run 1 | Run 2 | Comparison/note |
+|---|---|---|---|
+| Commit / tree identity | `4dfcfb41e9cbb799753986c2d76134514bbd19be`; `sha256=063150feec809290c2945a6e305f133e41330518f9d3cda9ca60cd3c85b449ab files=1018` | Same | Before/after and cross-run identities matched |
+| UTC start/end | 2026-11-09T14:29:13Z–14:30:42Z | 2026-11-09T14:32:00Z–14:33:34Z | Respective metadata |
+| Alembic | `0057_industry_pack_runtime (head)` | Same | Two independent empty databases; migration/current both exit 0 |
+| tests/failures/errors/skipped | 310 / 0 / 0 / 0 | 310 / 0 / 0 / 0 | All 310 unique nodes passed |
+| `-rA` audit | 310 entries, zero XPASS, exit 0 | 310 entries, zero XPASS, exit 0 | JUnit passes do not replace log audits |
+| JUnit time | 86.391s | 90.885s | Observational only, excluded from equivalence |
+| Coverage | 9890/18534 = 53.36138987806194% | 9882/18534 = 53.318225963094854% | Line-by-line equivalence is not claimed |
+| Node comparison | — | — | `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/shared/compare.json`: `identical=true`, `added=[]`, `missing=[]`, `outcome_changes=[]`, `skip_reason_changes=[]`; compare exit 0 |
+
+`shared/acceptance-summary.json` records eight files with executed-line differences: `channel/service.py`, `memory/decay.py`, `memory/service.py`, `memory/worker.py`, `open_platform/service.py`, Runtime `worker.py`, `model_gateway/catalog.py`, and `model_gateway/gateway.py`; exact line numbers remain in the JSON. This observation is neither hidden nor called line-identical, and it does not alone prove flakiness.
+
+All static and compliance checks passed: Ruff, the architecture gate, and zero drift in `backend/src` and `backend/migrations` relative to base. An actual `git revert --no-commit HEAD` ran in a separate disposable clone; the result had no difference from base `c6c47dec39025ebd4d1176c1e9925bac9c99c4fd`, exit 0, and no revert ran in the main working tree. Targeted scanning of 47 formal text evidence files returned `findings=[]` and `read_errors=[]`; two credential environment files were not read, and two binary coverage files were excluded. Docker resources and temporary credentials were cleaned up.
+
+These harness attempts **do not count toward the formal double run or passing evidence**: an image lacking `.git` was rejected with exit 128 before pytest/migration (`rejected-run1-no-git.*`); an incorrect Alembic working directory failed before pytest without migration (`rejected-run1-migration-path-*`); and an extra random `AGENT_API_TOKEN` produced 309 passed and 1 failed, with failing node `test_runtime_postgres.py::test_end_to_end_demo_uses_real_http_and_persistent_events` (HTTP 401 rather than 202; `failed-run1-auth-*`). Only after old containers/volumes were removed did the formal double run above proceed with new temporary credentials and two independent empty databases.
+
+The evidence root is `/tmp/nexusdesk-phase0-docker-acceptance.t8jnUT/`: `ACCEPTANCE-RESULT.md`, `run1-artifacts/`, `run2-artifacts/`, `shared/compare.json`, `shared/acceptance-summary.json`, `shared/secret-scan.json`, and the failed/rejected artifacts above.
 
 ## 7. CI Supporting Evidence and Boundary
 
 Existing CI run: <https://github.com/GroundedCoreAI/nexusdesk/actions/runs/42227604191>. All jobs succeeded on 2026-11-06 at head `16aed12eb095f29bed5c536b5fcbf68e510136c4`. Target `c6c47de` is a later documentation merge with the same backend tree; the previously collected total was 949 passed and 17 skipped.
 
-This is **single-run full-CI supporting evidence for the current backend only**. It contains neither the new Phase 0 tests nor coverage, JUnit artifacts, or double-run comparison. No commit containing the Phase 0 artifacts has been pushed/run in CI, so formal CI double-run evidence and links remain `pending_env`; this run is not Phase 0 acceptance evidence.
+This is **single-run full-CI supporting evidence for the current backend only**. It contains neither the new Phase 0 tests nor coverage, JUnit artifacts, or double-run comparison. Tested implementation/baseline commit `4dfcfb41e9cbb799753986c2d76134514bbd19be` has been pushed and completed the §6.2 local Docker double run, but no PR had been created as of this documentation backfill on 2026-11-10, and that backfill will create a later PR head outside that SHA. Formal clean GitHub Actions CI double-run evidence and links for the final PR head remain `pending_env`; neither the old run above nor local Docker is Phase 0 CI/complete-acceptance evidence.
 
 ## 8. Defect and Determinism Handling
 
