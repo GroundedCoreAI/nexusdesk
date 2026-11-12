@@ -1,12 +1,12 @@
 import asyncio
 import json
-import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import httpx
 import pytest
 import pytest_asyncio
+from conftest import require_test_database_url
 from langchain_core.messages import AIMessage
 from pydantic import SecretStr
 from sqlalchemy import text
@@ -34,9 +34,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 @pytest_asyncio.fixture
 async def database():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("Set TEST_DATABASE_URL to a migrated, dedicated PostgreSQL test database")
+    url = require_test_database_url()
     tenant = "test-" + str(uuid4())
     settings = Settings(database_url=url, tenant_id=tenant, embedded_worker=False)
     engine = create_engine(settings)

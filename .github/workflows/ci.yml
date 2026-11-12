@@ -121,12 +121,60 @@ jobs:
         # Includes the dev group (pytest, pytest-asyncio, ruff, httpx).
         run: uv sync --frozen
 
-      - name: Lint
+      - name: Lint (non-mutating)
         working-directory: backend
         run: uv run ruff check .
 
+      - name: Format check (non-mutating)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            range="${PR_BASE_SHA}...${PR_HEAD_SHA}"
+          elif [[ "$EVENT_NAME" == "push" &&
+                  "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            range="${PUSH_BEFORE_SHA}..${PUSH_AFTER_SHA}"
+          else
+            echo "No commit range for diff-scoped format check."
+            exit 0
+          fi
+
+          mapfile -t changed_py < <(
+            git diff --name-only --diff-filter=ACMR "$range" -- 'backend/*.py' \
+              | sed 's|^backend/||'
+          )
+          if [[ "${#changed_py[@]}" -eq 0 ]]; then
+            echo "No Python files changed under backend/."
+            exit 0
+          fi
+          (cd backend && uv run ruff format --check "${changed_py[@]}")
+
       - name: Architecture gates
         run: uv run --directory backend python "$GITHUB_WORKSPACE/scripts/check_architecture.py"
+
+      - name: Install Node for JS SDK tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: JS SDK tests
+        working-directory: sdk/javascript
+        run: npm test
+
+      - name: Verify checks did not mutate tracked files
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+            echo "::error::Quality checks modified tracked files."
+            git status --short
+            exit 1
+          fi
 
   backend-test-unit:
     name: Backend tests (unit)
@@ -152,8 +200,54 @@ jobs:
         run: uv sync --frozen
 
       - name: Test
+        id: pytest_unit
         working-directory: backend
-        run: uv run pytest -q -m "not postgres"
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/test-reports"
+          uv run pytest -rA --junitxml="${RUNNER_TEMP}/test-reports/unit.xml" -m "not postgres" \
+            | tee "${RUNNER_TEMP}/test-reports/unit.log"
+
+      - name: Audit and summarize unit results
+        if: success() || failure()
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          XML="${RUNNER_TEMP}/test-reports/unit.xml"
+          LOG="${RUNNER_TEMP}/test-reports/unit.log"
+          SUMMARY="${RUNNER_TEMP}/test-reports/unit-summary.json"
+          if [[ ! -f "$XML" ]]; then
+            echo "::error::JUnit report missing; infrastructure or collection failure before test execution."
+            exit 1
+          fi
+          uv run python scripts/runtime_baseline.py summary "$XML" --output "$SUMMARY"
+          if [[ "${{ steps.pytest_unit.outcome }}" == "success" && -f "$LOG" ]]; then
+            uv run python scripts/runtime_baseline.py audit-log "$LOG"
+          fi
+          uv run python - "$SUMMARY" <<'PY'
+          import json, os, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          c = data["counts"]
+          executed = c["tests"] - c["skipped"]
+          skips = [n for n in data["nodes"] if n["outcome"] == "skipped"]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("### Backend tests (unit)\n")
+              f.write(
+                  f"- Total: {c['tests']} | Executed: {executed} | "
+                  f"Failures: {c['failures']} | Infra/Fixture Errors: {c['errors']} | "
+                  f"Skipped: {c['skipped']}\n"
+              )
+              for s in skips:
+                  f.write(f"  - SKIP `{s['classname']}.{s['name']}`: {s['skip_reason']}\n")
+          if executed <= 0:
+              sys.exit("Unit suite executed zero non-skipped tests.")
+          PY
+
+      - name: Verify tests did not mutate tracked files
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          git diff --exit-code
 
   backend-test-postgres:
     # Two parallel shards (pytest-split, count-based). Each shard job gets its
@@ -182,8 +276,9 @@ jobs:
           --health-retries 10
 
     env:
-      # pytest reads these directly. Without them the database tests skip
-      # silently and the run passes without exercising anything.
+      # pytest reads these directly. REQUIRE_POSTGRES_TESTS=1 ensures missing
+      # DB URLs fail closed instead of silently skipping integration tests.
+      REQUIRE_POSTGRES_TESTS: "1"
       AGENT_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
       TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
       # Migration tests create and drop disposable databases, so the role needs
@@ -208,13 +303,62 @@ jobs:
         run: uv sync --frozen
 
       - name: Migrate the test database
+        id: migrate
         working-directory: backend
         # Required before pytest: the database fixtures expect a migrated schema.
         run: uv run alembic upgrade head
 
       - name: Test
+        id: pytest_pg
         working-directory: backend
-        run: uv run pytest -q -m postgres --splits 2 --group ${{ matrix.group }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/test-reports"
+          uv run pytest -rA --junitxml="${RUNNER_TEMP}/test-reports/pg-${{ matrix.group }}.xml" \
+            -m postgres --splits 2 --group ${{ matrix.group }} \
+            | tee "${RUNNER_TEMP}/test-reports/pg-${{ matrix.group }}.log"
+
+      - name: Audit and summarize postgres results
+        if: (success() || failure()) && steps.migrate.outcome == 'success'
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          XML="${RUNNER_TEMP}/test-reports/pg-${{ matrix.group }}.xml"
+          LOG="${RUNNER_TEMP}/test-reports/pg-${{ matrix.group }}.log"
+          SUMMARY="${RUNNER_TEMP}/test-reports/pg-${{ matrix.group }}-summary.json"
+          if [[ ! -f "$XML" ]]; then
+            echo "::error::JUnit report missing; infrastructure or collection failure before test execution."
+            exit 1
+          fi
+          uv run python scripts/runtime_baseline.py summary "$XML" --output "$SUMMARY"
+          if [[ "${{ steps.pytest_pg.outcome }}" == "success" && -f "$LOG" ]]; then
+            uv run python scripts/runtime_baseline.py audit-log "$LOG"
+          fi
+          uv run python - "$SUMMARY" "${{ matrix.group }}" <<'PY'
+          import json, os, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          shard = sys.argv[2]
+          c = data["counts"]
+          executed = c["tests"] - c["skipped"]
+          skips = [n for n in data["nodes"] if n["outcome"] == "skipped"]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(f"### Backend tests (postgres {shard}/2)\n")
+              f.write(
+                  f"- Total: {c['tests']} | Executed: {executed} | "
+                  f"Failures: {c['failures']} | Infra/Fixture Errors: {c['errors']} | "
+                  f"Skipped: {c['skipped']}\n"
+              )
+              for s in skips:
+                  f.write(f"  - SKIP `{s['classname']}.{s['name']}`: {s['skip_reason']}\n")
+          if executed <= 0:
+              sys.exit(f"Postgres shard {shard}/2 executed zero non-skipped tests.")
+          PY
+
+      - name: Verify tests did not mutate tracked files
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          git diff --exit-code
 
   frontend:
     name: Frontend (i18n + typecheck + build)
@@ -241,3 +385,13 @@ jobs:
       - name: Typecheck and build
         working-directory: frontend
         run: npm run build
+
+      - name: Verify frontend checks did not mutate tracked files
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+            echo "::error::Frontend checks modified tracked files."
+            git status --short
+            exit 1
+          fi

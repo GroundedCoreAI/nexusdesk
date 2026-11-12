@@ -1,10 +1,10 @@
 import asyncio
-import os
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 import pytest_asyncio
+from conftest import require_test_database_url
 from pydantic import SecretStr
 from sqlalchemy import text
 
@@ -16,9 +16,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 @pytest_asyncio.fixture
 async def platform():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("Requires a migrated PostgreSQL test database")
+    url = require_test_database_url()
     settings = Settings(
         database_url=url,
         tenant_id="test-" + str(uuid4()),
@@ -539,25 +537,26 @@ async def test_metrics_and_audit_reflect_real_operations(platform):
     metrics = (await client.get("/api/v1/observability/summary")).json()
     assert metrics["total"] == 1 and metrics["completed"] == 1
     assert metrics["p95_seconds"] is not None
-    runs = (await client.get("/api/v1/observability/runs", params={"page": 1, "page_size": 1})).json()
+    runs = (
+        await client.get("/api/v1/observability/runs", params={"page": 1, "page_size": 1})
+    ).json()
     assert len(runs["items"]) == 1
     assert runs["total"] == 1 and runs["page"] == 1 and runs["page_size"] == 1
     audit = await client.get("/api/v1/audit")
     audit_body = audit.json()
     assert any(r["action"] == "run.submitted" for r in audit_body["items"])
-    assert next(r for r in audit_body["items"] if r["action"] == "run.submitted")["ip"] == "203.0.113.77"
+    assert (
+        next(r for r in audit_body["items"] if r["action"] == "run.submitted")["ip"]
+        == "203.0.113.77"
+    )
     assert audit_body["total"] >= len(audit_body["items"])
     assert audit_body["page"] == 1 and audit_body["page_size"] == 10
     assert "platform-admin" not in audit.text
-    submitted = (
-        await client.get("/api/v1/audit", params={"action_type": "run.submitted"})
-    ).json()
+    submitted = (await client.get("/api/v1/audit", params={"action_type": "run.submitted"})).json()
     assert submitted["total"] >= 1
     assert all(row["action"] == "run.submitted" for row in submitted["items"])
     assert any(row["action"] == "run.submitted" for row in submitted["action_types"])
-    missing = (
-        await client.get("/api/v1/audit", params={"action_type": "does.not.exist"})
-    ).json()
+    missing = (await client.get("/api/v1/audit", params={"action_type": "does.not.exist"})).json()
     assert missing["total"] == 0 and missing["items"] == []
 
 
@@ -762,9 +761,9 @@ async def test_evaluation_case_workbook_template_and_import(platform):
     assert report.json()["results"][0]["passed"] is True
 
     # The sheet now round-trips the stored cases instead of the samples.
-    assert [row["name"] for row in parse_workbook(
-        (await client.get(f"{path}/template")).content
-    )] == ["知识检索"]
+    assert [
+        row["name"] for row in parse_workbook((await client.get(f"{path}/template")).content)
+    ] == ["知识检索"]
 
     # A broken upload is rejected before any row is written.
     bad = await client.post(f"{path}/import", content=b"not a workbook")
@@ -780,7 +779,10 @@ async def test_evaluation_case_workbook_import_respects_the_case_limit(platform)
 
     workbook = build_workbook(
         [
-            {"name": f"用例 {index}", "spec": {"input": f"输入 {index}", "expected_contains": ["x"]}}
+            {
+                "name": f"用例 {index}",
+                "spec": {"input": f"输入 {index}", "expected_contains": ["x"]},
+            }
             for index in range(24)
         ]
     )
