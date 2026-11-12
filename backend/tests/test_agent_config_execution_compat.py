@@ -5,14 +5,39 @@ import re
 from pathlib import Path
 from uuid import UUID
 
+import httpx
 import pytest
+from langchain_core.messages import AIMessage
 from sqlalchemy import text
+from test_execution_orchestrator import (
+    AGENT_ID,
+    ExecutionOrchestrator,
+    ParityMemory,
+    ParityRepository,
+    _registry,
+    assert_real_worker_parity,
+    parity_worker_row,
+    run_real_worker_pair,
+)
 from test_model_gateway import setup
 from test_platform_postgres import conversation
 from test_platform_postgres import platform as _platform
+from test_runtime_engine import SequenceModel, call, spec
 
+from agent_platform.applications.platform_runtime.runtime_factory import RuntimeFactory
 from agent_platform.business_capabilities.agent_config.service import AgentConfig
+from agent_platform.core_platform.agent_execution.adapters.react import ReactAdapter
+from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
+    capture_execution_context,
+)
+from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
+from agent_platform.core_platform.agent_runtime.worker import RuntimeWorker
+from agent_platform.core_platform.platform_services.integrations.business_tools.platform_tools import (
+    PlatformTools,
+)
 from agent_platform.core_platform.platform_services.persistence.store import DomainError
+from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
+from agent_platform.extension_contracts import RuntimeBindings
 
 platform = _platform
 
@@ -319,3 +344,268 @@ def test_p0_ut_08_frozen_identities_terminology_and_worker_neutrality():
     for node in ast.walk(worker_tree):
         if isinstance(node, ast.If):
             assert "provider" not in ast.unparse(node.test).lower()
+
+
+@pytest.mark.asyncio
+async def test_p2_it02_published_snapshot_language_and_multiround_tool_parity(monkeypatch):
+    """P2-IT02/CM04: real UUID snapshot drives the same real Factory/PlatformTools chain."""
+    config = AgentConfig(
+        system_prompt="Answer from the controlled snapshot.",
+        reply_language="zh-CN",
+        model_profile_id="50000000-0000-4000-8000-000000000005",
+        model_profile_version=3,
+        tool_names=["lookup"],
+        max_model_rounds=4,
+    )
+    snapshot = {
+        "id": AGENT_ID,
+        "version": 7,
+        "config": config.model_dump(mode="json"),
+        "tools": [{"spec": spec().model_dump(mode="json"), "version": "tool-v1"}],
+    }
+    original = copy.deepcopy(snapshot)
+    model = SequenceModel(
+        call("snapshot-A"),
+        AIMessage(content="snapshot answer"),
+        call("snapshot-A"),
+        AIMessage(content="snapshot answer"),
+    )
+
+    class Policy:
+        def check_rounds(self, rounds, settings):
+            return rounds
+
+        async def check(self, tenant_id, name, allowed):
+            assert name in allowed
+
+    class Tools:
+        async def credential_headers(self, tenant_id, spec, connection=None):
+            return {}
+
+    class ControlledFactory(RuntimeFactory):
+        def bound_model(self, snapshot, schemas, run_id=None):
+            assert snapshot["id"] == AGENT_ID
+            assert snapshot["config"]["model_profile_version"] == 3
+            return model
+
+    def build_factory(client, settings, base_runtime):
+        bindings = RuntimeBindings(policy=Policy(), tools=Tools())
+        return ControlledFactory(base_runtime, bindings, client, settings, base_runtime.tools.limit)
+
+    async def http(request):
+        return httpx.Response(200, json={"result": request.url.params["order_id"]})
+
+    row = parity_worker_row(config={"fingerprint": "parity-fingerprint", "agent": snapshot})
+    runtime_errors = []
+    original_run = RuntimeEngine.run
+
+    async def record_run(runtime, *args, **kwargs):
+        try:
+            return await original_run(runtime, *args, **kwargs)
+        except Exception as exc:
+            runtime_errors.append(exc)
+            raise
+
+    monkeypatch.setattr(RuntimeEngine, "run", record_run)
+    monkeypatch.setattr(
+        PlatformTools,
+        "_operation_id",
+        lambda self, name, args: UUID("60000000-0000-4000-8000-000000000006"),
+    )
+    off, on = await run_real_worker_pair(
+        model=model,
+        row=row,
+        transport=httpx.MockTransport(http),
+        factory_builder=build_factory,
+    )
+
+    assert not runtime_errors, [repr(error) for error in runtime_errors]
+    assert off["status"] == "completed", (off["events"], off["model_calls"])
+    assert_real_worker_parity(off, on)
+    assert snapshot == original
+    assert on["output"] == "snapshot answer"
+    assert "Reply in Simplified Chinese." in on["model_calls"][0][0]["content"]
+    assert "Answer from the controlled snapshot." in on["model_calls"][0][0]["content"]
+    tool_completed = [event for event in on["events"] if event["type"] == "tool.completed"]
+    assert len(tool_completed) == 1
+    assert tool_completed[0]["data"]["tool_version"] == "tool-v1"
+
+
+@pytest.mark.asyncio
+async def test_p2_t9_a1_published_snapshot_serial_no_tool_off_on_parity():
+    """T9 A1: a real published snapshot drives the identical serial no-tool script."""
+    config = AgentConfig(
+        system_prompt="Answer from the controlled serial snapshot.",
+        reply_language="en",
+        model_profile_id="50000000-0000-4000-8000-000000000005",
+        model_profile_version=3,
+        tool_names=[],
+        max_model_rounds=2,
+    )
+    snapshot = {
+        "id": AGENT_ID,
+        "version": 7,
+        "config": config.model_dump(mode="json"),
+        "tools": [],
+    }
+    original = copy.deepcopy(snapshot)
+
+    def reply(gateway_call_id):
+        return AIMessage(
+            content="serial snapshot answer",
+            usage_metadata={"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+            response_metadata={"gateway_call_id": gateway_call_id},
+        )
+
+    model = SequenceModel(reply("serial-off"), reply("serial-on"))
+
+    class Policy:
+        def check_rounds(self, rounds, settings):
+            return rounds
+
+    class Tools:
+        async def credential_headers(self, tenant_id, spec, connection=None):
+            raise AssertionError("the no-tool scenario must not resolve credentials")
+
+    class ControlledFactory(RuntimeFactory):
+        def bound_model(self, snapshot, schemas, run_id=None):
+            assert snapshot["id"] == AGENT_ID
+            assert snapshot["config"]["tool_names"] == []
+            assert snapshot["tools"] == []
+            assert schemas == []
+            return model
+
+    def build_factory(client, settings, base_runtime):
+        bindings = RuntimeBindings(policy=Policy(), tools=Tools())
+        return ControlledFactory(base_runtime, bindings, client, settings, base_runtime.tools.limit)
+
+    row = parity_worker_row(config={"fingerprint": "parity-fingerprint", "agent": snapshot})
+    off, on = await run_real_worker_pair(
+        model=model, row=row, memory=ParityMemory(), factory_builder=build_factory
+    )
+
+    assert_real_worker_parity(off, on)
+    assert snapshot == original
+    for capture in (off, on):
+        assert capture["status"] == "completed"
+        assert capture["output"] == "serial snapshot answer"
+        assert capture["error_code"] is None
+        assert capture["history"] == [
+            {"role": "user", "content": "current question"},
+            {"role": "assistant", "content": "serial snapshot answer"},
+        ]
+        assert capture["dropped"] == []
+        assert capture["aggregate_usage"] == {}
+        assert capture["usage"] == [{"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}]
+        assert [event["type"] for event in capture["events"]] == [
+            "model.started",
+            "model.completed",
+        ]
+        assert not any(event["type"].startswith("tool.") for event in capture["events"])
+        assert capture["terminal"]["type"] == "run.completed"
+        assert capture["terminal"]["seq"] == len(capture["replay"])
+        assert [event["seq"] for event in capture["replay"]] == list(
+            range(1, len(capture["replay"]) + 1)
+        )
+
+
+@pytest.mark.asyncio
+async def test_p2_it04_full_new_path_owns_one_private_stream_and_public_delivery(
+    monkeypatch,
+):
+    """P2-IT04/CM08: Factory, PlatformTools and Engine share private emit, never Worker emit."""
+    config = AgentConfig(
+        system_prompt="controlled",
+        model_profile_id="50000000-0000-4000-8000-000000000005",
+        model_profile_version=1,
+        tool_names=[],
+    )
+    snapshot = {
+        "id": AGENT_ID,
+        "version": 1,
+        "config": config.model_dump(mode="json"),
+        "tools": [],
+    }
+    model = SequenceModel(AIMessage(content="private stream answer"))
+    private_emits = {"factory": [], "tools": [], "run": []}
+    contexts = []
+    acknowledgements = []
+    private_collections = []
+    repository = ParityRepository()
+
+    class Policy:
+        def check_rounds(self, rounds, settings):
+            return rounds
+
+    class ControlledFactory(RuntimeFactory):
+        async def for_run(self, row, emit):
+            private_emits["factory"].append(emit)
+            runtime = await super().for_run(row, emit)
+            private_emits["tools"].append(runtime.tools.emit)
+            return runtime
+
+        def bound_model(self, snapshot, schemas, run_id=None):
+            return model
+
+    original_run = RuntimeEngine.run
+
+    async def run(runtime, message, history, emit, **kwargs):
+        private_emits["run"].append(emit)
+        return await original_run(runtime, message, history, emit, **kwargs)
+
+    monkeypatch.setattr(RuntimeEngine, "run", run)
+
+    settings = Settings(_env_file=None, execution_orchestrator_enabled=True)
+    async with httpx.AsyncClient() as client:
+        factory = ControlledFactory(None, RuntimeBindings(policy=Policy()), client, settings, None)
+
+        def make_adapter():
+            contexts.append(capture_execution_context())
+            adapter = ReactAdapter(contexts[-1], factory)
+            original_stream = adapter.stream_events
+            original_collect = adapter.collect_outcome
+
+            def stream_events(handle):
+                stream = original_stream(handle)
+                acknowledge = stream.acknowledge
+
+                async def ack(event):
+                    acknowledgements.append((event.event_id, repository.append_calls))
+                    await acknowledge(event)
+
+                stream.acknowledge = ack
+                return stream
+
+            async def collect_outcome(handle):
+                private_collections.append(handle)
+                return await original_collect(handle)
+
+            async def public_collect(handle):
+                raise AssertionError("React must use private Outcome collection exactly once")
+
+            adapter.stream_events = stream_events
+            adapter.collect_outcome = collect_outcome
+            adapter.collect_result = public_collect
+            return adapter
+
+        worker = RuntimeWorker(
+            repository,
+            factory,
+            settings,
+            "parity-fingerprint",
+            orchestrator=ExecutionOrchestrator(_registry(make_adapter)),
+        )
+        row = parity_worker_row(config={"fingerprint": "parity-fingerprint", "agent": snapshot})
+        await worker._execute(row)
+
+    assert repository.finishes[0]["status"] == "completed", repository.finishes
+    assert len(contexts) == 1
+    assert not any("emit" in field for field in vars(type(contexts[0])))
+    assert private_emits["factory"][0] is private_emits["tools"][0]
+    assert private_emits["factory"][0] is private_emits["run"][0]
+    assert len(private_collections) == 1
+    assert len(repository.finishes) == 1
+    assert repository.finishes[0]["status"] == "completed"
+    durable_count = len(repository.events) - 1
+    assert [count for _, count in acknowledgements] == list(range(1, durable_count + 1))
+    assert repository.events[-1]["type"] == "run.completed"

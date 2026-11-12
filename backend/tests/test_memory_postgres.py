@@ -204,7 +204,9 @@ async def test_p1_it_04_pending_summary_never_blocks_a_run(platform):
     # Next truncation queues a task but the run after it still sees the old summary.
     final = await send_and_run(client, services, settings, conv["id"], "第3轮")
     assert final["status"] == "completed"
-    assert [t["status"] for t in await memory_tasks(services.repository.engine, settings.tenant_id)] == [
+    assert [
+        t["status"] for t in await memory_tasks(services.repository.engine, settings.tenant_id)
+    ] == [
         "done",
         "pending",
     ]
@@ -508,9 +510,7 @@ async def test_p1_cm_04_cross_tenant_summary_is_unreachable(platform):
         await enqueue_summary_task(
             c, "other-tenant", conv["id"], [{"role": "user", "content": "x"}], None, 40
         )
-    outsider = make_worker(
-        services, settings.model_copy(update={"tenant_id": "other-tenant"})
-    )
+    outsider = make_worker(services, settings.model_copy(update={"tenant_id": "other-tenant"}))
     assert await outsider.run_once() is True  # executes its own tenant's task, skips writes
     assert await conversation_summary(engine, conv["id"]) is None
     # This tenant's own task is untouched by the outsider.
@@ -521,8 +521,10 @@ async def test_p1_cm_04_cross_tenant_summary_is_unreachable(platform):
 async def task_row(engine, task_id):
     async with engine.connect() as c:
         row = (
-            await c.execute(text("SELECT * FROM memory_tasks WHERE id=:id"), {"id": task_id})
-        ).mappings().one()
+            (await c.execute(text("SELECT * FROM memory_tasks WHERE id=:id"), {"id": task_id}))
+            .mappings()
+            .one()
+        )
         return dict(row)
 
 
@@ -650,9 +652,7 @@ async def test_p1_it_19_heartbeat_renewal_prevents_false_reaping(platform):
     blocking = BlockingService()
     # A 10s lease leaves ample slack for heartbeat scheduling delays on a
     # loaded CI runner while keeping the test fast (heartbeat ticks at 0.5s).
-    worker = MemoryWorker(
-        engine, blocking, settings, lease_seconds=10, heartbeat_seconds=0.5
-    )
+    worker = MemoryWorker(engine, blocking, settings, lease_seconds=10, heartbeat_seconds=0.5)
     async with engine.begin() as c:
         await enqueue_summary_task(
             c, settings.tenant_id, conv["id"], [{"role": "user", "content": "x"}], None, 40
@@ -748,3 +748,92 @@ async def test_p1_it_21_reaper_fails_task_past_attempts_cap(platform):
     poison = await task_row(engine, poison_id)
     assert poison["status"] == "failed" and poison["error"] == "memory_worker_lost"
     assert poison["owner"] is None and poison["lease_expires_at"] is None
+
+
+@pytest.mark.parametrize("orchestrator_enabled", [False, True])
+async def test_p2_exec_it17_summary_history_dropped_off_on_real_pg(platform, orchestrator_enabled):
+    """P2-IT17: real summary, retained history and dropped rows are path-identical."""
+    from test_runtime_postgres import p2_configure_worker, p2_execute_next
+
+    client, services, original_settings = platform
+    original_settings.history_turns = 1
+    settings = p2_configure_worker(services, orchestrator_enabled)
+    agent, _ = await create_agent(client)
+    conv = await make_conversation(client, agent)
+    for index in range(2):
+        response = await client.post(
+            f"/api/v1/conversations/{conv['id']}/messages",
+            json={"content": f"双路径问题{index}"},
+        )
+        assert response.status_code == 202
+        final = await p2_execute_next(services, settings)
+        assert final["status"] == "completed", final
+    tasks = await memory_tasks(services.repository.engine, settings.tenant_id)
+    assert len(tasks) == 1
+    assert [
+        message["content"]
+        for message in tasks[0]["payload"]["dropped_messages"]
+        if message["role"] == "user"
+    ] == ["双路径问题0"]
+    assert await make_worker(services, settings, RecordingGateway("双路径摘要")).run_once()
+    assert await conversation_summary(services.repository.engine, conv["id"]) == "双路径摘要"
+
+    response = await client.post(
+        f"/api/v1/conversations/{conv['id']}/messages", json={"content": "双路径问题2"}
+    )
+    assert response.status_code == 202
+    claimed = await services.repository.claim(services.worker.owner, 30, settings.tenant_id)
+    assert claimed["summary"] == "双路径摘要"
+    assert [message["content"] for message in claimed["history"] if message["role"] == "user"] == [
+        "双路径问题1"
+    ]
+    await services.worker._execute(claimed)
+    final = await services.repository.get(claimed["id"], settings.tenant_id)
+    assert final["status"] == "completed", final
+    tasks = await memory_tasks(services.repository.engine, settings.tenant_id)
+    assert len(tasks) == 2
+    assert [
+        message["content"]
+        for message in tasks[-1]["payload"]["dropped_messages"]
+        if message["role"] == "user"
+    ] == ["双路径问题1"]
+    events = await services.repository.events(final["id"], settings.tenant_id)
+    assert "summary.queued" in [event["type"] for event in events]
+
+
+@pytest.mark.parametrize("orchestrator_enabled", [False, True])
+@pytest.mark.parametrize("outcome", ["failed", "cancelled"])
+async def test_p2_exec_it17_failure_and_cancel_have_no_memory_writeback(
+    platform, orchestrator_enabled, outcome
+):
+    """P2-IT17: non-completed outcomes dispatch neither summary nor extraction."""
+    from test_runtime_postgres import p2_configure_worker
+
+    client, services, original_settings = platform
+    original_settings.history_turns = 1
+    settings = p2_configure_worker(services, orchestrator_enabled)
+    response = await client.post(
+        "/api/v1/conversations", json={"external_id": str(uuid4()), "agent_id": None}
+    )
+    assert response.status_code == 201, response.text
+    conv = response.json()
+
+    class FailingModel:
+        async def ainvoke(self, _messages):
+            raise RuntimeError("private provider details")
+
+    services.worker.runtime.legacy.model = FailingModel()
+    response = await client.post(
+        f"/api/v1/conversations/{conv['id']}/messages", json={"content": "不得写回"}
+    )
+    assert response.status_code == 202
+    claimed = await services.repository.claim(services.worker.owner, 30, settings.tenant_id)
+    if outcome == "cancelled":
+        await services.repository.cancel(claimed["id"], settings.tenant_id)
+    await services.worker._execute(claimed)
+    final = await services.repository.get(claimed["id"], settings.tenant_id)
+    assert final["status"] == outcome
+    assert final["error_code"] == ("execution_error" if outcome == "failed" else None)
+    assert "private provider details" not in str(final)
+    assert await memory_tasks(services.repository.engine, settings.tenant_id) == []
+    assert await conversation_summary(services.repository.engine, conv["id"]) is None

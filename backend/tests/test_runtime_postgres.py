@@ -84,6 +84,105 @@ def sse_ids(body):
     return [int(line.removeprefix("id: ")) for line in body.splitlines() if line.startswith("id: ")]
 
 
+class P2ScriptedRuntime:
+    def __init__(self, events=(), *, output="orchestrated", completion_gate=None):
+        self.events = events
+        self.output = output
+        self.completion_gate = completion_gate
+        self.entered = asyncio.Event()
+
+    async def run(self, message, history, emit, **kwargs):
+        self.entered.set()
+        for kind, data in self.events:
+            await emit(kind, data)
+        if self.completion_gate is not None:
+            await self.completion_gate.wait()
+        history = [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": self.output},
+        ]
+        return self.output, history, []
+
+
+class P2ScriptedFactory:
+    def __init__(self, runtime):
+        self.runtime = runtime
+
+    async def for_run(self, row, emit):
+        return self.runtime
+
+
+def p2_orchestrator(factory, adapters=None, *, queue_capacity=1, configure=None):
+    from test_execution_orchestrator import _registry
+
+    from agent_platform.core_platform.agent_execution.adapters.react import ReactAdapter
+    from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
+        capture_execution_context,
+    )
+    from agent_platform.core_platform.agent_execution.orchestration.orchestrator import (
+        ExecutionOrchestrator,
+    )
+
+    def make_adapter():
+        adapter = ReactAdapter(capture_execution_context(), factory, queue_capacity=queue_capacity)
+        if adapters is not None:
+            adapters.append(adapter)
+        if configure is not None:
+            configure(adapter)
+        return adapter
+
+    return ExecutionOrchestrator(_registry(make_adapter))
+
+
+def p2_context(row):
+    from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
+        build_execution_context,
+    )
+
+    return build_execution_context(row, history=row["history"], timeout_seconds=30)
+
+
+async def p2_expire_lease(repo, run_id):
+    async with repo.engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE runtime_runs SET lease_until=now()-interval '1 second' WHERE id=:id"),
+            {"id": run_id},
+        )
+
+
+def p2_terminal_events(events):
+    return [
+        event
+        for event in events
+        if event["type"] in {"run.completed", "run.failed", "run.cancelled"}
+    ]
+
+
+def p2_configure_worker(services, enabled):
+    """Select the real off/on composition path without changing claimed rows."""
+    from agent_platform.applications.platform_runtime.runtime_composition import (
+        _build_execution_orchestrator,
+    )
+
+    settings = services.worker.settings.model_copy(
+        update={"execution_orchestrator_enabled": enabled}
+    )
+    services.worker.settings = settings
+    services.worker.orchestrator = (
+        _build_execution_orchestrator(services.worker.runtime) if enabled else None
+    )
+    return settings
+
+
+async def p2_execute_next(services, settings):
+    row = await services.repository.claim(services.worker.owner, 30, settings.tenant_id)
+    assert row is not None
+    await services.worker._execute(row)
+    final = await services.repository.get(row["id"], settings.tenant_id)
+    assert final is not None
+    return final
+
+
 class RecordingRuntimePersistenceHooks:
     def __init__(self):
         self.delegate = BusinessRuntimePersistenceHooks()
@@ -784,6 +883,82 @@ async def test_p0_it_07_internal_sse_does_not_replay_transient_model_delta(datab
         assert delta_marker not in response.text
         assert "durable answer" in response.text
 
+        live_marker = "synthetic-live-transient-delta-marker"
+        live_row = await submit(repo, configured, conversation="live-transient-delta")
+        live_owner = uuid4()
+        live_claimed = await repo.claim(live_owner, 30, configured.tenant_id)
+        assert live_claimed is not None and live_claimed["id"] == live_row["id"]
+        subscribed = asyncio.Event()
+        delta_consumed = asyncio.Event()
+        original_subscribe = app.state.runtime.listener.subscribe
+
+        async def tracked_subscribe(tracked_run_id):
+            queue = await original_subscribe(tracked_run_id)
+            original_get = queue.get
+
+            async def tracked_get():
+                payload = await original_get()
+                if json.loads(payload).get("k") == "delta":
+                    delta_consumed.set()
+                return payload
+
+            queue.get = tracked_get
+            subscribed.set()
+            return queue
+
+        live_url = f"/api/v1/runs/{live_row['id']}/events"
+        app.state.runtime.listener.subscribe = tracked_subscribe
+        live_task = asyncio.create_task(client.get(live_url))
+        try:
+            await asyncio.wait_for(subscribed.wait(), 5)
+            await app.state.runtime.notifier.send(
+                live_row["id"],
+                {"k": "delta", "round": 1, "text": live_marker, "reasoning": "live-reasoning"},
+            )
+            await asyncio.wait_for(delta_consumed.wait(), 5)
+            await repo.append(live_row["id"], live_owner, "extension.after_delta", {"stable": True})
+            await repo.finish(
+                live_row["id"], live_owner, "completed", output="live done", history=[]
+            )
+            live = await asyncio.wait_for(live_task, 10)
+        finally:
+            app.state.runtime.listener.subscribe = original_subscribe
+            if not live_task.done():
+                live_task.cancel()
+            await asyncio.gather(live_task, return_exceptions=True)
+
+        assert live.status_code == 200
+        delta_frames = [frame for frame in live.text.split("\n\n") if "event: model.delta" in frame]
+        assert len(delta_frames) == 1
+        assert "id:" not in delta_frames[0]
+        assert live_marker in delta_frames[0]
+        assert sse_ids(live.text) == [1, 2, 3, 4]
+        assert live.text.index("event: run.started") < live.text.index("event: model.delta")
+        assert live.text.index("event: model.delta") < live.text.index(
+            "event: extension.after_delta"
+        )
+        assert live.text.rindex("event: run.completed") > live.text.index(
+            "event: extension.after_delta"
+        )
+        live_stored = await repo.events(live_row["id"], configured.tenant_id)
+        assert [event["type"] for event in live_stored] == [
+            "run.queued",
+            "run.started",
+            "extension.after_delta",
+            "run.completed",
+        ]
+        assert all(event["type"] != "model.delta" for event in live_stored)
+        for replay in (
+            await client.get(live_url, params={"after": 0}),
+            await client.get(live_url, headers={"Last-Event-ID": "2"}),
+        ):
+            assert replay.status_code == 200
+            assert live_marker not in replay.text
+            assert "event: model.delta" not in replay.text
+            assert replay.text.rindex("event: run.completed") > replay.text.index(
+                "event: extension.after_delta"
+            )
+
 
 async def test_p0_it_07_internal_sse_hides_terminal_tool_replay_and_advances_cursor(database):
     _repo, settings = database
@@ -879,3 +1054,528 @@ async def test_p0_it_09_completion_hooks_run_only_for_completed_runs(database):
         else:
             assert assistant == []
             assert final["output"] is None
+
+
+@pytest.mark.parametrize("terminal", ["finish", "reap"])
+@pytest.mark.parametrize("terminal_first", [True, False])
+async def test_p2_it09_running_first_commit_wins_for_cancel_finish_and_reaper(
+    database, terminal, terminal_first
+):
+    """P2-IT09: persistent first-commit-wins, with exactly one terminal frame."""
+    repo, settings = database
+    row = await submit(repo, settings)
+    owner = uuid4()
+    await repo.claim(owner, 30, settings.tenant_id)
+    if terminal == "reap":
+        await p2_expire_lease(repo, row["id"])
+
+    async def terminate():
+        if terminal == "finish":
+            await repo.finish(row["id"], owner, "completed", output="late", history=[])
+        else:
+            await repo.reap(settings.tenant_id)
+
+    if terminal_first:
+        await terminate()
+        cancelled = await repo.cancel(row["id"], settings.tenant_id)
+        assert cancelled["status"] in {"completed", "failed"}
+    else:
+        requested = await repo.cancel(row["id"], settings.tenant_id)
+        assert requested["cancel_requested"] is True
+        await terminate()
+
+    final = await repo.get(row["id"], settings.tenant_id)
+    expected_status = (
+        ("completed" if terminal == "finish" else "failed") if terminal_first else "cancelled"
+    )
+    expected_error = "worker_lost" if terminal == "reap" else None
+    assert final["status"] == expected_status
+    assert final["error_code"] == expected_error
+    assert final["output"] == ("late" if expected_status == "completed" else None)
+    events = await repo.events(row["id"], settings.tenant_id)
+    terminal_events = p2_terminal_events(events)
+    assert len(terminal_events) == 1
+    assert terminal_events[0]["type"] == f"run.{expected_status}"
+    assert events[-1] == terminal_events[0]
+    before = (final, events)
+    await terminate()
+    await repo.cancel(row["id"], settings.tenant_id)
+    assert (
+        await repo.get(row["id"], settings.tenant_id),
+        await repo.events(row["id"], settings.tenant_id),
+    ) == before
+
+
+@pytest.mark.parametrize("terminal_first", [True, False])
+async def test_p2_it09_queued_reaper_cancel_orders_and_cancelled_queue_timeout(
+    database, terminal_first
+):
+    repo, settings = database
+    row = await submit(repo, settings)
+    async with repo.engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE runtime_runs SET queue_expires_at=now()-interval '1 second', "
+                "cancel_requested=:cancel_requested WHERE id=:id"
+            ),
+            {"id": row["id"], "cancel_requested": not terminal_first},
+        )
+    if terminal_first:
+        await repo.reap(settings.tenant_id)
+        await repo.cancel(row["id"], settings.tenant_id)
+    else:
+        await repo.reap(settings.tenant_id)
+    final = await repo.get(row["id"], settings.tenant_id)
+    assert final["status"] == ("failed" if terminal_first else "cancelled")
+    assert final["error_code"] == "queue_timeout"
+    events = await repo.events(row["id"], settings.tenant_id)
+    assert len(p2_terminal_events(events)) == 1
+    assert events[-1]["data"] == {"error_code": "queue_timeout"}
+
+
+@pytest.mark.parametrize("stale_state", ["expired", "reaped", "cancelled"])
+async def test_p2_it11_stale_react_append_rethrows_cleans_and_preserves_terminal(
+    database, stale_state
+):
+    """P2-IT11: real Adapter/Orchestrator/Repository append control flow and cleanup."""
+    repo, settings = database
+    row = await submit(repo, settings)
+    owner = uuid4()
+    claimed = await repo.claim(owner, 30, settings.tenant_id)
+    if stale_state in {"expired", "reaped"}:
+        await p2_expire_lease(repo, row["id"])
+        assert await repo.heartbeat(row["id"], owner, 30) == "lost"
+        if stale_state == "reaped":
+            await repo.reap(settings.tenant_id)
+    else:
+        await repo.cancel(row["id"], settings.tenant_id)
+        await repo.finish(row["id"], owner, "cancelled", error=None)
+    before = await repo.get(row["id"], settings.tenant_id)
+    before_events = await repo.events(row["id"], settings.tenant_id)
+    adapters = []
+    runtime = P2ScriptedRuntime((("extension.stale", {"secret": "not-persisted"}),))
+    orchestrator = p2_orchestrator(P2ScriptedFactory(runtime), adapters)
+
+    async def worker_emit(kind, data):
+        await repo.append(row["id"], owner, kind, data)
+
+    with pytest.raises(asyncio.CancelledError):
+        await orchestrator.execute(p2_context(claimed), worker_emit)
+
+    execution = adapters[0]._execution
+    assert execution.stream_state == "closed"
+    assert execution.task.done()
+    assert execution.terminal.result().status == "cancelled"
+    assert execution.in_flight is None and execution.undelivered == 0
+    assert all(task.done() for task in adapters[0]._owned_tasks)
+    await repo.finish(row["id"], owner, "completed", output="forbidden", history=[])
+    after = await repo.get(row["id"], settings.tenant_id)
+    after_events = await repo.events(row["id"], settings.tenant_id)
+    assert after == before
+    assert after_events == before_events
+    assert all(event["type"] != "extension.stale" for event in after_events)
+    assert after["error_code"] != "execution_error"
+    if stale_state == "expired":
+        assert after["status"] == "running" and after["lease_valid"] is False
+        await repo.reap(settings.tenant_id)
+        after = await repo.get(row["id"], settings.tenant_id)
+        assert after["status"] == "failed" and after["error_code"] == "worker_lost"
+    elif stale_state == "reaped":
+        assert after["status"] == "failed" and after["error_code"] == "worker_lost"
+    else:
+        assert after["status"] == "cancelled" and after["error_code"] is None
+    if stale_state != "expired":
+        assert len(p2_terminal_events(after_events)) == 1
+
+
+async def test_p2_it11_worker_heartbeat_loss_is_worker_lost_not_user_cancellation(
+    database, monkeypatch
+):
+    repo, base_settings = database
+    settings = base_settings.model_copy(update={"execution_orchestrator_enabled": True})
+    row = await submit(repo, settings)
+    gate = asyncio.Event()
+    runtime = P2ScriptedRuntime(completion_gate=gate)
+    adapters = []
+    orchestrator = p2_orchestrator(P2ScriptedFactory(runtime), adapters)
+    worker = RuntimeWorker(
+        repo, P2ScriptedFactory(runtime), settings, "test", orchestrator=orchestrator
+    )
+    claimed = await repo.claim(worker.owner, settings.lease_seconds, settings.tenant_id)
+    monitor_started = asyncio.Event()
+    release_monitor = asyncio.Event()
+
+    async def gated_sleep(_seconds):
+        monitor_started.set()
+        await release_monitor.wait()
+
+    monkeypatch.setattr(asyncio, "sleep", gated_sleep)
+    task = asyncio.create_task(worker._execute(claimed))
+    await asyncio.wait_for(runtime.entered.wait(), 1)
+    await asyncio.wait_for(monitor_started.wait(), 1)
+    await p2_expire_lease(repo, row["id"])
+    release_monitor.set()
+    await asyncio.wait_for(task, 1)
+
+    interrupted = await repo.get(row["id"], settings.tenant_id)
+    assert interrupted["status"] == "running" and interrupted["lease_valid"] is False
+    assert interrupted["cancel_requested"] is False
+    assert p2_terminal_events(await repo.events(row["id"], settings.tenant_id)) == []
+    await repo.reap(settings.tenant_id)
+    final = await repo.get(row["id"], settings.tenant_id)
+    assert final["status"] == "failed" and final["error_code"] == "worker_lost"
+    assert final["cancel_requested"] is False
+    events = await repo.events(row["id"], settings.tenant_id)
+    assert len(p2_terminal_events(events)) == 1
+    assert events[-1]["type"] == "run.failed"
+    assert all(task.done() for task in adapters[0]._owned_tasks)
+    gate.set()
+
+
+async def test_p2_it16_real_pg_capacity_one_ack_backpressure_and_terminal_order(database):
+    """P2-IT16: slow durable worker_emit owns ack and releases capacity-one backpressure."""
+    repo, settings = database
+    row = await submit(repo, settings)
+    owner = uuid4()
+    claimed = await repo.claim(owner, 30, settings.tenant_id)
+    worker_entered = asyncio.Event()
+    release_worker = asyncio.Event()
+    third_emit = asyncio.Event()
+    order = []
+
+    class Runtime:
+        async def run(self, message, history, emit, **kwargs):
+            for index in range(4):
+                if index == 2:
+                    third_emit.set()
+                await emit("extension.backpressure", {"index": index})
+            return "done", [], []
+
+    adapters = []
+
+    def capture_ack(adapter):
+        original_stream = adapter.stream_events
+
+        def stream_events(handle):
+            stream = original_stream(handle)
+            acknowledge = stream.acknowledge
+
+            async def wrapped_ack(event):
+                order.append(f"ack:{event.payload['index']}")
+                await acknowledge(event)
+
+            stream.acknowledge = wrapped_ack
+            return stream
+
+        adapter.stream_events = stream_events
+
+    orchestrator = p2_orchestrator(P2ScriptedFactory(Runtime()), adapters, configure=capture_ack)
+
+    async def worker_emit(kind, data):
+        order.append(f"worker-start:{data['index']}")
+        if data["index"] == 0:
+            worker_entered.set()
+            await release_worker.wait()
+        await repo.append(row["id"], owner, kind, data)
+        order.append(f"worker-end:{data['index']}")
+
+    task = asyncio.create_task(orchestrator.execute(p2_context(claimed), worker_emit))
+    await asyncio.wait_for(worker_entered.wait(), 1)
+    await asyncio.wait_for(third_emit.wait(), 1)
+    execution = adapters[0]._execution
+    assert len(execution.queue) == 1
+    assert execution.in_flight is not None and execution.undelivered == 2
+    assert order == ["worker-start:0"]
+    release_worker.set()
+    outcome = await asyncio.wait_for(task, 1)
+
+    assert outcome.status == "completed"
+    assert order == [
+        item
+        for index in range(4)
+        for item in (f"worker-start:{index}", f"worker-end:{index}", f"ack:{index}")
+    ]
+    events = await repo.events(row["id"], settings.tenant_id)
+    assert [
+        event["data"]["index"] for event in events if event["type"] == "extension.backpressure"
+    ] == list(range(4))
+    await repo.finish(row["id"], owner, "completed", output="done", history=[])
+    events = await repo.events(row["id"], settings.tenant_id)
+    assert events[-1]["type"] == "run.completed"
+    assert len(p2_terminal_events(events)) == 1
+    assert execution.task.done() and all(task.done() for task in adapters[0]._owned_tasks)
+
+
+@pytest.mark.parametrize("failure", ["ordinary", "repository_cancelled"])
+async def test_p2_it16_emit_failure_and_cancelled_append_suppress_late_results(database, failure):
+    repo, settings = database
+    row = await submit(repo, settings)
+    owner = uuid4()
+    claimed = await repo.claim(owner, 30, settings.tenant_id)
+    runtime = P2ScriptedRuntime(
+        (
+            ("extension.first", {"index": 1}),
+            ("extension.failure", {"index": 2}),
+            ("extension.late", {"index": 3}),
+        )
+    )
+    adapters = []
+    acknowledged = []
+
+    def capture_ack(adapter):
+        original_stream = adapter.stream_events
+
+        def stream_events(handle):
+            stream = original_stream(handle)
+            acknowledge = stream.acknowledge
+
+            async def wrapped_ack(event):
+                acknowledged.append(event.payload["index"])
+                await acknowledge(event)
+
+            stream.acknowledge = wrapped_ack
+            return stream
+
+        adapter.stream_events = stream_events
+
+    orchestrator = p2_orchestrator(P2ScriptedFactory(runtime), adapters, configure=capture_ack)
+
+    async def worker_emit(kind, data):
+        if kind == "extension.failure" and failure == "ordinary":
+            raise RuntimeError("synthetic ordinary worker failure")
+        await repo.append(row["id"], owner, kind, data)
+        if kind == "extension.first" and failure == "repository_cancelled":
+            await repo.cancel(row["id"], settings.tenant_id)
+
+    if failure == "ordinary":
+        outcome = await orchestrator.execute(p2_context(claimed), worker_emit)
+        assert outcome.status == "failed" and outcome.legacy_error_code == "execution_error"
+        await repo.finish(row["id"], owner, "failed", error="execution_error")
+        final = await repo.get(row["id"], settings.tenant_id)
+        assert final["status"] == "failed" and final["error_code"] == "execution_error"
+    else:
+        with pytest.raises(asyncio.CancelledError):
+            await orchestrator.execute(p2_context(claimed), worker_emit)
+        await repo.finish(row["id"], owner, "completed", output="late", history=[])
+        final = await repo.get(row["id"], settings.tenant_id)
+        assert final["status"] == "cancelled" and final["error_code"] is None
+
+    assert acknowledged == [1]
+    events = await repo.events(row["id"], settings.tenant_id)
+    assert [event["type"] for event in events].count("extension.first") == 1
+    assert all(event["type"] not in {"extension.failure", "extension.late"} for event in events)
+    assert len(p2_terminal_events(events)) == 1
+    execution = adapters[0]._execution
+    assert execution.stream_state == "closed" and execution.task.done()
+    assert all(task.done() for task in adapters[0]._owned_tasks)
+
+
+async def test_p2_it18_real_pg_claimed_uuid_enters_execution_context(database):
+    """The real React path preserves the claimed mapping through RuntimeFactory."""
+    from uuid import UUID
+
+    repo, settings = database
+    await submit(repo, settings)
+    owner = uuid4()
+    claimed = await repo.claim(owner, 30, settings.tenant_id)
+    assert claimed is not None
+    original_row_id = claimed["id"]
+    original_row_id_value = str(original_row_id)
+    original_row_id_type = type(original_row_id)
+    assert isinstance(original_row_id, UUID)
+    assert original_row_id_type is not UUID
+    assert original_row_id_type.__module__.startswith("asyncpg.")
+
+    async with internal_runtime_client(settings) as (app, _client):
+        factory = app.state.runtime.worker.runtime
+        original_for_run = factory.for_run
+        factory_calls = []
+
+        async def spy_for_run(row, emit):
+            factory_calls.append((row, row["id"], type(row["id"]), emit))
+            return await original_for_run(row, emit)
+
+        adapters = []
+        factory.for_run = spy_for_run
+        try:
+            context = p2_context(claimed)
+            orchestrator = p2_orchestrator(factory, adapters)
+
+            async def worker_emit(kind, data):
+                await repo.append(claimed["id"], owner, kind, data)
+
+            outcome = await orchestrator.execute(context, worker_emit)
+            await repo.finish(
+                claimed["id"], owner, "completed", output=outcome.output, history=outcome.history
+            )
+        finally:
+            factory.for_run = original_for_run
+
+    assert outcome.status == "completed"
+    assert len(factory_calls) == 1
+    factory_row, factory_row_id, factory_row_id_type, factory_emit = factory_calls[0]
+    assert factory_row is claimed
+    assert factory_row_id is original_row_id
+    assert factory_row_id_type is original_row_id_type
+    assert str(factory_row_id) == original_row_id_value
+    assert callable(factory_emit)
+
+    assert context.row is claimed
+    assert context.row["id"] is original_row_id
+    assert type(context.row["id"]) is original_row_id_type
+    assert type(context.execution_id) is UUID
+    assert context.execution_id == original_row_id
+    request = adapters[0]._execution.request
+    assert type(request.execution_id) is UUID
+    assert request.execution_id == original_row_id
+
+    events = await repo.events(claimed["id"], settings.tenant_id)
+    assert any(event["type"] == "model.completed" for event in events)
+    assert events[-1]["type"] == "run.completed"
+
+
+async def test_p2_it18_mixed_workers_exclusive_claim_parity_and_all_off_rollback(database):
+    """P2-IT12/18: off API rows are claimed by on/off Workers without repair."""
+    repo, base_settings = database
+    off_settings = base_settings.model_copy(update={"execution_orchestrator_enabled": False})
+    on_settings = base_settings.model_copy(update={"execution_orchestrator_enabled": True})
+    assert off_settings.execution_orchestrator_enabled is False
+    assert on_settings.execution_orchestrator_enabled is True
+    rows = [await submit(repo, off_settings, conversation=f"mixed-{index}") for index in range(2)]
+    off_runtime = P2ScriptedRuntime((("extension.mixed", {"stable": True}),), output="same")
+    on_runtime = P2ScriptedRuntime((("extension.mixed", {"stable": True}),), output="same")
+    off = RuntimeWorker(repo, P2ScriptedFactory(off_runtime), off_settings, "test")
+    on = RuntimeWorker(
+        repo,
+        P2ScriptedFactory(on_runtime),
+        on_settings,
+        "test",
+        orchestrator=p2_orchestrator(P2ScriptedFactory(on_runtime)),
+    )
+    off_row, on_row = await asyncio.gather(
+        repo.claim(off.owner, 30, settings_tenant := off_settings.tenant_id),
+        repo.claim(on.owner, 30, settings_tenant),
+    )
+    assert off_row is not None and on_row is not None
+    assert {off_row["id"], on_row["id"]} == {row["id"] for row in rows}
+    assert all(row["config"] == {"fingerprint": "test"} for row in (off_row, on_row))
+    await asyncio.gather(off._execute(off_row), on._execute(on_row))
+    finals = [await repo.get(row["id"], base_settings.tenant_id) for row in rows]
+    assert [final["status"] for final in finals] == ["completed", "completed"]
+    assert [final["output"] for final in finals] == ["same", "same"]
+    assert all(final["error_code"] != "configuration_changed" for final in finals)
+    event_payloads = []
+    for row in rows:
+        events = await repo.events(row["id"], base_settings.tenant_id)
+        event_payloads.append([(event["type"], event["data"]) for event in events])
+        assert events[-1]["type"] == "run.completed" and len(p2_terminal_events(events)) == 1
+    assert event_payloads[0] == event_payloads[1]
+
+    rollback_row = await submit(repo, on_settings, conversation="all-off-rollback")
+    rollback = RuntimeWorker(
+        repo, P2ScriptedFactory(P2ScriptedRuntime(output="rollback")), off_settings, "test"
+    )
+    claimed = await repo.claim(rollback.owner, 30, off_settings.tenant_id)
+    assert claimed["id"] == rollback_row["id"]
+    await rollback._execute(claimed)
+    assert (await repo.get(rollback_row["id"], off_settings.tenant_id))["status"] == "completed"
+    assert [await repo.get(row["id"], off_settings.tenant_id) for row in rows] == finals
+
+
+async def test_p2_it20_real_pg_internal_run_scope_redaction_and_r15_errors(database):
+    """P2-IT20/CM04: actual internal routes preserve tenant/workspace isolation."""
+    from agent_platform.extension_contracts import BusinessScope
+
+    repo, settings = database
+    scope = BusinessScope(
+        tenant_id=settings.tenant_id,
+        business_id="customer-service",
+        workspace_id="default",
+    )
+    async with internal_runtime_client(settings) as (app, client):
+        row = await app.state.runtime.repository.submit(
+            settings.tenant_id,
+            RunRequest(conversation_id="scoped", message="private scoped input"),
+            {"fingerprint": "test"},
+            100,
+            100,
+            120,
+            scope=scope,
+        )
+        await app.state.runtime.repository.cancel(row["id"], settings.tenant_id, scope)
+        url = f"/api/v1/runs/{row['id']}"
+        scoped_headers = {"X-Workspace-ID": "default"}
+        response = await client.get(url, headers=scoped_headers)
+        assert response.status_code == 200
+        assert set(response.json()) == {
+            "id",
+            "conversation_id",
+            "status",
+            "output",
+            "error_code",
+            "cancel_requested",
+            "created_at",
+            "started_at",
+            "finished_at",
+        }
+        assert "private scoped input" not in response.text
+        assert all(
+            field not in response.json()
+            for field in ("config", "history", "outcome", "context", "dropped")
+        )
+        assert (await client.get(url)).status_code == 200
+        assert (await client.get(url, headers={"X-Workspace-ID": "workspace-b"})).status_code == 403
+        assert (await client.get(url + "/events")).status_code == 200
+        assert (await client.get(url + "/events", headers=scoped_headers)).status_code == 200
+        other_scope = BusinessScope(
+            tenant_id=settings.tenant_id,
+            business_id="other-business",
+            workspace_id="default",
+        )
+        assert await repo.get(row["id"], settings.tenant_id, other_scope) is None
+        wrong_workspace = BusinessScope(
+            tenant_id=settings.tenant_id,
+            business_id="customer-service",
+            workspace_id="workspace-b",
+        )
+        assert await repo.get(row["id"], settings.tenant_id, wrong_workspace) is None
+        assert await repo.events(row["id"], settings.tenant_id, scope=wrong_workspace) == []
+        from agent_platform.core_platform.platform_services.persistence.store import DomainError
+
+        with pytest.raises(DomainError, match="tenant_scope_mismatch"):
+            await repo.events(row["id"], "other-" + settings.tenant_id, scope=scope)
+
+        events_url = url + "/events"
+        for invalid in ("bad", "-1", "2147483648", "1.5"):
+            invalid_response = await client.get(
+                events_url,
+                params={"after": 1},
+                headers={**scoped_headers, "Last-Event-ID": invalid},
+            )
+            assert invalid_response.status_code == 400
+            assert invalid_response.json()["detail"] == "invalid_last_event_id"
+        for after in (-1, 2147483648, "bad", "1.5"):
+            assert (
+                await client.get(events_url, params={"after": after}, headers=scoped_headers)
+            ).status_code == 422
+        assert (await client.get("/api/v1/runs/not-a-uuid/events")).status_code == 422
+        assert (
+            await client.get(f"/api/v1/runs/{uuid4()}/events", headers=scoped_headers)
+        ).status_code == 404
+
+
+async def test_p2_it19_real_pg_dynamic_alembic_head_matches_current(database):
+    """P2-IT19/CM01: derive the expected revision from the migration scripts."""
+    from pathlib import Path
+
+    from alembic.script import ScriptDirectory
+
+    repo, _settings = database
+    scripts = ScriptDirectory(str(Path(__file__).parents[1] / "migrations"))
+    heads = scripts.get_heads()
+    async with repo.engine.connect() as conn:
+        current = set(
+            (await conn.execute(text("SELECT version_num FROM alembic_version"))).scalars()
+        )
+    assert len(heads) == 1
+    assert current == set(heads)

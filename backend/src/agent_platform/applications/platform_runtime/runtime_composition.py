@@ -26,6 +26,17 @@ from agent_platform.business_capabilities.knowledge.capability import KnowledgeC
 from agent_platform.business_capabilities.memory.capability import MemoryCapability
 from agent_platform.business_capabilities.memory.injection import MemoryInjection
 from agent_platform.business_capabilities.memory.store import build_memory_store
+from agent_platform.core_platform.agent_execution.orchestration.orchestrator import (
+    ExecutionOrchestrator,
+)
+from agent_platform.core_platform.agent_execution.registry import (
+    AdapterDescriptor,
+    AdapterRegistry,
+    EngineDescriptor,
+    EngineRegistry,
+    ProtocolDescriptor,
+    ProtocolRegistry,
+)
 from agent_platform.core_platform.agent_runtime.admission import RuntimeAdmission
 from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
 from agent_platform.core_platform.agent_runtime.notify import Listener, Notifier
@@ -57,6 +68,7 @@ from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGate
 from agent_platform.extension_contracts import EventPublisher, IdentityBindings
 
 from .platform_services import PlatformServices
+from .react_adapter_factory import ReactAdapterFactory
 from .runtime_factory import RuntimeFactory
 from .runtime_hooks import BusinessRuntimePersistenceHooks
 from .service_groups import (
@@ -67,6 +79,42 @@ from .service_groups import (
 
 logger = logging.getLogger(__name__)
 TrustedExtensionBinder = Callable[[CapabilityImplementationRegistry, PlatformServices], None]
+
+
+def _runtime_fingerprint(settings: Settings, specs: list[HttpTool]) -> str:
+    public = settings.model_dump(
+        mode="json",
+        exclude={
+            "knowledge_s3_access_key",
+            "knowledge_s3_secret_key",
+            "milvus_token",
+            "database_url",
+            "api_token",
+            "operator_api_token",
+            "viewer_api_token",
+            "model_api_key",
+            "embedded_worker",
+            "worker_concurrency",
+            "database_pool_size",
+            "execution_orchestrator_enabled",
+        },
+    )
+    public["tools"] = [spec.model_dump(mode="json") for spec in specs]
+    return hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest()
+
+
+def _build_execution_orchestrator(runtime_factory: RuntimeFactory) -> ExecutionOrchestrator:
+    """Register the fixed production triple without resolving a per-run adapter."""
+    engines = EngineRegistry()
+    engines.register(EngineDescriptor(engine_id="react"))
+    protocols = ProtocolRegistry()
+    protocols.register(ProtocolDescriptor(protocol_id="native"))
+    adapters = AdapterRegistry(engines, protocols)
+    adapters.register(
+        AdapterDescriptor(engine_id="react", protocol_id="native", adapter_version="v1"),
+        ReactAdapterFactory(runtime_factory),
+    )
+    return ExecutionOrchestrator(adapters)
 
 
 @dataclass
@@ -112,24 +160,7 @@ async def runtime_services(
         if settings.tools_file
         else []
     )
-    public = settings.model_dump(
-        mode="json",
-        exclude={
-            "knowledge_s3_access_key",
-            "knowledge_s3_secret_key",
-            "milvus_token",
-            "database_url",
-            "api_token",
-            "operator_api_token",
-            "viewer_api_token",
-            "model_api_key",
-            "embedded_worker",
-            "worker_concurrency",
-            "database_pool_size",
-        },
-    )
-    public["tools"] = [spec.model_dump(mode="json") for spec in specs]
-    fingerprint = hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest()
+    fingerprint = _runtime_fingerprint(settings, specs)
     snapshot = {
         "fingerprint": fingerprint,
         "model_backend": settings.model_backend,
@@ -277,6 +308,7 @@ async def runtime_services(
             groups = build_service_groups(platform)
             bindings = build_runtime_bindings(groups)
             factory = RuntimeFactory(runtime, bindings, client, settings, tools.limit, tool_policy)
+            orchestrator = _build_execution_orchestrator(factory)
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             groups.application.evaluation = platform.evaluation
             identity = IdentityBindings(
@@ -314,6 +346,7 @@ async def runtime_services(
                     notifier,
                     listener,
                     memory=MemoryInjection(groups.business.memory),
+                    orchestrator=orchestrator if settings.execution_orchestrator_enabled else None,
                 ),
                 snapshot=snapshot,
                 listener=listener,

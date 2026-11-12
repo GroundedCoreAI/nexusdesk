@@ -45,6 +45,8 @@ services:
       # for example NEXUSDESK_TLS_HOSTS=192.168.1.50,nexusdesk.test
       AGENT_TLS_HOSTS: ${NEXUSDESK_TLS_HOSTS:-}
       AGENT_EMBEDDED_WORKER: "true"
+      # Opt in explicitly for the embedded Worker; default remains legacy execution.
+      AGENT_EXECUTION_ORCHESTRATOR_ENABLED: ${AGENT_EXECUTION_ORCHESTRATOR_ENABLED:-false}
       AGENT_WORKER_CONCURRENCY: "2"
       AGENT_DATABASE_POOL_SIZE: "5"
       AGENT_REQUIRE_PASSWORD_CHANGE: "false"

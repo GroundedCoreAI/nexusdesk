@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     tenant_capacity: int = Field(default=50, ge=1)
     queue_timeout_seconds: int = Field(default=120, ge=1)
     run_timeout_seconds: int = Field(default=90, ge=1, le=600)
+    # Process-level rollout switch; changing it requires a restart and never
+    # changes the runtime configuration fingerprint used by claimed rows.
+    execution_orchestrator_enabled: bool = False
     model_timeout_seconds: float = Field(default=30, gt=0)
     # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
     # Enabled by default for the typewriter UI. A deployment can opt out with

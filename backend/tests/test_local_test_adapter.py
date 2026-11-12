@@ -277,7 +277,21 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "adapters/testing/__init__.py",
         "adapters/testing/local_test_adapter.py",
     }
-    expected_modules = contract_modules | registry_modules | adapter_modules
+    t2_modules = {
+        "orchestration/__init__.py",
+        "orchestration/execution_context.py",
+        "orchestration/execution_lifecycle.py",
+        "adapters/react/error_mapper.py",
+    }
+    t3_modules = {
+        "adapters/react/__init__.py",
+        "adapters/react/adapter.py",
+        "adapters/react/event_mapper.py",
+    }
+    t4_modules = {"orchestration/orchestrator.py"}
+    expected_modules = (
+        contract_modules | registry_modules | adapter_modules | t2_modules | t3_modules | t4_modules
+    )
     actual_modules = {str(path.relative_to(package_root)) for path in package_root.rglob("*.py")}
     assert actual_modules == expected_modules
 
