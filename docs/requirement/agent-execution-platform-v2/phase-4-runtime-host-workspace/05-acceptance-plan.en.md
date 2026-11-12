@@ -2,21 +2,12 @@
 
 > Status: Pending execution (run before this phase goes live; no acceptance results currently exist)
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off)
 > Basis: `01-business-goals.md` (G1–G5, success metrics), `02-requirements.md` (AC-1–AC-12); test execution follows `04-test-plan.md`
 
-## 1. Acceptance Goals and Organization
+## 1. Acceptance Scope and Responsibility
 
-Confirm that this phase is **functionally correct** (every AC reproduced), **operationally effective** (cleanup, isolation, resource, and observability metrics met), and **safe to enable** (untrusted execution off, no out-of-bound file operations/mistaken kills/silently ignored resources, and drainable rollback), then record a signed conclusion.
-
-| Role | Responsibility |
-|---|---|
-| Product/platform owner | Facilitates acceptance; signs off Host boundary, phase scope, and P2 residual handling |
-| QA | Executes A1–A12 and evidence; real-process, failure/adversarial/resource matrices, Phase 0 baseline comparison, and defect severity |
-| Engineering lead | Provides environment/built-in test targets; migration/restart/rollback drills; metric data and fixes |
-| Security owner | Veto authority for path/link/race, cross-tenant, untrusted execution, secrets, and mistaken-kill gates |
-| Operations owner | Linux/cgroup/volume/container environment; canary, health alerts, stop/drain, and production suitability |
-| Adapter engineering representative | UAT for two Adapters reusing Host, protocol ownership, and Sandbox replacement |
-| SRE/tenant-security representative | UAT for resource bounds, cleanup-failure remediation, public redaction, and rollback operability |
+Confirm every AC and retain evidence for cleanup, isolation, resource, and observability criteria. Untrusted execution remains disabled; out-of-bound file operations, mistaken kills, silently ignored resources, and non-drainable rollback are unacceptable. By default, the acceptance owner organizes and records the decision while the executor prepares isolated environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, security, or operations roles. Developer self-verification proves conformance to this document, not real-user acceptance or an independent security audit.
 
 ## 2. Acceptance Environments and Prerequisites
 
@@ -51,31 +42,24 @@ Confirm that this phase is **functionally correct** (every AC reproduced), **ope
 
 Record for every scenario: executor, date, environment/support matrix, target commit, prerequisite data, actual operations, expected/actual result, decision, and process/resource/DB/filesystem/log evidence links. Failures or missing environments cannot be rewritten as passes; destructive evidence references only isolated sentinels and dedicated volumes.
 
-## 4. UAT Decision (Adapter Engineering and Operations Representatives)
+**Evidence reuse**: A1–A12 directly reference the corresponding UT/IT/CM, CI, process, resource, database, and filesystem evidence in `06-test-report.md` wherever possible instead of manually repeating the full suite. Cleanup, orphan identification, path isolation, resource limits, and observability coverage are assessed directly from A/C criteria without a second business-metric acceptance round.
 
-- Adapters implement only Engine/Protocol and Host calls, without copying process-group, resource, or Workdir cleanup logic; replacing Sandbox Provider requires no protocol-code change.
-- Operators can distinguish Run terminal state, process exit, resource release, and Workdir deletion, and can safely retry or manually remediate from cleanup_failed records.
-- Public diagnostics expose no host path/PID/secret; internal operational evidence correlates by Run/host/tenant with controlled access.
-- The support matrix clearly distinguishes full Linux capabilities, macOS development approximations, and unsupported items; deployers cannot mistake Local Provider for an untrusted-code sandbox.
-- The rollback runbook is executable: stop admission, drain and verify zero active, then disable and roll back; cleanup_failed explicitly blocks rather than forcing table cleanup.
+## 4. Key Manual Checks
 
-## 5. Business-Metric Acceptance
+Use these only to supplement operational usability that automation does not fully cover. Record executor, target SHA, result, and evidence for each; do not create Adapter, SRE, or tenant-representative roles.
 
-| Metric | Baseline | Target | Measurement method |
-|---|---|---|---|
-| External test-process and descendant cleanup rate | Pending Phase 0 review of existing cancellation/restart coverage; no external-process baseline exists | 100% cleanup across specified normal, cancellation, timeout, crash, and restart scenarios, with no managed descendants left | For each Run in all five categories, reconcile process group, descendants, resource handles, and Workdir records; cleanup_failed does not count as success |
-| Cancellation/timeout to actual process-group stop latency | Pending Phase 0 existing-cancellation measurement; no OS-process baseline exists | Complete within configured grace + kill timeout plus 2s observation allowance; failure to stop must alert and cannot report cleanup success | Record trigger, TERM, KILL, last descendant exit, and alert with a monotonic clock, then calculate per case against its configuration |
-| Orphan-identification safety | Pending Phase 0 Worker-recovery semantics review | 100% recoverable-orphan identification; zero PID-reuse/identity-mismatch kills; uncertain processes enter manual remediation | Count recovery, signals, and manual records across match/mismatch/missing-identity/cross-Host/DB-failure matrices |
-| Workdir isolation and malicious-path denial rate | Pending Phase 0 file-path safety coverage review | 100% unique legal Execution directories; zero escapes across specified traversal, absolute-path, symlink/hardlink, and race cases | Check path/permission/ownership for concurrent legal samples; compare every external sentinel's content and metadata before/after the malicious matrix |
-| Effective resource-limit enforcement rate | Pending Phase 0 deployment resource-control review | Within the support matrix, every CPU/memory/PID/disk/time/output excess terminates or rejects; zero silently ignored unsupported required capabilities | Persist the support matrix per environment, then record threshold, actual usage, termination/denial latency, release result, and adjacent Run state for each item |
-| Host health and rollback observability coverage | Pending Phase 0 Worker health/metrics review | 100% structured observability for active processes, orphans, cleanup failures, Workdir usage/retention, and recovery batches; zero active orphans after rollback | Check metrics/logs/alerts against the state checklist, then independently reconcile DB and OS after full rollback rather than trusting application self-report |
+| # | Check | Pass criterion |
+|---|---|---|
+| M1 | Review Host/Adapter responsibilities and the support matrix in the actual deployment guide | Responsibilities are clear; full Linux capabilities, macOS development approximations, and unsupported items are distinguishable, and Local Provider is not presented as an untrusted-code sandbox |
+| M2 | Inspect normal and `cleanup_failed` samples and perform safe retry/manual remediation | Run terminal state, process exit, resource release, and Workdir deletion are distinguishable; public diagnostics expose no host path, PID, or secret, and internal evidence access is controlled |
+| M3 | Follow the rollback runbook through stop admission, drain, verification, disablement, and rollback | The runbook is executable and verifies zero active processes first; `cleanup_failed` explicitly blocks rollback rather than forcing table cleanup |
 
-## 6. Compliance Checks
+## 5. Security, Data, and Release Hard Gates
 
 | # | Check | Decision | Traceability |
 |---|---|---|---|
 | C1 | Host is decoupled from Adapters/Worker, and public APIs/handles expose no PID/PGID, host path, or environment | Must pass | AC-1; G1; FR-1 |
-| C2 | Cancellation/timeout actually cleans the whole process group, late results cannot overwrite terminal state, and cleanup failure is not falsely reported as success | Veto | AC-2–AC-4; G2; FR-2, FR-3 |
+| C2 | Managed processes and descendants have 100% cleanup across the specified normal, cancellation, timeout, crash, and restart scenarios; cancellation/timeout stops the whole group within configured grace + kill timeout plus 2s observation allowance; late results cannot overwrite terminal state; failure to stop alerts and is never reported as successful cleanup | Veto; verify each case with monotonic timing and OS evidence | AC-2–AC-4; G2; FR-2, FR-3 |
 | C3 | Recovery verifies host/boot/start token/digest together; zero PID-reuse kills and no blind kills on DB failure | Veto | AC-5; G2; FR-4 |
 | C4 | Tenant/scope ownership is rechecked, with zero successful external reads/writes/deletes across traversal/encoding/link/mount/race cases | Veto | AC-6–AC-8; G3; FR-5, FR-6 |
 | C5 | Missing required resource capabilities reject start, support matrix is truthful, and no limit is silently ignored, raised, or replaced by host totals | Veto | AC-9; G4; FR-7 |
@@ -89,10 +73,14 @@ Record for every scenario: executor, date, environment/support matrix, target co
 | C13 | No real Codex, strong-sandbox/network/credential capability, or shared-execution-root multi-replica is enabled, and no Phase 5/6 scope leaks in | Must pass | AC-10, AC-12; G4; FR-8, FR-10 |
 | C14 | Missing Linux/cgroup/mount/container items are `pending_env` and block their corresponding promise, with no approximation presented as full support | Veto | AC-5, AC-8, AC-9, AC-12; G2–G5; FR-4, FR-6, FR-7, FR-10 |
 
-## 7. Pass Criteria and Sign-off
+## 6. Pass Criteria and Acceptance Record
 
-- **Pass**: A1–A12 all pass; all six metrics meet targets; C1–C14 all pass; no P0/P1 remains; complete Linux/resource/adversarial-filesystem/restart/rollback evidence exists.
-- **Conditional pass**: only P2/P3 residuals that do not affect security, process/resource reliability, isolation, observability, or rollback, each with an owner and deadline; no veto item or promise covered by `pending_env` is eligible for conditional pass.
-- **Fail**: any AC, hard metric, or veto item fails; a missing Phase 0 baseline makes compatibility undecidable; or any out-of-bound file operation, mistaken kill, untrusted execution, silently ignored resource, secret leak, active orphan, or non-drainable rollback occurs. After fixing, reverify affected items and the complete security/recovery regression.
+- **Pass**: A1–A12 and C1–C14 all pass; M1–M3 are complete or have equivalent automated evidence; no P0/P1 remains; complete Linux/resource/adversarial-filesystem/restart/rollback evidence exists.
+- **Conditional pass**: only non-hard-gate P2/P3 residuals that do not affect security, process/resource reliability, isolation, observability, or rollback, each with an owner/deadline and an explanation from the acceptance owner in the record below; no veto item or promise covered by `pending_env` is eligible.
+- **Fail**: any AC or hard gate fails; a missing Phase 0 baseline makes compatibility undecidable; or any out-of-bound file operation, mistaken kill, untrusted execution, silently ignored resource, secret leak, active orphan, or non-drainable rollback occurs. After fixing, reverify affected items and the complete security/recovery regression.
 
-Produce the Phase 4 Acceptance Report with AC execution records, support matrix, raw metric data, compliance checks, migration/restart/rollback evidence, residual list, conclusion, and signatures (product/platform / QA / engineering / security / operations / Adapter representative). Full pass covers trusted built-in test processes only and is not approval to expose untrusted multi-tenant code execution.
+Produce the Phase 4 Acceptance Report with A/C evidence links, support matrix, raw C2 timing, key manual checks, migration/restart/rollback evidence, residuals, and the single record below; multi-role signatures are not required. Full pass covers trusted built-in test processes only and is not approval to expose untrusted multi-tenant code execution.
+
+| Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
+|---|---|---|---|---|---|
+| To be filled | To be filled (may be the acceptance owner) | To be filled | To be filled | Pending acceptance | To be filled |

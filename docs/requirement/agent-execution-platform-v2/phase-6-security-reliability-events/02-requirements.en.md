@@ -176,7 +176,7 @@
 
 | Configuration item | Level | Default | Description |
 |---|---|---|---|
-| `execution_untrusted_tenants_enabled` | Global settings | `false` | Enabled only after every hard gate and sign-off; cannot independently bypass sub-policies. |
+| `execution_untrusted_tenants_enabled` | Global settings | `false` | Enabled only after every hard gate passes and independent security and SRE/operations approvals complete; cannot independently bypass sub-policies. Remains disabled without the required personnel or evidence. |
 | `execution_sandbox_required` | Global settings | `true` | Untrusted execution requires a sandbox; configuration cannot degrade to host execution. |
 | `execution_network_default_deny` | Deployment policy | `true` | No egress by default, with minimal per-Execution allowances. |
 | `execution_credential_grant_ttl_seconds` | Global settings | Bounded short default, frozen at review | Grants expire on schedule and cannot exceed the deployment hard limit. |

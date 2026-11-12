@@ -2,20 +2,12 @@
 
 > Status: Pending implementation (execute before launch; no acceptance results currently exist)
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off)
 > Basis: `01-business-goals.md` (G1–G4, success metrics), `02-requirements.md` (AC-1–AC-11); test execution follows `04-test-plan.md`
 
-## 1. Acceptance Objectives and Organization
+## 1. Acceptance Scope and Responsibility
 
-Confirm that the phase is **functionally correct** (every AC reproduced), **commercially effective** (compatibility, performance, and snapshot targets met), and **safe to launch** (no client elevation or sensitive disclosure, with reversible flags), then record a signed conclusion.
-
-| Role | Responsibility |
-|---|---|
-| Product owner | Chairs acceptance; judges configuration/preview experience and signs P2 residual decisions |
-| QA | Executes A1–A11 and evidence; owns Phase 0 baseline comparisons, regressions, and defect severity |
-| Engineering lead | Provides environments, migration/rollback drills, metric data, and fixes |
-| Security lead | Judges elevation, cross-tenant access, snapshot sensitivity, policy provenance, and veto security gates |
-| Operations lead | Validates flag canary, observability, rollback operation, and production readiness |
-| Tenant administrator representative | Performs UAT for seamless legacy Agents, new configuration, and read-only Effective view |
+Confirm every AC, retain evidence for compatibility, performance, and snapshot criteria, and verify that clients cannot elevate privileges, sensitive data is not disclosed, and flags can roll back. By default, the acceptance owner organizes and records the decision while the executor prepares environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, security, or operations roles. Developer self-verification proves conformance to this document, not real-user acceptance or an independent audit.
 
 ## 2. Acceptance Environments and Prerequisites
 
@@ -47,25 +39,19 @@ Confirm that the phase is **functionally correct** (every AC reproduced), **comm
 
 Record for every scenario: executor, date, environment, target commit, setup data, actual operations, expected/actual result, decision, and screenshot/log/database evidence links. Failures or missing environments must not be rewritten as passes.
 
-## 4. UAT Decision (Tenant Administrator Representative)
+**Evidence reuse**: A1–A11 directly reference the corresponding UT/IT/CM, CI, database, and frontend automation results in `06-test-report.md` wherever possible instead of manually repeating the full suite. Records may link test nodes and raw evidence. Merged code, skip, or `pending_env` alone is not a pass.
 
-- Legacy Agents show no forced field completion, changed meaning, or mandatory republication prompt.
-- New Engine configuration distinguishes shared fields, React fields, and read-only capabilities; unknown/conflicting errors are actionable and fully internationalized.
-- Capability preview distinguishes “unsupported,” “environment unavailable,” and “policy denied,” without implying that declaration means authorization.
-- After rollback, stale Phase 3 editing controls disappear and historical published versions and Runs remain visible.
+## 4. Key Manual Checks
 
-## 5. Business Metric Acceptance
+Use these only to supplement actual UI and rollback behavior that automation does not fully cover. Record executor, target SHA, result, and evidence for each; do not create a user-representative role or standalone UAT round.
 
-| Metric | Baseline | Target | Measurement method |
-|---|---|---|---|
-| Legacy configuration compatibility | Pending Phase 0 measurement | 100% load/normalize/republish/execute for valid fixtures | Execute A1 for every fixed Phase 0 fixture and record fixture version and failure reasons |
-| Invalid configuration rejection | Pending Phase 0 inventory | 100% for all specified invalid classes, with stable error codes | Count A2 against P3-UT-04/05 and P3-IT-02 |
-| Successful client capability elevations | Pending Phase 0 trust-boundary inventory | 0 | Cross-check A5 raw-request matrix, audits, and security tests |
-| Phase 3 Run snapshot completeness | Pending Phase 0 measurement | 100% across all four terminal states, with zero starts on missing snapshots | Query completed/failed/cancelled/timed-out samples and compare start-event timing |
-| React instruction compatibility diff | Pending Phase 0 message baseline | 0 | Compare roles, order, wording, budgets, switches, and write-back for fixed fixtures |
-| Added resolution latency | Pending Phase 0 admission/claim p95 | At most 50ms added with caches | After warmup, sample at least 100 times under identical environment/load; separate configuration, probe-cache, and policy timing from external model time |
+| # | Check | Pass criterion |
+|---|---|---|
+| M1 | Open a legacy Agent and new Engine configuration | Legacy Agents require no forced field completion, changed meaning, or republication; shared fields, React fields, and read-only capabilities are clearly distinguished |
+| M2 | Submit unknown/conflicting configuration and inspect capability preview | Errors are actionable and fully internationalized; “unsupported,” “environment unavailable,” and “policy denied” are distinct, and declaration clearly does not imply authorization |
+| M3 | Perform one application rollback and inspect the UI | Stale Phase 3 editing controls disappear while historical published versions and Runs remain visible |
 
-## 6. Compliance Checks
+## 5. Security, Data, and Release Hard Gates
 
 | # | Check | Decision | Traceability |
 |---|---|---|---|
@@ -79,11 +65,16 @@ Record for every scenario: executor, date, environment, target commit, setup dat
 | C8 | User text is fully internationalized, Effective is read-only, and internal snapshots are not directly exposed | Mandatory | AC-9; G1, G2; FR-8 |
 | C9 | Master-flag and application rollback drills succeed without migration changes; non-React never silently falls back | Veto | AC-10; G4; FR-8, FR-9 |
 | C10 | Migration identifiers are revalidated before implementation, exactly five columns are added, history is unchanged, and no Phase 4/5/6 scope leaks in | Mandatory | AC-11; G1, G4; FR-6 |
+| C11 | With caches warm, added resolution latency over the Phase 0 admission/claim p95 is at most 50ms; after warmup, collect at least 100 samples under identical environment/load and separate configuration, probe-cache, and policy timing from external model time | Mandatory; record `not_measured` when unmeasured rather than passing | G1; performance success metric |
 
-## 7. Pass Criteria and Sign-Off
+## 6. Pass Criteria and Acceptance Record
 
-- **Pass**: A1–A11 all pass; all six metrics meet targets; C1–C10 pass; no P0/P1 remains; rollback evidence is complete.
-- **Conditional pass**: only P2/P3 residuals unrelated to security, compatibility, snapshots, or rollback, each with an owner and deadline; veto items are never eligible for conditional pass.
-- **Fail**: any AC, hard metric, or veto item fails; missing Phase 0 baselines make compatibility undecidable; or any elevation, cross-tenant access, secret disclosure, or silent non-React fallback occurs. Revalidate affected items and full regressions after fixes.
+- **Pass**: A1–A11 and C1–C11 all pass; M1–M3 are complete or have equivalent automated evidence; no P0/P1 remains; rollback evidence is complete.
+- **Conditional pass**: only non-hard-gate P2/P3 residuals unrelated to security, compatibility, snapshots, the performance hard gate, or rollback, each with an owner/deadline and an explanation from the acceptance owner in the record below; veto items are never eligible.
+- **Fail**: any AC or hard gate fails; missing Phase 0 baselines make compatibility undecidable; or any elevation, cross-tenant access, secret disclosure, or silent non-React fallback occurs. Revalidate affected items and full regressions after fixes.
 
-Produce the Phase 3 Acceptance Report with AC records, raw metric data, compliance results, migration/rollback evidence, residual list, conclusion, and signatures (product / QA / engineering / security / operations).
+Produce the Phase 3 Acceptance Report with A/C evidence links, raw C11 measurements, key manual checks, migration/rollback evidence, residuals, and the single record below; multi-role signatures are not required.
+
+| Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
+|---|---|---|---|---|---|
+| To be filled | To be filled (may be the acceptance owner) | To be filled | To be filled | Pending acceptance | To be filled |

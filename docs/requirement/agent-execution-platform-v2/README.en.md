@@ -1,7 +1,8 @@
 # NexusDesk Agent Execution Platform v2 · Phased Planning Documents
 
-> Status: Phase 0 implementation is committed and pushed, but clean committed-artifact CI double-runs, authorized real historical samples, and human sign-offs remain open, so formal acceptance is incomplete; Phase 1 design decisions are frozen and implementation started on 2026-11-08, without testing or acceptance; Phases 2–6 are not being implemented; Phase 7 is deferred as of 2026-11-07 because the project is in its early stage, with requirements retained as lowest-priority P4 issues
+> Status: Phase 0 implementation is committed and pushed, but clean committed-artifact CI double-runs, authorized real historical samples, and human sign-offs remain open, so formal acceptance is incomplete; Phase 1 code has merged into integration through merge `0a6c4b5`, while human acceptance remains a separate matter; Phase 2 design is frozen under R1–R14 and was revised for independent specification review on 2026-11-11, with no implementation before APPROVED re-review and no development, testing, or acceptance started; Phases 3–6 are not being implemented; Phase 7 is deferred as of 2026-11-07 because the project is in its early stage, with requirements retained as lowest-priority P4 issues
 > Created: 2026-11-02
+> Revised: 2026-11-11 (Phase 2 independent specification-review revision)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 17, 19, 20, and 22
 
 ## Background
@@ -42,17 +43,23 @@ Each phase contains:
 - `02-requirements.md` / `.en.md`: US, FR, non-functional requirements, and AC;
 - `03-technical-design.md` / `.en.md`: current-state mapping, file-level changes, data and flows, rollout and rollback;
 - `04-test-plan.md` / `.en.md`: UT/IT/CM, regression scope, defect levels, and exit criteria;
-- `05-acceptance-plan.md` / `.en.md`: AC-by-AC acceptance, business metrics, compliance checks, and sign-off;
+- `05-acceptance-plan.md` / `.en.md`: AC-by-AC acceptance, a few key manual checks, applicable security/data/release hard gates, and a single acceptance record; by default, reuse automated evidence without standalone UAT, duplicate business-metric tables, or multi-role sign-off;
 - `06-test-report.md` and `07-acceptance-report.md`: created only after actual testing/acceptance;
 - `08-implementation-breakdown.md`: created for large phases after design review and before implementation.
 
 ## Dependency and Migration Conventions
 
 - The default order is Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7. Security items may be reviewed earlier, but later launch gates must not be weakened. Phase 7 is currently deferred and excluded from the active implementation sequence.
-- The migration head observed during planning on 2026-11-02 was `0052_memory_tasks_tenant_index`; the Phase 0 implementation check on 2026-11-07 found `0057_industry_pack_runtime`. Numbers `0053+` in these documents are **planned identifiers**. Each phase must revalidate the head and adjust `down_revision` against its target commit, never edit an applied historical migration, and never treat a historical planning number as a permanent acceptance value.
+- The migration head observed during planning on 2026-11-02 was `0052_memory_tasks_tenant_index`; both the Phase 0 implementation check on 2026-11-07 and the Phase 2 design check on 2026-11-10 observed `0057_industry_pack_runtime`. Numbers `0053+` in these documents are **planned identifiers**. Each phase must revalidate the head and adjust `down_revision` against its target commit, never edit an applied historical migration, and never treat a historical planning number or Phase 2's read-only observation as a permanent acceptance value.
 - Phase 0 dependency maps, lifecycle records, and compatibility baselines remain under this root in the corresponding phase, avoiding a second documentation source.
-- The user explicitly requested Phase 1 startup on 2026-11-08; open Phase 0 items are only an accepted entry risk tracked by the product owner and QA, not formal Phase 0 acceptance, sign-off, or approval.
+- The user explicitly requested Phase 1 startup on 2026-11-08; open Phase 0 items are only an accepted entry risk tracked by the product owner and QA, not formal Phase 0 acceptance, sign-off, or approval. Phase 1 merging into integration likewise does not constitute formal Phase 1 human acceptance.
 - If a design conflicts with code reality, record a decision and revise the affected documents before changing implementation.
+
+## Phase 2 Current Deliverables and Subsequent Gates
+
+Phase 2's [01–05 planning suite](phase-2-react-provider-orchestrator/03-technical-design.en.md) and [08 implementation breakdown](phase-2-react-provider-orchestrator/08-implementation-breakdown.en.md) are frozen under R1–R14 and revised for independent specification review: fixed `react/native/v1`, UUID/restricted-nil identity boundaries, synchronous ContextVar capture with asynchronous Runtime assembly inside the runner, worker_emit/runtime_emit dual-emit isolation, first-emission gate and React-private no-stream state machine, Core-private structured acknowledgment with explicit decisions for all 25 public-suite functions, public Result/private Outcome separation, open business events, backpressure, distinct append/finish control flow, Adapter first-terminal-wins versus Run first-commit-wins, serial/parallel parity rules, default-off rollout, and rollback without data reversal. Functional exit is separate from real performance submetrics; performance pending_env caps T9 at conditionally passed.
+
+The remaining order cannot be reversed: T2–T7 implementation and integration → bilingual 06 only after T8 actually executes every test → bilingual 07 only after T9 formal acceptance with controlled fixtures → T10 adds the Phase 2-specific idempotent low-sensitivity example seed → T11 performs quickstart off/on, both-SSE, and rollback validation and only appends post-acceptance sections to existing 06/07. Do not currently create Phase 2 06/07, prewrite passage, or add seed data early.
 
 ## Explicit Overall Non-Goals
 
@@ -68,7 +75,7 @@ Each phase contains:
 
 - Phase 0: reproducibility of the current-state and test baseline; representativeness of historical configuration fixtures; identifier freeze.
 - Phase 1: contract stability without host-detail leakage; explicit Adapter versioning, cancellation, and error semantics.
-- Phase 2: behavioral equivalence of old and new React paths; Worker depends only on Orchestrator; rollback requires no data reversal.
+- Phase 2: safe UUID/nil identity boundaries; old/new React serial/parallel equivalence under the frozen rules; deterministic private acknowledgment, event ownership, cancellation, and terminal cleanup; Worker depends only on Orchestrator; rollback requires no data reversal; example seed work strictly follows formal acceptance.
 - Phase 3: lossless legacy defaults; client cannot elevate Effective capabilities; snapshots explain every execution decision.
 - Phase 4: process-tree cleanup, path/symlink isolation, and resource limits survive failure and adversarial tests.
 - Phase 5: App-Server starts only after CLI stabilizes; native protocols stay inside Providers; untrusted execution remains gated.

@@ -1,7 +1,8 @@
 # NexusDesk Agent 执行平台 v2 · 分阶段规划文档
 
-> 状态：Phase 0 实现已提交并推送，但干净已提交产物 CI 双跑、经授权真实历史样本与人工签字仍开放，正式验收尚未完成；Phase 1 设计决策已冻结并于 2026-11-08 启动实施，尚未测试或验收；Phase 2–6 未开始实施；Phase 7 自 2026-11-07 起因项目起步阶段暂缓执行，需求以最低优先级 P4 issue 保留
+> 状态：Phase 0 实现已提交并推送，但干净已提交产物 CI 双跑、经授权真实历史样本与人工签字仍开放，正式验收尚未完成；Phase 1 代码已通过 merge `0a6c4b5` 合入 integration，人工验收仍是独立事项；Phase 2 已完成 R1～R14 设计冻结并于 2026-11-11 按独立规格评审修订，复核 APPROVED 前不得实现，尚未开发、测试或验收；Phase 3–6 未开始实施；Phase 7 自 2026-11-07 起因项目起步阶段暂缓执行，需求以最低优先级 P4 issue 保留
 > 创建：2026-11-02
+> 修订：2026-11-11（Phase 2 独立规格评审修订）
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 17、19、20、22 节
 
 ## 背景
@@ -42,17 +43,23 @@
 - `02-requirements.md` / `.en.md`：US、FR、非功能需求与 AC；
 - `03-technical-design.md` / `.en.md`：现状映射、文件级改动、数据与流程、上线回滚；
 - `04-test-plan.md` / `.en.md`：UT/IT/CM、回归范围、缺陷分级与出口准则；
-- `05-acceptance-plan.md` / `.en.md`：AC 逐条验收、业务指标、合规核对与签字；
+- `05-acceptance-plan.md` / `.en.md`：AC 逐条验收、少量关键人工检查、适用安全/数据/发布硬门槛与单一验收记录；默认复用自动化证据，不生成独立 UAT、重复业务指标大表或多角色签字；
 - `06-test-report.md`、`07-acceptance-report.md`：仅在实际测试/验收后生成；
 - `08-implementation-breakdown.md`：大型阶段设计评审后、开发启动前生成。
 
 ## 依赖与迁移约定
 
 - 阶段顺序默认为 Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7；安全子项可提前评审，但不能削弱后续上线门槛。Phase 7 当前暂缓，不纳入现阶段实施顺序。
-- 2026-11-02 规划核查时的迁移头为 `0052_memory_tasks_tenant_index`；2026-11-07 Phase 0 实施核查时已前进到 `0057_industry_pack_runtime`。文档中的 `0053+` 均为**规划编号**，各阶段实施时必须基于目标提交重新核查 head、调整 `down_revision`，禁止修改已应用的历史迁移，也不得把历史规划编号当作永久验收值。
+- 2026-11-02 规划核查时的迁移头为 `0052_memory_tasks_tenant_index`；2026-11-07 Phase 0 实施核查及 2026-11-10 Phase 2 设计核查均观测到 `0057_industry_pack_runtime`。文档中的 `0053+` 均为**规划编号**，各阶段实施时必须基于目标提交重新核查 head、调整 `down_revision`，禁止修改已应用的历史迁移，也不得把历史规划编号或 Phase 2 的只读观测当作永久验收值。
 - Phase 0 产出的依赖图、生命周期与兼容基线继续放在本总目录对应阶段下，避免形成第二套文档源。
-- 用户于 2026-11-08 明确要求启动 Phase 1；Phase 0 未关闭项仅作为已接受入口风险，由产品负责人和 QA 继续跟踪，不构成 Phase 0 正式验收、签字或放行。
+- 用户于 2026-11-08 明确要求启动 Phase 1；Phase 0 未关闭项仅作为已接受入口风险，由产品负责人和 QA 继续跟踪，不构成 Phase 0 正式验收、签字或放行。Phase 1 合入 integration 同样不构成 Phase 1 正式人工验收。
 - 任一阶段发现设计与代码现实不一致，先登记裁定并修订相关文档，再修改实现。
+
+## Phase 2 当前交付与后续门禁
+
+Phase 2 的 [01–05 规划套件](phase-2-react-provider-orchestrator/03-technical-design.md) 与 [08 实施拆解](phase-2-react-provider-orchestrator/08-implementation-breakdown.md) 已按 R1～R14 冻结并完成独立规格评审修订：固定 `react/native/v1`，UUID/受限 nil 身份边界，同步 ContextVar 捕获与 runner 内异步 Runtime 装配，worker_emit/runtime_emit 双 emit 隔离，首发 gate 与 React 私有 no-stream 状态机，Core 私有结构化 ack 及公共 suite 25 函数逐项裁定，公共 Result/私有 Outcome 分离，开放业务事件、背压、append/finish 不同控制流、Adapter first-terminal-wins 与 Run first-commit-wins、串行/并行对等规则、默认 off 灰度和无需数据回退的回滚。功能出口与真实性能子指标分离，性能 pending_env 时 T9 最多有条件通过。
+
+后续顺序不可颠倒：T2～T7 实施与集成 → T8 实际逐条测试后才创建双语 06 → T9 使用受控 fixtures 正式验收后才创建双语 07 → T10 才新增 Phase 2 专属幂等低敏示例种子 → T11 才做 quickstart off/on、双 SSE 与回滚验证，并只向既有 06/07 追加验收后附录。当前不得创建 Phase 2 06/07、预写通过或提前新增 seed。
 
 ## 明确不做的（整体边界）
 
@@ -68,7 +75,7 @@
 
 - Phase 0：现状与测试基线是否可复现；历史配置样本是否覆盖真实发布快照；标识是否冻结。
 - Phase 1：契约是否足够稳定且不过度泄漏宿主细节；Adapter 版本、取消和错误语义是否明确。
-- Phase 2：新旧 React 路径行为是否等价；Worker 是否只依赖 Orchestrator；回滚是否无需数据回退。
+- Phase 2：UUID/nil 身份边界是否安全；新旧 React 串行/并行行为是否按冻结规则等价；私有 ack、事件所有权、取消与终态清理是否确定；Worker 是否只依赖 Orchestrator；回滚是否无需数据回退；示例种子是否严格晚于正式验收。
 - Phase 3：旧配置默认映射是否无损；Effective 能力是否无法被客户端提权；快照能否完整重放决策依据。
 - Phase 4：进程树清理、路径/软链隔离和资源限额是否经故障与对抗测试。
 - Phase 5：CLI 稳定后再启用 App-Server；原生协议是否封装在 Provider 内；不可信执行是否仍受安全门槛约束。

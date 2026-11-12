@@ -2,6 +2,7 @@
 
 > Status: Pending execution (run after this phase is implemented; no test results currently exist)
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements)
 > Basis: `02-requirements.md` (FR-1–FR-10, AC-1–AC-12), `03-technical-design.md` (Host, process groups, recovery, Workdir, resource matrix, and rollback)
 
 ## 1. Test Scope and Principles
@@ -19,6 +20,7 @@
 7. **Isolate destructive tests**: use only dedicated temporary execution roots, containers, and sentinel files; never run recursive-deletion/mount experiments on developer host roots, production volumes, or real customer directories.
 8. **Report environment capabilities honestly**: separate the full Linux matrix from the macOS development subset; mark missing items `pending_env` and never describe rlimit/monitoring approximations as cgroup-equivalent.
 9. **Keep secrets out of evidence**: test targets receive no real model/platform keys; scan logs, DB metadata, events, and evidence attachments for sensitive data.
+10. **Reuse evidence**: A/C acceptance directly references automated UT/IT/CM results and process/resource/DB/filesystem evidence instead of manually repeating the full suite; manual work is limited to key checks that cannot be automated.
 
 ## 2. Test Environments and Data Construction
 
@@ -133,7 +135,7 @@
 |---|---|---|
 | P0 blocker | Cross-tenant/host file read/write/delete; unrelated-process kill; untrusted-code execution entry; secret leak; uncontrollable process group or recursive deletion | Stop acceptance immediately and isolate the environment; after fixing, rerun complete security, recovery, and regression suites |
 | P1 critical | Descendant/resource leak; ineffective cancellation/timeout; failed orphan recovery; ignored required resource limit; corrupted Run/process state; rollback leaving active orphans | No acceptance or canary before fixing |
-| P2 major | Non-blocking cleanup retry, reason-code, health-metric, retention-policy, or supervision-performance deviation | Record owner/deadline and obtain owner sign-off only when there is no security/reliability impact |
+| P2 major | Non-blocking cleanup retry, reason-code, health-metric, retention-policy, or supervision-performance deviation | Only for non-hard-gate items without security/reliability impact: record owner/deadline and have the acceptance owner confirm conditional acceptance in the single acceptance record |
 | P3 minor | Non-sensitive log, internal diagnostic, or documentation presentation issue | Schedule a fix; never conceal leakage, a false support matrix, or missing environments |
 
 **Exit criteria**: all P4-UT/IT/CM pass; AC-1–AC-12 are reproducible; applicable regressions are green; no P0/P1 remains open; external modifications, unrelated-process kills, untrusted execution, and silently ignored limits are all zero; default-off React baseline diff is zero; rollback leaves zero active orphans. Mark unavailable-environment items `pending_env` and block their corresponding enablement promise rather than reporting a pass.
