@@ -3,6 +3,7 @@
 > Status: Deferred (early-stage project; this test plan is not being executed, no cases have run, and none may be recorded as passed)
 > Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; run applicable cases only after the phase is reactivated and the corresponding slice is developed
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements; phase remains deferred)
 > Basis: `02-requirements.en.md` (FR-1~FR-11, AC-1~AC-22), `03-technical-design.en.md` (S7-01~S7-09, planned migrations, and core flows), architecture §19 and §22
 > Baseline statement: Current behavioral, coverage, performance, and capacity baselines are unmeasured pending Phase 0; every comparative test must first cite accepted Phase 0 data
 
@@ -20,6 +21,7 @@
 6. **No waiting in time-based cases**: Construct Session, interaction, health, and Artifact retention times directly or use a controlled clock; do not use long sleeps for backoff/expiry.
 7. **Cost semantics are mandatory**: Assert duplicate events, additive/informational, unknown, multiple currencies, and gateway overlap separately; never classify unknown cost as 0.
 8. **Empty states and compatibility are mandatory**: No optional policy, advanced capability, usage, or health data and historical Run/Agent snapshots must remain readable and degradable.
+9. **Reuse evidence**: A/C acceptance directly references automated UT/IT/CM results and multiprocess, capacity, reporting, and storage evidence instead of manually repeating the full suite; manual work is limited to key checks that cannot be automated.
 
 ## 2. Test Environments and Data Construction
 
@@ -141,7 +143,7 @@
 |---|---|---|
 | P0 blocking | Cross-tenant leak; unauthorized execution/fallback/recovery; repeated confirmed external side effect; data loss; sandbox escape | Stop slice canary immediately; fix and complete all security/regression tests before continuing |
 | P1 critical | Terminal/Lease/idempotency error; quota overrun; duplicate waiting recovery; duplicate charges; flag failure; circuit causes global outage | No slice acceptance or canary expansion before a fix |
-| P2 major | Non-security policy deviation, incomplete report display, or nonblocking performance target missed | Product/QA/engineering may consider conditional acceptance with recorded owner and deadline |
+| P2 major | Non-security policy deviation, incomplete report display, or nonblocking performance target missed | Only non-hard-gate items may proceed after owner/deadline are recorded and the acceptance owner confirms conditional acceptance in the single acceptance record |
 | P3 minor | Text, noncritical logging, or documentation-link issue | Schedule a fix without hiding i18n or traceability failures |
 
 **Single-slice exit criteria**: All applicable UT/IT/CM cases pass with individual evidence; applicable AC scenarios pass in integration; affected regressions are green; no P0/P1 remains open; migration, canary, rollback, and all-off diff gates pass; Phase 0 comparative baselines are accepted. Every skip states environment, impact, and retest owner and is excluded from the pass rate.

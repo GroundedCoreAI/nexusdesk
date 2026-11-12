@@ -94,4 +94,4 @@ The existing knowledge/tool workspaces and S3 archive are not a general executio
 - **Duplicate data**: The model gateway already records model-call costs. Engine aggregate usage must declare whether it is additive and must not be summed again with model calls.
 - **Compatibility**: waiting, Effective capabilities, and new events are additive changes. Existing Runs, published Agent snapshots, SSE cursors, and fixed-Profile behavior must remain readable and replayable.
 - **Sensitive information**: Configuration stores Secret references only. Logs, events, Skill metadata, Artifact metadata, and reports must not contain plaintext tokens, sensitive host paths, or cross-tenant identifiers.
-- **Launch boundary**: These documents define unified testable contracts, not approval to launch everything. Scope, thresholds, real models/Engines, capacity, and production samples require sign-off for each slice.
+- **Launch boundary**: These documents define unified testable contracts, not approval to launch everything. Scope, thresholds, real models/Engines, capacity, and production samples require confirmation and evidence in each slice's single acceptance record.

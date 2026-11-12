@@ -59,6 +59,24 @@ NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
 - 在 Agent 列表用「**范围 → 仅看案例**」筛选；
 - 详细说明见[行业案例](../guides/industry-examples.md)。
 
+## 可选执行路径与回滚
+
+本章节命令均从仓库根目录执行。Quickstart 只有一个内嵌 Worker（`AGENT_EMBEDDED_WORKER=true`），默认使用 legacy 执行路径（`AGENT_EXECUTION_ORCHESTRATOR_ENABLED=false`），不会新增 UI 或服务。`app` 自身有 healthcheck，但容器状态不能替代路径日志与 Run 终态检查。如需受控体验 Orchestrator，显式开启并重建 `app`：
+
+```bash
+AGENT_EXECUTION_ORCHESTRATOR_ENABLED=true \
+  docker compose -f deploy/quickstart/compose.yaml up -d --force-recreate app
+```
+
+开关在进程启动时生效，不是请求热切换，也不会为失败的 Run 自动回退到 legacy。恢复默认路径：
+
+```bash
+AGENT_EXECUTION_ORCHESTRATOR_ENABLED=false \
+  docker compose -f deploy/quickstart/compose.yaml up -d --force-recreate app
+```
+
+不要用 `docker compose restart` 应用新环境值。混合 Worker、观测和生产回滚见[上线与回滚手册](../operations/agent-execution-orchestrator-rollout.md)。
+
 ## 常见问题
 
 **端口被占用**：`8080` 冲突时先停掉占用进程，或在 compose 文件里改端口映射。

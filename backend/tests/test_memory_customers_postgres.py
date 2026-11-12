@@ -71,9 +71,7 @@ async def identities_of(engine, tenant):
 
 
 async def make_channel(client, agent):
-    response = await client.post(
-        "/api/v1/channels", json={"name": "官网", "agent_id": agent["id"]}
-    )
+    response = await client.post("/api/v1/channels", json={"name": "官网", "agent_id": agent["id"]})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -233,8 +231,16 @@ async def test_p2_ut_08_same_key_update_merges_with_prev_content(platform):
             c,
             tenant,
             customer_id,
-            [{"op": "update", "type": "profile", "key": "name", "content": "张工",
-              "confidence": 0.9, "reason": ""}],
+            [
+                {
+                    "op": "update",
+                    "type": "profile",
+                    "key": "name",
+                    "content": "张工",
+                    "confidence": 0.9,
+                    "reason": "",
+                }
+            ],
             "conv-2",
             0.8,
             0.5,
@@ -283,8 +289,16 @@ async def test_extracted_update_never_clobbers_human_edit(platform):
             c,
             tenant,
             customer_id,
-            [{"op": "update", "type": "profile", "key": "name", "content": "张四",
-              "confidence": 0.95, "reason": ""}],
+            [
+                {
+                    "op": "update",
+                    "type": "profile",
+                    "key": "name",
+                    "content": "张四",
+                    "confidence": 0.95,
+                    "reason": "",
+                }
+            ],
             "conv-9",
             0.8,
             0.5,
@@ -440,7 +454,9 @@ async def test_p2_it_04_playground_and_example_agents_stay_out_of_memory(platfor
     assert (await conversation_detail(client, incoming["conversation_id"]))["customer_id"] is None
     assert await memory_tasks(engine, tenant) == []
     assert await identities_of(engine, tenant) == []
-    assert await db_rows(engine, "SELECT id FROM memory_customers WHERE tenant_id=:t", t=tenant) == []
+    assert (
+        await db_rows(engine, "SELECT id FROM memory_customers WHERE tenant_id=:t", t=tenant) == []
+    )
 
 
 async def test_p2_it_05_extraction_debounces_per_conversation(platform):
@@ -582,7 +598,9 @@ async def test_p2_it_09_agent_switches_split_read_and_write(platform):
     worker = make_worker(
         services,
         settings,
-        RecordingGateway('[{"op":"add","type":"profile","key":"name","content":"张三","confidence":0.9}]'),
+        RecordingGateway(
+            '[{"op":"add","type":"profile","key":"name","content":"张三","confidence":0.9}]'
+        ),
     )
     assert await worker.run_once() is True
     assert len(await items_of(engine, tenant, customer_id)) == 1
@@ -750,7 +768,9 @@ async def test_p2_api_01_authorization_matrix(platform):
         assert (await client.get(path, headers=ANONYMOUS)).status_code == 401
     # Writes: viewer forbidden on every mutation verb.
     assert (
-        await client.patch(f"/api/v1/memory/items/{active['id']}", headers=VIEWER, json={"content": "x"})
+        await client.patch(
+            f"/api/v1/memory/items/{active['id']}", headers=VIEWER, json={"content": "x"}
+        )
     ).status_code == 403
     assert (
         await client.delete(f"/api/v1/memory/items/{active['id']}", headers=VIEWER)
@@ -795,7 +815,10 @@ async def test_p2_api_02_customer_list_search_and_pagination(platform):
     assert all(item["item_count"] == 0 and item["last_active_at"] is None for item in empties)
     searched = (await client.get("/api/v1/memory/customers", params={"q": "beta"})).json()
     assert searched["total"] == 2
-    assert {tuple(item["external_keys"]) for item in searched["items"]} == {("beta-2",), ("beta-3",)}
+    assert {tuple(item["external_keys"]) for item in searched["items"]} == {
+        ("beta-2",),
+        ("beta-3",),
+    }
     page1 = (
         await client.get("/api/v1/memory/customers", params={"page": 1, "page_size": 2})
     ).json()
@@ -813,9 +836,7 @@ async def test_p2_api_03_edit_turns_item_human_and_keeps_previous(platform):
         services, settings, "edit-key", [op_add("profile", "name", "张三", 0.95)]
     )
     item = (await items_of(engine, tenant, customer_id))[0]
-    response = await client.patch(
-        f"/api/v1/memory/items/{item['id']}", json={"content": "张叁"}
-    )
+    response = await client.patch(f"/api/v1/memory/items/{item['id']}", json={"content": "张叁"})
     assert response.status_code == 200, response.text
     edited = response.json()
     assert edited["content"] == "张叁" and edited["prev_content"] == "张三"
@@ -926,7 +947,9 @@ async def test_p2_cm_03_mutations_leave_content_free_audit(platform):
     worker = make_worker(
         services,
         settings,
-        RecordingGateway('[{"op":"add","type":"profile","key":"name","content":"张三","confidence":0.9}]'),
+        RecordingGateway(
+            '[{"op":"add","type":"profile","key":"name","content":"张三","confidence":0.9}]'
+        ),
     )
     assert await worker.run_once() is True
     item = (await items_of(engine, tenant, customer_id))[0]
@@ -973,3 +996,70 @@ async def test_p2_cm_04_extraction_usage_lands_in_gateway_calls(platform, caplog
     assert len(calls) == 1 and calls[0]["status"] == "completed"
     rows = await db_rows(engine, "SELECT id FROM memory_items WHERE tenant_id=:t", t=tenant)
     assert rows == []  # nothing written
+
+
+@pytest.mark.parametrize("orchestrator_enabled", [False, True])
+async def test_p2_exec_it17_extract_customer_injection_and_original_row_off_on(
+    platform, orchestrator_enabled
+):
+    """P2-IT17: extraction, injection and original-row reinforcement survive both paths."""
+    from test_runtime_postgres import p2_configure_worker, p2_execute_next
+
+    client, services, _ = platform
+    settings = p2_configure_worker(services, orchestrator_enabled)
+    engine, tenant = services.repository.engine, settings.tenant_id
+    agent, _ = await create_agent(client)
+    channel = await make_channel(client, agent)
+    incoming = await ingest(
+        client, channel, "dual-path-1", "dual-customer", "我叫双路径，请用中文回复"
+    )
+    final = await p2_execute_next(services, settings)
+    assert final["status"] == "completed", final
+    customer_id = (await conversation_detail(client, incoming["conversation_id"]))["customer_id"]
+    assert len(await extract_tasks(engine, tenant)) == 1
+    gateway = RecordingGateway(
+        '[{"op":"add","type":"profile","key":"name","content":"双路径","confidence":0.95},'
+        '{"op":"add","type":"preference","key":"language","content":"中文","confidence":0.9}]'
+    )
+    assert await make_worker(services, settings, gateway).run_once() is True
+    items = await items_of(engine, tenant, customer_id)
+    assert {item["key"] for item in items} == {"name", "language"}
+    assert all(item["tenant_id"] == tenant for item in items)
+
+    again = await ingest(client, channel, "dual-path-2", "dual-customer", "继续用中文回复")
+    assert again["conversation_id"] == incoming["conversation_id"]
+    claimed = await services.repository.claim(services.worker.owner, 30, tenant)
+    injection = await services.worker._customer_memory(claimed)
+    assert "name: 双路径" in injection and "language: 中文" in injection
+    assert claimed["_memory_reinforce"]
+    captured = {}
+    original_memory_context = services.worker.memory.memory_context
+
+    def capture_memory_context(row, dropped, worker_settings):
+        captured["row_id"] = row["id"]
+        captured["reinforce"] = row.get("_memory_reinforce")
+        return original_memory_context(row, dropped, worker_settings)
+
+    services.worker.memory.memory_context = capture_memory_context
+    try:
+        await services.worker._execute(claimed)
+    finally:
+        services.worker.memory.memory_context = original_memory_context
+    final = await services.repository.get(claimed["id"], tenant)
+    assert final["status"] == "completed", final
+    assert captured["row_id"] == claimed["id"]
+    assert captured["reinforce"] == claimed["_memory_reinforce"]
+    reinforce = await db_rows(
+        engine,
+        "SELECT payload FROM memory_tasks WHERE tenant_id=:t AND kind='reinforce'",
+        t=tenant,
+    )
+    assert len(reinforce) == 1
+    assert set(reinforce[0]["payload"]["hits"]) <= {str(item["id"]) for item in items}
+    logs = await db_rows(
+        engine,
+        "SELECT tenant_id,run_id,item_id FROM memory_injection_log WHERE tenant_id=:t",
+        t=tenant,
+    )
+    assert len(logs) == 2
+    assert all(row["run_id"] == claimed["id"] and row["tenant_id"] == tenant for row in logs)

@@ -2,21 +2,14 @@
 
 > Status: Pending implementation (execute before this phase goes live; not currently accepted, and untrusted execution remains disabled)
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence while retaining independent security and SRE approval for untrusted execution)
 > Basis: `01-business-goals.md` (G1–G7 and success metrics), `02-requirements.md` (AC-1–AC-16); test execution is governed by `04-test-plan.md`
 
-## 1. Acceptance Objectives and Organization
+## 1. Acceptance Scope and Responsibility
 
-Confirm **functional correctness** (every AC reproduced), **adversarial security** (no successful real attacks), **fault recoverability** (consistent data/terminal state/resources at precise fault points), **business effectiveness** (metrics achieved), and **compatible rollback**, then issue an independent signed decision on whether untrusted multi-tenant code execution may be enabled.
+Confirm every AC, zero successful real attacks, consistent data/terminal state/resources at precise fault points, and evidence for compatibility and rollback. For routine acceptance, the acceptance owner organizes and records decisions while the executor prepares isolated environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, or finance roles. Usage idempotency, correction chains, aggregate rebuilding, and zero duplicate billing remain proven by A14, C6, C9, and automated reconciliation rather than a finance signature replacing technical evidence.
 
-| Role | Responsibility |
-|---|---|
-| Product owner | Chairs acceptance; handles common experience and non-hard-gate P2 residuals; cannot waive security items. |
-| QA | Executes A/AC and evidence; owns test exit, regressions, defect classification, and pending_env records. |
-| Engineering lead | Provides environment/migration/rollback support, metric data, fixes, and reconciliation evidence. |
-| Security owner/independent security auditor | Performs Vault/Broker, redaction, sandbox, network, file, and disclosure-response attacks; holds security veto. |
-| SRE/operations lead | Owns multi-Worker/Host fault injection, cleanup/quota, Outbox/alerts, RTO/RPO, and rollback decisions. |
-| Finance/data owner | Judges usage idempotency, correction chains, aggregate rebuilding, and duplicate billing. |
-| Client/business representative | Performs SSE reconnect and common Run UAT; judges historical-behavior compatibility. |
+**Independent-approval exception**: Enabling untrusted multi-tenant code execution is outside single-person lightweight acceptance and requires separate independent security and SRE/operations approvals grounded in real adversarial, fault-recovery, and rollback evidence. Without personnel holding those responsibilities or with insufficient evidence, `execution_untrusted_tenants_enabled` must remain `false`; removing process or signature requirements cannot authorize exposure. Developer self-verification is not an independent security audit.
 
 ## 2. Acceptance Environments and Prerequisites
 
@@ -53,30 +46,19 @@ Confirm **functional correctness** (every AC reproduced), **adversarial security
 
 Record for every scenario: executor, date, environment, versions, attack/fault point, prerequisite data, actual result, verdict, and log/DB/Host/network evidence links. Mark unavailable hard-gate environments `pending_env`; neither the phase nor untrusted exposure may pass.
 
-## 4. UAT Decision (Client/Business Representative)
+**Evidence reuse**: A1–A16 directly reference the corresponding UT/IT/CM, CI, adversarial, fault-point, DB, Host, network, and Outbox/SSE evidence in `06-test-report.md` wherever possible instead of manually repeating the full suite. Disclosure, escapes, stale writes, duplicate events/usage/billing, and regression diff are assessed directly from A/C criteria without a second business-metric acceptance round; evidence reuse does not reduce the attack matrix, fault points, or independent-approval exception.
 
-- Reconnect does not duplicate business events or silently lose progress; required reset beyond retention is explicit and safe.
-- Cancellation request versus confirmation is clear, with no false success where the UI says cancelled while the process still runs.
-- Lost transient model.delta does not damage the final answer, and historical events/existing Run API usage remain consistent.
-- Security denial, credential expiry, cleanup failure, and manual-retry messages contain no Secrets/host details and give operations enough information to locate the issue.
+## 4. Key Manual Checks
 
-## 5. Business Metric Acceptance
+Use these only to supplement client semantics and messaging that automation does not fully cover. Record executor, target SHA, result, and evidence for each; do not create client or business-representative roles.
 
-| Metric | Baseline | Target | Measurement method | Traceability |
-|---|---|---|---|---|
-| Credential escalation/plaintext disclosure | Pending Phase 0 | 0; 100% of new uses denied after revocation | A1–A3, DB/log/event/artifact scans, and revocation inventory. | G1 |
-| Sandbox/file/network escapes | Pending Phase 0 | 0 | Independent security executes the attack matrix and inspects host, network decoys, and other tenants. | G2 |
-| Effective stale-Worker commits | Pending Phase 0 | 0 | Reconcile DB/Host snapshots and Fencing audit before/after A7–A8. | G3 |
-| Worker-loss/late-result consistency | Pending Phase 0 | 100% defined recovery/terminal states; overwrite/dual-terminal/duplicate-effect=0 | Fault-injection run inventory and terminal/side-effect checks. | G3 |
-| Cancellation/cleanup/quota consistency | Pending Phase 0 | 100%; false cancelled=0 when unconfirmed | Reconcile Host processes/connections/mounts/reservations with Run state item by item. | G3, G4 |
-| Event/Outbox atomicity | Pending Phase 0 | Partial terminal state, missing Outbox, duplicate business effect=0 | Transaction fault points, recovery rescans, and consumer-ledger reconciliation. | G5 |
-| SSE replay completeness | Basic replay exists; full baseline pending Phase 0 | Silent gaps within retention=0, terminal state agrees | Reconcile every event_id across multipage/lost-notification/reconnect/expired-cursor datasets. | G5 |
-| Duplicate usage aggregation/billing | Pending Phase 0 | 0 | Reconcile source replay, old epochs, correction chains, and aggregate rebuilding. | G6 |
-| Parser diagnostics and disclosure | Pending Phase 0 | 100% classified coverage, canary disclosure=0, no event storms | Error-injection counts, sample scans, diagnostic rates, and output checks. | G6 |
-| Security/reliability overhead | Pending Phase 0 | Record p50/p95, Outbox lag, recovery time; freeze budgets after review | Measure fixed load and fault sets, report sample size/environment, and do not prefill improvements. | G7 |
-| Existing-behavior regression differences | Pending Phase 0 | diff=0 | Compare compatibility/rollback behavior with Phase 0 snapshots and existing suites. | G7 |
+| # | Check | Pass criterion |
+|---|---|---|
+| M1 | Exercise disconnect/reconnect, reset beyond retention, and transient-delta loss in the client | Business events are neither duplicated nor silently lost; reset messaging is explicit and safe; final answers, historical events, and existing Run API behavior remain consistent |
+| M2 | Request cancellation and observe request, confirmation, and abnormal states | Request and confirmation semantics are clear, with no false success where the UI says cancelled while the process still runs |
+| M3 | Inspect security-denial, credential-expiry, cleanup-failure, and manual-retry messages | Messages contain no Secrets/host details and retain correlation information needed for operational diagnosis |
 
-## 6. Compliance Checks
+## 5. Security, Data, and Release Hard Gates
 
 | # | Check | Verdict | Traceability |
 |---|---|---|---|
@@ -91,12 +73,19 @@ Record for every scenario: executor, date, environment, versions, attack/fault p
 | C9 | Parser diagnostics are bounded/redacted/rate-limited, and usage source idempotency/corrections are traceable. | Must pass | FR-14, FR-15; G6 |
 | C10 | Recheck head before implementing 0056/0057, expand/backfill online, never modify historical migrations, and retain data on rollback. | Must pass | FR-16; G7 |
 | C11 | React/Codex, Run/API/SSE, and historical configuration have no regressions; baselines pending Phase 0 cannot pass. | Must pass | FR-16; G7 |
-| C12 | The untrusted master switch remains false until independent security/SRE/finance sign-off completes; no role may waive it. | Veto item | FR-16; G1–G7 |
+| C12 | The untrusted master switch remains false until independent security and SRE/operations approvals complete; no role may waive it. Usage/accounting hard gates remain proven by A14, C6, C9, and reconciliation evidence and are not waived by removing finance sign-off. | Veto item | FR-16; G1–G7 |
 
-## 7. Pass Criteria and Sign-off
+**Engineering measurement (not a separate business-acceptance round)**: Record p50/p95, Outbox lag, recovery and migration-lock durations, sample size, and environment under fixed load and fault sets for capacity and release-budget review. Record `not_measured` when unmeasured and never prefill improvements. These records replace no correctness, security, or recovery hard gate.
 
-- **Pass**: A1–A16 all pass, hard metrics are achieved, C1–C12 all pass, no P0/P1 remains, and real adversarial/fault environments have no pending_env; only then may a separate approval enable a small batch of untrusted tenants.
-- **Conditional pass**: Only non-security, non-reliability, non-event/accounting-correctness P2/P3 residuals remain, each with owner and deadline; even conditional pass does not automatically authorize untrusted exposure.
-- **Fail**: Any veto item, successful attack, effective stale write, duplicate billing, silent data gap, hard metric, or real-environment coverage fails; after fixes, rerun affected items and full adversarial/fault regressions.
+## 6. Pass Criteria and Acceptance Record
 
-Produce the Phase 6 Acceptance Report containing AC/A execution records, attack/fault matrices, metric/reconciliation data, migration/rollback evidence, compliance results, residuals, conclusion, and signatures (product / QA / engineering / security / SRE / finance). Untrusted exposure requires separate security and SRE approval.
+- **Phase pass**: A1–A16 and C1–C12 all pass; M1–M3 are complete or have equivalent automated evidence; no P0/P1 remains, and real adversarial/fault environments have no `pending_env`. Phase pass alone does not authorize untrusted exposure.
+- **Conditional pass**: only non-security, non-reliability, non-event/accounting-correctness, non-hard-gate P2/P3 residuals remain, each with owner/deadline and an explanation from the acceptance owner in the record below; even conditional pass does not authorize untrusted exposure.
+- **Fail**: any veto item, successful attack, effective stale write, duplicate billing, silent data gap, A/C criterion, or real-environment coverage fails; after fixes, rerun affected items and full adversarial/fault regressions.
+- **Separate untrusted-exposure approval**: after phase pass, attach independent security and SRE/operations approval records specifying target SHA, tenant scope, small-batch plan, evidence links, and revocation conditions. Without the required personnel or evidence, keep `execution_untrusted_tenants_enabled=false`.
+
+Produce the Phase 6 Acceptance Report with A/C evidence links, attack/fault matrices, automated reconciliation data, migration/rollback evidence, key manual checks, engineering measurements, residuals, and the single acceptance record below; routine multi-role signatures are not required. Link independent untrusted-exposure approvals separately rather than letting the acceptance owner self-approve them.
+
+| Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
+|---|---|---|---|---|---|
+| To be filled | To be filled (may be the acceptance owner) | To be filled | To be filled | Pending acceptance | To be filled; untrusted exposure remains off by default |

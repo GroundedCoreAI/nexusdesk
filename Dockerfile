@@ -31,6 +31,7 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends nginx supervisor tini && rm -rf /var/lib/apt/lists/*
 COPY --from=frontend-build /build/dist /app/web
 COPY deploy/quickstart/supervisord.conf /app/deploy/supervisord.conf
+COPY deploy/quickstart/uvicorn-logging.yaml /app/deploy/uvicorn-logging.yaml
 COPY deploy/quickstart/nginx.conf.template /app/deploy/nginx.conf.template
 USER nexusdesk
 EXPOSE 8080

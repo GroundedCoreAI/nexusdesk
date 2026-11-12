@@ -2,6 +2,7 @@
 
 > Status: Pending implementation (execute after development; no test results currently exist)
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements)
 > Basis: `02-requirements.md` (FR-1–FR-9, AC-1–AC-11), `03-technical-design.md` (compatibility layer, capability resolution, snapshot barrier, Instruction Provider, rollback)
 
 ## 1. Test Scope and Principles
@@ -17,6 +18,7 @@
 5. **Failure paths are mandatory**: probe timeout, unknown policy, persistence failure, and pre-start failure all fail closed without partially authorized execution.
 6. **No real waits in time-based cases**: use fake clocks, direct database setup, or controlled doubles for probe expiry, cache invalidation, and Run timeout.
 7. **Side-effect-free replay**: snapshot-decision replay reads data only and never recalls real models, tools, or external Engines.
+8. **Reuse evidence**: A/C acceptance directly references automated UT/IT/CM results and CI/database evidence instead of manually repeating the full suite; manual work is limited to key checks that cannot be automated.
 
 ## 2. Test Environments and Data Setup
 
@@ -106,7 +108,7 @@
 |---|---|---|
 | P0 blocking | Client/Adapter elevation, cross-tenant disclosure, secrets in snapshots, unauthorized Adapter start, or data loss | Stop acceptance immediately; fix and rerun all security and compatibility suites |
 | P1 critical | Legacy incompatibility, incorrect Effective resolution, missing snapshots, Summary/Memory regression, or broken flag/non-React rejection | Must be fixed before acceptance |
-| P2 major | Non-blocking reason-code, preview, performance-target, or general quality deviation | May proceed only with no security/compatibility impact, an owner/deadline, and product sign-off |
+| P2 major | Non-blocking reason-code, preview, performance-target, or general quality deviation | Only for non-hard-gate items without security/compatibility impact: record owner/deadline and have the acceptance owner confirm conditional acceptance in the single acceptance record |
 | P3 minor | Wording, non-sensitive logging, or display issues | Schedule a fix; never use this level to hide hardcoded i18n or disclosure |
 
 **Exit criteria**: all P3-UT/IT/CM pass; AC-1–AC-11 reproduce; applicable regressions are green; no open P0/P1; zero elevations or cross-tenant successes; snapshot coverage and sensitive scans meet targets; flag-off behavior has zero diff from Phase 2. Mark unavailable environments `pending_env` and block the corresponding launch claim rather than recording a pass.

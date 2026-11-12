@@ -1,4 +1,6 @@
 import importlib.util
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -223,6 +225,59 @@ async def test_existing_encrypted_credentials_require_original_key(tmp_path, mon
             SimpleNamespace(model_credential_key_file=tmp_path / "missing.key")
         )
     assert not (tmp_path / "missing.key").exists()
+
+
+def test_quickstart_worker_info_logging_preserves_root_and_existing_loggers():
+    config = ROOT / "deploy/quickstart/uvicorn-logging.yaml"
+    probe = """
+import logging
+import sys
+from uvicorn.config import Config
+
+root = logging.getLogger()
+root.handlers.clear()
+root.setLevel(logging.WARNING)
+existing = logging.getLogger("deployment_existing")
+existing.handlers.clear()
+existing.disabled = False
+existing.setLevel(logging.INFO)
+existing.propagate = False
+existing.addHandler(logging.StreamHandler(sys.stdout))
+Config("example:app", log_config=sys.argv[1]).configure_logging()
+assert root.level == logging.WARNING
+assert existing.disabled is False
+uvicorn_error = logging.getLogger("uvicorn.error")
+assert uvicorn_error.disabled is False
+assert uvicorn_error.getEffectiveLevel() == logging.INFO
+assert logging.getLogger("uvicorn.access").getEffectiveLevel() == logging.INFO
+worker = logging.getLogger("agent_platform.core_platform.agent_runtime.worker")
+assert worker.getEffectiveLevel() == logging.INFO
+assert len(worker.handlers) == 1
+assert worker.propagate is False
+worker.info("r17_worker_info_visible")
+uvicorn_error.info("r17_uvicorn_info_visible")
+existing.info("r17_existing_info_visible")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe, str(config)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    output = result.stdout + result.stderr
+    assert "r17_worker_info_visible" in output
+    assert "r17_uvicorn_info_visible" in output
+    assert "r17_existing_info_visible" in output
+
+
+def test_quickstart_uvicorn_log_config_is_packaged_and_wired():
+    supervisor = (ROOT / "deploy/quickstart/supervisord.conf").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "--log-config /app/deploy/uvicorn-logging.yaml" in supervisor
+    assert (
+        "COPY deploy/quickstart/uvicorn-logging.yaml /app/deploy/uvicorn-logging.yaml" in dockerfile
+    )
 
 
 def test_deployment_topologies_and_no_secret_copy():

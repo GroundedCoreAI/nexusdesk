@@ -1,7 +1,12 @@
 import asyncio
 import logging
+from math import isfinite
+from time import monotonic
 from uuid import uuid4
 
+from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
+    build_execution_context,
+)
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL
 from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
 from agent_platform.core_platform.platform_services.tenant_isolation.context import (
@@ -23,6 +28,7 @@ class RuntimeWorker:
         notifier=None,
         listener=None,
         memory: MemoryInjectionPort | None = None,
+        orchestrator=None,
     ):
         self.repository, self.runtime, self.settings = repository, runtime, settings
         self.fingerprint = fingerprint
@@ -34,8 +40,37 @@ class RuntimeWorker:
         # Injected by the application composition root. The Runtime never
         # constructs a memory implementation itself.
         self.memory = memory
+        self.orchestrator = orchestrator
+
+    def _log_orchestrator_terminal(self, row, status, started_at):
+        selector = getattr(self.orchestrator, "selector", None)
+        execution_tuple = (
+            "/".join(selector)
+            if isinstance(selector, tuple) and all(isinstance(item, str) for item in selector)
+            else "unavailable"
+        )
+        duration_ms = (monotonic() - started_at) * 1000.0
+        if not isfinite(duration_ms) or duration_ms < 0:
+            duration_ms = 0.0
+        if status == "failed":
+            logger.info(
+                "Run %s execution path=orchestrator tuple=%s status=failed "
+                "error=execution_failed duration_ms=%.3f",
+                row["id"],
+                execution_tuple,
+                duration_ms,
+            )
+        else:
+            logger.info(
+                "Run %s execution path=orchestrator tuple=%s status=%s duration_ms=%.3f",
+                row["id"],
+                execution_tuple,
+                status,
+                duration_ms,
+            )
 
     async def _execute(self, row):
+        started_at = monotonic()
         monitor_failure = False
         scope_token = bind_scope(
             BusinessScope(
@@ -73,33 +108,69 @@ class RuntimeWorker:
         try:
             if row["config"]["fingerprint"] != self.fingerprint:
                 raise RuntimeFault("configuration_changed")
-            runtime = (
-                await self.runtime.for_run(row, emit)
-                if hasattr(self.runtime, "for_run")
-                else self.runtime
-            )
-            execution = asyncio.create_task(
-                runtime.run(
-                    row["input"],
-                    row["history"],
-                    emit,
+            if self.settings.execution_orchestrator_enabled:
+                if self.orchestrator is None:
+                    raise RuntimeFault("execution_error")
+                context = build_execution_context(
+                    row,
+                    history=row["history"],
                     summary_message=self._summary_message(row),
                     customer_memory=await self._customer_memory(row),
+                    trace_id=row.get("trace_id"),
+                    timeout_seconds=self.settings.run_timeout_seconds,
                 )
-            )
-            watcher = asyncio.create_task(monitor(execution))
-            output, history, dropped = await execution
-            await self.repository.finish(
-                row["id"],
-                self.owner,
-                "completed",
-                output=output,
-                history=history,
-                completion=self._memory_context(row, dropped),
-            )
+                execution = asyncio.create_task(self.orchestrator.execute(context, emit))
+                watcher = asyncio.create_task(monitor(execution))
+                outcome = await execution
+                if outcome.status == "completed":
+                    await self.repository.finish(
+                        row["id"],
+                        self.owner,
+                        "completed",
+                        output=outcome.output,
+                        history=outcome.history,
+                        completion=self._memory_context(row, outcome.dropped),
+                    )
+                else:
+                    await self.repository.finish(
+                        row["id"],
+                        self.owner,
+                        outcome.status,
+                        error=outcome.legacy_error_code,
+                    )
+                self._log_orchestrator_terminal(row, outcome.status, started_at)
+            else:
+                runtime = (
+                    await self.runtime.for_run(row, emit)
+                    if hasattr(self.runtime, "for_run")
+                    else self.runtime
+                )
+                execution = asyncio.create_task(
+                    runtime.run(
+                        row["input"],
+                        row["history"],
+                        emit,
+                        summary_message=self._summary_message(row),
+                        customer_memory=await self._customer_memory(row),
+                    )
+                )
+                watcher = asyncio.create_task(monitor(execution))
+                output, history, dropped = await execution
+                await self.repository.finish(
+                    row["id"],
+                    self.owner,
+                    "completed",
+                    output=output,
+                    history=history,
+                    completion=self._memory_context(row, dropped),
+                )
         except asyncio.CancelledError:
             if execution:
                 execution.cancel()
+            if self.settings.execution_orchestrator_enabled:
+                self._log_orchestrator_terminal(
+                    row, "failed" if monitor_failure else "cancelled", started_at
+                )
             await self.repository.finish(
                 row["id"],
                 self.owner,
@@ -107,12 +178,19 @@ class RuntimeWorker:
                 error="worker_lost" if monitor_failure else None,
             )
         except RuntimeFault as exc:
+            if self.settings.execution_orchestrator_enabled:
+                self._log_orchestrator_terminal(row, "failed", started_at)
             await self.repository.finish(row["id"], self.owner, "failed", error=exc.code)
         except TimeoutError:
+            if self.settings.execution_orchestrator_enabled:
+                self._log_orchestrator_terminal(row, "failed", started_at)
             await self.repository.finish(row["id"], self.owner, "failed", error="run_timeout")
         except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
             # Provider errors may contain credentials or customer data; never expose raw messages.
-            logger.error("Run %s failed", row["id"])
+            if self.settings.execution_orchestrator_enabled:
+                self._log_orchestrator_terminal(row, "failed", started_at)
+            else:
+                logger.error("Run %s failed", row["id"])
             await self.repository.finish(row["id"], self.owner, "failed", error="execution_error")
         finally:
             if watcher:
