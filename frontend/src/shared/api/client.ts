@@ -486,6 +486,66 @@ export interface AgentScenarioReference {
   volume: number;
 }
 export interface AgentScenarioReferencePage { items: AgentScenarioReference[] }
+/** Exact engine/protocol/adapter triple stored under `engine` in the draft JSONB. */
+export interface EngineIdentity {
+  engine_id: string;
+  protocol_id: string;
+  adapter_version: string;
+}
+/** Typed React settings; the three root draft fields below are its legacy aliases. */
+export interface ReactExecutionConfig {
+  model_profile_id: string | null;
+  model_profile_version: number | null;
+  max_model_rounds: number;
+}
+/** The 11 capability names the execution contract recognises, in CAPABILITY_ORDER. */
+export const EXECUTION_CAPABILITY_NAMES = [
+  'streaming',
+  'persistent_session',
+  'session_resume',
+  'cancellation',
+  'human_approval',
+  'interactive_input',
+  'tool_calling',
+  'file_operations',
+  'terminal_execution',
+  'native_events',
+  'workspace_required',
+] as const;
+export type ExecutionCapabilityName = typeof EXECUTION_CAPABILITY_NAMES[number];
+/** Stable public reason codes (03-technical-design.md §4.1); never a secret or a path. */
+export type ExecutionReasonCode =
+  | 'allowed'
+  | 'not_declared'
+  | 'probe_unavailable'
+  | 'probe_timeout'
+  | 'probe_stale'
+  | 'workspace_unavailable'
+  | 'platform_denied'
+  | 'tenant_denied'
+  | 'agent_disabled'
+  | 'execution_denied'
+  | 'policy_unavailable';
+/** One row of the preview response: exactly `name/effective/reason_code` (R-21). */
+export interface EffectiveCapabilityView {
+  name: ExecutionCapabilityName;
+  effective: boolean;
+  reason_code: ExecutionReasonCode;
+}
+export interface ExecutionPreviewField {
+  name: string;
+  type: string;
+  required: boolean;
+}
+/** `POST /agents/execution-preview` response; the endpoint is read-only by contract. */
+export interface ExecutionPreview {
+  engine: EngineIdentity;
+  config_schema: {
+    schema_version: string;
+    fields: ExecutionPreviewField[];
+  };
+  capabilities: EffectiveCapabilityView[];
+}
 export interface AgentConfig {
   reply_language?: "auto" | "zh-CN" | "zh-TW" | "en" | "hi";
   system_prompt: string;
@@ -494,6 +554,10 @@ export interface AgentConfig {
   max_model_rounds: number;
   model_profile_id?: string | null;
   model_profile_version?: number | null;
+  /** Absent on drafts written before Phase 3; the server supplies the default. */
+  engine?: EngineIdentity;
+  react?: ReactExecutionConfig | null;
+  disabled_capabilities?: ExecutionCapabilityName[];
   summary_enabled?: boolean;
   memory_enabled?: boolean;
   memory_read_enabled?: boolean;
@@ -505,6 +569,93 @@ export interface AgentConfig {
   memory_search_limit?: number | null;
   memory_blacklist_auto_handoff?: boolean;
 }
+/** The only engine triple the Phase 3 registry ships for production traffic. */
+export const SUPPORTED_ENGINES: EngineIdentity[] = [{ engine_id: 'react', protocol_id: 'native', adapter_version: 'v1' }];
+export const DEFAULT_ENGINE: EngineIdentity = SUPPORTED_ENGINES[0];
+const DEFAULT_REACT: ReactExecutionConfig = { model_profile_id: null, model_profile_version: null, max_model_rounds: 6 };
+const REACT_ALIASES: Array<keyof ReactExecutionConfig> = ['model_profile_id', 'model_profile_version', 'max_model_rounds'];
+/** Semantic view of the execution part of a draft; never mutates the draft. */
+export interface ExecutionView {
+  engine: EngineIdentity;
+  engineKnown: boolean;
+  react: ReactExecutionConfig | null;
+  disabledCapabilities: ExecutionCapabilityName[];
+  /** Draft fields whose root alias disagrees with the same field under `react`. */
+  conflicts: string[];
+}
+/**
+ * Merge the Phase 3 execution fields with the legacy root aliases.
+ *
+ * Reading a pre-Phase-3 draft must not fabricate fields: the defaults below
+ * exist only in this returned view, so an untouched draft stays untouched
+ * (03-technical-design.md §3.2, 05-acceptance-plan.md M1). Equal aliases collapse
+ * into one canonical value, divergent aliases are reported instead of guessed.
+ */
+export function readExecution(config: AgentConfig): ExecutionView {
+  const engine = config.engine ?? DEFAULT_ENGINE;
+  const react = config.react;
+  const legacy = config as unknown as Record<string, unknown>;
+  const modern = (react ?? {}) as unknown as Record<string, unknown>;
+  const merged = { ...DEFAULT_REACT } as Record<string, unknown>;
+  const conflicts: string[] = [];
+  for (const field of REACT_ALIASES) {
+    const legacyValue = field in legacy ? legacy[field] : undefined;
+    const modernValue = react && field in modern ? modern[field] : undefined;
+    if (legacyValue !== undefined && modernValue !== undefined && JSON.stringify(legacyValue) !== JSON.stringify(modernValue)) {
+      conflicts.push(field);
+    }
+    const value = modernValue !== undefined ? modernValue : legacyValue;
+    if (value !== undefined) merged[field] = value;
+  }
+  return {
+    engine,
+    engineKnown: SUPPORTED_ENGINES.some(item => item.engine_id === engine.engine_id && item.protocol_id === engine.protocol_id && item.adapter_version === engine.adapter_version),
+    react: engine.engine_id === 'react' ? merged as unknown as ReactExecutionConfig : null,
+    disabledCapabilities: config.disabled_capabilities ? [...config.disabled_capabilities] : [],
+    conflicts,
+  };
+}
+/**
+ * Write React settings back to the places the draft already uses.
+ *
+ * A draft may carry the legacy root fields, the typed `react` object, or both
+ * (the service echoes the canonical form with the aliases filled in). Updating
+ * only one of them would create an alias conflict the server rejects, so every
+ * existing location is kept in step and no new key is introduced.
+ */
+export function patchReactConfig(config: AgentConfig, patch: Partial<ReactExecutionConfig>): AgentConfig {
+  const next: AgentConfig = { ...config };
+  const root = next as unknown as Record<string, unknown>;
+  const react: Record<string, unknown> = { ...(config.react as unknown as Record<string, unknown> | undefined) };
+  const keepsReact = !!config.react;
+  for (const field of REACT_ALIASES) {
+    if (!(field in patch)) continue;
+    const value = (patch as Record<string, unknown>)[field];
+    const inReact = keepsReact && field in react;
+    // Neither alias exists: write the legacy root field, which every server
+    // version accepts, instead of expanding the draft's shape on a first edit.
+    if (inReact) react[field] = value;
+    if (field in config || !inReact) root[field] = value;
+  }
+  if (keepsReact) next.react = react as unknown as ReactExecutionConfig;
+  return next;
+}
+/** Narrow one capability; unchecking only removes a prior local narrowing. */
+export function toggleDisabledCapability(config: AgentConfig, name: ExecutionCapabilityName, disabled: boolean): AgentConfig {
+  const current = config.disabled_capabilities ?? [];
+  const values = disabled ? [...new Set([...current, name])] : current.filter(item => item !== name);
+  // An empty narrowing list is the server default, so it is not written at all.
+  const next = values.slice().sort((left, right) => EXECUTION_CAPABILITY_NAMES.indexOf(left) - EXECUTION_CAPABILITY_NAMES.indexOf(right));
+  return { ...config, disabled_capabilities: next.length ? next : undefined };
+}
+/**
+ * Ask the server what a draft *would* resolve to. The request body is the strict
+ * `{agent_id, config}` pair: effective/declared/available/policy fields are
+ * computed server-side and are never sent, and the response grants nothing.
+ */
+export function previewExecution(agentId: string | null, config: AgentConfig) {
+  return post<ExecutionPreview>('/agents/execution-preview', { agent_id: agentId, config });
+}
 /** Platform-side memory capability caps exposed by GET /agents/memory-config-caps. */
 export interface MemoryConfigCaps {
   summary_enabled: boolean;
@@ -513,6 +664,17 @@ export interface MemoryConfigCaps {
   memory_inject_max_items: number;
   memory_search_limit: number;
   memory_blacklist_auto_handoff: boolean;
+}
+/**
+ * Deployment-side Phase 3 switches exposed by GET /agents/execution-config-flags
+ * (03-technical-design.md §7.4, R-25). The strict response carries exactly these
+ * two booleans, named verbatim like the backend settings, and nothing else; the
+ * frontend only uses them to decide which Phase 3 editing entries to show. It is
+ * a presentation hint — the server remains the authorization boundary.
+ */
+export interface ExecutionConfigFlags {
+  execution_phase3_enabled: boolean;
+  execution_orchestrator_enabled: boolean;
 }
 export interface Agent { created_by?: string | null; industry?:string; tags?:string[]; is_example?:boolean; updated_at?: string; created_at?: string; id: string; name: string; description: string; draft: AgentConfig; draft_revision: number; published_version: number | null; archived?: boolean }
 export interface KnowledgeBase { id: string; name: string; document_count: number; enabled: boolean }

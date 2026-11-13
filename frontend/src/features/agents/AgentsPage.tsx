@@ -4,10 +4,11 @@ import { t, number, errorText } from '../../i18n/index';
 import { useEffect, useRef, useState } from 'react';
 import { Avatar, Button, Card, Checkbox, ConfigProvider, Drawer, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Radio, Select, Space, Spin, Splitter, Switch, Tag, Tooltip } from 'antd';
 import { ApartmentOutlined, ArrowLeftOutlined, CommentOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
-import { api, patch, post, put, type Agent, type AgentConfig, type EvaluationReportPage, type KnowledgeBase, type MemoryConfigCaps, type Tool } from '../../shared/api/client';
+import { api, patch, post, put, type Agent, type AgentConfig, type EvaluationReportPage, type ExecutionConfigFlags, type KnowledgeBase, type MemoryConfigCaps, type Tool } from '../../shared/api/client';
 import { Alert, Field, time, toast, useAccess, useAction, useResource } from '../../shared/components/ui';
 import { useCatalogOptions } from '../models/useCatalogOptions';
 import { AgentModelPicker } from './AgentModelPicker';
+import { ExecutionConfigSection, executionIssues } from './ExecutionConfigSection';
 import { AgentChat, AgentRecords } from './Conversations';
 import { AgentEvaluationPanel } from '../evaluation/AgentEvaluationPanel';
 import { AgentFilters, INDUSTRIES, PURPOSES, industryLabel, purposeLabel, readFilters, filterSuffix, type Filters } from './AgentFilters';
@@ -21,7 +22,7 @@ export interface PageResult<T> {
     page_size: number;
 }
 const initialConfig = (): AgentConfig => withMemoryDefaults({ system_prompt: t('你是一个专业、友好的智能助手。请准确理解用户需求，并提供清晰可靠的帮助。'), tool_names: ['knowledge_search', 'propose_ticket', 'memory_search'], knowledge_base_ids: [], max_model_rounds: 6, model_profile_id: null, model_profile_version: null, reply_language: "auto" });
-const groups = () => ([['basic', t("基本信息")], ['model', t("模型配置")], ['prompt', t("行为指令")], ['tools', t("工具")], ['knowledge', t("知识库")], ['memory', t("记忆")], ['runtime', t("运行参数")]] as const);
+const groups = () => ([['basic', t("基本信息")], ['model', t("模型配置")], ['prompt', t("行为指令")], ['tools', t("工具")], ['knowledge', t("知识库")], ['memory', t("记忆")], ['runtime', t("运行参数")], ['execution', t("执行与能力")]] as const);
 const labels = (): Record<string, string> => ({ system_prompt: t("行为指令"), tool_names: t("工具"), knowledge_base_ids: t("知识库"), max_model_rounds: t("最大模型轮次"), model_profile_id: t("模型方案"), model_profile_version: t("模型方案版本"), reply_language: t("回复语言"), summary_enabled: t("滚动摘要"), memory_enabled: t("启用客户长期记忆"), memory_read_enabled: t("读取记忆"), memory_write: t("自动写入记忆"), memory_types: t("记忆类型"), memory_search_enabled: t("启用 memory_search 检索"), memory_write_mode: t("写入策略"), memory_inject_max_items: t("单次注入上限"), memory_search_limit: t("检索返回上限"), memory_blacklist_auto_handoff: t("黑名单客户自动转人工") });
 type MemoryType = "profile" | "preference" | "event";
 const MEMORY_TYPES: MemoryType[] = ["profile", "preference", "event"];
@@ -91,6 +92,10 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
     const tools = useResource<Tool[]>(editor ? '/tools' : null);
     const bases = useResource<KnowledgeBase[]>(editor ? '/knowledge-bases' : null);
     const memoryCaps = useResource<MemoryConfigCaps>(editor ? '/agents/memory-config-caps' : null);
+    // Deployment switches for the Phase 3 editing entries (03 §7.4, R-25): read
+    // once per editor lifetime, alongside the memory caps. A failed read leaves
+    // `flags` null, and the section fails closed by hiding the entries.
+    const executionFlags = useResource<ExecutionConfigFlags>(editor ? '/agents/execution-config-flags' : null);
     const caps = memoryCaps.data;
     const formDisabled = !admin || action.busy || !!selected?.archived;
     const summaryPlatformOff = caps ? !caps.summary_enabled : false;
@@ -255,6 +260,16 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         const overCap = memoryOverCap();
         if (overCap && !window.confirm(overCap))
             return;
+        // An alias conflict or an unregistered triple is reported against the
+        // field the contract names, and never sent as a half-applied draft.
+        const blockers = executionIssues(config);
+        if (blockers.length) {
+            setMobileTab('config');
+            setActiveSection('execution');
+            requestAnimationFrame(() => document.getElementById('agent-execution')?.scrollIntoView({ block: 'start' }));
+            void action.run(async () => { throw new Error(blockers.join('\n')); }, '');
+            return;
+        }
         setView('config');
         setMobileTab('config');
         requestAnimationFrame(() => {
@@ -370,8 +385,10 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         </div>}
       </div>
     </section>
-    <section id="agent-runtime"><h2>{t("运行参数")}</h2><div className="agent-setting-card"><Field label={t("回复语言")}><select aria-label={t("回复语言")} value={config.reply_language || 'auto'} onChange={e => setConfig({ ...config, reply_language: e.target.value as AgentConfig['reply_language'] })}><option value="auto">{t("跟随用户语言")}</option><option value="zh-CN">{t("简体中文")}</option><option value="zh-TW">{t("繁體中文")}</option><option value="en">English</option><option value="hi">हिन्दी</option></select></Field><p className="agent-muted">{t("回复语言独立于界面语言，保存并发布后生效。")}</p><Field label={t("最大模型轮次")}><InputNumber aria-label={t("最大模型轮次")} min={1} max={30} precision={0} value={config.max_model_rounds} disabled={!admin || action.busy || selected?.archived} onChange={v => setConfig({ ...config, max_model_rounds: v || 1 })}/></Field><p className="agent-muted">{t("限制单次运行的模型调用轮数，范围 1\u201330。")}</p></div></section>
-    </fieldset></form></Splitter.Panel><Splitter.Panel min="25%" className="agent-chat-panel"><AgentChat key={selected?.id || 'new'} agent={selected}/></Splitter.Panel></Splitter></div>
+    <section id="agent-runtime"><h2>{t("运行参数")}</h2><div className="agent-setting-card"><Field label={t("回复语言")}><select aria-label={t("回复语言")} value={config.reply_language || 'auto'} onChange={e => setConfig({ ...config, reply_language: e.target.value as AgentConfig['reply_language'] })}><option value="auto">{t("跟随用户语言")}</option><option value="zh-CN">{t("简体中文")}</option><option value="zh-TW">{t("繁體中文")}</option><option value="en">English</option><option value="hi">हिन्दी</option></select></Field><p className="agent-muted">{t("回复语言独立于界面语言，保存并发布后生效。")}</p></div></section>
+    </fieldset>
+    <ExecutionConfigSection config={config} onChange={setConfig} agentId={selected?.id ?? null} canEdit={admin && !selected?.archived} busy={action.busy} saveError={action.error} flags={executionFlags.data}/>
+    </form></Splitter.Panel><Splitter.Panel min="25%" className="agent-chat-panel"><AgentChat key={selected?.id || 'new'} agent={selected}/></Splitter.Panel></Splitter></div>
     {view === 'records' && selected && <AgentRecords agentId={selected.id}/>}
     {view === 'evaluation' && selected && <div className="agent-evaluation-view"><AgentEvaluationPanel key={selected.id} agentId={selected.id} publishedVersion={selected.published_version} disabled={!!selected.archived}/></div>}
     {view === 'usage' && selected && <AgentSceneUsage agentId={selected.id} agentName={name || selected.name} agentVersion={selected.published_version} agentConfig={config} onOpenScene={path => onNavigate(path)} onOpenAgentConfig={() => setView('config')}/>}

@@ -56,6 +56,13 @@ export function errorText(message:string) {
     agent_not_published:'请先保存并发布 Agent',
     database_unavailable:'无法连接后端或读取权限：',
     agent_missing_or_revision_conflict:'智能体已被修改或恢复，请关闭弹窗并刷新列表后重新操作。',
+    // Phase 3 execution domain errors (03-technical-design.md §7.3). The code is
+    // the contract; the sentence below only explains it and stays free of any
+    // internal snapshot, probe or policy detail.
+    execution_phase3_disabled:'Phase 3 执行能力尚未启用，无法预览。',
+    execution_engine_unavailable:'所选 Engine 未注册或已停用，无法预览或发布。',
+    execution_configuration_invalid:'执行配置不合法，请检查标记的字段。',
+    execution_policy_unavailable:'能力策略源暂不可用，请稍后重试。',
     agent_revision_conflict:'智能体已被修改或恢复，请关闭弹窗并刷新列表后重新操作。',
     draft_revision_conflict:'智能体已被修改或恢复，请关闭弹窗并刷新列表后重新操作。',
     model_resource_disabled:'模型方案不可用，请检查模型网关配置',
