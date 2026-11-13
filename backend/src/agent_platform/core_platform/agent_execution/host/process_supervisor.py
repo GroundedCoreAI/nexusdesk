@@ -33,6 +33,7 @@ from .host_models import (
     ManagedProcess,
     ProcessResult,
 )
+from .observability import EVENT_CLEANUP_FAILED, AlertSink, ObservabilityRecord
 from .process_identity import group_alive
 from .process_runner import StartedProcess
 
@@ -93,6 +94,7 @@ class ProcessSupervisor:
         clock: Callable[[], float] | None = None,
         monotonic: Callable[[], float] | None = None,
         alert: Callable[[str, UUID], None] | None = None,
+        alert_sink: AlertSink | None = None,
     ) -> None:
         if cancel_grace_seconds <= 0 or kill_timeout_seconds <= 0:
             raise ValueError("grace and kill windows must be positive")
@@ -103,6 +105,10 @@ class ProcessSupervisor:
         self._clock = clock or time.time
         self._monotonic = monotonic or time.monotonic
         self._alert = alert
+        # T15 structured alert seam: every escalation that ends the machine
+        # in cleanup_failed lands here with Run correlation (02 FR-9 failure
+        # row). The pre-existing tuple callback stays for B3 pins.
+        self._alert_sink = alert_sink
         # One cleanup owner per managed id plus one retained result per id:
         # repeated cancel/reconcile enters the same machine and returns the
         # same progress (P4-UT-05, 03 §4.3).
@@ -293,13 +299,27 @@ class ProcessSupervisor:
     ) -> ProcessResult:
         """KILL window exhausted: escalate visibly, never claim cleanup success."""
         logger.error(
-            "runtime host cleanup failed trigger=%s managed_id=%s pgid=%s",
+            "runtime host cleanup failed trigger=%s managed_id=%s",
             _TERMINATE_REASON_BY_BREACH.get(reason, reason),
             managed.managed_id,
-            pgid,
         )
         if self._alert is not None:
             self._alert(REASON_CLEANUP_FAILED, managed.managed_id)
+        if self._alert_sink is not None:
+            self._alert_sink.emit(
+                ObservabilityRecord(
+                    event=EVENT_CLEANUP_FAILED,
+                    severity="error",
+                    code=REASON_CLEANUP_FAILED,
+                    host_id=managed.host_id,
+                    run_id=managed.run_id,
+                    managed_id=managed.managed_id,
+                    fields={
+                        "trigger": _TERMINATE_REASON_BY_BREACH.get(reason, reason),
+                        "state": managed.state,
+                    },
+                )
+            )
         return self._finish(
             managed, final_state="cleanup_failed", exit_code=None, reason=REASON_CLEANUP_FAILED
         )

@@ -80,6 +80,19 @@ class WorkdirRecord(ExecutionContractModel):
     created_at_posix: float = Field(ge=0)
 
 
+class WorkdirStats(ExecutionContractModel):
+    """Aggregated live Workdir footprint for FR-9 health (08 T15).
+
+    Internal DTO like every other workspace type: joined into ``HostHealth``
+    only, never serialized into events or Run metadata.
+    """
+
+    live_bytes: int = Field(ge=0)
+    retained_count: int = Field(ge=0)
+    cleanup_failed_count: int = Field(ge=0)
+    oldest_retention_age_seconds: float | None = Field(default=None, ge=0)
+
+
 @runtime_checkable
 class WorkspaceProvider(Protocol):
     """Prepare/activate/retain/cleanup contract for Execution Workdirs.

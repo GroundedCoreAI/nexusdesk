@@ -58,6 +58,13 @@ from agent_platform.core_platform.agent_execution.contracts.snapshots import SNA
 from agent_platform.core_platform.agent_execution.host.local_sandbox_provider import (
     LocalSandboxProvider,
 )
+from agent_platform.core_platform.agent_execution.host.observability import (
+    EVENT_SWEEP_BATCH,
+    AlertSink,
+    LoggingAlertSink,
+    ObservabilityRecord,
+    ReconcileStallWatch,
+)
 from agent_platform.core_platform.agent_execution.host.process_registry import ProcessRegistry
 from agent_platform.core_platform.agent_execution.host.process_runner import (
     ProcessRunner,
@@ -582,12 +589,22 @@ class ExecutionRuntimeSubsystem:
     resources: ResourceManager
     reconcile_interval_seconds: float
     cleanup_interval_seconds: float
+    alert_sink: AlertSink | None = None
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
     async def recover_on_startup(self) -> None:
         """R-8: process records left by previous boots before admission opens."""
         await self.host.reconcile()
         await self._sweep_once()
+
+    async def health_report(self):
+        """Internal operational health read (FR-9; 08 §6 defers HTTP routing).
+
+        The structured ``HostHealth`` object is exposed on the composition
+        services only: public Run APIs gain nothing, and an authenticated
+        internal endpoint stays registered as a deferred issue candidate.
+        """
+        return await self.host.health_report()
 
     def start(self) -> None:
         """Spawn the reconcile and cleanup interval loops (never blocking)."""
@@ -616,12 +633,21 @@ class ExecutionRuntimeSubsystem:
             logger.error("execution runtime shutdown left %s active groups", remaining)
 
     async def _reconcile_loop(self) -> None:
+        # Stalled-reconcile alert (P4-UT-22) lives in ReconcileStallWatch so
+        # this module keeps the Phase 3 R-49 POSIX-only clock discipline.
+        watch = ReconcileStallWatch(
+            interval_seconds=self.reconcile_interval_seconds,
+            alert_sink=self.alert_sink,
+            host_id=self.registry.host_id,
+        )
         while True:
             await asyncio.sleep(self.reconcile_interval_seconds)
             try:
                 await self.host.reconcile()
+                watch.succeeded()
             except Exception:  # noqa: BLE001 - DB outage retries on the next tick.
                 logger.warning("execution runtime reconcile deferred")
+                watch.failed()
 
     async def _cleanup_loop(self) -> None:
         while True:
@@ -634,6 +660,15 @@ class ExecutionRuntimeSubsystem:
         except Exception:  # noqa: BLE001 - the interval scan retries on the next tick.
             logger.warning("execution workdir sweep deferred")
             return
+        if candidates and self.alert_sink is not None:
+            self.alert_sink.emit(
+                ObservabilityRecord(
+                    event=EVENT_SWEEP_BATCH,
+                    severity="info",
+                    host_id=self.registry.host_id,
+                    fields={"candidates": len(candidates)},
+                )
+            )
         for candidate in candidates:
             with suppress(Exception):
                 await self.workspace.cleanup(
@@ -666,6 +701,8 @@ def _build_execution_runtime_subsystem(
     if not settings.execution_runtime_host_id:
         return None
     shared_clock = clock or time.time
+    # One structured alert surface for the whole subsystem (02 FR-9).
+    alert_sink = LoggingAlertSink()
     sandbox_provider_id = f"{settings.execution_sandbox_provider}/v1"
     provider = LocalSandboxProvider(
         enforcement_required=settings.execution_resource_enforcement_required,
@@ -681,6 +718,7 @@ def _build_execution_runtime_subsystem(
         host_instance_id=boot_id or f"boot-{uuid4().hex}",
         sandbox_provider=sandbox_provider_id,
         clock=shared_clock,
+        alert_sink=alert_sink,
     )
     workspace = ExecutionWorkspaceManager(
         engine,
@@ -689,6 +727,8 @@ def _build_execution_runtime_subsystem(
         retention_seconds=settings.execution_workdir_retention_seconds,
         failed_retention_seconds=settings.execution_workdir_failed_retention_seconds,
         clock=shared_clock,
+        alert_sink=alert_sink,
+        host_id=settings.execution_runtime_host_id,
     )
     host = RuntimeHost(
         enabled=settings.execution_runtime_host_enabled,
@@ -698,6 +738,7 @@ def _build_execution_runtime_subsystem(
             cancel_grace_seconds=settings.execution_process_cancel_grace_seconds,
             kill_timeout_seconds=settings.execution_process_kill_timeout_seconds,
             clock=shared_clock,
+            alert_sink=alert_sink,
         ),
         registry=registry,
         wall_timeout_seconds=settings.execution_process_wall_timeout_seconds,
@@ -706,6 +747,7 @@ def _build_execution_runtime_subsystem(
         resource_manager=resources,
         workspace_manager=workspace,
         clock=shared_clock,
+        alert_sink=alert_sink,
     )
     return ExecutionRuntimeSubsystem(
         host=host,
@@ -714,6 +756,7 @@ def _build_execution_runtime_subsystem(
         resources=resources,
         reconcile_interval_seconds=settings.execution_process_reconcile_interval_seconds,
         cleanup_interval_seconds=settings.execution_workdir_cleanup_interval_seconds,
+        alert_sink=alert_sink,
     )
 
 

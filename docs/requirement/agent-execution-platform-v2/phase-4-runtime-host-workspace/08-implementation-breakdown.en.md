@@ -1,6 +1,6 @@
 # Phase 4 · Runtime Host, Process Supervision, and Workspace — Implementation Breakdown
 
-> Status: T1 complete (this breakdown plus the bilingual 02/03/04/05 revisions it mandates); T2–T16 not started
+> Status: T1–T15 complete through batch B5 plus the B6 observability lane; T16 close-out executed by B6 (evidence summary in §8, full per-case results land in 06)
 > Created: 2026-11-14
 > Basis: `01-business-goals.en.md`, `02-requirements.en.md`, `03-technical-design.en.md`, `04-test-plan.en.md`, `05-acceptance-plan.en.md`, plus a code-reality review of branch `feat/agent-execution-platform-v2-phase4` (cut from completed Phase 3 at `c63fd4a`)
 > Baseline facts: actual Alembic head is `0058_agent_execution_metadata` (down_revision `0057_industry_pack_runtime`); Phase 3 acceptance closed **conditionally passed** (see R-2); this development host is macOS (darwin) with Docker available for PostgreSQL (R-3)
@@ -193,3 +193,79 @@ Dependency spine: Batch 1 (data + config skeleton) unblocks everything; Batch 2 
 - If an implementation fact conflicts with a ruling, revise this 08 and the bilingual 02/03/04/05 **first**, then code (Phase 3 discipline).
 - `pending_env`/`not_measured` are terminal honest states for this run; they do not block development entry (R-2) but block any statement that AC-9/AC-5-full or enablement is proven (05 C14).
 - The development lane must not touch `agent_runtime/repository.py` terminal-state logic, `contracts/adapter.py` start signature, or Phase 3 snapshot/barrier files except at the seams named in T13.
+
+## 8. B6 Closure Register (2026-11-14, development lane)
+
+This section is the single citable place for 06/07 to quote environment
+attribution and pending items; it adds no semantics beyond §5's frozen split.
+
+### 8.1 `pending_env` register (Linux-only, blocks its enablement promise per R-3)
+
+| Item | Coverage IDs | macOS status |
+|---|---|---|
+| cgroup v2 `memory.max` per-Execution hard limit | P4-IT-19 (memory-hard half) | pending_env; rlimit approximation measured probe-gated (R-13), never substituted |
+| cgroup v2 `pids.max` per-Execution hard limit | P4-IT-20 | pending_env; reactive PID-count bound sampled and measured here |
+| Filesystem/project quota enforcement (total-Workdir hard quota) | P4-IT-21 (total-quota half) | pending_env; per-file RLIMIT_FSIZE half measured; accounting/excess-persist path measured (R-12) |
+| Per-Execution CPU group accounting as hard ceiling | 03 §4.6 row 1 full strength | pending_env; RLIMIT_CPU approximation measured, labeled non-equivalent |
+| Live mount-namespace mount-point experiments | P4-UT-13 mount row, P4-IT-17 mount half | pending_env; substituted-probe denial measured on APFS |
+| Deterministic real OS PID-reuse kill corroboration | P4-IT-10 (OS-experiment half) | pending_env; decision-form substitutes + zero-signal pins measured |
+| Production-image container restart / stop-timeout drill | P4-IT-09 production half, P4-IT-29 runtime half, P4-IT-28 production face | pending_env; **quickstart-profile local-Docker half NOW measured** (8.3) |
+| Full support-matrix sign-off | P4-CM-07 | pending_env (Linux columns) |
+| Supervision-overhead vs Phase 0 baseline | P4-IT-30 | `not_measured` upstream (Phase 0 baseline gap, R-2), not closable on this host |
+
+### 8.2 Measured here (environment string for 06 to attach)
+
+macOS darwin 27.0.0 x86_64; CPython 3.12.13 (uv); PostgreSQL via local Docker
+`pgvector/pgvector:pg17` container `nexusdesk-phase4-pg` on `127.0.0.1:5443`
+(secrets in a mode-600 file outside the repository only). Batch B6 executed
+and passed: the full Phase 4 suite (`341 passed, 3 skipped with attribution`
+— the cgroup/quota/mount pending_env lanes — with PG; all eleven
+`test_agent_execution_phase4_*.py` files including the new observability
+file's 31 cases — the P4-UT-21 full-surface secret scan over a real-process
+run and the P4-UT-22 health/label/stalled-reconcile audit — and the closeout
+group's 4 real-process cases inside the orchestration file (nested
+ignore-term cancellation, output-flood termination, Run-deadline-wins race,
+and a cross-process SIGKILL worker crash recovered by a same-host_id
+identity-verified restart; zero surviving trusted-test descendants pinned
+after each)), the whole
+Phase 0–3 regression set with PG
+(`758 passed, 3 skipped` across `phase3 or phase4` selection), and the full
+non-PG repository suite (`2293 passed, 0 failed`).
+
+### 8.3 Quickstart local-Docker drill (P4-IT-09 local half, measured)
+
+`sh nexusdesk quickstart` rebuilt the app image (base layers seeded from the
+dockerproxy mirror because direct Docker Hub metadata resolution failed on
+this host), brought the stack up `Healthy`, then survived a
+`docker compose restart app` round-trip with `--wait` re-greening. Verified
+on the live containers: `alembic_version = 0059_execution_runtime_host`; both
+Phase 4 tables exist (`execution_workdirs`, `runtime_host_processes`); the
+app container carries `AGENT_EXECUTION_RUNTIME_HOST_ENABLED=false` with **no**
+runtime-host id, `/data` contains only `credentials/` and `tls/` — no
+`/data/execution` directory was created (default-off zero-side-effect
+invariant, 08 §1.7); the React root returns 200. The production-image
+runtime-worker half stays pending_env (8.1).
+
+### 8.4 OPEN_Q1 disposition (Phase 3 postgres fixtures, pre-B6)
+
+Reproduced on HEAD and on the Phase 3 tip `c63fd4a` with the same command:
+`TEST_DATABASE_URL=postgresql://…` (plain-driver form) makes
+`test_agent_execution_phase3_snapshots.py` / `_preview.py` reject at Settings
+construction with `database_url must use postgresql+asyncpg`. That validator
+ships since the initial commit (`7dce7ba`) — both trees fail identically —
+and the same URL with the asyncpg driver scheme passes 148/148 on both trees
+against the migrated container database. Conclusion: environment-shape
+attribution, not a Phase 4 regression; no production-code change was made
+for it. Lane note for 06/07: Phase 3 PG fixtures pass `TEST_DATABASE_URL`
+verbatim into `Settings`, so they require the `postgresql+asyncpg://` form
+while Phase 4 fixtures normalize either form internally.
+
+### 8.5 Deferred candidates carried out of B6 (08 §6 vocabulary)
+
+- Internal HTTP endpoint for operational health reads: **not added** (Phase 4
+  ships logs/alerts/structured health only). The composed subsystem exposes
+  `ExecutionRuntimeSubsystem.health_report()` (async `HostHealth`, including
+  the Workdir stats columns of 02 FR-9) for in-process operational use; an
+  authenticated internal REST surface is registered as an issue candidate.
+- Alert routing/dashboards beyond emitting `AlertSink` records: unchanged
+  deferral (08 §6).

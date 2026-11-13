@@ -277,6 +277,19 @@ class HostHealth(ExecutionContractModel):
     cleanup_failed_count: int = Field(default=0, ge=0)
     workdir_cleanup_failed_count: int = Field(default=0, ge=0)
     last_reconcile_age_seconds: float | None = Field(default=None, ge=0)
+    # T15 cumulative observability (02 FR-9): ``exit_reason_counts`` keys are
+    # restricted to the frozen reason vocabulary by the Host, so label
+    # cardinality is bounded by the code constant, never by Run ids.
+    start_failure_count: int = Field(default=0, ge=0)
+    exit_reason_counts: dict[str, int] = Field(default_factory=dict)
+    recovery_terminated_count: int = Field(default=0, ge=0)
+    recovery_manual_remediation_count: int = Field(default=0, ge=0)
+    # Workdir usage and retention age joined from the durable table when a
+    # workspace port is wired (health_report); the sync snapshot leaves them
+    # at their zero defaults.
+    workdir_live_bytes: int = Field(default=0, ge=0)
+    workdir_retained_count: int = Field(default=0, ge=0)
+    workdir_oldest_retention_age_seconds: float | None = Field(default=None, ge=0)
 
     @property
     def active_count(self) -> int:

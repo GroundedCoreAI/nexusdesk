@@ -311,6 +311,7 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
     phase4_host_modules = {
         "host/__init__.py",
         "host/host_models.py",
+        "host/observability.py",
         "host/process_identity.py",
         "host/process_runner.py",
         "host/process_supervisor.py",

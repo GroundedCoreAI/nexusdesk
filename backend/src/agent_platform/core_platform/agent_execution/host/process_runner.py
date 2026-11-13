@@ -344,4 +344,7 @@ class ProcessRunner:
             try:
                 await asyncio.wait_for(target.wait(), timeout=5)
             except TimeoutError:  # pragma: no cover - KILL is uncatchable
-                logger.error("runtime host spawn cleanup could not reap run_id=%s", target.pid)
+                # No OS identity in logs (P4-UT-21): the group was killed but
+                # not reaped; the durable record and alert lanes carry the
+                # correlation, this line only states the fact.
+                logger.error("runtime host spawn cleanup could not reap the killed group")

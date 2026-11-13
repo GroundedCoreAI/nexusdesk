@@ -24,9 +24,15 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from ..host.observability import (
+    EVENT_WORKDIR_CLEANUP_FAILED,
+    EVENT_WORKDIR_OVER_QUOTA,
+    AlertSink,
+    ObservabilityRecord,
+)
 from . import execution_workdir as workdir_ops
 from . import workspace_policy as policy
-from .workspace_provider import WorkdirRecord
+from .workspace_provider import WorkdirRecord, WorkdirStats
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +69,8 @@ class ExecutionWorkspaceManager:
         failed_retention_seconds: int,
         clock: Callable[[], float] | None = None,
         mount_probe: Callable[[int, int], bool] | None = None,
+        alert_sink: AlertSink | None = None,
+        host_id: str | None = None,
     ) -> None:
         if quota_bytes <= 0:
             raise ValueError("quota_bytes must be positive")
@@ -77,6 +85,11 @@ class ExecutionWorkspaceManager:
         # Substituted in tests and (for live mount experiments) pending_env
         # environments; the default is the device-comparison probe.
         self._mount_probe = mount_probe or policy.default_mount_probe
+        # T15 seams: structured alerts (R-12 excess, FR-5 cleanup failure)
+        # and the deployment host id for FR-9 correlation only. host_id is
+        # never a routing or scope input.
+        self._alert_sink = alert_sink
+        self._host_id = host_id
 
     # ------------------------------------------------------------------
     # WorkspaceProvider contract
@@ -163,7 +176,7 @@ class ExecutionWorkspaceManager:
         try:
             await asyncio.to_thread(self._fs_prepare, relative_path)
         except workdir_ops.WorkdirOperationError as exc:
-            await self._conditional_update(
+            landed = await self._conditional_update(
                 to_status="cleanup_failed",
                 where_status_in=("preparing",),
                 run_id=run_id,
@@ -177,6 +190,8 @@ class ExecutionWorkspaceManager:
                 run_id,
                 tenant_id,
             )
+            if landed:
+                self._alert_cleanup_failed(exc.code, run_id=run_id, workdir_id=workdir_id)
             raise WorkspaceStateError(exc.code) from exc
 
         await self._conditional_update(
@@ -342,7 +357,7 @@ class ExecutionWorkspaceManager:
         try:
             await asyncio.to_thread(self._fs_remove, record.relative_path)
         except workdir_ops.WorkdirOperationError as exc:
-            await self._conditional_update(
+            landed = await self._conditional_update(
                 to_status="cleanup_failed",
                 where_status_in=("cleaning",),
                 run_id=run_id,
@@ -357,6 +372,8 @@ class ExecutionWorkspaceManager:
                 run_id,
                 tenant_id,
             )
+            if landed:
+                self._alert_cleanup_failed(exc.code, run_id=run_id, workdir_id=workdir_id)
             raise WorkspaceStateError(exc.code) from exc
 
         await self._conditional_update(
@@ -409,6 +426,39 @@ class ExecutionWorkspaceManager:
             rows = (await conn.execute(text(sql), params)).mappings()
             return [self._to_record(row) for row in rows]
 
+    async def stats(self, *, tenant_id: str | None = None) -> WorkdirStats:
+        """FR-9 disk usage and retention-age aggregation (08 T15).
+
+        One bounded aggregate query over the durable table: bytes sum the
+        *last successful observations* of live rows (deleted Tombstones are
+        out of the live footprint), counts are per status and the retention
+        age is the oldest still-pending retained row's wait time, so the
+        sweeper's health is observable without walking directories.
+        """
+        where = "WHERE status <> 'deleted'"
+        params: dict[str, object] = {"now": datetime.fromtimestamp(self._clock(), UTC)}
+        if tenant_id is not None:
+            where += " AND tenant_id = :tenant_id"
+            params["tenant_id"] = tenant_id
+        sql = (
+            "SELECT"
+            " COALESCE(SUM(size_bytes), 0) AS live_bytes,"
+            " COUNT(*) FILTER (WHERE status = 'retained') AS retained_count,"
+            " COUNT(*) FILTER (WHERE status = 'cleanup_failed') AS cleanup_failed_count,"
+            " MAX(EXTRACT(EPOCH FROM (:now - updated_at)))"
+            " FILTER (WHERE status = 'retained') AS oldest_retention_age_seconds"
+            f" FROM execution_workdirs {where}"
+        )
+        async with self._engine.begin() as conn:
+            row = (await conn.execute(text(sql), params)).mappings().one()
+        age = row["oldest_retention_age_seconds"]
+        return WorkdirStats(
+            live_bytes=int(row["live_bytes"] or 0),
+            retained_count=int(row["retained_count"] or 0),
+            cleanup_failed_count=int(row["cleanup_failed_count"] or 0),
+            oldest_retention_age_seconds=None if age is None else max(0.0, float(age)),
+        )
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
@@ -434,7 +484,7 @@ class ExecutionWorkspaceManager:
         try:
             await asyncio.to_thread(self._fs_prepare, relative_path)
         except workdir_ops.WorkdirOperationError as exc:
-            await self._conditional_update(
+            landed = await self._conditional_update(
                 to_status="cleanup_failed",
                 where_status_in=("preparing",),
                 run_id=run_id,
@@ -448,6 +498,8 @@ class ExecutionWorkspaceManager:
                 run_id,
                 tenant_id,
             )
+            if landed:
+                self._alert_cleanup_failed(exc.code, run_id=run_id, workdir_id=None)
             raise WorkspaceStateError(exc.code) from exc
 
         await self._conditional_update(
@@ -485,6 +537,18 @@ class ExecutionWorkspaceManager:
             usage.total_bytes,
             record.quota_bytes,
         )
+        if self._alert_sink is not None:
+            self._alert_sink.emit(
+                ObservabilityRecord(
+                    event=EVENT_WORKDIR_OVER_QUOTA,
+                    severity="warning",
+                    code="runtime_host_resource_exceeded",
+                    host_id=self._host_id,
+                    run_id=run_id,
+                    workdir_id=record.workdir_id,
+                    fields={"observed_bytes": usage.total_bytes, "quota_bytes": record.quota_bytes},
+                )
+            )
 
     async def _persist_observation(
         self,
@@ -627,6 +691,27 @@ class ExecutionWorkspaceManager:
                 tenant_id,
                 code,
             )
+        else:
+            self._alert_cleanup_failed(code, run_id=run_id, workdir_id=record.workdir_id)
+
+    def _alert_cleanup_failed(self, code: str, *, run_id: UUID, workdir_id: UUID | None) -> None:
+        """FR-5/FR-9: durable cleanup failure is visible, never a silent state.
+
+        One structured alert per real landing; the row plus this record is
+        the acceptance evidence (08 R-12 accounting for the excess twin).
+        """
+        if self._alert_sink is None:
+            return
+        self._alert_sink.emit(
+            ObservabilityRecord(
+                event=EVENT_WORKDIR_CLEANUP_FAILED,
+                severity="error",
+                code=code,
+                host_id=self._host_id,
+                run_id=run_id,
+                workdir_id=workdir_id,
+            )
+        )
 
     @staticmethod
     def _to_record(row) -> WorkdirRecord:

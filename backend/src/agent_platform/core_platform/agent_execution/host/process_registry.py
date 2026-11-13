@@ -23,10 +23,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from .host_models import (
+    REASON_CLEANUP_FAILED,
     HostReasonCode,
     ManagedProcess,
     ProcessState,
 )
+from .observability import EVENT_CLEANUP_FAILED, AlertSink, ObservabilityRecord
 
 logger = logging.getLogger(__name__)
 
@@ -105,12 +107,16 @@ class ProcessRegistry:
         host_instance_id: str,
         sandbox_provider: str = "local/v1",
         clock=None,
+        alert_sink: AlertSink | None = None,
     ) -> None:
         self._engine = engine
         self._host_id = host_id
         self._host_instance_id = host_instance_id
         self._sandbox_provider = sandbox_provider
         self._clock = clock or time
+        # T15: the durable landing point for every cleanup_failed state,
+        # supervised or recovered alike, alerts through the same seam.
+        self._alert_sink = alert_sink
 
     @property
     def host_instance_id(self) -> str:
@@ -200,8 +206,14 @@ class ProcessRegistry:
         cancel_requested: bool = False,
         cleanup_deadline_posix: float | None = None,
         metadata_merge: dict | None = None,
+        run_id: UUID | None = None,
     ) -> bool:
-        """Conditional state move; ``term_signal`` lands in exit_code as -signal."""
+        """Conditional state move; ``term_signal`` lands in exit_code as -signal.
+
+        ``run_id`` is never persisted here - it only correlates the T15
+        cleanup_failed alert with the Run (02 FR-9); the durable row already
+        carries the Run via its own column.
+        """
         placeholders = ", ".join(f":fs_{index}" for index in range(len(from_states)))
         params: dict[str, object] = {
             "id": managed_id,
@@ -235,9 +247,24 @@ class ProcessRegistry:
                     ),
                     params,
                 )
-                return result.rowcount > 0
+            landed = result.rowcount > 0
         except (DBAPIError, OSError) as exc:
             raise RegistryUnavailableError("mark failed") from exc
+        if landed and to_status == "cleanup_failed" and self._alert_sink is not None:
+            # The honest durable escalation (FR-3 failure row, FR-9 alert):
+            # one alert per real landing, never per attempted call.
+            self._alert_sink.emit(
+                ObservabilityRecord(
+                    event=EVENT_CLEANUP_FAILED,
+                    severity="error",
+                    code=REASON_CLEANUP_FAILED,
+                    host_id=self._host_id,
+                    run_id=run_id,
+                    managed_id=managed_id,
+                    fields={"last_error_code": last_error_code or REASON_CLEANUP_FAILED},
+                )
+            )
+        return landed
 
     async def observe(self, managed_id: UUID) -> None:
         try:

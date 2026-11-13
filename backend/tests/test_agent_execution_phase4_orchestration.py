@@ -17,6 +17,7 @@ from pathlib import Path
 
 import asyncpg
 import pytest
+from agent_execution.process_test_adapters import LineJsonProcessAdapter
 from test_ticket_migrations import migrate
 
 from agent_platform.core_platform.agent_execution.contracts import (
@@ -826,3 +827,319 @@ def test_composition_recovery_before_admission(orch_database, tmp_path):
         assert subsystem._tasks == []
 
     _drive(orch_database, flow)
+
+
+# ---------------------------------------------------------------------------
+# T16 integration close-out group (08 §4 T16): the remaining real-process
+# shapes driven end-to-end through the Host/Orchestrator lanes, each closing
+# with zero surviving trusted-test descendants (04 §6 last bullet). The
+# deterministic OS PID-reuse corroboration half of P4-IT-10 stays pending_env
+# on darwin (08 R-3); its decision-shape unit tests live in the registry file.
+# ---------------------------------------------------------------------------
+
+
+def _ps_text() -> str:
+    return os.popen("ps -axo pid,command").read()
+
+
+def _assert_no_surviving_trusted_targets():
+    survivors = [
+        line
+        for line in _ps_text().splitlines()
+        if "trusted_targets.py" in line and "phase4_crash_worker" not in line
+    ]
+    assert survivors == []
+
+
+class _IgnoreTermAdapter(LineJsonProcessAdapter):
+    """Nested TERM-ignoring target through the orchestrator (P4-IT-06 e2e)."""
+
+    _CASE = "ignore-term"
+    _ENGINE_ID = "proc-termignore"
+    _PROTOCOL_ID = "line-json"
+
+    async def start(self, request):
+        from agent_execution.process_test_adapters import make_spec
+
+        relative = str(request.execution_workdir or f"adhoc/{request.execution_id}")
+        working_dir = self._root / relative
+        working_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        spec = make_spec("ignore-term", "60", workdir_relative=relative)
+        managed = await self._host.start(
+            spec,
+            run_id=request.execution_id,
+            tenant_id=request.tenant_id,
+            working_dir=working_dir,
+        )
+        self._managed_by_execution[request.execution_id] = managed.managed_id
+        return ExecutionHandle(
+            execution_id=request.execution_id,
+            engine_id=self.engine_id,
+            protocol_id=self.protocol_id,
+            adapter_version="v1",
+            provider_session_id=str(managed.managed_id),
+        )
+
+    async def stream_events(self, handle):
+        await asyncio.sleep(60)
+        if False:  # pragma: no cover - keeps this an async generator
+            yield
+
+
+class _FloodAdapter(LineJsonProcessAdapter):
+    """Per-stream output bound breach through the orchestrator (P4-IT-04 e2e)."""
+
+    _CASE = "flood-stdout"
+    _ENGINE_ID = "proc-flood"
+    _PROTOCOL_ID = "line-json"
+
+    async def start(self, request):
+        from agent_execution.process_test_adapters import make_spec
+
+        relative = str(request.execution_workdir or f"adhoc/{request.execution_id}")
+        working_dir = self._root / relative
+        working_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # 256 KiB against the adapter policy's 64 KiB per-stream bound.
+        spec = make_spec("flood-stdout", "262144", workdir_relative=relative)
+        managed = await self._host.start(
+            spec,
+            run_id=request.execution_id,
+            tenant_id=request.tenant_id,
+            working_dir=working_dir,
+        )
+        self._managed_by_execution[request.execution_id] = managed.managed_id
+        return ExecutionHandle(
+            execution_id=request.execution_id,
+            engine_id=self.engine_id,
+            protocol_id=self.protocol_id,
+            adapter_version="v1",
+            provider_session_id=str(managed.managed_id),
+        )
+
+    async def stream_events(self, handle):
+        cached = self._results.get(handle.execution_id)
+        if cached is None:
+            await self.collect_result(handle)
+            cached = self._results[handle.execution_id]
+        # The flood payload is not protocol-framed: zero events, so the
+        # orchestrator lands on collect_result's failure mapping directly.
+        for event in self._parse_events(handle, cached[0]):
+            yield event
+
+    def _parse_events(self, handle, host_result):
+        return []
+
+
+def _closeout_registry_for(host, root):
+    engines = EngineRegistry()
+    protocols = ProtocolRegistry()
+    protocols.register(ProtocolDescriptor(protocol_id="line-json"))
+    registry = AdapterRegistry(engines, protocols)
+    for engine_id, adapter_cls in (
+        ("proc-termignore", _IgnoreTermAdapter),
+        ("proc-flood", _FloodAdapter),
+    ):
+        engines.register(EngineDescriptor(engine_id=engine_id))
+        registry.register(
+            AdapterDescriptor(
+                engine_id=engine_id,
+                protocol_id="line-json",
+                adapter_version="v1",
+                declared=EngineCapabilities(
+                    workspace_required=True, native_events=True, cancellation=True
+                ),
+            ),
+            lambda cls=adapter_cls: cls(host, root=root),
+        )
+    return registry
+
+
+async def _noop_emit(event_type, payload):
+    return None
+
+
+@pytest.mark.postgres
+def test_orchestrator_nested_ignore_term_cancellation_e2e(orch_database, tmp_path):
+    # P4-IT-05/06 end-to-end: cancelling mid-stream escalates the whole
+    # process group - a TERM-ignoring parent AND its TERM-ignoring nested
+    # child - through KILL, retains the cancellation decision and leaves
+    # zero survivors.
+    import time as _time
+
+    root = tmp_path / "exec-root"
+    root.mkdir(mode=0o700)
+    host_id = "worker-orch-iterm"
+
+    async def flow(engine):
+        host, workspace = _full_stack(engine, root, host_id=host_id)
+        registry = _closeout_registry_for(host, root)
+        orchestrator = ExecutionOrchestrator(
+            registry,
+            selector=("proc-termignore", "line-json", "v1"),
+            workdir_provider=workspace,
+            runtime_host=host,
+        )
+        run_id = await _make_run(engine)
+        task = asyncio.create_task(orchestrator.execute(_context(run_id), _noop_emit))
+        await asyncio.sleep(0.8)  # parent and nested leaf are alive, ignoring TERM
+        started = _time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        deadline = _time.monotonic() + 5
+        while (await host.registry.fetch_pending(batch_size=10)) and _time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        assert await host.registry.fetch_pending(batch_size=10) == []
+        counts = await host.registry.count_by_state()
+        assert counts.get("exited", 0) == 1
+        current = await workspace.get(run_id=run_id, tenant_id=TENANT)
+        assert current is not None and current.status == "retained"
+        # The nested leaf ignored TERM too: only the group KILL cleared it.
+        assert "leaf-ignore-term" not in _ps_text()
+        assert _time.monotonic() - started < 5  # bounded machine, no hang
+
+    _drive(orch_database, flow)
+    _assert_no_surviving_trusted_targets()
+
+
+@pytest.mark.postgres
+def test_orchestrator_output_flood_termination_e2e(orch_database, tmp_path):
+    # P4-IT-04 end-to-end through the Orchestrator: the per-stream bound
+    # terminates the group, the Run faces a RESOURCE failure mapping, the
+    # failure-window retention decision lands and nothing survives.
+    root = tmp_path / "exec-root"
+    root.mkdir(mode=0o700)
+
+    async def flow(engine):
+        host, workspace = _full_stack(engine, root, host_id="worker-orch-flood")
+        registry = _closeout_registry_for(host, root)
+        orchestrator = ExecutionOrchestrator(
+            registry,
+            selector=("proc-flood", "line-json", "v1"),
+            workdir_provider=workspace,
+            runtime_host=host,
+        )
+        run_id = await _make_run(engine)
+        outcome = await orchestrator.execute(_context(run_id), _noop_emit)
+        assert outcome.status == "failed"
+        counts = await host.registry.count_by_state()
+        assert counts.get("exited", 0) == 1
+        row = await host.registry.fetch_pending(batch_size=10)
+        assert row == []
+        current = await workspace.get(run_id=run_id, tenant_id=TENANT)
+        assert current is not None and current.status == "retained"
+
+    _drive(orch_database, flow)
+    _assert_no_surviving_trusted_targets()
+
+
+@pytest.mark.postgres
+def test_host_run_deadline_earlier_than_wall_with_real_process(orch_database, tmp_path):
+    # P4-IT-07 end-to-end on the Host contract: the earlier of the process
+    # wall ceiling and the Run deadline wins; here wall=30s vs a Run
+    # deadline 0.4s out, so the group dies with the wall-timeout reason.
+    import time as _time
+
+    from agent_platform.core_platform.agent_execution.host.process_identity import (
+        group_alive,
+    )
+
+    root = tmp_path / "exec-root"
+    root.mkdir(mode=0o700)
+
+    async def flow(engine):
+        host, _workspace = _full_stack(engine, root, host_id="worker-orch-deadline")
+        run_id = await _make_run(engine)
+        from agent_execution.process_test_adapters import make_spec
+
+        managed = await host.start(
+            make_spec("sleep", "30"),
+            run_id=run_id,
+            tenant_id=TENANT,
+            working_dir=root,
+        )
+        deadline = _time.monotonic() + 0.4
+        result = await host.wait(
+            managed.managed_id, wall_seconds=30, run_deadline_monotonic=deadline
+        )
+        assert result.reason_code == "runtime_host_wall_timeout"
+        assert not group_alive(managed.process_group_id)
+        counts = await host.registry.count_by_state()
+        assert counts.get("exited", 0) == 1
+
+    _drive(orch_database, flow)
+    _assert_no_surviving_trusted_targets()
+
+
+@pytest.mark.postgres
+def test_worker_sigkill_crash_and_restart_recovery_e2e(orch_database, tmp_path):
+    # P4-IT-08 hard half on darwin (08 §5 "process-level SIGKILL+restart
+    # same-host_id recovery"): a separate OS process runs the Host, the
+    # harness SIGKILLs it (uncatchable), the trusted target survives as a
+    # true orphan with a durable 'running' row, and a fresh boot instance of
+    # the same host_id recovers it through the identity-verified machine.
+    import json
+    import signal
+    import subprocess
+    import sys
+    import time as _time
+
+    from agent_platform.core_platform.agent_execution.host.process_identity import (
+        process_alive,
+    )
+
+    root = tmp_path / "exec-root"
+    root.mkdir(mode=0o700)
+    marker = tmp_path / "worker-marker.json"
+    host_id = "worker-crash"
+    script = Path(__file__).resolve().parent / "agent_execution" / "phase4_crash_worker.py"
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            str(script),
+            str(orch_database),
+            host_id,
+            "boot-crash",
+            str(marker),
+        ],
+        cwd=str(tmp_path),
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parent)},
+    )
+    info = None
+    wait_deadline = _time.monotonic() + 60
+    while _time.monotonic() < wait_deadline:
+        if marker.exists():
+            try:
+                info = json.loads(marker.read_text(encoding="utf-8"))
+                break
+            except json.JSONDecodeError:
+                pass  # partial write; retry until the worker finishes it
+        _time.sleep(0.2)
+    assert info is not None, "crash worker never registered its process"
+    target_pid = info["pid"]
+    assert process_alive(target_pid)
+
+    # SIGKILL the worker: no cleanup can run, the record stays 'running'.
+    os.kill(child.pid, signal.SIGKILL)
+    child.wait(timeout=10)
+    _time.sleep(0.3)
+    assert process_alive(target_pid)  # the orphan outlived its Host process
+
+    async def flow(engine):
+        host, _workspace = _full_stack(
+            engine, root, host_id=host_id, boot="boot-recovered", enabled=False
+        )
+        summary = await host.reconcile(batch_size=16)
+        assert summary.terminated == 1
+        row = await host.registry.fetch_pending(batch_size=10)
+        assert row == []
+        counts = await host.registry.count_by_state()
+        assert counts.get("exited", 0) == 1
+        deadline = _time.monotonic() + 5
+        while process_alive(target_pid) and _time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        assert not process_alive(target_pid)
+
+    _drive(orch_database, flow)
+    _assert_no_surviving_trusted_targets()

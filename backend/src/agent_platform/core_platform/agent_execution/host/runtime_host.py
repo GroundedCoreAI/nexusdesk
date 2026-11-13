@@ -14,6 +14,7 @@ stays usable so the recovery/cleanup path keeps working (03 §5.1).
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,15 +23,27 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from .host_models import (
+    HOST_REASON_CODES,
     REASON_ADMISSION_CLOSED,
     REASON_CLEANUP_FAILED,
     REASON_IDENTITY_MISMATCH,
+    REASON_MANUAL_REMEDIATION,
     REASON_SPAWN_FAILED,
     REASON_UNTRUSTED_TARGET,
     HostHealth,
     ManagedProcess,
     ProcessResult,
     ProcessSpec,
+)
+from .observability import (
+    EVENT_MANUAL_REMEDIATION,
+    EVENT_PROCESS_EXITED,
+    EVENT_RECONCILE_DEFERRED,
+    EVENT_RECOVERY_BATCH,
+    EVENT_START_FAILED,
+    EVENT_START_REFUSED,
+    AlertSink,
+    ObservabilityRecord,
 )
 from .process_identity import capture_start_token_async, group_alive
 from .process_registry import (
@@ -44,6 +57,11 @@ from .process_supervisor import GroupHandle, ProcessSupervisor, SupervisorStateE
 from .sandbox_provider import SandboxPolicyError
 
 logger = logging.getLogger(__name__)
+
+# The manager-level Workdir vocabulary is the second frozen code space for
+# alerts (workspace_provider.WorkdirErrorCode); anything outside the two
+# vocabularies collapses in _stable_code.
+_WORKDIR_CODE_RE = re.compile(r"workdir_[a-z0-9_]+")
 
 
 class HostAdmissionError(RuntimeError):
@@ -99,6 +117,7 @@ class RuntimeHost:
         workspace_manager: Any | None = None,
         identity_probe: Callable[[int], Any] | None = None,
         clock: Callable[[], float] | None = None,
+        alert_sink: AlertSink | None = None,
     ) -> None:
         if enabled and not host_id.strip():
             raise ValueError("enabled RuntimeHost requires a stable host id")
@@ -118,6 +137,14 @@ class RuntimeHost:
         self.workspace_manager = workspace_manager
         self._identity_probe = identity_probe or capture_start_token_async
         self._clock = clock or time.time
+        # T15 FR-9 seam: cumulative, low-cardinality observability counters
+        # keyed only by frozen code strings plus one alert sink shared with
+        # the supervisor/registry/workspace lanes.
+        self._alert_sink = alert_sink
+        self._start_failures: dict[str, int] = {}
+        self._exit_reasons: dict[str, int] = {}
+        self._recovery_terminated = 0
+        self._recovery_manual = 0
         self._admitting = enabled
         self._closed = False
         self._tracked: dict[UUID, _Tracked] = {}
@@ -163,6 +190,14 @@ class RuntimeHost:
                 spec.executable_id,
                 run_id,
             )
+            self._record_start_failure(REASON_UNTRUSTED_TARGET)
+            self._alert(
+                EVENT_START_REFUSED,
+                "warning",
+                REASON_UNTRUSTED_TARGET,
+                run_id=run_id,
+                fields={"executable_id": spec.executable_id},
+            )
             raise HostStartError(REASON_UNTRUSTED_TARGET, exc.detail) from exc
 
         # B4 ports: with a Sandbox/Resource Provider wired, support checks and
@@ -191,7 +226,9 @@ class RuntimeHost:
                 preexec=self._preexec_for(reservation),
             )
         except Exception as exc:
-            code = getattr(exc, "code", REASON_SPAWN_FAILED)
+            code = self._stable_code(getattr(exc, "code", REASON_SPAWN_FAILED))
+            self._record_start_failure(code)
+            self._alert(EVENT_START_FAILED, "error", code, run_id=run_id, managed_id=record_id)
             await self._release(reservation)
             await self._registry.mark_state(
                 managed_id=record_id,
@@ -199,6 +236,7 @@ class RuntimeHost:
                 to_status="exited",
                 last_error_code=code,
                 metadata_merge={"recovery": "start-failed"},
+                run_id=run_id,
             )
             raise HostStartError(code) from exc
 
@@ -225,6 +263,7 @@ class RuntimeHost:
         )
         result = self._classify(tracked, result)
         tracked.result = result
+        self._observe_result(result)
         await self._persist_result(result)
         await self._release(tracked.reservation)
         self._untrack(managed_id)
@@ -241,6 +280,7 @@ class RuntimeHost:
         )
         result = self._classify(tracked, result)
         tracked.result = result
+        self._observe_result(result)
         await self._persist_result(result)
         await self._release(tracked.reservation)
         self._untrack(managed_id)
@@ -260,6 +300,7 @@ class RuntimeHost:
             rows = await self._registry.fetch_pending(batch_size=batch_size)
         except RegistryUnavailableError:
             logger.error("runtime host reconcile deferred: registry unavailable")
+            self._alert(EVENT_RECONCILE_DEFERRED, "warning", None)
             return ReconcileSummary(db_unavailable=True)
         terminated = manual = absent = skipped = 0
         for row in rows:
@@ -275,6 +316,22 @@ class RuntimeHost:
             else:
                 absent += 1
         self._last_reconcile_at = self._clock()
+        self._recovery_terminated += terminated
+        self._recovery_manual += manual
+        if rows:
+            # FR-9 recovery batch fact: one info record per nonempty pass,
+            # counts only - ids stay on the per-row alerts.
+            self._alert(
+                EVENT_RECOVERY_BATCH,
+                "info",
+                None,
+                fields={
+                    "terminated": terminated,
+                    "manual_remediation": manual,
+                    "absent": absent,
+                    "current_boot_skipped": skipped,
+                },
+            )
         return ReconcileSummary(
             terminated=terminated,
             manual_remediation=manual,
@@ -309,6 +366,32 @@ class RuntimeHost:
             orphaned_count=counts.get("orphaned", 0),
             cleanup_failed_count=counts.get("cleanup_failed", 0),
             last_reconcile_age_seconds=age,
+            start_failure_count=sum(self._start_failures.values()),
+            exit_reason_counts=dict(self._exit_reasons),
+            recovery_terminated_count=self._recovery_terminated,
+            recovery_manual_remediation_count=self._recovery_manual,
+        )
+
+    async def health_report(self) -> HostHealth:
+        """Health snapshot joined with the durable Workdir footprint (T15).
+
+        The synchronous :meth:`health` carries only in-process truth; this
+        read adds the FR-9 disk usage / retention-age / cleanup-failure
+        columns from the workspace port when one is wired. Operational reads
+        use this object; no public HTTP surface is added in Phase 4 (08 §6
+        defers an internal endpoint to an issue candidate).
+        """
+        health = self.health()
+        if self.workspace_manager is None:
+            return health
+        stats = await self.workspace_manager.stats()
+        return health.model_copy(
+            update={
+                "workdir_cleanup_failed_count": stats.cleanup_failed_count,
+                "workdir_live_bytes": stats.live_bytes,
+                "workdir_retained_count": stats.retained_count,
+                "workdir_oldest_retention_age_seconds": stats.oldest_retention_age_seconds,
+            }
         )
 
     async def close(self) -> int:
@@ -328,7 +411,17 @@ class RuntimeHost:
             return_exceptions=True,
         )
         self._closed = True
-        return sum(1 for tracked in self._tracked.values() if tracked.result is None)
+        remaining = sum(1 for tracked in self._tracked.values() if tracked.result is None)
+        if remaining:
+            # Drain left survivors: manual remediation is owed (FR-9 alert,
+            # never a silently swallowed shutdown).
+            self._alert(
+                EVENT_MANUAL_REMEDIATION,
+                "error",
+                REASON_MANUAL_REMEDIATION,
+                fields={"survivors": remaining},
+            )
+        return remaining
 
     # ------------------------------------------------------------------
     # Internals
@@ -345,6 +438,8 @@ class RuntimeHost:
             return await admit(spec, run_id=run_id)
         except SandboxPolicyError as exc:
             logger.warning("runtime host refused admission run_id=%s code=%s", run_id, exc.code)
+            self._record_start_failure(self._stable_code(exc.code))
+            self._alert(EVENT_START_REFUSED, "warning", self._stable_code(exc.code), run_id=run_id)
             raise HostStartError(exc.code) from exc
 
     def _preexec_for(self, reservation):
@@ -398,6 +493,7 @@ class RuntimeHost:
                 ),
                 to_status="cleanup_failed",
                 last_error_code=result.reason_code,
+                run_id=result.run_id,
             )
             return
         await self._registry.mark_state(
@@ -409,6 +505,7 @@ class RuntimeHost:
             last_error_code=(
                 None if result.reason_code == "runtime_host_exited" else result.reason_code
             ),
+            run_id=result.run_id,
         )
 
     async def _decide(self, row: ProcessRecordRow) -> str:
@@ -457,10 +554,18 @@ class RuntimeHost:
                 to_status="cleanup_failed",
                 last_error_code=decision.reason_code or REASON_IDENTITY_MISMATCH,
                 metadata_merge={"recovery": "identity-unverified"},
+                run_id=managed.run_id,
             )
             logger.error(
                 "runtime host identity mismatch managed_id=%s: manual remediation required",
                 managed.managed_id,
+            )
+            self._alert(
+                EVENT_MANUAL_REMEDIATION,
+                "error",
+                decision.reason_code or REASON_IDENTITY_MISMATCH,
+                run_id=managed.run_id,
+                managed_id=managed.managed_id,
             )
             return "manual"
         if managed.state == "cleanup_failed":
@@ -482,6 +587,7 @@ class RuntimeHost:
                 from_states=("orphaned", "terminating", "cleanup_failed"),
                 to_status="cleanup_failed",
                 last_error_code=REASON_CLEANUP_FAILED,
+                run_id=row.managed.run_id,
             )
             return
         await self._registry.mark_state(
@@ -491,4 +597,68 @@ class RuntimeHost:
             exit_code=result.exit_code,
             term_signal=result.term_signal,
             metadata_merge={"recovery": "terminated"},
+        )
+
+    # ------------------------------------------------------------------
+    # T15 observability helpers (02 FR-9)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _stable_code(value: object) -> str:
+        """Map any failure string onto the frozen low-cardinality vocabularies.
+
+        Unknown shapes collapse to ``runtime_host_spawn_failed`` so a stray
+        exception text can never become a metric label or alert code (C7,
+        P4-UT-22 no-high-cardinality guarantee).
+        """
+        if isinstance(value, str) and (
+            value in HOST_REASON_CODES or _WORKDIR_CODE_RE.fullmatch(value)
+        ):
+            return value
+        return REASON_SPAWN_FAILED
+
+    def _record_start_failure(self, code: str) -> None:
+        stable = self._stable_code(code)
+        self._start_failures[stable] = self._start_failures.get(stable, 0) + 1
+
+    def _observe_result(self, result: ProcessResult) -> None:
+        """One exit fact per terminal result: counter plus info record."""
+        stable = self._stable_code(result.reason_code)
+        self._exit_reasons[stable] = self._exit_reasons.get(stable, 0) + 1
+        fields: dict[str, str | int | float] = {"final_state": result.final_state}
+        if result.exit_code is not None:
+            fields["exit_code"] = result.exit_code
+        if result.term_signal is not None:
+            fields["term_signal"] = result.term_signal
+        self._alert(
+            EVENT_PROCESS_EXITED,
+            "info" if result.final_state != "cleanup_failed" else "error",
+            stable,
+            run_id=result.run_id,
+            managed_id=result.managed_id,
+            fields=fields,
+        )
+
+    def _alert(
+        self,
+        event: str,
+        severity: str,
+        code: str | None,
+        *,
+        run_id: UUID | None = None,
+        managed_id: UUID | None = None,
+        fields: dict[str, str | int | float] | None = None,
+    ) -> None:
+        if self._alert_sink is None:
+            return
+        self._alert_sink.emit(
+            ObservabilityRecord(
+                event=event,
+                severity=severity,  # type: ignore[arg-type]
+                code=self._stable_code(code) if code is not None else None,
+                host_id=self._host_id,
+                run_id=run_id,
+                managed_id=managed_id,
+                fields=fields or {},
+            )
         )
