@@ -6,14 +6,15 @@ composition code; applications assemble the core runtime, platform services,
 and business capabilities here.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from uuid import UUID
+from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass, field
+from uuid import UUID, uuid4
 
 import httpx
 from asyncpg import PostgresError
@@ -54,6 +55,17 @@ from agent_platform.core_platform.agent_execution.contracts.instructions import 
     REACT_INSTRUCTION_PROVIDER_VERSION,
 )
 from agent_platform.core_platform.agent_execution.contracts.snapshots import SNAPSHOT_COLUMNS
+from agent_platform.core_platform.agent_execution.host.local_sandbox_provider import (
+    LocalSandboxProvider,
+)
+from agent_platform.core_platform.agent_execution.host.process_registry import ProcessRegistry
+from agent_platform.core_platform.agent_execution.host.process_runner import (
+    ProcessRunner,
+    TrustedTargetRegistry,
+)
+from agent_platform.core_platform.agent_execution.host.process_supervisor import ProcessSupervisor
+from agent_platform.core_platform.agent_execution.host.resource_manager import ResourceManager
+from agent_platform.core_platform.agent_execution.host.runtime_host import RuntimeHost
 from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
     ExecutionSnapshotBarrier,
 )
@@ -67,6 +79,9 @@ from agent_platform.core_platform.agent_execution.registry import (
     EngineRegistry,
     ProtocolDescriptor,
     ProtocolRegistry,
+)
+from agent_platform.core_platform.agent_execution.workspace.workspace_manager import (
+    ExecutionWorkspaceManager,
 )
 from agent_platform.core_platform.agent_runtime.admission import RuntimeAdmission
 from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
@@ -424,6 +439,7 @@ def _build_execution_orchestrator(
     barrier: ExecutionSnapshotBarrier | None = None,
     clock: Callable[[], float] | None = None,
     subsystem: ExecutionCapabilitySubsystem | None = None,
+    execution_runtime: "ExecutionRuntimeSubsystem | None" = None,
 ) -> ExecutionOrchestrator:
     """Register production metadata and wire the Phase 3 seams from settings.
 
@@ -454,14 +470,26 @@ def _build_execution_orchestrator(
         clock=clock,
         barrier=barrier,
     )
+    # Phase 4 seams follow the same injected-port rule (08 R-4c): with the
+    # runtime subsystem unset - the default everywhere host id is empty - the
+    # orchestrator is byte-identical to Phase 3. With it set, the React
+    # registration still declares workspace_required=False, so the process
+    # barrier never fires for React (the default-off invariant).
+    runtime_seams: dict[str, object] = {}
+    if execution_runtime is not None:
+        runtime_seams = {
+            "workdir_provider": execution_runtime.workspace,
+            "runtime_host": execution_runtime.host,
+        }
     if subsystem is None:
-        return ExecutionOrchestrator(adapters)
+        return ExecutionOrchestrator(adapters, **runtime_seams)
     return ExecutionOrchestrator(
         adapters,
         capabilities=subsystem.resolver,
         snapshot_barrier=subsystem.barrier,
         snapshot_max_bytes=subsystem.snapshot_max_bytes,
         instruction_preparer=RuntimeFactoryInstructionPreparer(runtime_factory),
+        **runtime_seams,
     )
 
 
@@ -538,6 +566,158 @@ def _build_execution_capability_subsystem(
 
 
 @dataclass
+class ExecutionRuntimeSubsystem:
+    """Phase 4 Host assembly: supervision, durable registry, workspace, sandbox.
+
+    Constructed only when this process carries a stable execution host id
+    (08 R-7): processes that do not own the execution root construct nothing,
+    and the React path stays byte-identical to Phase 3. Recovery and cleanup
+    run regardless of the admission state (03 §5.1, 08 R-8); ``enabled`` only
+    gates new starts and that gate lives inside the Host.
+    """
+
+    host: RuntimeHost
+    workspace: ExecutionWorkspaceManager
+    registry: ProcessRegistry
+    resources: ResourceManager
+    reconcile_interval_seconds: float
+    cleanup_interval_seconds: float
+    _tasks: list[asyncio.Task] = field(default_factory=list)
+
+    async def recover_on_startup(self) -> None:
+        """R-8: process records left by previous boots before admission opens."""
+        await self.host.reconcile()
+        await self._sweep_once()
+
+    def start(self) -> None:
+        """Spawn the reconcile and cleanup interval loops (never blocking)."""
+        self._tasks = [
+            asyncio.create_task(self._reconcile_loop(), name="execution-runtime-reconcile"),
+            asyncio.create_task(self._cleanup_loop(), name="execution-workdir-cleanup"),
+        ]
+
+    async def aclose(self) -> None:
+        """Stop loops, then the Host's stop-admission->drain machine (T14 order).
+
+        Shutdown order mirrors the Phase 3 warmer-close discipline: loops die
+        first so no reconcile races the drain, then ``host.close`` cancels and
+        reaps every tracked group through the bounded TERM/KILL machine. The
+        default 5s+5s windows fit the deployment stop grace; larger FR-10
+        values require a deployment stop-timeout change (03 §4.3), which the
+        compose files document.
+        """
+        for task in self._tasks:
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks = []
+        remaining = await self.host.close()
+        if remaining:
+            logger.error("execution runtime shutdown left %s active groups", remaining)
+
+    async def _reconcile_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.reconcile_interval_seconds)
+            try:
+                await self.host.reconcile()
+            except Exception:  # noqa: BLE001 - DB outage retries on the next tick.
+                logger.warning("execution runtime reconcile deferred")
+
+    async def _cleanup_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.cleanup_interval_seconds)
+            await self._sweep_once()
+
+    async def _sweep_once(self) -> None:
+        try:
+            candidates = await self.workspace.sweep_expired()
+        except Exception:  # noqa: BLE001 - the interval scan retries on the next tick.
+            logger.warning("execution workdir sweep deferred")
+            return
+        for candidate in candidates:
+            with suppress(Exception):
+                await self.workspace.cleanup(
+                    workdir_id=candidate.workdir_id,
+                    run_id=candidate.run_id,
+                    tenant_id=candidate.tenant_id,
+                )
+
+
+def _build_execution_runtime_subsystem(
+    settings: Settings,
+    engine,
+    *,
+    boot_id: str | None = None,
+    clock: Callable[[], float] | None = None,
+) -> ExecutionRuntimeSubsystem | None:
+    """Assemble the Phase 4 runtime from FR-10 settings without starting it.
+
+    Returns ``None`` when no execution host id is configured: the API and the
+    channel/knowledge/memory workers, and quickstart defaults, construct no
+    Host, no loops and no directories (08 R-7 topology; the AC-12 deployment
+    check pins exactly this). ``boot_id`` and ``clock`` are code-level seams
+    for tests and for the recovery audit, never settings-selectable.
+
+    The trusted-target allowlist is the empty code constant: Phase 4 registers
+    no production executable (08 §1.9 - real engines arrive in Phase 5), so
+    anything started through this composition lane is refused by the Runner
+    gate before spawn; test triples compose their own registry explicitly.
+    """
+    if not settings.execution_runtime_host_id:
+        return None
+    shared_clock = clock or time.time
+    sandbox_provider_id = f"{settings.execution_sandbox_provider}/v1"
+    provider = LocalSandboxProvider(
+        enforcement_required=settings.execution_resource_enforcement_required,
+    )
+    resources = ResourceManager(
+        provider,
+        sample_interval_seconds=settings.execution_resource_sample_interval_seconds,
+        clock=shared_clock,
+    )
+    registry = ProcessRegistry(
+        engine,
+        host_id=settings.execution_runtime_host_id,
+        host_instance_id=boot_id or f"boot-{uuid4().hex}",
+        sandbox_provider=sandbox_provider_id,
+        clock=shared_clock,
+    )
+    workspace = ExecutionWorkspaceManager(
+        engine,
+        root=settings.execution_workdir_root,
+        quota_bytes=settings.execution_workdir_max_bytes,
+        retention_seconds=settings.execution_workdir_retention_seconds,
+        failed_retention_seconds=settings.execution_workdir_failed_retention_seconds,
+        clock=shared_clock,
+    )
+    host = RuntimeHost(
+        enabled=settings.execution_runtime_host_enabled,
+        host_id=settings.execution_runtime_host_id,
+        runner=ProcessRunner(TrustedTargetRegistry(())),
+        supervisor=ProcessSupervisor(
+            cancel_grace_seconds=settings.execution_process_cancel_grace_seconds,
+            kill_timeout_seconds=settings.execution_process_kill_timeout_seconds,
+            clock=shared_clock,
+        ),
+        registry=registry,
+        wall_timeout_seconds=settings.execution_process_wall_timeout_seconds,
+        resource_enforcement_required=settings.execution_resource_enforcement_required,
+        sandbox_provider_id=sandbox_provider_id,
+        resource_manager=resources,
+        workspace_manager=workspace,
+        clock=shared_clock,
+    )
+    return ExecutionRuntimeSubsystem(
+        host=host,
+        workspace=workspace,
+        registry=registry,
+        resources=resources,
+        reconcile_interval_seconds=settings.execution_process_reconcile_interval_seconds,
+        cleanup_interval_seconds=settings.execution_workdir_cleanup_interval_seconds,
+    )
+
+
+@dataclass
 class RuntimeServices:
     """All resources owned by one application process."""
 
@@ -564,6 +744,10 @@ class RuntimeServices:
     # ``None`` while ``execution_phase3_enabled`` is false, which is what lets
     # the off state provably reach no trusted port at all.
     execution_subsystem: ExecutionCapabilitySubsystem | None = None
+    # The Phase 4 runtime subsystem (Host/Workspace/loops) when this process
+    # owns an execution root; ``None`` is the default topology for API and the
+    # non-runtime workers (08 R-7).
+    execution_runtime: ExecutionRuntimeSubsystem | None = None
 
 
 @asynccontextmanager
@@ -612,6 +796,9 @@ async def runtime_services(
     # unbound name when startup fails earlier: while it stays None there is no
     # subsystem and nothing to close (R-46).
     subsystem: ExecutionCapabilitySubsystem | None = None
+    # Bound before the try for the same reason as ``subsystem``: the close
+    # order in ``finally`` must never hit an unbound name.
+    execution_runtime: ExecutionRuntimeSubsystem | None = None
     tool_policy = ToolEgressPolicy.from_settings(settings)
     try:
         async with (
@@ -746,11 +933,13 @@ async def runtime_services(
                 adapters,
                 barrier=_RepositorySnapshotBarrier(repository.write_execution_snapshots),
             )
+            execution_runtime = _build_execution_runtime_subsystem(settings, engine)
             orchestrator = _build_execution_orchestrator(
                 factory,
                 adapters,
                 settings=settings,
                 subsystem=subsystem,
+                execution_runtime=execution_runtime,
             )
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             groups.application.evaluation = platform.evaluation
@@ -777,6 +966,12 @@ async def runtime_services(
             # closed on a cold entry instead of the process refusing to boot.
             if subsystem is not None:
                 subsystem.warmer.start()
+            if execution_runtime is not None:
+                # R-8: recovery precedes admission; the loops run even with
+                # the Host disabled so existing records converge, while the
+                # Host's admission gate refuses new starts (03 §5.1).
+                await execution_runtime.recover_on_startup()
+                execution_runtime.start()
             try:
                 await capability_state.persist_all("system")
             except ExtensionRegistryError as exc:
@@ -812,11 +1007,18 @@ async def runtime_services(
                 extension_discovery=extension_discovery,
                 scope=platform.scope,
                 execution_subsystem=subsystem,
+                execution_runtime=execution_runtime,
             )
     finally:
         # R-46 close order: this subsystem first (a warm round may still be
         # awaiting a port that reads the engine or HTTP), then contributions,
         # extensions, the engine, and the listener/notifier pair.
+        # Phase 4 first: the Host drain reaps processes and closes records on
+        # the engine that is disposed below; the loops must die before the
+        # Host closes so no reconcile races the drain (mirrors the R-46
+        # ordering discipline).
+        if execution_runtime is not None:
+            await execution_runtime.aclose()
         if subsystem is not None:
             await subsystem.warmer.aclose()
             await subsystem.resolver.aclose()

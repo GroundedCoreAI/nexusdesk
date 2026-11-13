@@ -35,6 +35,28 @@ services:
       start_period: 30s
   runtime-worker:
     <<: *backend
+    # YAML merge replaces whole keys (08 R-7): the anchor's credentials volume
+    # must be redeclared next to the dedicated execution root, and the
+    # anchor's environment map must be redeclared too. API and the other
+    # workers deliberately do NOT mount execution_data or set a host id:
+    # their absence is itself an AC-12 topology check, and one execution
+    # root may only ever have one Host (03 §4.4).
+    volumes:
+      - credentials:/data/credentials
+      - execution_data:/data/execution
+    environment:
+      AGENT_ENVIRONMENT: production
+      AGENT_QUICKSTART_MODE: "false"
+      AGENT_EMBEDDED_WORKER: "false"
+      AGENT_MODEL_CREDENTIAL_KEY_FILE: /data/credentials/master.key
+      # Stable per-execution-root identity; it is what assembles the Runtime
+      # Host subsystem on this process only (08 R-7/R-8). Override via
+      # NEXUSDESK_RUNTIME_HOST_ID in .env for multi-environment deployments.
+      AGENT_EXECUTION_RUNTIME_HOST_ID: ${NEXUSDESK_RUNTIME_HOST_ID:-production-runtime}
+      AGENT_EXECUTION_WORKDIR_ROOT: /data/execution
+      # The Phase 4 master switch stays off by default; enablement is a
+      # rollout decision (03 §8), never a side effect of deploying the volume.
+      AGENT_EXECUTION_RUNTIME_HOST_ENABLED: ${AGENT_EXECUTION_RUNTIME_HOST_ENABLED:-false}
     restart: unless-stopped
     command: [python, -m, agent_platform.applications.worker]
     depends_on:
@@ -103,3 +125,4 @@ services:
 
 volumes:
   credentials:
+  execution_data:
