@@ -199,6 +199,17 @@ jobs:
         working-directory: backend
         run: uv sync --frozen
 
+      - name: Verify P0 test suite presence
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          count=$(uv run pytest -m p0 --collect-only -q | grep -c "::" || true)
+          echo "Collected ${count} P0 test(s)."
+          if [[ "${count}" -le 0 ]]; then
+            echo "::error::No P0 regression tests were collected (expected > 0)."
+            exit 1
+          fi
+
       - name: Test
         id: pytest_unit
         working-directory: backend
@@ -227,15 +238,30 @@ jobs:
           uv run python - "$SUMMARY" <<'PY'
           import json, os, sys
           data = json.load(open(sys.argv[1], encoding="utf-8"))
-          c = data["counts"]
-          executed = c["tests"] - c["skipped"]
-          skips = [n for n in data["nodes"] if n["outcome"] == "skipped"]
+          nodes = data["nodes"]
+          by_outcome = {}
+          for n in nodes:
+              by_outcome[n["outcome"]] = by_outcome.get(n["outcome"], 0) + 1
+
+          skips = [n for n in nodes if n["outcome"] == "skipped"]
+          executed = len(nodes) - len(skips)
+          failures = by_outcome.get("failed", 0)
+          errors = by_outcome.get("error", 0)
+          skipped = len(skips)
+
+          extra = []
+          if "xfail" in by_outcome:
+              extra.append(f"XFail: {by_outcome['xfail']}")
+          if "xpass" in by_outcome:
+              extra.append(f"XPass: {by_outcome['xpass']}")
+          extra_str = f" | {' | '.join(extra)}" if extra else ""
+
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
               f.write("### Backend tests (unit)\n")
               f.write(
-                  f"- Total: {c['tests']} | Executed: {executed} | "
-                  f"Failures: {c['failures']} | Infra/Fixture Errors: {c['errors']} | "
-                  f"Skipped: {c['skipped']}\n"
+                  f"- Total: {len(nodes)} | Executed: {executed} | "
+                  f"Failures: {failures} | Infra/Fixture Errors: {errors} | "
+                  f"Skipped: {skipped}{extra_str}\n"
               )
               for s in skips:
                   f.write(f"  - SKIP `{s['classname']}.{s['name']}`: {s['skip_reason']}\n")
@@ -338,15 +364,30 @@ jobs:
           import json, os, sys
           data = json.load(open(sys.argv[1], encoding="utf-8"))
           shard = sys.argv[2]
-          c = data["counts"]
-          executed = c["tests"] - c["skipped"]
-          skips = [n for n in data["nodes"] if n["outcome"] == "skipped"]
+          nodes = data["nodes"]
+          by_outcome = {}
+          for n in nodes:
+              by_outcome[n["outcome"]] = by_outcome.get(n["outcome"], 0) + 1
+
+          skips = [n for n in nodes if n["outcome"] == "skipped"]
+          executed = len(nodes) - len(skips)
+          failures = by_outcome.get("failed", 0)
+          errors = by_outcome.get("error", 0)
+          skipped = len(skips)
+
+          extra = []
+          if "xfail" in by_outcome:
+              extra.append(f"XFail: {by_outcome['xfail']}")
+          if "xpass" in by_outcome:
+              extra.append(f"XPass: {by_outcome['xpass']}")
+          extra_str = f" | {' | '.join(extra)}" if extra else ""
+
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
               f.write(f"### Backend tests (postgres {shard}/2)\n")
               f.write(
-                  f"- Total: {c['tests']} | Executed: {executed} | "
-                  f"Failures: {c['failures']} | Infra/Fixture Errors: {c['errors']} | "
-                  f"Skipped: {c['skipped']}\n"
+                  f"- Total: {len(nodes)} | Executed: {executed} | "
+                  f"Failures: {failures} | Infra/Fixture Errors: {errors} | "
+                  f"Skipped: {skipped}{extra_str}\n"
               )
               for s in skips:
                   f.write(f"  - SKIP `{s['classname']}.{s['name']}`: {s['skip_reason']}\n")

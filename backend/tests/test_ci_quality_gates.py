@@ -160,6 +160,7 @@ def test_ci_workflow_enforces_non_mutating_checks_and_strict_postgres_gate():
     assert "git diff --exit-code" in pg_steps
 
     unit_steps = "\n".join(step.get("run", "") for step in jobs["backend-test-unit"]["steps"])
+    assert "pytest -m p0 --collect-only" in unit_steps
     assert "--junitxml=" in unit_steps
     assert "runtime_baseline.py summary" in unit_steps
     assert "git diff --exit-code" in unit_steps
