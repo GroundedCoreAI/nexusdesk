@@ -1018,8 +1018,10 @@ def test_current_contract_and_package_dependencies_stay_one_directional():
         "contracts/result.py",
         "contracts/events.py",
         "contracts/capabilities.py",
+        "contracts/config.py",
         "contracts/errors.py",
         "contracts/adapter.py",
+        "contracts/snapshots.py",
     }
     actual_t2_modules = {
         str(path.relative_to(package_root))

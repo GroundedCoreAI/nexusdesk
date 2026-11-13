@@ -26,6 +26,8 @@ from agent_platform.business_capabilities.knowledge.capability import KnowledgeC
 from agent_platform.business_capabilities.memory.capability import MemoryCapability
 from agent_platform.business_capabilities.memory.injection import MemoryInjection
 from agent_platform.business_capabilities.memory.store import build_memory_store
+from agent_platform.core_platform.agent_execution.contracts.capabilities import EngineCapabilities
+from agent_platform.core_platform.agent_execution.contracts.config import ReactConfig
 from agent_platform.core_platform.agent_execution.orchestration.orchestrator import (
     ExecutionOrchestrator,
 )
@@ -103,15 +105,48 @@ def _runtime_fingerprint(settings: Settings, specs: list[HttpTool]) -> str:
     return hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest()
 
 
-def _build_execution_orchestrator(runtime_factory: RuntimeFactory) -> ExecutionOrchestrator:
-    """Register the fixed production triple without resolving a per-run adapter."""
+def _execution_adapter_registry() -> AdapterRegistry:
     engines = EngineRegistry()
     engines.register(EngineDescriptor(engine_id="react"))
     protocols = ProtocolRegistry()
     protocols.register(ProtocolDescriptor(protocol_id="native"))
-    adapters = AdapterRegistry(engines, protocols)
+    return AdapterRegistry(engines, protocols)
+
+
+def _build_execution_orchestrator(
+    runtime_factory: RuntimeFactory,
+    adapters: AdapterRegistry | None = None,
+) -> ExecutionOrchestrator:
+    """Register production metadata without resolving a per-run adapter.
+
+    The React ``AdapterDescriptor`` below mirrors the metadata-only registry in
+    ``business_capabilities/agent_config/service._standalone_execution_registry``;
+    ``test_react_descriptor_metadata_matches_between_standalone_and_production_registries``
+    locks the two to stay field-identical.
+    """
+
+    adapters = adapters or _execution_adapter_registry()
     adapters.register(
-        AdapterDescriptor(engine_id="react", protocol_id="native", adapter_version="v1"),
+        AdapterDescriptor(
+            engine_id="react",
+            protocol_id="native",
+            adapter_version="v1",
+            config_schema=ReactConfig,
+            config_schema_version="v1",
+            declared=EngineCapabilities(
+                streaming=True,
+                cancellation=True,
+                tool_calling=True,
+                native_events=True,
+            ),
+            declared_schema_version="v1",
+            probe_id="react-probe",
+            probe_version="v1",
+            policy_provider_id="react-policy",
+            policy_version="v1",
+            instruction_provider_id="react-native",
+            provider_version="v1",
+        ),
         ReactAdapterFactory(runtime_factory),
     )
     return ExecutionOrchestrator(adapters)
@@ -167,6 +202,7 @@ async def runtime_services(
         "model_name": settings.model_name,
     }
     engine = create_engine(settings)
+    adapters = _execution_adapter_registry()
     dsn = settings.database_url.get_secret_value()
     listener = Listener(dsn)
     notifier = Notifier(dsn)
@@ -218,6 +254,7 @@ async def runtime_services(
                 contributions,
                 tool_client=client,
                 tool_network_policy=tool_policy,
+                adapter_registry=adapters,
             )
             platform.extensions = extensions
             platform.ui_extensions = ui_extensions
@@ -308,7 +345,7 @@ async def runtime_services(
             groups = build_service_groups(platform)
             bindings = build_runtime_bindings(groups)
             factory = RuntimeFactory(runtime, bindings, client, settings, tools.limit, tool_policy)
-            orchestrator = _build_execution_orchestrator(factory)
+            orchestrator = _build_execution_orchestrator(factory, adapters)
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             groups.application.evaluation = platform.evaluation
             identity = IdentityBindings(

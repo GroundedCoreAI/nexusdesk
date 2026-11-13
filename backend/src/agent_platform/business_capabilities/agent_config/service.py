@@ -1,9 +1,31 @@
 import json
-from typing import Literal
+import logging
+from collections.abc import Mapping
+from typing import Literal, NoReturn
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from agent_platform.core_platform.agent_execution.contracts.capabilities import EngineCapabilities
+from agent_platform.core_platform.agent_execution.contracts.config import (
+    CapabilityName,
+    EngineIdentity,
+    ExecutionConfig,
+    ReactConfig,
+    normalize_execution_config,
+)
+from agent_platform.core_platform.agent_execution.contracts.errors import (
+    ConfigurationError,
+    ExecutionErrorCode,
+)
+from agent_platform.core_platform.agent_execution.registry import (
+    AdapterDescriptor,
+    AdapterRegistry,
+    EngineDescriptor,
+    EngineRegistry,
+    ProtocolDescriptor,
+    ProtocolRegistry,
+)
 from agent_platform.core_platform.platform_services.persistence.store import (
     DomainError,
     audit,
@@ -19,6 +41,8 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
 
 from .classification import INDUSTRIES, TAGS
 
+logger = logging.getLogger(__name__)
+
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -28,6 +52,13 @@ class AgentConfig(BaseModel):
     max_model_rounds: int = Field(default=6, ge=1, le=30)
     model_profile_id: UUID | None = None
     model_profile_version: int | None = Field(default=None, ge=1)
+    engine: EngineIdentity = Field(
+        default_factory=lambda: EngineIdentity(
+            engine_id="react", protocol_id="native", adapter_version="v1"
+        )
+    )
+    react: ReactConfig | None = None
+    disabled_capabilities: tuple[CapabilityName, ...] = Field(default=(), max_length=11)
     reply_language: Literal["auto", "zh-CN", "zh-TW", "en", "hi"] = "auto"
     # Agent-level switch for the rolling conversation summary. Flows through the
     # existing draft/publish/snapshot chain, so no table change is needed.
@@ -59,6 +90,47 @@ class AgentConfig(BaseModel):
     memory_inject_max_items: int | None = Field(default=None, ge=1)
     memory_search_limit: int | None = Field(default=None, ge=1)
     memory_blacklist_auto_handoff: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_execution(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        execution_fields = {
+            "engine",
+            "react",
+            "disabled_capabilities",
+            "model_profile_id",
+            "model_profile_version",
+            "max_model_rounds",
+        }
+        execution = normalize_execution_config(
+            {key: item for key, item in value.items() if key in execution_fields}
+        )
+        normalized = dict(value)
+        normalized.update(
+            engine=execution.engine,
+            react=execution.react,
+            disabled_capabilities=execution.disabled_capabilities,
+        )
+        if execution.react is not None:
+            normalized.update(
+                model_profile_id=execution.react.model_profile_id,
+                model_profile_version=execution.react.model_profile_version,
+                max_model_rounds=execution.react.max_model_rounds,
+            )
+        else:
+            normalized.update(model_profile_id=None, model_profile_version=None)
+        return normalized
+
+    def execution_config(self) -> ExecutionConfig:
+        return normalize_execution_config(
+            {
+                "engine": self.engine,
+                "react": self.react,
+                "disabled_capabilities": self.disabled_capabilities,
+            }
+        )
 
     @field_validator("memory_types")
     @classmethod
@@ -100,9 +172,87 @@ class AgentDraft(BaseModel):
         )
 
 
+def _metadata_only_factory() -> NoReturn:
+    raise AssertionError("metadata-only AgentService registry must not resolve adapters")
+
+
+def _standalone_execution_registry() -> AdapterRegistry:
+    """Provide strict React validation for isolated service tests and scripts.
+
+    The React ``AdapterDescriptor`` below mirrors the production metadata in
+    ``applications/platform_runtime/runtime_composition._build_execution_orchestrator``;
+    ``test_react_descriptor_metadata_matches_between_standalone_and_production_registries``
+    locks the two to stay field-identical.
+    """
+
+    engines = EngineRegistry()
+    engines.register(EngineDescriptor(engine_id="react"))
+    protocols = ProtocolRegistry()
+    protocols.register(ProtocolDescriptor(protocol_id="native"))
+    registry = AdapterRegistry(engines, protocols)
+    registry.register(
+        AdapterDescriptor(
+            engine_id="react",
+            protocol_id="native",
+            adapter_version="v1",
+            config_schema=ReactConfig,
+            declared=EngineCapabilities(
+                streaming=True,
+                cancellation=True,
+                tool_calling=True,
+                native_events=True,
+            ),
+            probe_id="react-probe",
+            policy_provider_id="react-policy",
+            instruction_provider_id="react-native",
+        ),
+        _metadata_only_factory,
+    )
+    return registry
+
+
+def canonical_config_diff(
+    published: Mapping[str, object],
+    draft: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Compare normalized semantic views without persisting default completion."""
+
+    published_view = AgentConfig.model_validate(published).model_dump(mode="json")
+    draft_view = AgentConfig.model_validate(draft).model_dump(mode="json")
+    return [
+        {"field": key, "published": published_view.get(key), "draft": draft_view.get(key)}
+        for key in sorted(set(published_view) | set(draft_view))
+        if published_view.get(key) != draft_view.get(key)
+    ]
+
+
 class AgentService:
-    def __init__(self, engine, tools, model_catalog=None):
+    def __init__(
+        self,
+        engine,
+        tools,
+        model_catalog=None,
+        adapter_registry: AdapterRegistry | None = None,
+    ):
         self.engine, self.tools, self.model_catalog = engine, tools, model_catalog
+        self.adapter_registry = adapter_registry or _standalone_execution_registry()
+
+    @staticmethod
+    def parse_config(value: Mapping[str, object]) -> AgentConfig:
+        try:
+            return AgentConfig.model_validate(value)
+        except ValidationError:
+            raise DomainError("execution_configuration_invalid", 409) from None
+
+    def validate_execution(self, config: AgentConfig) -> None:
+        try:
+            self.adapter_registry.validate_config(config.execution_config())
+        except ValidationError:
+            raise DomainError("execution_configuration_invalid", 409) from None
+        except ConfigurationError as exc:
+            if exc.error.code == ExecutionErrorCode.INVALID_REQUEST:
+                raise DomainError("execution_configuration_invalid", 409) from None
+            raise DomainError("execution_engine_unavailable", 409) from None
 
     async def validate_model(self, tenant, config, c):
         if not config.model_profile_id:
@@ -138,9 +288,7 @@ class AgentService:
             return required(
                 await one(
                     c,
-                    "SELECT * FROM agents WHERE tenant_id=:t"
-                    + scope_sql
-                    + " AND id=:id",
+                    "SELECT * FROM agents WHERE tenant_id=:t" + scope_sql + " AND id=:id",
                     t=tenant,
                     id=aid,
                     **scope_params,
@@ -162,14 +310,17 @@ class AgentService:
         created_by=None,
     ):
         scope_sql, scope_params = resource_scope_clause()
-        where = """tenant_id=:t AND (:archived OR NOT archived)
+        where = (
+            """tenant_id=:t AND (:archived OR NOT archived)
             AND (:q='' OR name ILIKE :pattern)
             AND (:status='all' OR (:status='published' AND published_version IS NOT NULL)
                  OR (:status='unpublished' AND published_version IS NULL))
             AND (:all_industries OR industry=ANY(CAST(:industries AS text[])))
             AND (:all_tags OR tags && CAST(:tags AS text[]))
             AND (NOT :examples_only OR is_example)
-            AND (:all_creators OR created_by=:creator)""" + scope_sql
+            AND (:all_creators OR created_by=:creator)"""
+            + scope_sql
+        )
         params = {
             "t": tenant,
             "archived": include_archived,
@@ -199,6 +350,7 @@ class AgentService:
             return {"items": items, "total": total["total"], "page": page, "page_size": page_size}
 
     async def create(self, tenant, actor, body):
+        self.validate_execution(body.config)
         scope_values = resource_scope_values()
         async with self.engine.begin() as c:
             row = await one(
@@ -225,6 +377,7 @@ class AgentService:
             return row
 
     async def update(self, tenant, actor, aid, body, revision):
+        self.validate_execution(body.config)
         scope_sql, scope_params = resource_scope_clause()
         async with self.engine.begin() as c:
             # The FROM subquery snapshots the pre-update draft so the audit
@@ -238,8 +391,12 @@ class AgentService:
                 is_example=CASE WHEN :set_example THEN :is_example ELSE is_example END,
                 draft_revision=draft_revision+1,updated_at=now()
                 FROM (SELECT draft AS old_draft,name AS old_name,description AS old_description
-                      FROM agents WHERE id=:id AND tenant_id=:t""" + scope_sql + """) old
-                WHERE id=:id AND tenant_id=:t""" + scope_sql + """
+                      FROM agents WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + """) old
+                WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + """
                 AND draft_revision=:revision RETURNING *, old.old_draft, old.old_name, old.old_description""",
                 id=aid,
                 t=tenant,
@@ -267,10 +424,24 @@ class AgentService:
             # knowledge_base_ids) match the old JSONB draft shape and the
             # audit details stay json.dumps-able (AC-11).
             new_draft = body.config.model_dump(mode="json")
+            try:
+                config_changes = canonical_config_diff(old_draft, new_draft)
+            except ValidationError:
+                # Historical rows can carry drafts written before the strict
+                # contract (e.g. migration seeds storing '{}'). The submitted
+                # config already passed the parse and execution gates, so a
+                # baseline that cannot be read must not 500 the save nor
+                # block repairs with a 409: degrade the audit to an empty
+                # field diff. The exception text is not logged because
+                # drafts can contain customer-adjacent content.
+                logger.warning(
+                    "agent.updated audit diff skipped for agent %s: stored draft is not parseable",
+                    aid,
+                )
+                config_changes = []
             changes = {
-                key: {"from": old_draft.get(key), "to": new_draft.get(key)}
-                for key in sorted(set(old_draft) | set(new_draft))
-                if old_draft.get(key) != new_draft.get(key)
+                change["field"]: {"from": change["published"], "to": change["draft"]}
+                for change in config_changes
             }
             for field in ("name", "description"):
                 if old_values[field] != getattr(body, field):
@@ -321,7 +492,8 @@ class AgentService:
             )
             if agent["draft_revision"] != revision:
                 raise DomainError("draft_revision_conflict", 409)
-            config = AgentConfig.model_validate(agent["draft"])
+            config = self.parse_config(agent["draft"])
+            self.validate_execution(config)
             await self.validate_model(tenant, config, c)
             if agent["archived"]:
                 raise DomainError("agent_archived", 409)
@@ -383,7 +555,9 @@ class AgentService:
                     v=version,
                 )
             )
-            await self.validate_model(tenant, AgentConfig.model_validate(target["config"]), c)
+            config = self.parse_config(target["config"])
+            self.validate_execution(config)
+            await self.validate_model(tenant, config, c)
             await execute(
                 c,
                 "UPDATE agents SET published_version=:v,updated_at=now() WHERE id=:id",
@@ -400,7 +574,8 @@ class AgentService:
                 c,
                 """SELECT a.id,v.version AS published_version,a.archived,a.is_example,v.config,v.tool_snapshot FROM agents a
             LEFT JOIN agent_versions v ON v.agent_id=a.id AND v.version=COALESCE(CAST(:version AS integer),a.published_version)
-            WHERE a.id=:id AND a.tenant_id=:t""" + scope_sql,
+            WHERE a.id=:id AND a.tenant_id=:t"""
+                + scope_sql,
                 id=aid,
                 t=tenant,
                 version=version,
@@ -414,11 +589,13 @@ class AgentService:
             raise DomainError("agent_archived", 409)
         current = await self.tools.resolve(tenant, row["config"]["tool_names"], c)
         specs = row["tool_snapshot"] if row["tool_snapshot"] is not None else current
-        await self.validate_model(tenant, AgentConfig.model_validate(row["config"]), c)
+        config = self.parse_config(row["config"])
+        self.validate_execution(config)
+        await self.validate_model(tenant, config, c)
         return {
             "id": str(aid),
             "version": row["published_version"],
-            "config": row["config"],
+            "config": config.model_dump(mode="json"),
             "tools": specs,
             # Rides along with the run config so the runtime can keep example
             # agents out of the memory extraction pipeline without a re-query.
@@ -431,9 +608,7 @@ class AgentService:
             row = await one(
                 c,
                 "UPDATE agents SET archived=:a,draft_revision=draft_revision+1,updated_at=now() "
-                "WHERE id=:id AND tenant_id=:t"
-                + scope_sql
-                + " AND draft_revision=:r RETURNING *",
+                "WHERE id=:id AND tenant_id=:t" + scope_sql + " AND draft_revision=:r RETURNING *",
                 id=aid,
                 t=tenant,
                 a=archived,
@@ -547,11 +722,11 @@ class AgentService:
                     **scope_params,
                 )
             )
+            published = self.parse_config(row["config"])
+            draft = self.parse_config(row["draft"])
+            self.validate_execution(published)
+            self.validate_execution(draft)
             return {
                 "version": version,
-                "changes": [
-                    {"field": k, "published": row["config"].get(k), "draft": row["draft"].get(k)}
-                    for k in sorted(set(row["config"]) | set(row["draft"]))
-                    if row["config"].get(k) != row["draft"].get(k)
-                ],
+                "changes": canonical_config_diff(row["config"], row["draft"]),
             }

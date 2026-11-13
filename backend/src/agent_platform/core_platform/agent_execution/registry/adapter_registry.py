@@ -7,11 +7,17 @@ from contextlib import suppress
 from typing import cast
 from weakref import ReferenceType, ref
 
-from pydantic import ConfigDict, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from ..contracts.adapter import AgentEngineAdapter
 from ..contracts.base import ExecutionContractModel
-from ..contracts.common import AdapterVersion, EngineId, ProtocolId
+from ..contracts.capabilities import EngineCapabilities
+from ..contracts.common import AdapterVersion, EngineId, ProtocolId, Slug
+from ..contracts.config import (
+    EmptyEngineConfig,
+    ExecutionConfig,
+    normalize_execution_config,
+)
 from ..contracts.errors import (
     ConfigurationError,
     ExecutionError,
@@ -36,6 +42,16 @@ class AdapterDescriptor(ExecutionContractModel):
     protocol_id: ProtocolId
     adapter_version: AdapterVersion
     enabled: bool = True
+    config_schema: type[BaseModel] = EmptyEngineConfig
+    config_schema_version: AdapterVersion = "v1"
+    declared: EngineCapabilities = Field(default_factory=EngineCapabilities)
+    declared_schema_version: AdapterVersion = "v1"
+    probe_id: Slug = "unavailable"
+    probe_version: AdapterVersion = "v1"
+    policy_provider_id: Slug = "unavailable"
+    policy_version: AdapterVersion = "v1"
+    instruction_provider_id: Slug = "unavailable"
+    provider_version: AdapterVersion = "v1"
 
 
 def _configuration_error(
@@ -228,6 +244,18 @@ class AdapterRegistry:
         """Register a factory without invoking it or probing external systems."""
         if not isinstance(descriptor, AdapterDescriptor):
             raise _configuration_error(ExecutionErrorCode.INVALID_REQUEST)
+        schema_config = descriptor.config_schema.model_config
+        if (
+            schema_config.get("strict") is not True
+            or schema_config.get("frozen") is not True
+            or schema_config.get("extra") != "forbid"
+        ):
+            raise _configuration_error(
+                ExecutionErrorCode.ADAPTER_CONTRACT_MISMATCH,
+                engine_id=descriptor.engine_id,
+                protocol_id=descriptor.protocol_id,
+                adapter_version=descriptor.adapter_version,
+            )
         triple = (
             descriptor.engine_id,
             descriptor.protocol_id,
@@ -281,13 +309,16 @@ class AdapterRegistry:
         self._registrations[triple] = (descriptor, factory)
         self._returned_instances[triple] = []
 
-    def resolve(
+    def _enabled_registration(
         self,
         engine_id: str,
         protocol_id: str,
         adapter_version: str,
-    ) -> AgentEngineAdapter:
-        """Resolve only the exact enabled triple and construct a fresh adapter."""
+    ) -> tuple[
+        AdapterDescriptor,
+        Callable[[], AgentEngineAdapter],
+        tuple[str, str, str],
+    ]:
         engine_id, protocol_id, adapter_version = _validated_resolution_identity(
             engine_id,
             protocol_id,
@@ -336,6 +367,63 @@ class AdapterRegistry:
                 protocol_id=protocol_id,
                 adapter_version=adapter_version,
             )
+        return descriptor, factory, triple
+
+    def metadata(
+        self,
+        engine_id: str,
+        protocol_id: str,
+        adapter_version: str,
+    ) -> AdapterDescriptor:
+        """Return exact enabled metadata without constructing or probing an adapter."""
+
+        descriptor, _, _ = self._enabled_registration(
+            engine_id,
+            protocol_id,
+            adapter_version,
+        )
+        return descriptor
+
+    def validate_config(
+        self,
+        value: ExecutionConfig | dict[str, object],
+    ) -> ExecutionConfig:
+        """Validate canonical execution data against the exact registered schema."""
+
+        try:
+            # An already canonical ExecutionConfig is not re-normalized through
+            # JSON; only the adapter-specific schema check below can still
+            # reject it. Mapping-style input goes through the full normalizer.
+            normalized = (
+                value if isinstance(value, ExecutionConfig) else normalize_execution_config(value)
+            )
+            engine = normalized.engine
+            descriptor = self.metadata(
+                engine.engine_id,
+                engine.protocol_id,
+                engine.adapter_version,
+            )
+            engine_config = normalized.react if normalized.react is not None else {}
+            descriptor.config_schema.model_validate(engine_config)
+        except ConfigurationError:
+            raise
+        except (ValidationError, TypeError, ValueError):
+            raise _configuration_error(ExecutionErrorCode.INVALID_REQUEST) from None
+        return normalized
+
+    def resolve(
+        self,
+        engine_id: str,
+        protocol_id: str,
+        adapter_version: str,
+    ) -> AgentEngineAdapter:
+        """Resolve only the exact enabled triple and construct a fresh adapter."""
+
+        descriptor, factory, triple = self._enabled_registration(
+            engine_id,
+            protocol_id,
+            adapter_version,
+        )
         try:
             instance = factory()
         except Exception:  # noqa: BLE001 - all factory failures use the safe catalog error.

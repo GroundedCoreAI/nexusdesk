@@ -263,8 +263,10 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "contracts/result.py",
         "contracts/events.py",
         "contracts/capabilities.py",
+        "contracts/config.py",
         "contracts/errors.py",
         "contracts/adapter.py",
+        "contracts/snapshots.py",
     }
     registry_modules = {
         "registry/__init__.py",
@@ -289,8 +291,22 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "adapters/react/event_mapper.py",
     }
     t4_modules = {"orchestration/orchestrator.py"}
+    phase3_capability_modules = {
+        "capability/__init__.py",
+        "capability/cache.py",
+        "capability/ports.py",
+        "capability/resolver.py",
+        "capability/snapshots.py",
+        "capability/warmer.py",
+    }
     expected_modules = (
-        contract_modules | registry_modules | adapter_modules | t2_modules | t3_modules | t4_modules
+        contract_modules
+        | registry_modules
+        | adapter_modules
+        | t2_modules
+        | t3_modules
+        | t4_modules
+        | phase3_capability_modules
     )
     actual_modules = {str(path.relative_to(package_root)) for path in package_root.rglob("*.py")}
     assert actual_modules == expected_modules
@@ -329,6 +345,12 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         if relative_path in registry_modules - {"registry/__init__.py"}:
             forbidden = (*common_forbidden, ".adapters", ".testing")
             assert not any(part in name for name in names for part in forbidden), relative_path
+        if relative_path in phase3_capability_modules:
+            forbidden = (*common_forbidden, ".adapters", ".orchestration", ".testing")
+            assert not any(part in name for name in names for part in forbidden), (
+                relative_path,
+                imports,
+            )
         if relative_path == "adapters/testing/local_test_adapter.py":
             assert not any("registry" in name for name in names)
             forbidden_calls = {"uuid4", "now", "utcnow", "sleep", "random"}
