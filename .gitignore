@@ -44,3 +44,7 @@ work/
 .vite*.log
 pytest-of-*/
 frontend/.tmp/
+
+# Coverage artifacts produced by local pytest runs
+.coverage
+.coverage.*
