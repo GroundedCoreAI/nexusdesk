@@ -324,6 +324,12 @@ def _runtime_fingerprint_exclude_fields() -> set[str]:
     model/round/history fields are, and stay hashed. The Phase 3 semantics survive
     the exclusion through the five snapshot columns' provenance and the R-17 live
     read, not through the fingerprint.
+
+    R-8 (Phase 4 08) extends the same rule to the whole Phase 4 family:
+    ``execution_runtime_host_*``, ``execution_workdir_*``, ``execution_process_*``,
+    ``execution_resource_*`` and ``execution_sandbox_provider`` are rollout flags
+    and tuning limits, none of them a Runtime assembly input, so changing one
+    must never force queued Runs to ``configuration_changed``.
     """
     return {
         "knowledge_s3_access_key",
@@ -341,6 +347,19 @@ def _runtime_fingerprint_exclude_fields() -> set[str]:
         "execution_phase3_enabled",
         "execution_snapshot_max_bytes",
         *(name for name in Settings.model_fields if name.startswith("execution_capability_")),
+        *(
+            name
+            for name in Settings.model_fields
+            if name.startswith(
+                (
+                    "execution_runtime_host_",
+                    "execution_workdir_",
+                    "execution_process_",
+                    "execution_resource_",
+                )
+            )
+            or name == "execution_sandbox_provider"
+        ),
     }
 
 
