@@ -542,6 +542,41 @@ def _drive_engine(url, flow, root):
     asyncio.run(main())
 
 
+async def _raw_execute(url, sql, *params):
+    conn = await asyncpg.connect(url)
+    try:
+        return await conn.execute(sql, *params)
+    finally:
+        await conn.close()
+
+
+async def _insert_workdir_row(
+    url,
+    *,
+    workdir_id,
+    run_id,
+    tenant,
+    business="b",
+    workspace="w",
+    status="preparing",
+    relative_path,
+    quota=1_073_741_824,
+):
+    await _raw_execute(
+        url,
+        "INSERT INTO execution_workdirs (id, run_id, tenant_id, business_id, workspace_id,"
+        " relative_path, status, quota_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        str(workdir_id),
+        str(run_id),
+        tenant,
+        business,
+        workspace,
+        relative_path,
+        status,
+        quota,
+    )
+
+
 async def _make_run(engine, tenant: str) -> uuid.UUID:
     from agent_platform.applications.platform_runtime.runtime_hooks import (
         BusinessRuntimePersistenceHooks,
@@ -790,7 +825,8 @@ def test_concurrent_cross_tenant_prepare_and_fk_gate(workspace_database, tmp_pat
         assert (manager_root / first.relative_path).is_dir()
         assert (manager_root / second.relative_path).is_dir()
 
-        # Concurrent double-prepare of the same Run converges on one record.
+        # Concurrent double-prepare of the same Run converges on one record,
+        # and per R-11 neither caller may observe a preparing status.
         pair = await asyncio.gather(
             manager.prepare(
                 run_id=run_a, tenant_id="wd-tenant-a", business_id="b", workspace_id="w"
@@ -800,6 +836,7 @@ def test_concurrent_cross_tenant_prepare_and_fk_gate(workspace_database, tmp_pat
             ),
         )
         assert pair[0].workdir_id == pair[1].workdir_id == first.workdir_id
+        assert {pair[0].status, pair[1].status} <= {"ready", "active"}
 
         # Trusted-target gate: an unknown run_id never reaches the filesystem.
         ghost = uuid.uuid4()
@@ -926,3 +963,230 @@ def test_prepare_fs_failure_records_cleanup_failed_then_recovers(workspace_datab
         assert deleted.status == "deleted"
 
     _drive_engine(workspace_database, flow, broken_root)
+
+
+# ---------------------------------------------------------------------------
+# R-11: ready-or-refuse self-convergence for prepare
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+def test_prepare_converges_crashed_preparing_winner(workspace_database, tmp_path):
+    # A crashed winner leaves a preparing row with no filesystem tree. The
+    # late caller converges it itself: rerun the convergent build, apply the
+    # guarded preparing->ready update, refetch. No waiting, no polling, and
+    # the row identity (workdir_id) stays the winner's (08 R-11).
+    root = tmp_path / "execution"
+    root.mkdir(mode=0o700)
+    tenant = "wd-converge"
+
+    async def flow(engine, manager_root):
+        db_url = workspace_database
+        manager = _manager(engine, manager_root, clock=lambda: 1.0)
+        run_id = await _make_run(engine, tenant)
+        relative = policy.build_relative_path(tenant, str(run_id))
+        stranded = uuid.uuid4()
+        await _insert_workdir_row(
+            db_url,
+            workdir_id=stranded,
+            run_id=run_id,
+            tenant=tenant,
+            relative_path=relative,
+        )
+
+        record = await manager.prepare(
+            run_id=run_id, tenant_id=tenant, business_id="b", workspace_id="w"
+        )
+        assert record.workdir_id == stranded
+        assert record.status in ("ready", "active")
+        run_dir = manager_root / relative
+        for name in policy.expected_layout_dirs():
+            assert (run_dir / name).is_dir()
+
+    _drive_engine(workspace_database, flow, root)
+
+
+@pytest.mark.postgres
+def test_prepare_refuses_id_mismatch_and_post_terminal(workspace_database, tmp_path):
+    # Same Run under conflicting trusted ids: refuse with a stable code and
+    # leave the row untouched (never adopt another scope's record). Rows past
+    # the usable window (retained/deleted/...) mean start-prevention (R-11).
+    root = tmp_path / "execution"
+    root.mkdir(mode=0o700)
+    tenant = "wd-converge-refuse"
+
+    async def flow(engine, manager_root):
+        db_url = workspace_database
+        manager = _manager(engine, manager_root, clock=lambda: 1.0)
+        run_a = await _make_run(engine, tenant)
+        relative_a = policy.build_relative_path(tenant, str(run_a))
+        await _insert_workdir_row(
+            db_url,
+            workdir_id=uuid.uuid4(),
+            run_id=run_a,
+            tenant=tenant,
+            business="someone-else",
+            relative_path=relative_a,
+        )
+        with pytest.raises(WorkspaceStateError) as excinfo:
+            await manager.prepare(run_id=run_a, tenant_id=tenant, business_id="b", workspace_id="w")
+        assert excinfo.value.code == "workdir_persistence_conflict"
+        still = await manager.get(run_id=run_a, tenant_id=tenant)
+        assert still is not None and still.status == "preparing"
+
+        run_b = await _make_run(engine, tenant)
+        relative_b = policy.build_relative_path(tenant, str(run_b))
+        await _insert_workdir_row(
+            db_url,
+            workdir_id=uuid.uuid4(),
+            run_id=run_b,
+            tenant=tenant,
+            status="retained",
+            relative_path=relative_b,
+        )
+        with pytest.raises(WorkspaceStateError) as excinfo:
+            await manager.prepare(run_id=run_b, tenant_id=tenant, business_id="b", workspace_id="w")
+        assert excinfo.value.code == "workdir_state_invalid"
+
+    _drive_engine(workspace_database, flow, root)
+
+
+# ---------------------------------------------------------------------------
+# R-12: latest-successful-observation accounting
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+def test_retain_persists_overquota_observation_with_structured_alert(
+    workspace_database, tmp_path, caplog
+):
+    # An over-quota observation is fact, not mutation: the successful
+    # observation is persisted, the retain decision stands, last_error_code
+    # stays clean, and the excess signal is the row plus a structured
+    # warning carrying the stable reason code - never warn-only over a
+    # stale record (08 R-12, P4-IT-21).
+    root = tmp_path / "execution"
+    root.mkdir(mode=0o700)
+    tenant = "wd-overquota"
+
+    async def flow(engine, manager_root):
+        manager = _manager(engine, manager_root, clock=lambda: 1.0, quota_bytes=64)
+        run_id = await _make_run(engine, tenant)
+        record = await manager.prepare(
+            run_id=run_id, tenant_id=tenant, business_id="b", workspace_id="w"
+        )
+        await manager.activate(workdir_id=record.workdir_id, run_id=run_id, tenant_id=tenant)
+        _plant_file(manager_root / record.relative_path / "workdir", "big", b"z" * 100)
+
+        with caplog.at_level("WARNING"):
+            retained = await manager.retain(
+                workdir_id=record.workdir_id,
+                run_id=run_id,
+                tenant_id=tenant,
+                outcome="success",
+            )
+        assert retained.status == "retained"
+        assert retained.size_bytes == 100
+        assert retained.file_count == 1
+        assert retained.last_error_code is None
+
+        alerts = [
+            r.getMessage()
+            for r in caplog.records
+            if "over quota" in r.getMessage() and "runtime_host_resource_exceeded" in r.getMessage()
+        ]
+        assert len(alerts) == 1
+        current = await manager.get(run_id=run_id, tenant_id=tenant)
+        assert current is not None and current.size_bytes == 100
+
+    _drive_engine(workspace_database, flow, root)
+
+
+@pytest.mark.postgres
+def test_cleanup_reobserves_before_delete_and_keeps_final_observation(workspace_database, tmp_path):
+    # Every physical deletion path performs one best-effort re-observation
+    # before removal and persists the success, so the Tombstone carries the
+    # final observation for audit (08 R-12, P4-IT-15).
+    root = tmp_path / "execution"
+    root.mkdir(mode=0o700)
+    tenant = "wd-reobserve"
+
+    async def flow(engine, manager_root):
+        manager = _manager(engine, manager_root, clock=lambda: 1.0)
+        run_id = await _make_run(engine, tenant)
+        record = await manager.prepare(
+            run_id=run_id, tenant_id=tenant, business_id="b", workspace_id="w"
+        )
+        await manager.activate(workdir_id=record.workdir_id, run_id=run_id, tenant_id=tenant)
+        _plant_file(manager_root / record.relative_path / "workdir", "one", b"a" * 10)
+        retained = await manager.retain(
+            workdir_id=record.workdir_id,
+            run_id=run_id,
+            tenant_id=tenant,
+            outcome="success",
+        )
+        assert retained.size_bytes == 10
+
+        _plant_file(manager_root / record.relative_path / "temp", "two", b"b" * 12)
+        deleted = await manager.cleanup(
+            workdir_id=record.workdir_id, run_id=run_id, tenant_id=tenant
+        )
+        assert deleted.status == "deleted"
+        assert deleted.size_bytes == 22  # re-asserted before removal
+        assert deleted.file_count == 2
+        assert not (manager_root / record.relative_path).exists()
+
+    _drive_engine(workspace_database, flow, root)
+
+
+@pytest.mark.postgres
+def test_failed_observation_never_overwrites_persisted_value(workspace_database, tmp_path):
+    # An aborted observation (the mount probe denies the scope) is tolerated
+    # before deletion and must not touch the row: the cleanup_failed record
+    # keeps the last successful observation plus its own stable error code;
+    # the converged retry re-observes the same value into the Tombstone
+    # (08 R-12). A hardlink-oversize accounting, by contrast, IS a
+    # successful observation and is persisted - that is the second half of
+    # the same rule, covered by the over-quota test above.
+    root = tmp_path / "execution"
+    root.mkdir(mode=0o700)
+    tenant = "wd-observation-sticky"
+
+    async def flow(engine, manager_root):
+        manager = _manager(engine, manager_root, clock=lambda: 1.0)
+        run_id = await _make_run(engine, tenant)
+        record = await manager.prepare(
+            run_id=run_id, tenant_id=tenant, business_id="b", workspace_id="w"
+        )
+        await manager.activate(workdir_id=record.workdir_id, run_id=run_id, tenant_id=tenant)
+        _plant_file(manager_root / record.relative_path / "workdir", "one", b"a" * 10)
+        retained = await manager.retain(
+            workdir_id=record.workdir_id,
+            run_id=run_id,
+            tenant_id=tenant,
+            outcome="failed",
+        )
+        assert retained.size_bytes == 10  # the last successful observation
+
+        def deny_mount(child_dev, parent_dev):
+            return True
+
+        blocked = _manager(engine, manager_root, clock=lambda: 2.0, mount_probe=deny_mount)
+        with pytest.raises(WorkspaceStateError) as excinfo:
+            await blocked.cleanup(workdir_id=record.workdir_id, run_id=run_id, tenant_id=tenant)
+        assert excinfo.value.code == ops.WORKDIR_MOUNT_DENIED
+        failed = await manager.get(run_id=run_id, tenant_id=tenant)
+        assert failed is not None
+        assert failed.status == "cleanup_failed"
+        assert failed.last_error_code == "workdir_mount_denied"
+        assert failed.size_bytes == 10  # the aborted observation did not overwrite
+        assert (manager_root / record.relative_path / "workdir" / "one").exists()
+
+        repaired = await manager.cleanup(
+            workdir_id=record.workdir_id, run_id=run_id, tenant_id=tenant
+        )
+        assert repaired.status == "deleted"
+        assert repaired.size_bytes == 10  # re-observation converges on the same value
+        assert not (manager_root / record.relative_path).exists()
+
+    _drive_engine(workspace_database, flow, root)

@@ -94,9 +94,16 @@ class ExecutionWorkspaceManager:
 
         The relative path is generated exclusively from the trusted tenant
         digest and Run UUID; nothing here accepts a location from a caller.
-        A second prepare for the same Run returns the existing record
-        (idempotent), and a filesystem failure is recorded as
-        ``cleanup_failed`` for alert/retry before the error surfaces.
+        R-11 contract - ready-or-refuse with self-convergence: ``prepare``
+        never returns a ``preparing`` record and never blocks or polls. On an
+        ON CONFLICT race whose existing row is still ``preparing`` (a slow or
+        crashed winner), a caller whose trusted ids match re-runs the same
+        convergent handle build and the same guarded ``preparing -> ready``
+        update exactly once, then refetches; trusted-id mismatch is a stable
+        ``workdir_persistence_conflict``, and any post-condition outside
+        ``ready``/``active`` refuses start (FR-5 failure row). A filesystem
+        failure is recorded as ``cleanup_failed`` for alert/retry before the
+        error surfaces.
         """
         relative_path = self._generated_path(tenant_id, run_id)
         workdir_id = uuid4()
@@ -133,7 +140,25 @@ class ExecutionWorkspaceManager:
             existing = await self._fetch(where="run_id=:run_id", params={"run_id": run_id})
             if existing is None:  # pragma: no cover - conflict implies the row
                 raise WorkspaceStateError("workdir_persistence_conflict", "conflict without row")
-            return existing
+            if (
+                existing.tenant_id != tenant_id
+                or existing.business_id != business_id
+                or existing.workspace_id != workspace_id
+            ):
+                # Same Run, different trusted scope: refuse, never adopt.
+                raise WorkspaceStateError(
+                    "workdir_persistence_conflict",
+                    "trusted ids disagree with the durable record",
+                )
+            if existing.status == "preparing":
+                return await self._converge_preparing(
+                    run_id=run_id, tenant_id=tenant_id, relative_path=relative_path
+                )
+            if existing.status in ("ready", "active"):
+                return existing
+            raise WorkspaceStateError(
+                "workdir_state_invalid", f"prepare cannot return {existing.status}"
+            )
 
         try:
             await asyncio.to_thread(self._fs_prepare, relative_path)
@@ -164,7 +189,8 @@ class ExecutionWorkspaceManager:
             where="run_id=:run_id AND tenant_id=:tenant_id",
             params={"run_id": run_id, "tenant_id": tenant_id},
         )
-        assert record is not None
+        if record is None or record.status not in ("ready", "active"):
+            raise WorkspaceStateError("workdir_state_invalid", "prepare did not reach ready")
         return record
 
     async def activate(self, *, workdir_id: UUID, run_id: UUID, tenant_id: str) -> WorkdirRecord:
@@ -209,7 +235,15 @@ class ExecutionWorkspaceManager:
         try:
             usage = await asyncio.to_thread(self._fs_account, record.relative_path)
             size_params = {"size_bytes": usage.total_bytes, "file_count": usage.file_count}
+            # R-12: a successful observation always persists, including an
+            # over-quota one; the excess signal is the persisted row plus
+            # this structured alert with the stable reason code, never a
+            # warn-only stale record. Over-quota never flips the retain
+            # decision and never touches last_error_code.
+            self._alert_over_quota(record, usage, run_id=run_id, tenant_id=tenant_id)
         except workdir_ops.WorkdirOperationError as exc:
+            # A failed/partial observation never overwrites the last
+            # successful one (fail-closed, 04 Principle 3).
             logger.warning(
                 "workdir usage accounting skipped code=%s run_id=%s tenant=%s",
                 exc.code,
@@ -238,7 +272,11 @@ class ExecutionWorkspaceManager:
         against the generator before any filesystem call, so a tampered or
         mispointed row is refused (never "cleaned somewhere else"). Failures
         leave the row ``cleanup_failed`` with the stable code and surface the
-        error to the caller.
+        error to the caller. Every physical deletion path - interval sweeper,
+        cleanup_failed retry and the direct retain->clean branch all enter
+        here - performs one best-effort usage re-observation before removal
+        and persists it on success (08 R-12), so the Tombstone carries the
+        final successful observation for audit.
         """
         record = await self._fetch(
             where="id=:workdir_id AND run_id=:run_id AND tenant_id=:tenant_id",
@@ -282,6 +320,24 @@ class ExecutionWorkspaceManager:
             if current is not None and current.status == "deleted":
                 return current
             raise WorkspaceStateError("workdir_state_invalid", "cannot enter cleaning")
+
+        try:
+            usage = await asyncio.to_thread(self._fs_account, record.relative_path)
+            persisted = await self._persist_observation(
+                workdir_id=workdir_id, run_id=run_id, tenant_id=tenant_id, usage=usage
+            )
+            if persisted:
+                self._alert_over_quota(record, usage, run_id=run_id, tenant_id=tenant_id)
+        except workdir_ops.WorkdirOperationError as exc:
+            # R-12: a failed pre-delete re-observation is tolerated - the
+            # deletion proceeds under its own scope rechecks and the row
+            # keeps the last successful observation.
+            logger.warning(
+                "workdir pre-delete observation skipped code=%s run_id=%s tenant=%s",
+                exc.code,
+                run_id,
+                tenant_id,
+            )
 
         try:
             await asyncio.to_thread(self._fs_remove, record.relative_path)
@@ -362,6 +418,100 @@ class ExecutionWorkspaceManager:
             return policy.build_relative_path(tenant_id, str(run_id))
         except policy.WorkspacePathError as exc:
             raise WorkspaceStateError("workdir_path_rejected", "trusted ids unusable") from exc
+
+    async def _converge_preparing(
+        self, *, run_id: UUID, tenant_id: str, relative_path: str
+    ) -> WorkdirRecord:
+        """R-11 self-convergence for a conflicted ``preparing`` row.
+
+        One rerun of the convergent build (create_workdir/ensure_layout are
+        idempotent by construction, so a concurrent winner's partial tree
+        converges or is found complete) plus one guarded ``preparing ->
+        ready`` update, then a refetch. No polling, no waiting: if the
+        guarded update loses to the winner, the winner's landing is visible
+        in the refetch; anything still unusable refuses start.
+        """
+        try:
+            await asyncio.to_thread(self._fs_prepare, relative_path)
+        except workdir_ops.WorkdirOperationError as exc:
+            await self._conditional_update(
+                to_status="cleanup_failed",
+                where_status_in=("preparing",),
+                run_id=run_id,
+                tenant_id=tenant_id,
+                set_extra=", last_error_code=:error_code",
+                extra_params={"error_code": exc.code},
+            )
+            logger.error(
+                "execution workdir prepare convergence failed code=%s run_id=%s tenant=%s",
+                exc.code,
+                run_id,
+                tenant_id,
+            )
+            raise WorkspaceStateError(exc.code) from exc
+
+        await self._conditional_update(
+            to_status="ready",
+            where_status_in=("preparing",),
+            run_id=run_id,
+            tenant_id=tenant_id,
+        )
+        current = await self._fetch(
+            where="run_id=:run_id AND tenant_id=:tenant_id",
+            params={"run_id": run_id, "tenant_id": tenant_id},
+        )
+        if current is not None and current.status in ("ready", "active"):
+            return current
+        raise WorkspaceStateError("workdir_state_invalid", "prepare could not converge")
+
+    def _alert_over_quota(
+        self,
+        record: WorkdirRecord,
+        usage,
+        *,
+        run_id: UUID,
+        tenant_id: str,
+    ) -> None:
+        """Structured excess alert (08 R-12): the persisted observation plus
+        this log carrying the stable resource-excess reason code from the
+        host reason vocabulary. No paths, no exception text."""
+        if usage.total_bytes <= record.quota_bytes:
+            return
+        logger.warning(
+            "execution workdir over quota code=runtime_host_resource_exceeded"
+            " run_id=%s tenant_id=%s observed_bytes=%s quota_bytes=%s",
+            run_id,
+            tenant_id,
+            usage.total_bytes,
+            record.quota_bytes,
+        )
+
+    async def _persist_observation(
+        self,
+        *,
+        workdir_id: UUID,
+        run_id: UUID,
+        tenant_id: str,
+        usage,
+    ) -> bool:
+        """Persist a successful observation while the row stays in cleaning."""
+        async with self._engine.begin() as conn:
+            result = await conn.execute(
+                text(
+                    "UPDATE execution_workdirs"
+                    " SET size_bytes=:size, file_count=:files, updated_at=now()"
+                    " WHERE id=:id AND run_id=:run_id AND tenant_id=:tenant_id"
+                    " AND status = 'cleaning'"
+                ),
+                {
+                    "size": usage.total_bytes,
+                    "files": usage.file_count,
+                    "id": workdir_id,
+                    "run_id": run_id,
+                    "tenant_id": tenant_id,
+                },
+            )
+        return result.rowcount > 0
 
     def _fs_prepare(self, relative_path: str) -> None:
         root_fd = workdir_ops.ensure_execution_root(self._root)

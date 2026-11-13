@@ -99,7 +99,15 @@ class WorkspaceProvider(Protocol):
         business_id: str,
         workspace_id: str,
     ) -> WorkdirRecord:
-        """Generate the platform path, persist ``preparing``, build the tree, ``ready``."""
+        """Generate the platform path, persist ``preparing``, build the tree, ``ready``.
+
+        R-11 ready-or-refuse with self-convergence: the call never returns a
+        ``preparing`` record and never blocks - a conflicted slow/crashed
+        winner is converged by the late caller itself (rerun of the
+        idempotent build plus the guarded conditional update), and anything
+        that cannot reach ``ready``/``active`` raises a stable error so the
+        start is prevented (FR-5 failure row).
+        """
         ...
 
     async def activate(self, *, workdir_id: UUID, run_id: UUID, tenant_id: str) -> WorkdirRecord:
