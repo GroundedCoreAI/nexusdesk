@@ -1,16 +1,37 @@
 import asyncio
+import importlib
 import json
+from uuid import UUID
 
 import httpx
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
+from agent_platform.core_platform.agent_execution.contracts.config import EngineIdentity
 from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
 from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGateway
 
 pytestmark = pytest.mark.asyncio
+
+AGENT_ID = UUID("60000000-0000-4000-8000-000000000006")
+
+
+def _instructions_contract():
+    return importlib.import_module(
+        "agent_platform.core_platform.agent_execution.contracts.instructions"
+    )
+
+
+def _react_instruction_provider():
+    return importlib.import_module(
+        "agent_platform.core_platform.agent_execution.instructions.react_provider"
+    ).ReactInstructionProvider()
+
+
+def _engine_identity():
+    return EngineIdentity(engine_id="react", protocol_id="native", adapter_version="v1")
 
 
 def spec(name="lookup"):
@@ -234,3 +255,82 @@ async def test_graph_run_states_do_not_leak_between_conversations():
         engine = RuntimeEngine(EchoModel(), ToolGateway(client, []), Settings())
         results = await asyncio.gather(*(engine.run(str(i), [], ignore_event) for i in range(20)))
     assert [answer for answer, _, _ in results] == [str(i) for i in range(20)]
+
+
+async def test_prepared_react_instructions_are_an_equivalent_input_not_a_second_assembly():
+    """AC-7: the Phase 3 React provider feeds this Engine, it does not re-assemble.
+
+    The first run below is the untouched Phase 2 path; the second passes the
+    prepared instructions through ``run`` while still supplying the same history,
+    summary, and memory arguments. Model input, output, kept history, and dropped
+    messages must be identical, and the payload must be the only message source.
+    """
+    contract = _instructions_contract()
+    provider = _react_instruction_provider()
+    history = [
+        {"role": "user", "content": "h1"},
+        {"role": "assistant", "content": "a1", "reasoning_content": "r1"},
+        {"role": "assistant", "content": "a2", "reasoning_content": None},
+    ]
+    settings = Settings(_env_file=None, system_prompt="PLATFORM PROMPT", history_turns=2)
+    instructions = contract.InstructionInput(
+        engine=_engine_identity(),
+        agent_id=AGENT_ID,
+        agent_version=3,
+        system_prompt=settings.system_prompt,
+        history=tuple(dict(item) for item in history),
+        current_user_input="current question",
+        summary_message="SUMMARY: rolled up",
+        customer_memory="CUSTOMER: preference-a",
+    )
+    prepared = provider.prepare(instructions)
+
+    async with httpx.AsyncClient() as client:
+        baseline = RuntimeEngine(
+            SequenceModel(AIMessage(content="answer")), ToolGateway(client, []), settings
+        )
+        baseline_result = await baseline.run(
+            "current question",
+            list(history),
+            ignore_event,
+            summary_message="SUMMARY: rolled up",
+            customer_memory="CUSTOMER: preference-a",
+        )
+        prepared_engine = RuntimeEngine(
+            SequenceModel(AIMessage(content="answer")), ToolGateway(client, []), settings
+        )
+        # The prepared branch replaces the whole assembly, and the Engine refuses
+        # business arguments it would have to ignore (H-2): the rendered Summary
+        # and Memory text already sits inside the payload.
+        prepared_result = await prepared_engine.run(
+            "current question",
+            list(history),
+            ignore_event,
+            prepared_instructions=prepared,
+        )
+
+    def captured(engine):
+        return [
+            {
+                "type": message.type,
+                "content": message.content,
+                "additional_kwargs": dict(message.additional_kwargs),
+            }
+            for message in engine.model.seen[0]
+        ]
+
+    assert captured(baseline) == captured(prepared_engine)
+    assert [item["type"] for item in captured(prepared_engine)] == [
+        "system",
+        "system",
+        "system",
+        "human",
+        "ai",
+        "ai",
+        "human",
+    ]
+    assert captured(baseline)[1]["content"] == "SUMMARY: rolled up"
+    assert captured(baseline)[2]["content"] == "CUSTOMER: preference-a"
+    assert captured(baseline)[4]["additional_kwargs"] == {"reasoning_content": "r1"}
+    assert captured(baseline)[5]["additional_kwargs"] == {}
+    assert baseline_result == prepared_result

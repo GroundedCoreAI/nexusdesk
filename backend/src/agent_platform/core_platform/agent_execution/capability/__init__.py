@@ -18,6 +18,14 @@ from .ports import (
     WorkspaceAvailabilityPort,
     WorkspaceScope,
 )
+from .production import (
+    NO_TENANT_POLICY_REVISION,
+    PHASE3_PLATFORM_CAPABILITY_ALLOWLIST,
+    POLICY_LAYER_PROVENANCE_VERSION,
+    DeclarationDerivedDeploymentProbe,
+    NoTrustedWorkspaceGeneration,
+    PlatformDefaultPolicyProvider,
+)
 from .resolver import (
     CapabilityResolution,
     CapabilityResolutionRequest,
@@ -35,6 +43,9 @@ from .snapshots import (
 from .warmer import CapabilityWarmer
 
 __all__ = [
+    "NO_TENANT_POLICY_REVISION",
+    "PHASE3_PLATFORM_CAPABILITY_ALLOWLIST",
+    "POLICY_LAYER_PROVENANCE_VERSION",
     "AvailabilityCacheKey",
     "AvailabilityGeneration",
     "CacheLookup",
@@ -45,6 +56,9 @@ __all__ = [
     "CapabilityResolver",
     "CapabilitySnapshotSet",
     "CapabilityWarmer",
+    "DeclarationDerivedDeploymentProbe",
+    "NoTrustedWorkspaceGeneration",
+    "PlatformDefaultPolicyProvider",
     "PolicyCacheKey",
     "PolicyContext",
     "PolicyRevisionScope",

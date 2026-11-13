@@ -1170,6 +1170,7 @@ def test_current_t2_and_t3_modules_have_exact_scope_and_one_directional_dependen
         "contracts/errors.py",
         "contracts/adapter.py",
         "contracts/snapshots.py",
+        "contracts/instructions.py",
     }
     expected_registry_modules = {
         "registry/__init__.py",
@@ -1178,6 +1179,29 @@ def test_current_t2_and_t3_modules_have_exact_scope_and_one_directional_dependen
         "registry/adapter_registry.py",
     }
     expected_modules = expected_contract_modules | expected_registry_modules
+    implementation_packages = {
+        "registry",
+        "adapters",
+        "orchestration",
+        "capability",
+        "instructions",
+    }
+    execution_marker = "agent_platform.core_platform.agent_execution."
+
+    def escapes_into_implementation(name: str, level: int, own_escape_level: int) -> bool:
+        """Whether one import leaves its own package for an implementation package.
+
+        ``.split(".")[0]`` on the path after ``agent_execution.`` is deliberate:
+        the contracts layer owns ``contracts.capabilities`` while
+        ``agent_execution.capability`` is a separate implementation package, and a
+        substring check would conflate the two.
+        """
+        if level:
+            return level >= own_escape_level and name.split(".")[0] in implementation_packages
+        return name.startswith(execution_marker) and (
+            name.removeprefix(execution_marker).split(".")[0] in implementation_packages
+        )
+
     actual_contract_modules = {
         str(path.relative_to(package_root)) for path in (package_root / "contracts").glob("*.py")
     } | {"__init__.py"}
@@ -1214,11 +1238,21 @@ def test_current_t2_and_t3_modules_have_exact_scope_and_one_directional_dependen
             imports,
         )
         if relative_path.startswith("contracts/") or relative_path == "__init__.py":
-            forbidden = (*common_forbidden, ".registry", ".adapters")
+            forbidden = (*common_forbidden, ".registry", ".adapters", ".instructions")
             assert not any(part in name for name in names for part in forbidden), (
                 relative_path,
                 imports,
             )
+            # The contracts layer is a leaf: neither a relative escape
+            # (``from ..capability import ...``) nor an absolute one may reach an
+            # execution implementation package, which now includes the T6
+            # instruction providers.
+            escaping_level = 1 if relative_path == "__init__.py" else 2
+            assert not [
+                (name, level)
+                for name, level in imports
+                if escapes_into_implementation(name, level, escaping_level)
+            ], (relative_path, imports)
         if relative_path in expected_registry_modules - {"registry/__init__.py"}:
             forbidden = (*common_forbidden, ".adapters", ".testing")
             assert not any(part in name for name in names for part in forbidden), (

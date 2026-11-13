@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime
 from pathlib import Path
@@ -2810,3 +2811,179 @@ def test_error_messages_only_carry_field_paths_and_stable_codes():
         "snapshot_identity_mismatch",
     }
     assert exc.value.code in codes
+
+
+# ---------------------------------------------------------------------------
+# P3-IT-08 / R-51: the repository entry cleaning gate is a strict re-validation
+# ---------------------------------------------------------------------------
+
+GATE_COLUMNS = tuple(sorted(SNAPSHOT_COLUMNS))
+GATE_DENIED_KEY = "api_key"
+GATE_BENIGN_FIELD = "gate_note"
+
+
+def _gate_denied_key(body: dict) -> dict:
+    """A denylisted key at the payload root: the recursive scan's own face."""
+    body[GATE_DENIED_KEY] = "abc"
+    return body
+
+
+def _gate_credential_value(body: dict) -> dict:
+    """A credential-shaped *value* under a schema-legal key name."""
+    body[GATE_BENIGN_FIELD] = FAKE_API_KEY
+    return body
+
+
+def _gate_host_path_value(body: dict) -> dict:
+    """A filesystem-shaped value, the other half of the value scan."""
+    body[GATE_BENIGN_FIELD] = FAKE_HOST_PATH
+    return body
+
+
+def _gate_drop_last(body: dict, key: str) -> dict:
+    """Drop one entry from a coverage-checked collection or a required field."""
+    if key in body and isinstance(body[key], list):
+        body[key] = body[key][:-1]
+    else:
+        del body[key]
+    return body
+
+
+def _gate_duplicate_first(body: dict, key: str) -> dict:
+    """Repeat one entry in place, which a scan alone cannot see."""
+    body[key] = [body[key][0], dict(body[key][0]), *body[key][1:]]
+    return body
+
+
+def _gate_duplicate_disabled_capability(body: dict) -> dict:
+    """Repeat one capability name in the canonical config payload.
+
+    The config snapshot has no item list, but its ``disabled_capabilities`` is a
+    set-like sequence the DTO de-duplicates: the strict re-validation therefore
+    has to notice that the re-produced canonical text no longer equals the
+    stored one, which is precisely the coverage a clean-key scan does not have.
+    """
+    body["config"]["disabled_capabilities"] = ["streaming", "streaming"]
+    return body
+
+
+# (class, column) -> (tamper, expected code). The two code shapes are the point of
+# R-51: the first three classes are what ``assert_snapshot_payload_clean`` already
+# caught, while a missing or duplicated entry is only refused by the strict
+# re-validation (required fields, exact capability coverage and the canonical
+# round-trip), which is why the gate may not be a clean-key scan.
+GATE_CASES: dict[tuple[str, str], tuple[Callable[[dict], dict], str]] = {
+    # Every column: the denylist and the value scans are depth-independent.
+    **{
+        (kind, column): (tamper, code)
+        for kind, tamper, code in (
+            ("denied_key", _gate_denied_key, "snapshot_denied_field_name"),
+            ("credential_value", _gate_credential_value, "snapshot_denied_credential_value"),
+            ("host_path_value", _gate_host_path_value, "snapshot_denied_host_path"),
+        )
+        for column in GATE_COLUMNS
+    },
+    ("missing_item", "execution_config_snapshot"): (
+        lambda body: _gate_drop_last(body, "engine"),
+        "snapshot_field_invalid",
+    ),
+    ("missing_item", "declared_capabilities_snapshot"): (
+        lambda body: _gate_drop_last(body, "capabilities"),
+        "snapshot_field_invalid",
+    ),
+    ("missing_item", "available_capabilities_snapshot"): (
+        lambda body: _gate_drop_last(body, "items"),
+        "snapshot_field_invalid",
+    ),
+    ("missing_item", "execution_policy_snapshot"): (
+        lambda body: _gate_drop_last(body, "decisions"),
+        "snapshot_field_invalid",
+    ),
+    ("missing_item", "effective_capabilities_snapshot"): (
+        lambda body: _gate_drop_last(body, "items"),
+        "snapshot_field_invalid",
+    ),
+    # ``declared_capabilities_snapshot`` carries no repeated-entry collection at
+    # all (its capability layer is a fixed-shape object, and a duplicated JSON
+    # key collapses before any gate can see it), so the duplicate class is
+    # structurally inexpressible there and is exercised on the other four.
+    ("duplicate_item", "execution_config_snapshot"): (
+        _gate_duplicate_disabled_capability,
+        "snapshot_field_invalid",
+    ),
+    ("duplicate_item", "available_capabilities_snapshot"): (
+        lambda body: _gate_duplicate_first(body, "items"),
+        "snapshot_field_invalid",
+    ),
+    ("duplicate_item", "execution_policy_snapshot"): (
+        lambda body: _gate_duplicate_first(body, "decisions"),
+        "snapshot_field_invalid",
+    ),
+    ("duplicate_item", "effective_capabilities_snapshot"): (
+        lambda body: _gate_duplicate_first(body, "items"),
+        "snapshot_field_invalid",
+    ),
+}
+
+
+def test_gate_case_matrix_covers_every_class_per_expressible_column():
+    """The matrix itself is a judgement: no class may quietly lose a column."""
+    expected = {
+        (kind, column)
+        for kind in ("denied_key", "credential_value", "host_path_value", "missing_item")
+        for column in GATE_COLUMNS
+    } | {
+        ("duplicate_item", column)
+        for column in GATE_COLUMNS
+        if column != "declared_capabilities_snapshot"
+    }
+    assert set(GATE_CASES) == expected
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(("kind", "column"), sorted(GATE_CASES))
+def test_pg_barrier_entry_clean_gate_refuses_every_payload_class_before_sql(kind, column):
+    """R-51/P3-IT-08: the gate is at the repository entry and it is strict.
+
+    Each tamper lands on exactly one of the five columns while the other four
+    stay serializer output, so a pass can never be explained by an accidentally
+    malformed whole payload. Three things are asserted together: the stable code,
+    that no barrier statement was ever executed (the gate runs before
+    ``engine.begin()``), and that the row keeps all five columns NULL afterwards.
+    The error text must not repeat the smuggled value.
+    """
+
+    tamper, expected_code = GATE_CASES[(kind, column)]
+    url = _snapshot_database_url()
+    tenant = "p3-it08-" + uuid4().hex[:12]
+
+    async def scenario() -> tuple:
+        engine, repo = _repository(url, tenant)
+        statements: list[str] = []
+
+        @event.listens_for(engine.sync_engine, "before_execute")
+        def _observe(conn, clauseelement, multiparams, params, execution_options):
+            sql = str(clauseelement)
+            if SNAPSHOT_WRITE_MARKER in sql:
+                statements.append(sql)
+
+        try:
+            claimed = await _claimed_run(repo, tenant)
+            run_id = claimed["row"]["id"]
+            payloads = make_payloads(run_id)
+            body = json.loads(getattr(payloads, column))
+            tampered = replace(payloads, **{column: json.dumps(tamper(body), default=str)})
+            with pytest.raises(ExecutionSnapshotError) as raised:
+                await repo.write_execution_snapshots(run_id, claimed["owner"], tampered)
+            stored = await _raw_snapshots(engine, run_id)
+            return raised.value, list(statements), stored
+        finally:
+            await _cleanup(engine, tenant)
+
+    error, statements, stored = asyncio.run(scenario())
+
+    assert error.code == expected_code, (kind, column)
+    assert statements == [], (kind, column)
+    assert all(stored[gate_column] is None for gate_column in SNAPSHOT_COLUMNS)
+    assert FAKE_API_KEY not in str(error)
+    assert FAKE_HOST_PATH not in str(error)

@@ -37,6 +37,7 @@ from .config import (
     EngineIdentity,
     ExecutionConfig,
     ReactConfig,
+    execution_config_from_agent_config,
     normalize_execution_config,
 )
 from .errors import (
@@ -50,6 +51,18 @@ from .errors import (
 )
 from .events import AgentEvent
 from .handle import ExecutionHandle
+from .instructions import (
+    REACT_INSTRUCTION_PROVIDER_ID,
+    REACT_INSTRUCTION_PROVIDER_VERSION,
+    InstructionInput,
+    InstructionProvider,
+    PreparedInstructions,
+    ReactMessagePlan,
+    instruction_contract_error,
+    react_native_history_item,
+    react_native_input_parts,
+    react_native_messages,
+)
 from .request import ExecutionRequest
 from .result import ExecutionResult
 from .snapshots import (
@@ -72,6 +85,8 @@ __all__ = [
     "CAPABILITY_ORDER",
     "NO_EXECUTION_RESTRICTIONS",
     "POLICY_LAYER_ORDER",
+    "REACT_INSTRUCTION_PROVIDER_ID",
+    "REACT_INSTRUCTION_PROVIDER_VERSION",
     "SNAPSHOT_COLUMNS",
     "SNAPSHOT_MAX_BYTES_DEFAULT",
     "UNOBSERVED_DIGEST",
@@ -105,11 +120,15 @@ __all__ = [
     "ExecutionRequest",
     "ExecutionResult",
     "ExecutionSnapshotError",
+    "InstructionInput",
+    "InstructionProvider",
     "PolicyDecisionSet",
     "PolicyLayerDecision",
     "PolicyLayerName",
     "PolicyLayerVersion",
+    "PreparedInstructions",
     "ReactConfig",
+    "ReactMessagePlan",
     "assert_snapshot_payload_clean",
     "build_execution_config_snapshot",
     "canonical_digest",
@@ -121,9 +140,14 @@ __all__ = [
     "ensure_handle_identity",
     "ensure_request_identity",
     "ensure_result_identity",
+    "execution_config_from_agent_config",
     "execution_restriction_digest",
+    "instruction_contract_error",
     "normalize_adapter_exception",
     "normalize_execution_config",
+    "react_native_history_item",
+    "react_native_input_parts",
+    "react_native_messages",
     "serialize_execution_snapshots",
     "serialize_snapshot",
 ]

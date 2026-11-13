@@ -58,6 +58,12 @@ _ERROR_MAP: dict[str, _PublicError] = {
         "model_not_configured",
         _INVALID_REQUEST,
     ),
+    # 08 R-30: the two published-snapshot faults are Run-facing RuntimeFault codes
+    # whose public category is INVALID_REQUEST. An unregistered code falls through
+    # ``_ERROR_MAP.get(code, _INTERNAL_ERROR)`` and would surface as
+    # ``internal_error``, silently moving a configuration problem into the internal
+    # category, so the registration itself is the gate (P3-UT-19).
+    **_codes("agent_snapshot_required agent_snapshot_invalid", _INVALID_REQUEST),
     **_codes(
         "model_input_too_large model_round_limit tool_call_limit model_output_too_large "
         "gateway_concurrency_exceeded gateway_request_quota_exceeded model_response_too_large",

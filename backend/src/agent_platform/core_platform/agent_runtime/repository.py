@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from agent_platform.core_platform.agent_execution.contracts.snapshots import (
     SNAPSHOT_COLUMNS,
     ExecutionSnapshotError,
+    deserialize_execution_snapshots,
 )
 from agent_platform.core_platform.agent_runtime.hooks import RuntimePersistenceHooks
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL, channel
@@ -313,7 +314,12 @@ class RunRepository:
         ):
             # R-9: the identity inside the snapshot *is* this row's startup
             # identity, so a foreign one is an audit conflict, never a write.
+            # This runs before the cleaning gate on purpose: whose row this is
+            # stays a controlled outcome (D-3's distinguishable ``audit_conflict``)
+            # and must not be re-reported as a payload-shape error.
             return SnapshotWriteResult("audit_conflict")
+        # R-51: nothing below this line may reach SQL without the strict gate.
+        self._clean_snapshot_payloads(payloads)
         async with self.engine.begin() as conn:
             row = (
                 (
@@ -389,6 +395,28 @@ class RunRepository:
             return SnapshotWriteResult(self._snapshot_write_diagnosis(classified, owner))
 
     @staticmethod
+    def _clean_snapshot_payloads(payloads: ExecutionSnapshotPayloads) -> None:
+        """The R-51 cleaning gate: strict re-validation, before any SQL.
+
+        Shape checking alone cannot see the two classes 04 P3-IT-08 requires
+        refused on their own - a *missing* entry and a *duplicated* one - because
+        ``assert_snapshot_payload_clean`` only walks keys and value shapes. Re-
+        running the public deserializer per column adds exactly that coverage:
+        the denylist and value scans, the strict ``extra="forbid"`` schema with
+        full capability coverage, the canonical round-trip (which is what catches
+        a de-duplicated or truncated collection) and cross-column identity.
+
+        It stays in Python and in front of ``engine.begin()``, so a refused
+        payload performs no statement at all and the row keeps its five NULL
+        columns, and it is a domain ``ExecutionSnapshotError`` naming only the
+        column, never the rejected content.
+        """
+
+        deserialize_execution_snapshots(
+            {column: getattr(payloads, column) for column in SNAPSHOT_COLUMNS}
+        )
+
+    @staticmethod
     def _validated_snapshot_bodies(payloads: ExecutionSnapshotPayloads) -> dict[str, dict]:
         """Reject non-canonical payload input before it reaches ``CAST(... AS jsonb)``.
 
@@ -397,6 +425,10 @@ class RunRepository:
         domain error, and the fail-closed mapping in the orchestrator would never
         see it. Only the column name and a stable code are reported — never the
         offending content.
+
+        This is the shape half of the entry guard; the strict half is
+        :meth:`_clean_snapshot_payloads`, which runs after the identity comparison
+        so that a foreign startup keeps its own distinguishable outcome.
         """
 
         bodies: dict[str, dict] = {}

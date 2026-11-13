@@ -262,14 +262,32 @@ async def test_sparse_raw_version_exposes_direct_snapshot_tool_names_limitation(
 
 
 def test_react_descriptor_metadata_matches_between_standalone_and_production_registries():
-    """Minor-3 lock: the metadata-only and production React descriptors stay identical."""
+    """Minor-3 lock, rewritten per R-45: value-equivalent without losing strictness.
+
+    Exactly one descriptor field is deployment-derived: ``policy_version``, which
+    production reads from ``execution_capability_policy_version`` while the
+    standalone mirror keeps its own literal (R-31 forbids forcing it). Every other
+    field must stay field-identical, so the parity is not weakened; each side's
+    derivation source is pinned separately, because "both default to v1" would
+    hide a deployment that overrides the settings value.
+    """
     from agent_platform.applications.platform_runtime import runtime_composition
     from agent_platform.business_capabilities.agent_config import service as agent_service
 
+    settings = Settings(_env_file=None)
+    production_registry = runtime_composition._execution_adapter_registry()
+    runtime_composition._build_execution_orchestrator(None, production_registry, settings=settings)
+    production = production_registry.metadata("react", "native", "v1")
     standalone = agent_service._standalone_execution_registry().metadata("react", "native", "v1")
-    production = runtime_composition._execution_adapter_registry()
-    runtime_composition._build_execution_orchestrator(None, production)
-    assert standalone == production.metadata("react", "native", "v1")
+
+    assert standalone.model_dump(exclude={"policy_version"}) == production.model_dump(
+        exclude={"policy_version"}
+    )
+    assert production.policy_version == settings.execution_capability_policy_version
+    assert (
+        standalone.policy_version
+        == Settings.model_fields["execution_capability_policy_version"].default
+    )
 
 
 @pytest.mark.asyncio

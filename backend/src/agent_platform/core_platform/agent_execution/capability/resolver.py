@@ -364,14 +364,14 @@ class CapabilityResolver:
         if availability_status != "fresh":
             self._availability_cache.schedule(
                 availability_key,
-                lambda: self._load_available(request),
+                lambda: self._load_available(request, generation),
             )
 
         policy = self._read_policy(policy_key, policy_status)
         if policy_status != "fresh":
             self._policy_cache.schedule(
                 policy_key,
-                lambda: self._load_policy(request, revision),
+                lambda: self._load_policy(request, revision, generation),
             )
 
         return CapabilityResolution(
@@ -412,31 +412,40 @@ class CapabilityResolver:
     # ------------------------------------------------------------------ #
 
     async def warm(self, request: CapabilityResolutionRequest) -> bool:
-        """Awaited refresh of both caches for one target; never builds adapters."""
+        """Awaited refresh of both caches for one target; never builds adapters.
+
+        The in-round observations taken by ``_key_inputs`` are passed down to the
+        loaders, so the loader can never re-read a port and land on a different
+        workspace generation than the one the cache key was built from (T4
+        carry-over: the same skew class as the R-17 revision fix).
+        """
         descriptor, generation, revision = self._key_inputs(request)
         availability_ok = (
             await self._availability_cache.refresh(
                 self._availability_key(descriptor, generation),
-                lambda: self._load_available(request),
+                lambda: self._load_available(request, generation),
             )
             is not None
         )
         policy_ok = (
             await self._policy_cache.refresh(
                 self._policy_key(descriptor, generation, request, revision),
-                lambda: self._load_policy(request, revision),
+                lambda: self._load_policy(request, revision, generation),
             )
             is not None
         )
         return availability_ok and policy_ok
 
-    async def _load_available(self, request: CapabilityResolutionRequest) -> AvailableCapabilities:
+    async def _load_available(
+        self,
+        request: CapabilityResolutionRequest,
+        generation: AvailabilityGeneration | None,
+    ) -> AvailableCapabilities:
         descriptor = self._descriptor(
             request.engine_id,
             request.protocol_id,
             request.adapter_version,
         )
-        generation = self._workspace_generation(request)
         context = ProbeContext(
             deployment_identity=self._deployment_identity,
             engine_id=descriptor.engine_id,
@@ -551,13 +560,13 @@ class CapabilityResolver:
         self,
         request: CapabilityResolutionRequest,
         revision: int,
+        generation: AvailabilityGeneration | None,
     ) -> PolicyDecisionSet:
         descriptor = self._descriptor(
             request.engine_id,
             request.protocol_id,
             request.adapter_version,
         )
-        generation = self._workspace_generation(request)
         context = PolicyContext(
             engine_id=descriptor.engine_id,
             protocol_id=descriptor.protocol_id,

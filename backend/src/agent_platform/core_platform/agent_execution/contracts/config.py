@@ -25,6 +25,18 @@ CapabilityName = Literal[
 ]
 
 _LEGACY_REACT_FIELDS = ("model_profile_id", "model_profile_version", "max_model_rounds")
+# The exact key set ``AgentConfig.normalize_execution`` consumes. It is repeated
+# here (and pinned by a parity test) because the projection may not import the
+# business model: a drift between the two sets would make a published agent's
+# execution snapshot silently report defaults for keys the Agent config carries.
+_AGENT_CONFIG_EXECUTION_FIELDS = frozenset(
+    {
+        "engine",
+        "react",
+        "disabled_capabilities",
+        *_LEGACY_REACT_FIELDS,
+    }
+)
 _DEFAULT_ENGINE = {
     "engine_id": "react",
     "protocol_id": "native",
@@ -127,6 +139,26 @@ def _alias_values_conflict(legacy: object, react: object) -> bool:
         return _json_value(legacy) != _json_value(react)
     except (TypeError, ValueError):
         return True
+
+
+def execution_config_from_agent_config(value: Mapping[str, object]) -> ExecutionConfig:
+    """Project one published Agent config onto the canonical ExecutionConfig.
+
+    ``core_platform`` may not import the business ``AgentConfig`` (architecture
+    gate), yet the Phase 3 startup snapshot has to pin the very same canonical
+    configuration the publish path stored. The key set below is therefore exactly
+    the set ``AgentConfig.normalize_execution`` consumes - the three engine keys,
+    the ``react`` block, the three legacy root React aliases and
+    ``disabled_capabilities`` - and nothing else is read, so agent-level prompt,
+    language, memory and tool keys cannot leak into an execution snapshot.
+
+    Parity with ``AgentConfig.execution_config()`` is pinned by a test in both
+    legacy-root-alias and ``react`` shapes; that is what keeps "one normalizer
+    serves execution" (T3) true after this helper exists.
+    """
+
+    projected = {key: item for key, item in value.items() if key in _AGENT_CONFIG_EXECUTION_FIELDS}
+    return normalize_execution_config(projected)
 
 
 def normalize_execution_config(value: ExecutionConfig | Mapping[str, object]) -> ExecutionConfig:

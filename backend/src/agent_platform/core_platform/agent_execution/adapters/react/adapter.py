@@ -18,6 +18,7 @@ from ...contracts import (
     ExecutionHandle,
     ExecutionRequest,
     ExecutionResult,
+    PreparedInstructions,
     ensure_handle_identity,
     ensure_request_identity,
 )
@@ -30,7 +31,15 @@ RuntimeEmit = Callable[[object, object], Awaitable[None]]
 
 
 class RuntimeEngine(Protocol):
-    """Structural runtime capability; no concrete runtime implementation is imported."""
+    """Structural runtime capability; no concrete runtime implementation is imported.
+
+    ``prepared_instructions`` is the Phase 3 addition (R-32): the instruction
+    provider output computed before ``start``. It defaults to ``None`` so the
+    Phase 2 off path stays byte-identical, and the implementation signature in
+    ``core_platform.agent_runtime.engine`` is pinned to this shape by a test - a
+    five-parameter Protocol with a six-parameter implementation would let the
+    prepared input be dropped silently.
+    """
 
     async def run(
         self,
@@ -39,6 +48,7 @@ class RuntimeEngine(Protocol):
         emit: RuntimeEmit,
         summary_message: str | None = None,
         customer_memory: str | None = None,
+        prepared_instructions: PreparedInstructions | None = None,
     ) -> tuple[object, object, object]: ...
 
 
@@ -263,13 +273,33 @@ class ReactAdapter:
                     runtime = await self._runtime_factory.for_run(
                         execution.context.row, runtime_emit
                     )
-                    output, history, dropped = await runtime.run(
-                        execution.context.row["input"],
-                        execution.context.history,
-                        runtime_emit,
-                        summary_message=execution.context.summary_message,
-                        customer_memory=execution.context.customer_memory,
-                    )
+                    prepared = execution.context.prepared_instructions
+                    if prepared is None:
+                        # The off path stays the literal Phase 2 call: five
+                        # arguments, the same two rendered values, nothing added.
+                        output, history, dropped = await runtime.run(
+                            execution.context.row["input"],
+                            execution.context.history,
+                            runtime_emit,
+                            summary_message=execution.context.summary_message,
+                            customer_memory=execution.context.customer_memory,
+                        )
+                    else:
+                        # R-41: the prepared path must not re-supply either
+                        # rendered value. The Engine checks exactly that and fails
+                        # closed, because a second copy of the business rendering
+                        # would mean two sources of truth for one Run, and the
+                        # retained window of a differently derived second copy is
+                        # what this invariant exists to catch. The provider output
+                        # is the only message source once it is present.
+                        output, history, dropped = await runtime.run(
+                            execution.context.row["input"],
+                            execution.context.history,
+                            runtime_emit,
+                            summary_message=None,
+                            customer_memory=None,
+                            prepared_instructions=prepared,
+                        )
                 result, outcome = self._completed_result(execution, output, history, dropped)
                 async with execution.condition:
                     if execution.terminal.done():

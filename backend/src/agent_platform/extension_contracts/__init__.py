@@ -14,7 +14,11 @@ from .capabilities import (
     CapabilityStatusView,
     ExtensionKind,
 )
-from .context import BusinessScope
+from .context import (
+    DEFAULT_BUSINESS_ID,
+    DEFAULT_WORKSPACE_ID,
+    BusinessScope,
+)
 from .events import EventEnvelope, EventPublisher, EventSubscriber
 from .identity import IdentityBindings
 from .policy import (
@@ -61,6 +65,8 @@ from .ui import (
 )
 
 __all__ = [
+    "DEFAULT_BUSINESS_ID",
+    "DEFAULT_WORKSPACE_ID",
     "BusinessScope",
     "CapabilityConfigVersion",
     "CapabilityConfigurable",

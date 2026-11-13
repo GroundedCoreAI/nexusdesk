@@ -3,23 +3,42 @@ import io
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args, get_origin
 from urllib.parse import quote
 from uuid import UUID
 
+import annotated_types
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from jsonschema import Draft202012Validator
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-from agent_platform.business_capabilities.agent_config.service import AgentDraft
+from agent_platform.applications.security_audit import (
+    CATEGORY_AGENT_SCOPE_NOT_FOUND,
+    record_request_rejection,
+)
+from agent_platform.business_capabilities.agent_config.service import AgentConfig, AgentDraft
 from agent_platform.business_capabilities.channel.service import IncomingMessage
 from agent_platform.business_capabilities.customer_service.service import UNSET
 from agent_platform.business_capabilities.evaluation.scoring import ProfileRef, ScoringOptions
 from agent_platform.business_capabilities.evaluation.service import EvaluationCase
 from agent_platform.business_capabilities.knowledge.chunking import ChunkingPolicy, chunk_document
 from agent_platform.business_capabilities.knowledge.service import DocumentInput
+from agent_platform.core_platform.agent_execution.capability.resolver import (
+    CapabilityResolutionRequest,
+    PolicySourceUnavailableError,
+)
+from agent_platform.core_platform.agent_execution.contracts.capabilities import (
+    NO_EXECUTION_RESTRICTIONS,
+    EffectiveCapabilityDecision,
+    effective_capability_views,
+)
+from agent_platform.core_platform.agent_execution.contracts.config import EngineIdentity
+from agent_platform.core_platform.agent_execution.contracts.errors import (
+    ConfigurationError,
+    ExecutionErrorCode,
+)
 from agent_platform.core_platform.extension_platform import (
     CapabilityContributionError,
     ExtensionRegistryError,
@@ -156,6 +175,74 @@ class ChannelInput(NameInput):
 class ChannelUpdateInput(Input):
     config: dict[str, object] | None = None
     credentials: dict[str, str] | None = None
+
+
+class ExecutionConfigFlagsOutput(BaseModel):
+    """Strict Phase 3 rollout flags (03 §7.4, R-25): exactly the two deployment
+    booleans, named verbatim like settings, frozen and extra-forbid."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    execution_phase3_enabled: bool
+    execution_orchestrator_enabled: bool
+
+
+class ExecutionPreviewInput(BaseModel):
+    """Strict preview request (03 §7.1, FR-5): a draft AgentConfig plus an
+    optional already-saved ``agent_id`` (``null`` = unsaved draft).
+
+    ``extra="forbid"`` here and on every nested model is the whole anti-
+    forgery contract: ``declared``/``available``/``effective``/
+    ``effective_capabilities``/``policy``/``policy_version``/``probe``/
+    ``tenant_id``/``actor`` and any host/workspace/policy internals are
+    rejected as unknown fields — never ignored-and-continued — so the only
+    inputs that can reach the resolver are the ones the server derives from
+    the authenticated context and Registry metadata.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: UUID | None = None
+    config: AgentConfig
+
+
+class ExecutionPreviewFieldSchema(BaseModel):
+    """One public config-schema field: name/type/required/safety bounds only."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    type: str
+    required: bool
+    nullable: bool = False
+    minimum: int | None = None
+    maximum: int | None = None
+
+
+class ExecutionPreviewConfigSchema(BaseModel):
+    """Registry config-schema metadata projected without schema-internal text."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str
+    fields: list[ExecutionPreviewFieldSchema]
+
+
+class ExecutionPreviewOutput(BaseModel):
+    """Whitelist response (03 §7.2, R-12/R-21).
+
+    ``capabilities`` items are the reused strict DTO ``EffectiveCapabilityDecision``
+    — not a second response model — produced only by
+    ``effective_capability_views(resolution.effective)``. No Declared/Available/
+    Policy raw values, no snapshots, no probe text, no policy rules, no internal
+    ids or paths ever appear here.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    engine: EngineIdentity
+    config_schema: ExecutionPreviewConfigSchema
+    capabilities: list[EffectiveCapabilityDecision]
 
 
 def _ui_manifest_payload(manifest, user=None, extensions=None):
@@ -649,6 +736,183 @@ async def agent_memory_config_caps(request: Request, user: Reader):
         "memory_search_limit": s.memory_search_limit,
         "memory_blacklist_auto_handoff": s.memory_blacklist_auto_handoff,
     }
+
+
+@router.get("/agents/execution-config-flags", response_model=ExecutionConfigFlagsOutput)
+async def agent_execution_config_flags(request: Request, user: Reader):
+    """Phase 3 rollout switches for the agent config form (03 §7.4, R-25).
+
+    Declares the two deployment booleans so the frontend can gate Phase 3
+    editing entries declaratively instead of inferring state from preview
+    errors. Reading the raw pair (not a synthesized view) keeps the FR-9
+    matrix in the UI and preserves the distinction between a normal rolled-
+    back ``off`` and the ``on + orchestrator-off`` misconfiguration.
+
+    Zero side effects by contract: this handler touches nothing but
+    ``settings`` — no capability caches, probes, adapters, factories, runs,
+    snapshots, warmers or audit writes — and it never answers an
+    ``execution_*`` domain error; every state, including all-off, is a 200.
+    The values are non-secret, tenant-agnostic deployment configuration
+    (same disclosure level as ``summary_enabled`` in memory-config-caps).
+    """
+    s = runtime(request).settings
+    return ExecutionConfigFlagsOutput(
+        execution_phase3_enabled=s.execution_phase3_enabled,
+        execution_orchestrator_enabled=s.execution_orchestrator_enabled,
+    )
+
+
+# The JSON-visible primitive types a config schema may disclose. Anything the
+# mapper does not name stays ``object``: the projection is a whitelist, and an
+# unmapped annotation only ever loses detail, never leaks internals (§7.2).
+_PREVIEW_SCHEMA_TYPES: dict[type, str] = {
+    int: "integer",
+    float: "number",
+    str: "string",
+    bool: "boolean",
+    UUID: "uuid",
+}
+
+
+def _preview_config_field_specs(
+    model: type[BaseModel],
+) -> list[ExecutionPreviewFieldSchema]:
+    """Project one Registry ``config_schema`` class into public field specs."""
+    specs: list[ExecutionPreviewFieldSchema] = []
+    for name, field in model.model_fields.items():
+        annotation = field.annotation
+        nullable = False
+        base = annotation
+        if get_origin(annotation) is not None or type(None) in get_args(annotation):
+            args = [arg for arg in get_args(annotation) if arg is not type(None)]
+            nullable = len(args) != len(get_args(annotation)) or type(None) in get_args(annotation)
+            base = args[0] if len(args) == 1 else type(None)
+        type_name = _PREVIEW_SCHEMA_TYPES.get(base, "object")
+        minimum: int | None = None
+        maximum: int | None = None
+        for constraint in field.metadata:
+            if isinstance(constraint, annotated_types.Ge):
+                minimum = int(constraint.ge)
+            elif isinstance(constraint, annotated_types.Le):
+                maximum = int(constraint.le)
+        specs.append(
+            ExecutionPreviewFieldSchema(
+                name=name,
+                type=type_name,
+                required=field.is_required(),
+                nullable=nullable,
+                minimum=minimum,
+                maximum=maximum,
+            )
+        )
+    return specs
+
+
+@router.post("/agents/execution-preview", response_model=ExecutionPreviewOutput)
+async def agent_execution_preview(request: Request, body: ExecutionPreviewInput, user: Reader):
+    """Read-only Effective preview for a draft or saved Agent (03 §7.1-§7.3).
+
+    Contract summary, all of it enforced below:
+
+    * tenant/actor/business/workspace come only from the authenticated context
+      (``user`` + the middleware-bound ``business_scope``); the request body
+      cannot name any of them because its schema forbids them (FR-5, P3-UT-12);
+    * the resolution runs through the very ``CapabilityResolver`` instance the
+      T7-wired Run path owns (``app.state.runtime.execution_subsystem``,
+      08 R-12/P3-IT-11): one cache, one revision observation, no preview-side
+      authorization that a later Run could reuse — every Run re-resolves;
+    * the synchronous hot path reads the caches only: ``resolve()`` never
+      awaits a remote probe itself, a cold entry previews as unavailable with
+      a stable reason code, and the deduplicated background refresh is the
+      resolver's own (§4.2);
+    * no factory/Adapter is instantiated, no ``adapter.start``, no
+      Run/Conversation/snapshot write, no audit of a *successful* preview —
+      the only audit this face writes is a denied ``agent_id`` lookup, which
+      records the attempt, never the foreign row's data (P3-IT-05);
+    * Phase 3 off answers the stable domain error, so no probe or port is ever
+      reached in an off state (§7.3).
+    """
+    settings = runtime(request).settings
+    if not settings.execution_phase3_enabled:
+        raise DomainError("execution_phase3_disabled", 409)
+    subsystem = getattr(request.app.state.runtime, "execution_subsystem", None)
+    if subsystem is None:
+        # On-but-unassembled is a deployment defect and must fail closed with
+        # the configuration code, never degrade to an unprobed "everything
+        # unavailable" preview (03 §7.3).
+        raise DomainError("execution_configuration_invalid", 409)
+
+    try:
+        execution = body.config.execution_config()
+    except (ValidationError, TypeError, ValueError):
+        # The same normalizer serves draft/publish/preview/Run (T3, FR-1); a
+        # canonical form that does not add up reuses the existing service-side
+        # mapping instead of inventing a preview-only table (03 §7.3, R-30).
+        raise DomainError("execution_configuration_invalid", 409) from None
+
+    selector = (
+        execution.engine.engine_id,
+        execution.engine.protocol_id,
+        execution.engine.adapter_version,
+    )
+    try:
+        descriptor = subsystem.registry.metadata(*selector)
+    except ConfigurationError as exc:
+        if exc.error.code is ExecutionErrorCode.INVALID_REQUEST:
+            raise DomainError("execution_configuration_invalid", 409) from None
+        raise DomainError("execution_engine_unavailable", 409) from None
+
+    agent_id = body.agent_id
+    published_version: int | None = None
+    if agent_id is not None:
+        try:
+            # Same tenant + business/workspace scope as every Agent read: a
+            # foreign row answers with the existing ``agent_not_found`` 404 and
+            # never a field-hiding 200, so existence does not leak (§7.1).
+            row = await business(request).agents.get(user.tenant, agent_id)
+        except DomainError as exc:
+            if exc.status == 404:
+                # R-13: the escalation *attempt* is audited (03 §7.3), with the
+                # trusted subject, the route template and the body path only —
+                # the foreign agent id value and row are never recorded.
+                await record_request_rejection(
+                    request,
+                    category=CATEGORY_AGENT_SCOPE_NOT_FOUND,
+                    field_paths=["body.agent_id"],
+                )
+            raise
+        published_version = row.get("published_version")
+
+    scope = getattr(request.state, "business_scope", None)
+    resolution_request = CapabilityResolutionRequest(
+        engine_id=execution.engine.engine_id,
+        protocol_id=execution.engine.protocol_id,
+        adapter_version=execution.engine.adapter_version,
+        tenant_id=user.tenant,
+        business_scope=scope.business_id if scope is not None else None,
+        workspace_id=scope.workspace_id if scope is not None else None,
+        agent_id=agent_id,
+        agent_published_version=published_version,
+        disabled_capabilities=execution.disabled_capabilities,
+        # Server-computed constant, never client input (R-17).
+        execution_restriction_digest=NO_EXECUTION_RESTRICTIONS,
+    )
+    try:
+        resolution = await subsystem.resolver.resolve(resolution_request)
+    except PolicySourceUnavailableError:
+        # R-17: a policy-revision source that cannot be observed maps to the
+        # stable policy code; defaulting to 0 is forbidden on this face too.
+        raise DomainError("execution_policy_unavailable", 409) from None
+
+    return ExecutionPreviewOutput(
+        engine=execution.engine,
+        config_schema=ExecutionPreviewConfigSchema(
+            schema_version=descriptor.config_schema_version,
+            fields=_preview_config_field_specs(descriptor.config_schema),
+        ),
+        # R-21: the unique Effective projection, nothing else.
+        capabilities=list(effective_capability_views(resolution.effective)),
+    )
 
 
 @router.get("/agents/{aid}")
