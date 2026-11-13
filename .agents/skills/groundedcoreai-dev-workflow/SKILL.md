@@ -79,7 +79,7 @@ nexusdesk（`GroundedCoreAI/nexusdesk`）的分支管理、PR、发布、hotfix 
    - 安全敏感改动复核；
    - 构建与部署冒烟测试（独立测试环境，**禁用生产数据库/凭据/数据**；
      只有一台服务器时用独立数据库、独立数据卷、独立配置、不同端口）；
-   - 发布说明、已知限制、升级注意事项检查（中英双语）。
+   - 发布说明、已知限制、升级注意事项检查（英文，中文可选）。
 4. 创建 `release/vX.Y.Z → main` 的 PR，通过 CI + 另一名核心维护者审批后，
    用 **merge commit** 合并（不用 squash，保留发布过程与签名链）。合并前
    确认 PR 分支已 up-to-date 且最终变更与已验证的 RC 一致。
@@ -93,11 +93,11 @@ nexusdesk（`GroundedCoreAI/nexusdesk`）的分支管理、PR、发布、hotfix 
    ```
 
    若合并结果与已测试的 RC 代码不同，必须重新验证后才能打 tag。
-6. 在 GitHub 创建对应 Release（功能变更、修复、已知限制、升级说明，中英
-   双语）。**`main` 更新、正式 Tag 和 GitHub Release 均不触发任何服务器部
+6. 在 GitHub 创建对应 Release（功能变更、修复、已知限制、升级说明，英文；
+   中文可选）。**`main` 更新、正式 Tag 和 GitHub Release 均不触发任何服务器部
    署**——正式 Release 只负责记录和发布版本，与测试服务器部署完全解耦。
-7. 通过 PR 把 release 分支上的版本号、中英文 CHANGELOG 及其他必要变更**同
-   步回 `integration`**（保留 `integration` 上已有的新开发和依赖更新），然后
+7. 通过 PR 把 release 分支上的版本号、CHANGELOG 及其他必要变更**同步回
+   `integration`**（保留 `integration` 上已有的新开发和依赖更新），然后
    删除 `release/vX.Y.Z` 分支。
 8. 正式 tag 一旦推送**不得移动或覆盖**（由现有 `Protect release tags`
    Ruleset 保护）。
