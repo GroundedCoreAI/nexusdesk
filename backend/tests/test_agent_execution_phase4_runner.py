@@ -339,3 +339,363 @@ def test_managed_process_os_identity_is_unset_by_default_and_bounded():
 def test_host_package_is_importable_and_internal():
     assert host.__name__.endswith("agent_execution.host")
     assert host.__doc__ is not None
+
+
+# ---------------------------------------------------------------------------
+# T7: start identity, allowlist gate, real spawn and bounded I/O
+# (P4-UT-02/03/20/21 + P4-IT-02/03/04, measurable on darwin per 08 R-3)
+# ---------------------------------------------------------------------------
+
+import asyncio
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from agent_execution.process_test_adapters import (
+    TRUSTED_TARGET_PATH,
+    build_trusted_registry,
+    make_spec,
+)
+
+from agent_platform.core_platform.agent_execution.host import (
+    process_identity,
+    process_runner,
+)
+from agent_platform.core_platform.agent_execution.host.host_models import (
+    REASON_UNTRUSTED_TARGET,
+)
+from agent_platform.core_platform.agent_execution.host.process_runner import (
+    ProcessRunner,
+    UntrustedTargetError,
+)
+
+REGISTRY = build_trusted_registry()
+
+
+def _runner(**overrides):
+    return ProcessRunner(REGISTRY, **overrides)
+
+
+def _workdir(tmp_path: Path) -> Path:
+    working = tmp_path / "aa11" / "bb22"
+    working.mkdir(parents=True, exist_ok=True)
+    return working
+
+
+# ---------------------------------------------------------------------------
+# Identity probes (08 R-6)
+# ---------------------------------------------------------------------------
+
+
+def test_linux_token_parser_reads_starttime_and_cmdline_digest(monkeypatch):
+    stat_body = (
+        b"123 (python) S 1 123 123 0 -1 0 4194304 100 0 0 0 5 5 20 0 1 0 0 "
+        b"987654321 12345678 9999999 18446744073709551615 0 0 0 0"
+    )
+    cmdline = b"/usr/bin/python\x00-m\x00trusted_targets\x00exit\x000\x00"
+
+    class _FakeFile:
+        def __init__(self, payload: bytes):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return self._payload
+
+    def fake_open(path, *args, **kwargs):
+        return _FakeFile(stat_body if str(path).endswith("/stat") else cmdline)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    import hashlib
+
+    expected_digest = hashlib.sha256(cmdline).hexdigest()[:16]
+    # starttime is /proc field 22, index 19 of the tokens after ")".
+    token = process_identity._linux_token(123)
+    assert token == f"linux:987654321:{expected_digest}"
+
+
+def test_identity_matches_is_fail_closed():
+    assert process_identity.identity_matches("macos:x", "macos:x")
+    assert not process_identity.identity_matches("macos:x", "macos:y")
+    assert not process_identity.identity_matches(None, "macos:y")
+    assert not process_identity.identity_matches("macos:x", None)
+    assert not process_identity.identity_matches(None, None)
+
+
+def test_start_token_capture_is_platform_honest():
+    token = process_identity.capture_start_token(os.getpid())
+    if sys.platform.startswith("linux"):
+        assert token is None or token.startswith("linux:")
+    elif sys.platform == "darwin":
+        # The macOS dev-subset probe is best-effort (08 R-6): either a
+        # parsable token or None, never a fabricated value.
+        assert token is None or token.startswith("macos:")
+    else:  # pragma: no cover - unsupported platforms fail closed
+        assert token is None
+
+
+def test_probe_of_a_dead_pid_returns_none():
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    assert process_identity.capture_start_token(proc.pid) is None
+
+
+def test_group_and_process_liveness_probes():
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
+    try:
+        assert process_identity.process_alive(proc.pid)
+        pgid = process_identity.read_pgid(proc.pid)
+        assert pgid is not None
+        assert process_identity.group_alive(pgid)
+    finally:
+        proc.kill()
+        proc.wait()
+    assert not process_identity.process_alive(proc.pid)
+
+
+# ---------------------------------------------------------------------------
+# Allowlist gate before spawn (P4-UT-02)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        (TRUSTED_TARGET_PATH, "exit", "0"),
+        (TRUSTED_TARGET_PATH, "sleep", "30"),
+        (TRUSTED_TARGET_PATH, "json-events"),
+    ],
+)
+def test_registry_accepts_the_fixed_target_and_bounded_parameters(argv):
+    spec = make_spec("exit", "0").model_copy(update={"argv": argv})
+    resolved = REGISTRY.resolve(spec)
+    assert resolved[0] == sys.executable
+    assert resolved[1:] == argv
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        (),  # empty argv never matches the fixed prefix
+        ("/tmp/evil.sh", "exit", "0"),  # caller-supplied executable path
+        (TRUSTED_TARGET_PATH, "../escape"),
+        (TRUSTED_TARGET_PATH, "exit; rm -rf /"),
+        (TRUSTED_TARGET_PATH, "EXIT"),  # uppercase is outside the grammar
+        (TRUSTED_TARGET_PATH, "exit", "0", ".."),
+        (TRUSTED_TARGET_PATH, "exit", "0") * 10,  # too many parameters
+        (TRUSTED_TARGET_PATH, "exit", "a b"),
+        (TRUSTED_TARGET_PATH, "exit", "x" * 65),
+    ],
+)
+def test_registry_rejects_unregistered_and_arbitrary_argv(argv):
+    spec = make_spec("placeholder").model_copy(update={"argv": argv})
+    with pytest.raises(UntrustedTargetError):
+        REGISTRY.resolve(spec)
+
+
+def test_unregistered_executable_id_is_rejected():
+    spec = make_spec("exit", "0").model_copy(update={"executable_id": "other-engine"})
+    with pytest.raises(UntrustedTargetError):
+        REGISTRY.resolve(spec)
+
+
+def test_host_gate_blocks_before_any_spawn(monkeypatch, tmp_path):
+    spawns = {"count": 0}
+    real_create = asyncio.create_subprocess_exec
+
+    async def counting_create(*args, **kwargs):
+        spawns["count"] += 1
+        return await real_create(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", counting_create)
+    runner = _runner()
+    bad_spec = make_spec("exit", "0").model_copy(update={"argv": ("/bin/sh", "-c", "true")})
+    with pytest.raises(UntrustedTargetError):
+        asyncio.run(
+            runner.start(
+                bad_spec,
+                run_id=uuid4(),
+                managed_id=uuid4(),
+                host_id="runtime-worker.01",
+                host_instance_id="boot-1",
+                sandbox_provider="local/v1",
+                working_dir=_workdir(tmp_path),
+            )
+        )
+    assert spawns["count"] == 0  # zero exec attempts, AC-6/P4-UT-02
+    assert REASON_UNTRUSTED_TARGET == "runtime_host_untrusted_target"
+
+
+# ---------------------------------------------------------------------------
+# Real spawn, bounded I/O, identity (P4-UT-03/21, P4-IT-02/03/04)
+# ---------------------------------------------------------------------------
+
+
+def _start_and_collect(tmp_path, spec, *, wait_timeout=10):
+    """Spawn through the Runner and collect to completion (test helper)."""
+
+    async def flow():
+        runner = _runner()
+        started = await runner.start(
+            spec,
+            run_id=uuid4(),
+            managed_id=uuid4(),
+            host_id="runtime-worker.01",
+            host_instance_id="boot-1",
+            sandbox_provider="local/v1",
+            working_dir=_workdir(tmp_path),
+        )
+        assert started.managed.state == "running"
+        assert started.managed.os_pid == started.process.pid
+        assert started.managed.process_group_id == started.process.pid  # own session
+        exit_code = await asyncio.wait_for(started.process.wait(), wait_timeout)
+        await started.pump.drain(2.0)
+        return started, exit_code
+
+    return asyncio.run(flow())
+
+
+def test_real_spawn_runs_the_trusted_target_in_the_workdir(tmp_path):
+    spec = make_spec("workdir-marker", None, workdir_relative="aa11/bb22")
+    started, exit_code = _start_and_collect(tmp_path, spec)
+    assert exit_code == 0
+    marker = _workdir(tmp_path) / "marker.txt"
+    assert marker.read_bytes() == b"inside-workdir"
+    assert started.managed.command_digest == spec.command_digest
+
+
+def test_start_identity_and_digest_are_attached_at_spawn(tmp_path):
+    spec = make_spec("exit", "0")
+    started, exit_code = _start_and_collect(tmp_path, spec)
+    assert exit_code == 0
+    assert started.managed.start_token is None or ":" in started.managed.start_token
+    if sys.platform.startswith("linux"):
+        assert started.managed.start_token is not None  # /proc is authoritative there
+    assert started.managed.command_digest.startswith("sha256:")
+
+
+def test_secret_environment_values_never_reach_logs_or_output(tmp_path, caplog):
+    secret = "super-secret-value-xyzzy"
+    spec = make_spec("env-silent").model_copy(
+        update={"environment": {"PATH": "/usr/bin:/bin", "AGENT_TOKEN": secret}}
+    )
+    with caplog.at_level("DEBUG"):
+        started, exit_code = _start_and_collect(tmp_path, spec)
+    assert exit_code == 0
+    stdout, stderr = started.output()
+    assert stdout == b""
+    assert stderr == b""
+    assert secret not in caplog.text
+    assert secret not in str(started.managed)
+
+
+def test_independent_per_stream_byte_limits_with_backpressure(tmp_path):
+    # 200KiB into stdout against a 4KiB bound: the pump stops consuming at
+    # the limit (the child blocks on the full pipe), while the independently
+    # bounded stderr stays clean - the group must not be killed until the
+    # Supervisor decides (tested there), so this case ends with a manual
+    # group KILL and zero surviving descendants (04 §6).
+    spec = make_spec("flood-stdout", "204800")
+    spec = spec.model_copy(
+        update={
+            "resource_policy": spec.resource_policy.model_copy(
+                update={"output_max_bytes_per_stream": 4096}
+            )
+        }
+    )
+
+    async def flow():
+        runner = _runner()
+        started = await runner.start(
+            spec,
+            run_id=uuid4(),
+            managed_id=uuid4(),
+            host_id="runtime-worker.01",
+            host_instance_id="boot-1",
+            sandbox_provider="local/v1",
+            working_dir=_workdir(tmp_path),
+        )
+        try:
+            await asyncio.wait_for(started.pump.stdout.overflowed.wait(), timeout=10)
+            assert started.pump.stdout.truncated is True
+            assert len(started.pump.stdout.payload()) == 4096
+            assert not started.pump.stderr.overflowed.is_set()
+            assert started.pump.stderr.payload() == b""
+            # The pump stopped retaining bytes; the child stays alive, which
+            # is what the Supervisor-side termination is exercised on.
+            assert started.process.returncode is None
+        finally:
+            os.killpg(started.managed.process_group_id, signal.SIGKILL)
+            await asyncio.wait_for(started.process.wait(), timeout=10)
+            await started.pump.aclose()
+
+    asyncio.run(flow())
+
+
+# ---------------------------------------------------------------------------
+# Reverse-order cleanup on spawn/pipe/registration failure (P4-UT-20)
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_failure_surfaces_when_exec_fails(tmp_path, monkeypatch):
+    async def failing_create(*args, **kwargs):
+        raise OSError(2, "No such file or directory")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", failing_create)
+    runner = _runner()
+    with pytest.raises(process_runner.ProcessSpawnError) as excinfo:
+        asyncio.run(
+            runner.start(
+                make_spec("exit", "0"),
+                run_id=uuid4(),
+                managed_id=uuid4(),
+                host_id="runtime-worker.01",
+                host_instance_id="boot-1",
+                sandbox_provider="local/v1",
+                working_dir=_workdir(tmp_path),
+            )
+        )
+    assert excinfo.value.code == "runtime_host_spawn_failed"
+
+
+def test_pipe_setup_failure_kills_group_and_reaps(tmp_path, monkeypatch):
+    # The exec succeeded but the registration step (pump start) fails: the
+    # runner must terminate the freshly created group through the same
+    # handle and re-validate before surfacing the error.
+    captured = {}
+    real_pump_start = process_runner.StreamPump.start
+
+    def broken_start(self):
+        captured["pid"] = self._process.pid
+        raise RuntimeError("pipe setup exploded")
+
+    monkeypatch.setattr(process_runner.StreamPump, "start", broken_start)
+    runner = _runner()
+    spec = make_spec("sleep", "60")
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            runner.start(
+                spec,
+                run_id=uuid4(),
+                managed_id=uuid4(),
+                host_id="runtime-worker.01",
+                host_instance_id="boot-1",
+                sandbox_provider="local/v1",
+                working_dir=_workdir(tmp_path),
+            )
+        )
+    assert captured["pid"] is not None
+    deadline = time.monotonic() + 5
+    while process_identity.process_alive(captured["pid"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not process_identity.process_alive(captured["pid"])
+    assert not process_identity.group_alive(captured["pid"])
+    assert real_pump_start is not None  # keep the reference honest

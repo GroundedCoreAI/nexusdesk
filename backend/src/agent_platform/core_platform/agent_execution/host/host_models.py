@@ -15,7 +15,7 @@ drift apart.
 import hashlib
 import json
 from collections.abc import Sequence
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 from uuid import UUID
 
 from pydantic import Field, StringConstraints
@@ -43,6 +43,9 @@ REASON_CLEANUP_FAILED = "runtime_host_cleanup_failed"
 REASON_CLEANUP_RACE = "runtime_host_cleanup_race"
 REASON_SUPPORT_UNSUPPORTED = "runtime_host_support_unsupported"
 REASON_WORKDIR_UNAVAILABLE = "runtime_host_workdir_unavailable"
+REASON_EXITED = "runtime_host_exited"
+REASON_ADMISSION_CLOSED = "runtime_host_admission_closed"
+REASON_RECOVERY_TERMINATED = "runtime_host_recovery_terminated"
 
 HostReasonCode = Literal[
     "runtime_host_untrusted_target",
@@ -58,6 +61,9 @@ HostReasonCode = Literal[
     "runtime_host_cleanup_race",
     "runtime_host_support_unsupported",
     "runtime_host_workdir_unavailable",
+    "runtime_host_exited",
+    "runtime_host_admission_closed",
+    "runtime_host_recovery_terminated",
 ]
 
 HOST_REASON_CODES: frozenset[str] = frozenset(
@@ -75,6 +81,9 @@ HOST_REASON_CODES: frozenset[str] = frozenset(
         REASON_CLEANUP_RACE,
         REASON_SUPPORT_UNSUPPORTED,
         REASON_WORKDIR_UNAVAILABLE,
+        REASON_EXITED,
+        REASON_ADMISSION_CLOSED,
+        REASON_RECOVERY_TERMINATED,
     }
 )
 
@@ -212,6 +221,19 @@ class ManagedProcess(ExecutionContractModel):
         return self.model_copy(update={"state": state})
 
 
+class ExitObservation(NamedTuple):
+    """One bounded wait for process termination.
+
+    ``exited`` carries the reaped exit code (own children only); ``absent``
+    is the honest recovery-side observation that the process group vanished
+    without a reapable status; ``alive`` means the window elapsed with the
+    group still running, so escalation decides the next signal.
+    """
+
+    status: Literal["exited", "alive", "absent"]
+    exit_code: int | None = None
+
+
 class ProcessResult(ExecutionContractModel):
     """Structured outcome of one supervised process (FR-1 output row).
 
@@ -229,6 +251,10 @@ class ProcessResult(ExecutionContractModel):
     stdout_truncated: bool = False
     stderr_truncated: bool = False
     wall_seconds: float = Field(ge=0)
+    # Bounded protocol payload for the Adapter's parser: already capped by
+    # the per-stream limit, never logged, and never part of a public event.
+    stdout: bytes = b""
+    stderr: bytes = b""
 
 
 class HostHealth(ExecutionContractModel):
