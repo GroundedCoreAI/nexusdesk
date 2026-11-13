@@ -2,6 +2,9 @@ import json
 import logging
 from uuid import uuid4
 
+from agent_platform.business_capabilities.customer_service.service_apps.business_conversations import (
+    BusinessConversationService,
+)
 from agent_platform.core_platform.platform_services.integrations.channels.base import (
     CHANNEL_WORK_CHANNEL,
     chunk_text,
@@ -92,7 +95,8 @@ class ConversationService:
         async with self.engine.connect() as c:
             return await many(
                 c,
-                """SELECT id,external_id,mode,agent_id,deleted_agent,assigned_to,created_at,updated_at
+                """SELECT id,external_id,mode,agent_id,agent_version,application_id,
+                application_version,deleted_agent,assigned_to,created_at,updated_at
                 FROM runtime_conversations
                 WHERE tenant_id=:t AND """
                 + scope_sql
@@ -138,7 +142,8 @@ class ConversationService:
             )
             items = await many(
                 c,
-                """SELECT id,external_id,mode,agent_id,deleted_agent,assigned_to,created_at,updated_at
+                """SELECT id,external_id,mode,agent_id,agent_version,application_id,
+                application_version,deleted_agent,assigned_to,created_at,updated_at
                 FROM runtime_conversations WHERE """
                 + where
                 + " ORDER BY updated_at DESC,id DESC LIMIT :lim OFFSET :off",
@@ -249,7 +254,8 @@ class ConversationService:
             )
             items = await many(
                 c,
-                """SELECT id,external_id,mode,agent_id,source,created_at,updated_at,
+                """SELECT id,external_id,mode,agent_id,agent_version,application_id,
+                application_version,source,created_at,updated_at,
                 (SELECT content FROM conversation_messages WHERE conversation_id=runtime_conversations.id
                  ORDER BY seq DESC LIMIT 1) AS last_message
                 FROM runtime_conversations WHERE """
@@ -296,6 +302,9 @@ class ConversationService:
         source="business",
         identity=None,
         scope: BusinessScope | None = None,
+        application_id=None,
+        application_version=None,
+        agent_version=None,
     ):
         query_scope = resolve_scope(tenant, scope)
         resolved = persisted_scope(tenant, scope)
@@ -304,6 +313,10 @@ class ConversationService:
             raise DomainError("invalid_conversation_source", 422)
         if source == "playground" and not agent_id:
             raise DomainError("playground_agent_required", 422)
+        if application_id is not None and (
+            application_version is None or agent_id is None or agent_version is None
+        ):
+            raise DomainError("conversation_application_context_incomplete", 422)
         async with transaction(self.engine, connection) as c:
             example_agent = False
             if source == "playground":
@@ -358,9 +371,13 @@ class ConversationService:
             row = await one(
                 c,
                 """INSERT INTO runtime_conversations(
-                    id,tenant_id,business_id,workspace_id,external_id,agent_id,source,customer_id
+                    id,tenant_id,business_id,workspace_id,external_id,agent_id,agent_version,
+                    application_id,application_version,source,customer_id
                 )
-                VALUES(:id,:t,:business,:workspace,:external,:aid,:source,:customer)
+                VALUES(
+                    :id,:t,:business,:workspace,:external,:aid,:agent_version,
+                    :application_id,:application_version,:source,:customer
+                )
                 ON CONFLICT(tenant_id,business_id,workspace_id,external_id)
                 DO NOTHING RETURNING *""",
                 id=uuid4(),
@@ -369,6 +386,9 @@ class ConversationService:
                 workspace=resolved.workspace_id,
                 external=external_id,
                 aid=agent_id,
+                agent_version=agent_version,
+                application_id=application_id,
+                application_version=application_version,
                 source=source,
                 customer=customer_id,
             )
@@ -456,7 +476,20 @@ class ConversationService:
                 raise DomainError("conversation_not_claimed", 409)
             if not administrator and row["assigned_to"] != actor:
                 raise DomainError("conversation_assignee_required", 403)
-            await add_message(c, cid, "human", content)
+            runtime_message_id = await add_message(c, cid, "human", content)
+            await BusinessConversationService.append_runtime_message(
+                c,
+                tenant_id=tenant,
+                runtime_conversation_id=cid,
+                role="human",
+                content=content,
+                runtime_message_id=runtime_message_id,
+                scope=BusinessScope(
+                    tenant_id=tenant,
+                    business_id=row["business_id"],
+                    workspace_id=row["workspace_id"],
+                ),
+            )
             await execute(
                 c,
                 """UPDATE runtime_conversations SET history=CAST(:msg AS jsonb)
@@ -529,8 +562,34 @@ class ConversationService:
                 **scope_params,
                 mode="closed" if operation == "close" else "bot",
             )
-            await add_message(
+            system_content = "会话已关闭。" if operation == "close" else "会话已重新打开。"
+            runtime_message_id = await add_message(
                 c, cid, "system", "会话已关闭。" if operation == "close" else "会话已重新打开。"
+            )
+            await BusinessConversationService.append_runtime_message(
+                c,
+                tenant_id=tenant,
+                runtime_conversation_id=cid,
+                role="system",
+                content=system_content,
+                runtime_message_id=runtime_message_id,
+                scope=BusinessScope(
+                    tenant_id=tenant,
+                    business_id=updated["business_id"],
+                    workspace_id=updated["workspace_id"],
+                ),
+            )
+            await BusinessConversationService.set_status_for_runtime(
+                c,
+                tenant=tenant,
+                runtime_conversation_id=cid,
+                status="closed" if operation == "close" else "open",
+                assigned_to=updated.get("assigned_to"),
+                scope=BusinessScope(
+                    tenant_id=tenant,
+                    business_id=updated["business_id"],
+                    workspace_id=updated["workspace_id"],
+                ),
             )
             await audit(c, tenant, actor, "conversation." + operation, cid)
             return updated

@@ -40,14 +40,14 @@ NEXUSDESK_TLS_HOSTS=192.168.1.50,nexusdesk.test sh nexusdesk quickstart
 
 如果此前在体验环境配置过企业身份或嵌入应用，数据库里保存的“平台公开地址”仍是 `http://`，登录时校验来源会不通过。把开放平台中登记的地址改成实际访问的 `https://` 地址即可。
 
-应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据与行业案例（9 个知识库、18 个 Agent 草稿、36 篇虚构案例文档）；再次启动保留数据。案例 Agent 自动绑定演示 Chat 方案，可在 Agent 管理页用“仅看案例”筛选。部署自动初始化本地管理员 admin / nexusdesk；体验模式不强制首次改密（`AGENT_REQUIRE_PASSWORD_CHANGE=false`），用该账号直接登录。quickstart 镜像在构建时传入 `VITE_PREFILL_LOGIN=true`，登录页因此预填该公开演示账号；普通 `npm run build` 与生产镜像不传该参数，登录页保持空白，不会把口令写进产物。Nginx 只原样透传 `Authorization` 头，不注入身份。启动时仍会生成一个本地服务令牌持久化在数据卷中，供运维用登录页的“服务令牌”入口应急登录，它不写入前端资源或启动输出。
+应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据、独立行业案例（9 个知识库、18 个 Agent 草稿、36 篇虚构案例文档），以及基于首个已发布 Agent 的不可变服务应用示例；再次启动保留数据，示例 seed 不会覆盖已存在的示例或用户复制后的应用。案例 Agent 自动绑定演示 Chat 方案，可在 Agent 管理页用“仅看案例”筛选。部署自动初始化本地管理员 admin / nexusdesk；体验模式不强制首次改密（`AGENT_REQUIRE_PASSWORD_CHANGE=false`），用该账号直接登录。quickstart 镜像在构建时传入 `VITE_PREFILL_LOGIN=true`，登录页因此预填该公开演示账号；普通 `npm run build` 与生产镜像不传该参数，登录页保持空白，不会把口令写进产物。Nginx 只原样透传 `Authorization` 头，不注入身份。启动时仍会生成一个本地服务令牌持久化在数据卷中，供运维用登录页的“服务令牌”入口应急登录，它不写入前端资源或启动输出。
 
-进入“会话工作台”选择 `sample-support`：
+进入“服务应用”选择任一标准案例并复制为自己的应用，完成连接凭据和发布后再通过客户渠道测试：
 
-1. 输入“发货需要多久？”体验知识检索与工具结果。
-2. 输入“帮我创建工单”查看待确认的工单建议，按界面确认后创建。
-3. 通过人工接管入口体验协作。
-4. 文档中心上传 TXT/Markdown/普通 DOCX 等，查看解析、分片，关联知识库并发布关键词索引。
+1. 复制标准案例并确认绑定的 Agent 与版本。
+2. 配置应用连接的凭据，运行发布检查。
+3. 发布应用版本并显式绑定到客户渠道。
+4. 在预览与调试中验证只读技能，写操作仍须人工确认。
 
 页面持续显示“快速体验模式”。Demo 仅验证流程，不代表真实回答质量；不连接真实订单业务，不提供真实 OCR、向量检索或 GPU 推理。MinIO、Milvus、外部解析服务均不启动；原始文件仍存 PostgreSQL，非内存临时存储。体验模式默认单租户，不适合公开或多人生产使用。
 
@@ -73,15 +73,15 @@ sh nexusdesk deploy
 
 PowerShell 使用 `Copy-Item` 复制模板，再执行 `.\nexusdesk.ps1 deploy`。环境变量文件中的特殊字符按 Compose .env 规则引用；数据库 URL 的密码需要 URL 编码。不要把真实 .env、主密钥提交到代码仓库。
 
-包含 Web、API、Runtime Worker、Knowledge Worker、Memory Worker 五个常驻容器，共用后端镜像；另有一次性 migrate 服务。Memory Worker 执行会话摘要等异步记忆任务（复用 `memory_tasks` 表认领，非新中间件），与 Runtime Worker 解耦、可独立伸缩。中间件由外部提供，不重复启动、不修改已有 PostgreSQL / Milvus / MinIO。脚本先构建镜像，停止应用服务，重新执行迁移与已配置存储连接检查，成功后启动全部服务；迁移失败不启动应用，默认不导入演示数据。如需在目标库预置行业案例，在 `.env` 设 `AGENT_SEED_INDUSTRIES=true`（写入 36 篇标注为虚构的演示文档，脚本不提供清理）。
+包含 Web、API、Runtime Worker、Knowledge Worker、Memory Worker 五个常驻容器，共用后端镜像；另有一次性 migrate 服务。Memory Worker 执行会话摘要等异步记忆任务（复用 `memory_tasks` 表认领，非新中间件），与 Runtime Worker 解耦、可独立伸缩。中间件由外部提供，不重复启动、不修改已有 PostgreSQL / Milvus / MinIO。脚本先构建镜像，停止应用服务，重新执行迁移与已配置存储连接检查，成功后启动全部服务；迁移失败不启动应用。服务应用示例由 `AGENT_SERVICE_APP_EXAMPLES_ENABLED` 独立控制；如需在目标库预置行业案例，另设 `AGENT_SEED_INDUSTRIES=true`（写入 36 篇标注为虚构的演示文档，脚本不提供清理）。
 
-migrate 一次性服务本身就是初始化步骤：建表（Alembic 迁移到 head）、创建默认管理员（admin / nexusdesk，首次登录强制改密）、创建主密钥、检查已配置的 Milvus / S3 连通性。全新数据库初始化后服务应用列表是空的，需要预置四个演示行业包（购物消费 / 游戏业务 / 内容创作 / 出行服务，各产出一个已发布的应用）时，在 `.env` 设 `AGENT_SEED_INDUSTRY_PACKS=true`，下次 `sh nexusdesk deploy` 的 migrate 阶段会安装并发布它们；也可对已有库手动补跑：
+migrate 一次性服务本身就是初始化步骤：建表（Alembic 迁移到 head）、创建默认管理员（admin / nexusdesk，首次登录强制改密）、创建主密钥、检查已配置的 Milvus / S3 连通性。`AGENT_SERVICE_APP_EXAMPLES_ENABLED=true` 时，会在库中已存在已发布 Agent 的前提下安装游戏玩家、购物消费、创作者与出行服务四个不可变服务应用示例；没有已发布 Agent 时该 seed 幂等返回 0，不伪造 Agent。也可在发布 Agent 后手动补跑：
 
 ```sh
-docker compose --env-file deploy/production/.env -f deploy/production/compose.yaml run --rm --no-deps migrate python -m agent_platform.applications.seed_demo_packs
+docker compose --env-file deploy/production/.env -f deploy/production/compose.yaml run --rm --no-deps migrate python -m agent_platform.applications.seed_service_apps
 ```
 
-该命令幂等：已安装的包不重复安装，已发布的场景和应用不重复发布，只补齐缺失的部分，因此重复执行安全。包里的样例数据是虚构演示内容；对话要真正回答，仍需先在界面发布 Chat 模型方案。演示数据装载失败只会打印告警并以退出码 0 结束 migrate（控制台照常启动，只是列表为空），按上面命令重跑即可，不会拖垮部署。
+该命令幂等：已存在的示例不会更新，用户复制后的应用也不会被覆盖，只补齐缺失的示例。示例数据是虚构演示内容；对话要真正回答，仍需先在界面发布 Chat 模型方案。示例装载失败只会打印告警并以退出码 0 结束 migrate（控制台照常启动，只是示例列表为空），按上面命令重跑即可，不会拖垮部署。
 
 - PostgreSQL 必需；配置 `AGENT_DATABASE_URL`。
 - 默认使用 `AGENT_MODEL_BACKEND=unconfigured`，无需模型密钥即可启动。界面提示添加供应商连接、Chat 模型和发布配置方案，再绑定到 Agent；未配置时对话明确返回配置提示，不降级 Demo。可选的旧版默认模型通过 `openai` 后端配置。
@@ -123,7 +123,7 @@ PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Mi
 
 ## 演示业务接口（mock-business）
 
-行业能力里的「数据执行器」需要一个真实可访问的上游。仓库自带一个演示服务 `backend/examples/mock_business`，暴露 25 个业务接口（订单、工单、客户、账单等）与 15 个业务对象夹具，响应体统一为 `{code,message,data}`，并支持故障注入，用于验证超时、5xx 与降级路径。
+服务应用连接需要一个真实可访问的上游。仓库自带一个演示服务 `backend/examples/mock_business`，暴露 25 个业务接口（订单、工单、客户、账单等）与 15 个业务对象夹具，响应体统一为 `{code,message,data}`，并支持故障注入，用于验证超时、5xx 与降级路径。
 
 **三套 Compose（根目录 `compose.yaml`、体验模式、生产拓扑）都包含该服务，且默认启动。** 不需要它时用显式服务名启动其余部分：
 
@@ -152,15 +152,15 @@ docker build --build-arg PYTHON_IMAGE=<mirror>/library/python:3.12-slim-bookworm
 
 生产环境建议推送到私有仓库，再用 `NEXUSDESK_MOCK_IMAGE` 指向带 tag 的镜像，不要依赖服务器上的源码目录。
 
-**关键：服务地址写在数据里，不写在环境变量里。** 工具集的目标地址由界面配置（配置管理 → 工具集 → 服务地址），因此换拓扑后要同步改地址：
+**关键：服务地址写在数据里，不写在环境变量里。** 应用连接的目标地址由界面配置（服务应用 → 应用连接 → 服务地址），因此换拓扑后要同步改地址：
 
-| 平台跑在哪 | 工具集里填 |
+| 平台跑在哪 | 应用连接里填 |
 |---|---|
 | 宿主机（本地开发，`compose.yaml`） | `http://127.0.0.1:8010` |
 | quickstart 的 `app` 容器 | `http://mock-business:8010` |
 | production 的 `api` 容器 | `http://mock-business:8010` |
 
-地址填错的表现是工具集创建成功、执行时报连接失败或 404，不会在保存阶段拦截。演示接口的路径清单位于 `backend/examples/mock_business/README.md`，可用 `python scripts/mock_tools.py` 一键把 25 个接口导入并发布，`python scripts/mock_executors.py` 回填 15 个 provider 的执行器。
+地址填错的表现是连接保存成功、发布检查或调试执行时报连接失败 / 404，不会在保存阶段伪造成功。演示接口的路径清单位于 `backend/examples/mock_business/README.md`；在应用连接中按技能参数映射配置对应路径与结果字段。
 
 ## 记忆检索：pgvector 与降级模式
 

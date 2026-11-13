@@ -4,6 +4,12 @@ import json
 from collections import OrderedDict
 
 from agent_platform.applications.platform_runtime.tool_defaults import BUILTIN_SCHEMAS
+from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
+    ApplicationRuntimeContext,
+    ApplicationRuntimeResolver,
+    application_http_tool_specs,
+    authorized_tool_names,
+)
 from agent_platform.business_capabilities.evaluation.service import MockTools
 from agent_platform.core_platform.agent_runtime.engine import RuntimeEngine
 from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
@@ -20,13 +26,27 @@ from agent_platform.extension_contracts import RuntimeBindings
 class RuntimeFactory:
     """Build one Runtime instance from a run snapshot and explicit bindings."""
 
-    def __init__(self, base_runtime, bindings, client, settings, shared_limit, network_policy=None):
+    def __init__(
+        self,
+        base_runtime,
+        bindings,
+        client,
+        settings,
+        shared_limit,
+        network_policy=None,
+        application_runtime=None,
+    ):
         if not isinstance(bindings, RuntimeBindings):
             raise TypeError("RuntimeFactory requires RuntimeBindings")
         self.base_runtime, self.client, self.settings = base_runtime, client, settings
         self.bindings = bindings
         self.limit = shared_limit
         self.network_policy: ToolEgressPolicy | None = network_policy
+        self.application_runtime = application_runtime or ApplicationRuntimeResolver(
+            bindings.engine,
+            None,
+            settings,
+        )
         self.models = OrderedDict()
 
     @property
@@ -77,12 +97,39 @@ class RuntimeFactory:
         snapshot = row["config"].get("agent")
         if not snapshot:
             return self.base_runtime
+        application = row["config"].get("application")
+        if application:
+            specs = [
+                HttpTool.model_validate(spec) for spec in application_http_tool_specs(application)
+            ]
+            allowed = authorized_tool_names(application)
+
+            async def credential_resolver(spec):
+                return await self.application_runtime.credential_headers(
+                    row["tenant_id"],
+                    spec,
+                    application_id=application.get("id"),
+                    business_id=application.get("business_id"),
+                    workspace_id=application.get("workspace_id"),
+                )
+
+        else:
+            # Platform diagnostics may still use a direct Agent run. Customer
+            # channels never reach this branch because their run snapshot is
+            # application-scoped.
+            specs = [HttpTool.model_validate(s["spec"]) for s in snapshot["tools"]]
+            allowed = snapshot["config"]["tool_names"]
+
+            async def credential_resolver(spec):
+                return await self.bindings.tools.credential_headers(
+                    row["tenant_id"],
+                    spec,
+                )
+
         http = ToolGateway(
             self.client,
-            [HttpTool.model_validate(s["spec"]) for s in snapshot["tools"]],
-            credential_resolver=lambda spec: self.bindings.tools.credential_headers(
-                row["tenant_id"], spec
-            ),
+            specs,
+            credential_resolver=credential_resolver,
             network_policy=self.network_policy,
         )
         http.limit = self.limit
@@ -90,7 +137,7 @@ class RuntimeFactory:
             http,
             self.bindings,
             row,
-            snapshot["config"]["tool_names"],
+            allowed,
             snapshot["config"]["knowledge_base_ids"],
             emit,
         )
@@ -125,3 +172,54 @@ class RuntimeFactory:
             RuntimeEngine(self.bound_model(snapshot, schemas), mocks, self.effective(snapshot)),
             mocks,
         )
+
+    async def preview_application(
+        self,
+        context: ApplicationRuntimeContext,
+        message: str,
+        *,
+        allow_write: bool,
+    ):
+        """Run an isolated, side-effect-free application preview.
+
+        Both application tools and built-in capability tools are mocked. The
+        draft/published snapshot and Agent version still go through the same
+        tool authorization and runtime loop used by customer-facing runs, so
+        the preview validates the real skill contract without calling external
+        systems or writing business data.
+        """
+
+        del allow_write  # The caller filters write skills before this boundary.
+        application = context.snapshot()
+        specs = [HttpTool.model_validate(spec) for spec in application_http_tool_specs(application)]
+        schemas = [spec.model_schema() for spec in specs]
+        schemas.extend(
+            BUILTIN_SCHEMAS[name] for name in context.builtin_tools if name in BUILTIN_SCHEMAS
+        )
+        responses = {
+            schema["function"]["name"]: {
+                "ok": True,
+                "data": {"preview": True},
+                "simulation": True,
+                "upstream_called": False,
+            }
+            for schema in schemas
+        }
+        mocks = MockTools(schemas, responses)
+        runtime = RuntimeEngine(
+            self.bound_model(context.agent_snapshot, schemas),
+            mocks,
+            self.effective(context.agent_snapshot),
+        )
+        events = []
+
+        async def emit(kind, data):
+            events.append({"type": kind, **data})
+
+        output, _, _ = await runtime.run(message, [], emit)
+        return {
+            "reply": output,
+            "tools": list(mocks.calls),
+            "violations": list(mocks.violations),
+            "events": events,
+        }

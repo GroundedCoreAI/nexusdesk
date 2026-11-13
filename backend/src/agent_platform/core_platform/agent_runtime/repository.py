@@ -315,6 +315,7 @@ class RunRepository:
                 error_code=:error,finished_at=now(),lease_until=NULL WHERE id=:id"""),
                 {"id": run_id, "status": status, "output": output, "error": error},
             )
+            await self.hooks.on_finished(conn, row, status, error)
             if status == "completed":
                 for kind, data in await self.hooks.on_completed(
                     conn, row, cid, output, history, completion
@@ -360,6 +361,7 @@ class RunRepository:
                         finished_at=now() WHERE id=:id"""),
                         {"id": run_id},
                     )
+                    await self.hooks.on_finished(conn, row, "cancelled", None)
                     await self._event(conn, run_id, "run.cancelled", {})
                 else:
                     await self._event(conn, run_id, "run.cancel_requested", {})
@@ -388,4 +390,5 @@ class RunRepository:
                     finished_at=now(),lease_until=NULL WHERE id=:id"""),
                     {"id": row["id"], "status": status, "error": error},
                 )
+                await self.hooks.on_finished(conn, row, status, error)
                 await self._event(conn, row["id"], "run." + status, {"error_code": error})

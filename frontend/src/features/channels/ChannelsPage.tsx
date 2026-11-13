@@ -1,10 +1,9 @@
-import { t } from '../../i18n/index';
-import { useState } from 'react';
+import { dateTime, t } from '../../i18n/index';
+import { useEffect, useState } from 'react';
 import {
     patch,
     post,
-    type Agent,
-    type Channel,
+    put,
     type ChannelDelivery,
     type ChannelField,
     type ChannelProvider,
@@ -18,6 +17,60 @@ import {
     useAction,
     useResource,
 } from '../../shared/components/ui';
+import {
+    Button,
+    Modal,
+    Select,
+    Space,
+    Table,
+    Tag,
+    type TableColumnsType,
+} from 'antd';
+import './channels.css';
+
+interface ChannelV2 {
+    id: string;
+    name: string;
+    application_id: string;
+    application_key?: string | null;
+    application_name?: string | null;
+    application_version: number;
+    enabled: boolean;
+    provider: string;
+    config: Record<string, unknown>;
+    credentials_configured: boolean;
+    last_error_code?: string | null;
+    last_activity_at?: string | null;
+    token?: string | null;
+}
+
+interface PublishedApplication {
+    id: string;
+    key: string;
+    name: string;
+    published_version: number | null;
+}
+
+interface PublishedApplicationPage {
+    items: PublishedApplication[];
+    total: number;
+    page: number;
+    page_size: number;
+}
+
+interface ApplicationVersion {
+    version: number;
+    current?: boolean;
+    published?: boolean;
+}
+
+interface ApplicationVersionPage {
+    items: ApplicationVersion[];
+    published_version?: number | null;
+    total: number;
+    page: number;
+    page_size: number;
+}
 
 function ProviderInput({
     field,
@@ -89,7 +142,7 @@ function DeliveryList({ channelId }: { channelId: string }) {
         5000,
     );
     return (
-        <Panel title={t('投递记录')}>
+        <div className="channel-delivery-list">
             <Alert error={rows.error}/>
             {!rows.loading && !rows.data?.items.length && <Empty>{t('暂无投递记录')}</Empty>}
             {rows.data?.items.map(item => (
@@ -106,31 +159,54 @@ function DeliveryList({ channelId }: { channelId: string }) {
                     </p>
                 </article>
             ))}
-        </Panel>
+        </div>
     );
 }
 
 export function ChannelsPage() {
-    const rows = useResource<Channel[]>('/channels');
-    const agents = useResource<Agent[]>('/agents');
+    const rows = useResource<ChannelV2[]>('/channels');
+    const applications = useResource<PublishedApplicationPage>(
+        '/service-apps?page=1&page_size=100&status=published',
+    );
     const providers = useResource<ChannelProvider[]>('/channels/providers');
     const action = useAction();
     const { admin } = useAccess();
     const [provider, setProvider] = useState('generic_webhook');
     const [signing, setSigning] = useState('');
     const [name, setName] = useState('');
-    const [agent, setAgent] = useState('');
+    const [applicationId, setApplicationId] = useState('');
+    const [applicationVersion, setApplicationVersion] = useState<number | null>(null);
     const [config, setConfig] = useState<Record<string, string>>({});
     const [credentials, setCredentials] = useState<Record<string, string>>({});
-    const [created, setCreated] = useState<Channel | null>(null);
-    const [editing, setEditing] = useState<Channel | null>(null);
+    const [created, setCreated] = useState<ChannelV2 | null>(null);
+    const [editing, setEditing] = useState<ChannelV2 | null>(null);
     const [editConfig, setEditConfig] = useState<Record<string, string>>({});
     const [editCredentials, setEditCredentials] = useState<Record<string, string>>({});
     const [deliveriesFor, setDeliveriesFor] = useState('');
+    const [switching, setSwitching] = useState<ChannelV2 | null>(null);
+    const [targetVersion, setTargetVersion] = useState<number | null>(null);
+
     const selectedProvider = providers.data?.find(item => item.id === provider);
+    const publishedApplications = (applications.data?.items || [])
+        .filter(item => item.published_version !== null);
+    const selectedApplication = publishedApplications.find(item => item.id === applicationId);
+    const createVersions = useResource<ApplicationVersionPage>(
+        selectedApplication
+            ? `/service-apps/${encodeURIComponent(selectedApplication.key)}/versions?page=1&page_size=100`
+            : null,
+    );
+    const switchVersions = useResource<ApplicationVersionPage>(
+        switching?.application_key
+            ? `/service-apps/${encodeURIComponent(switching.application_key)}/versions?page=1&page_size=100`
+            : null,
+    );
     const native = provider !== 'generic_webhook';
     const providerName = (value: string) =>
         providers.data?.find(item => item.id === value)?.name || value;
+
+    useEffect(() => {
+        setApplicationVersion(selectedApplication?.published_version ?? null);
+    }, [selectedApplication?.id, selectedApplication?.published_version]);
 
     function chooseProvider(value: string) {
         const definition = providers.data?.find(item => item.id === value);
@@ -139,9 +215,10 @@ export function ChannelsPage() {
             (definition?.config_fields || []).map(field => [field.name, field.default || '']),
         ));
         setCredentials({});
+        setSigning('');
     }
 
-    function beginEdit(channel: Channel) {
+    function beginEdit(channel: ChannelV2) {
         setEditing(channel);
         setEditConfig(Object.fromEntries(
             Object.entries(channel.config || {}).map(([key, value]) => [key, String(value ?? '')]),
@@ -149,101 +226,203 @@ export function ChannelsPage() {
         setEditCredentials({});
     }
 
+    function beginSwitch(channel: ChannelV2) {
+        setSwitching(channel);
+        setTargetVersion(channel.application_version);
+    }
+
+    function applicationName(channel: ChannelV2) {
+        return channel.application_name
+            || publishedApplications.find(item => item.id === channel.application_id)?.name
+            || channel.application_key
+            || channel.application_id;
+    }
+
+    const columns: TableColumnsType<ChannelV2> = [
+        {
+            title: t('渠道'),
+            key: 'channel',
+            width: 220,
+            render: (_, channel) => (
+                <div className="channel-primary-cell">
+                    <strong>{channel.name}</strong>
+                    <span>{providerName(channel.provider)}</span>
+                    <code>{channel.id}</code>
+                </div>
+            ),
+        },
+        {
+            title: t('服务应用'),
+            key: 'application',
+            width: 230,
+            render: (_, channel) => (
+                <div className="channel-application-cell">
+                    <strong>{applicationName(channel)}</strong>
+                    <Tag color="blue">v{channel.application_version}</Tag>
+                </div>
+            ),
+        },
+        {
+            title: t('状态'),
+            key: 'status',
+            width: 170,
+            render: (_, channel) => (
+                <Space size={4} wrap>
+                    <Tag color={channel.enabled ? 'green' : 'default'}>
+                        {channel.enabled ? t('已启用') : t('已停用')}
+                    </Tag>
+                    <Tag color={channel.credentials_configured ? 'green' : 'gold'}>
+                        {channel.credentials_configured ? t('凭据已配置') : t('凭据未配置')}
+                    </Tag>
+                </Space>
+            ),
+        },
+        {
+            title: t('最近活动'),
+            dataIndex: 'last_activity_at',
+            width: 180,
+            render: value => value ? dateTime(String(value)) : '—',
+        },
+        {
+            title: t('操作'),
+            key: 'actions',
+            width: 330,
+            render: (_, channel) => (
+                <Space size={2} wrap className="channel-actions">
+                    <Button
+                        type="link"
+                        size="small"
+                        disabled={!admin || action.busy}
+                        onClick={() => void action.run(async () => {
+                            await patch(`/channels/${channel.id}`, {
+                                enabled: !channel.enabled,
+                            });
+                            rows.refresh();
+                        })}
+                    >
+                        {channel.enabled ? t('停用') : t('启用')}
+                    </Button>
+                    {channel.provider === 'generic_webhook' && (
+                        <Button
+                            type="link"
+                            size="small"
+                            disabled={!admin || action.busy}
+                            onClick={() => void action.run(async () => {
+                                setCreated(await post<ChannelV2>(
+                                    `/channels/${channel.id}/rotate-token`,
+                                ));
+                                rows.refresh();
+                            }, t('已轮换，旧令牌立即失效'))}
+                        >
+                            {t('轮换渠道令牌')}
+                        </Button>
+                    )}
+                    {channel.provider !== 'generic_webhook' && (
+                        <Button
+                            type="link"
+                            size="small"
+                            disabled={!admin || action.busy}
+                            onClick={() => beginEdit(channel)}
+                        >
+                            {t('配置凭据')}
+                        </Button>
+                    )}
+                    <Button
+                        type="link"
+                        size="small"
+                        disabled={!admin || action.busy || !channel.application_key}
+                        onClick={() => beginSwitch(channel)}
+                    >
+                        {t('切换应用版本')}
+                    </Button>
+                    <Button
+                        type="link"
+                        size="small"
+                        onClick={() => setDeliveriesFor(
+                            deliveriesFor === channel.id ? '' : channel.id,
+                        )}
+                    >
+                        {deliveriesFor === channel.id ? t('收起投递记录') : t('查看投递记录')}
+                    </Button>
+                </Space>
+            ),
+        },
+    ];
+
     return (
-        <div className="channel-workspace">
+        <div className="channel-workspace channel-v2">
             <Alert
-                error={rows.error || agents.error || providers.error || action.error}
+                error={rows.error
+                    || applications.error
+                    || createVersions.error
+                    || providers.error
+                    || action.error}
                 notice={action.notice}
             />
-            <div className="split">
-                <Panel title={t('接入渠道')}>
-                    {rows.data?.map(channel => (
-                        <article className="tool-item" key={channel.id}>
-                            <div className="row">
-                                <strong>{channel.name}</strong>
-                                <span className={`badge ${channel.enabled ? 'success' : 'default'}`}>
-                                    {channel.enabled ? t('已启用') : t('已停用')}
-                                </span>
-                            </div>
-                            <p className="small">
-                                {providerName(channel.provider)} · {channel.credentials_configured
-                                    ? t('凭据已配置')
-                                    : t('凭据未配置')}
-                            </p>
-                            <p className="mono small">{channel.id}</p>
-                            <p>
-                                Agent：{agents.data?.find(item => item.id === channel.agent_id)?.name
-                                    || channel.agent_id}
-                            </p>
-                            {channel.provider !== 'generic_webhook' && (
-                                <p className="mono small">
-                                    POST /api/v1/ingress/channels/{channel.id}/webhook/{channel.provider}
-                                </p>
-                            )}
-                            {channel.last_error_code && (
-                                <p className="error-text">{channel.last_error_code}</p>
-                            )}
-                            <button
-                                className="secondary"
-                                disabled={!admin || action.busy}
-                                onClick={() => void action.run(async () => {
-                                    await patch(`/channels/${channel.id}`, {
-                                        enabled: !channel.enabled,
-                                    });
-                                    rows.refresh();
-                                })}
-                            >
-                                {channel.enabled ? t('停用') : t('启用')}
-                            </button>
-                            {channel.provider === 'generic_webhook' && (
-                                <button
-                                    className="secondary"
-                                    disabled={!admin || action.busy}
-                                    onClick={() => void action.run(async () => {
-                                        setCreated(await post<Channel>(
-                                            `/channels/${channel.id}/rotate-token`,
-                                        ));
-                                        rows.refresh();
-                                    }, t('已轮换，旧令牌立即失效'))}
-                                >
-                                    {t('轮换渠道令牌')}
-                                </button>
-                            )}
-                            {channel.provider !== 'generic_webhook' && (
-                                <button
-                                    className="secondary"
-                                    disabled={!admin || action.busy}
-                                    onClick={() => beginEdit(channel)}
-                                >
-                                    {t('配置凭据')}
-                                </button>
-                            )}
-                            <button
-                                className="text-button"
-                                onClick={() => setDeliveriesFor(
-                                    deliveriesFor === channel.id ? '' : channel.id,
-                                )}
-                            >
-                                {deliveriesFor === channel.id ? t('收起投递记录') : t('查看投递记录')}
-                            </button>
-                        </article>
-                    ))}
-                    {rows.data?.length === 0 && <Empty>{t('创建渠道接入业务系统')}</Empty>}
+            <div className="channel-v2-layout">
+                <Panel
+                    title={t('接入渠道')}
+                    action={(
+                        <Button onClick={rows.refresh} loading={rows.loading}>
+                            {t('刷新')}
+                        </Button>
+                    )}
+                >
+                    <p className="hint channel-version-note">
+                        {t('渠道固定使用一个已发布应用版本，切换后仅影响后续入站消息。')}
+                    </p>
+                    <Table<ChannelV2>
+                        className="channel-table"
+                        rowKey="id"
+                        columns={columns}
+                        dataSource={rows.data || []}
+                        loading={rows.loading}
+                        pagination={{
+                            defaultPageSize: 10,
+                            showSizeChanger: false,
+                            position: ['bottomRight'],
+                            hideOnSinglePage: false,
+                            showTotal: total => t('共 {{v0}} 条', { v0: total }),
+                        }}
+                        scroll={{ x: 1130 }}
+                        locale={{
+                            emptyText: <Empty>{t('创建渠道接入业务系统')}</Empty>,
+                        }}
+                        expandable={{
+                            expandedRowKeys: deliveriesFor ? [deliveriesFor] : [],
+                            expandedRowRender: channel => (
+                                deliveriesFor === channel.id
+                                    ? <DeliveryList channelId={channel.id}/>
+                                    : null
+                            ),
+                            showExpandColumn: false,
+                        }}
+                    />
                 </Panel>
-                <div className="stack">
+
+                <div className="channel-v2-side">
                     <Panel title={t('创建渠道')}>
                         <form onSubmit={event => {
                             event.preventDefault();
+                            if (!applicationId || applicationVersion === null) return;
                             void action.run(async () => {
                                 const body = native
-                                    ? { name, agent_id: agent, provider, config, credentials }
+                                    ? {
+                                        name,
+                                        application_id: applicationId,
+                                        application_version: applicationVersion,
+                                        provider,
+                                        config,
+                                        credentials,
+                                    }
                                     : {
                                         name,
-                                        agent_id: agent,
+                                        application_id: applicationId,
+                                        application_version: applicationVersion,
                                         provider,
                                         signing_secret_ref: signing || null,
                                     };
-                                setCreated(await post<Channel>('/channels', body));
+                                setCreated(await post<ChannelV2>('/channels', body));
                                 rows.refresh();
                                 setName('');
                             }, native
@@ -258,6 +437,51 @@ export function ChannelsPage() {
                                         onChange={event => setName(event.target.value)}
                                     />
                                 </Field>
+                                <Field label={t('已发布服务应用')}>
+                                    <Select
+                                        aria-label={t('已发布服务应用')}
+                                        showSearch
+                                        optionFilterProp="label"
+                                        value={applicationId || undefined}
+                                        placeholder={t('请选择已发布服务应用')}
+                                        loading={applications.loading}
+                                        notFoundContent={t('暂无已发布服务应用')}
+                                        disabled={!admin || action.busy}
+                                        options={publishedApplications.map(item => ({
+                                            value: item.id,
+                                            label: item.name,
+                                        }))}
+                                        onChange={value => {
+                                            setApplicationId(value);
+                                            const app = publishedApplications.find(
+                                                item => item.id === value,
+                                            );
+                                            setApplicationVersion(app?.published_version ?? null);
+                                        }}
+                                    />
+                                </Field>
+                                {!publishedApplications.length && !applications.loading && (
+                                    <p className="hint channel-no-application">
+                                        {t('请先发布服务应用后再创建渠道')}
+                                    </p>
+                                )}
+                                <Field label={t('应用版本')}>
+                                    <Select
+                                        aria-label={t('应用版本')}
+                                        value={applicationVersion ?? undefined}
+                                        placeholder={t('选择应用版本')}
+                                        loading={createVersions.loading}
+                                        disabled={!admin
+                                            || action.busy
+                                            || !selectedApplication
+                                            || createVersions.loading}
+                                        options={(createVersions.data?.items || []).map(item => ({
+                                            value: item.version,
+                                            label: `v${item.version}${item.current ? ` · ${t('当前版本')}` : ''}`,
+                                        }))}
+                                        onChange={setApplicationVersion}
+                                    />
+                                </Field>
                                 <Field label={t('渠道类型')}>
                                     <select
                                         required
@@ -267,20 +491,6 @@ export function ChannelsPage() {
                                         {providers.data?.map(item => (
                                             <option key={item.id} value={item.id}>{item.name}</option>
                                         ))}
-                                    </select>
-                                </Field>
-                                <Field label={t('已发布 Agent')}>
-                                    <select
-                                        required
-                                        value={agent}
-                                        onChange={event => setAgent(event.target.value)}
-                                    >
-                                        <option value="">{t('请选择')}</option>
-                                        {agents.data
-                                            ?.filter(item => item.published_version)
-                                            .map(item => (
-                                                <option key={item.id} value={item.id}>{item.name}</option>
-                                            ))}
                                     </select>
                                 </Field>
                                 {native && selectedProvider && (
@@ -310,10 +520,22 @@ export function ChannelsPage() {
                                         />
                                     </Field>
                                 )}
-                                <button>{t('创建渠道')}</button>
+                                <Button
+                                    type="primary"
+                                    htmlType="submit"
+                                    block
+                                    disabled={!admin
+                                        || action.busy
+                                        || !name.trim()
+                                        || !applicationId
+                                        || applicationVersion === null}
+                                >
+                                    {t('创建渠道')}
+                                </Button>
                             </fieldset>
                         </form>
                     </Panel>
+
                     {editing && (
                         <Panel title={`${providerName(editing.provider)} · ${t('配置')}`}>
                             <form onSubmit={event => {
@@ -357,6 +579,7 @@ export function ChannelsPage() {
                             </form>
                         </Panel>
                     )}
+
                     {created && (
                         <Panel title={created.token ? t('本次创建的访问令牌') : t('渠道配置信息')}>
                             {created.token ? (
@@ -377,16 +600,63 @@ export function ChannelsPage() {
                             )}
                         </Panel>
                     )}
-                    {deliveriesFor && <DeliveryList channelId={deliveriesFor}/>}
+
                     <Panel title={t('接入说明')}>
                         <p className="hint">
                             {native
-                                ? t('渠道使用平台原生签名校验，Agent 和人工回复会通过出站投递 Worker 主动发送。')
+                                ? t('服务应用和人工回复会通过出站投递 Worker 主动发送。')
                                 : t('通用 Webhook 使用渠道 Token；回复通过 replies 接口按 seq 拉取。')}
                         </p>
                     </Panel>
                 </div>
             </div>
+
+            <Modal
+                open={Boolean(switching)}
+                title={`${t('切换应用版本')}${switching ? ` · ${switching.name}` : ''}`}
+                okText={t('切换应用版本')}
+                cancelText={t('取消')}
+                confirmLoading={action.busy}
+                okButtonProps={{
+                    disabled: targetVersion === null
+                        || targetVersion === switching?.application_version,
+                }}
+                onCancel={() => {
+                    if (!action.busy) setSwitching(null);
+                }}
+                onOk={() => {
+                    if (!switching || targetVersion === null) return;
+                    void action.run(async () => {
+                        await put(`/channels/${switching.id}/application-version`, {
+                            application_version: targetVersion,
+                        });
+                        rows.refresh();
+                        setSwitching(null);
+                    }, t('应用版本已切换'));
+                }}
+            >
+                <p className="hint">
+                    {t('渠道固定使用一个已发布应用版本，切换后仅影响后续入站消息。')}
+                </p>
+                {switchVersions.error && <Alert error={switchVersions.error}/>}
+                <Field label={t('应用版本')}>
+                    <Select
+                        aria-label={t('应用版本')}
+                        value={targetVersion ?? undefined}
+                        placeholder={t('选择应用版本')}
+                        loading={switchVersions.loading}
+                        disabled={switchVersions.loading || !switching?.application_key}
+                        options={(switchVersions.data?.items || []).map(item => ({
+                            value: item.version,
+                            label: `v${item.version}${item.current ? ` · ${t('当前版本')}` : ''}`,
+                        }))}
+                        onChange={setTargetVersion}
+                    />
+                </Field>
+                {!switchVersions.loading && !switchVersions.data?.items.length && (
+                    <p className="hint">{t('无法加载应用版本')}</p>
+                )}
+            </Modal>
         </div>
     );
 }

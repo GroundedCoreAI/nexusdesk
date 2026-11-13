@@ -92,6 +92,9 @@ class RecordingRuntimePersistenceHooks:
     async def add_message(self, conn, conversation_id, role, content, run_id=None):
         await self.delegate.add_message(conn, conversation_id, role, content, run_id)
 
+    async def on_finished(self, conn, run, status, error):
+        await self.delegate.on_finished(conn, run, status, error)
+
     async def on_completed(self, conn, run, conversation_id, output, history, completion):
         self.completed.append((run["id"], output, history, completion))
         return await self.delegate.on_completed(

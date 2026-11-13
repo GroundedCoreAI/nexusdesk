@@ -34,6 +34,7 @@ services:
       AGENT_ENVIRONMENT: production
       AGENT_QUICKSTART_MODE: "true"
       AGENT_SEED_INDUSTRIES: "true"
+      AGENT_SERVICE_APP_EXAMPLES_ENABLED: ${NEXUSDESK_SERVICE_APP_EXAMPLES_ENABLED:-true}
       # Language of the seeded memory demo datasets, matching the console i18n
       # bundles: zh-CN (default), zh-TW, en, hi. First-boot only:
       # NEXUSDESK_SEED_LOCALE=en docker compose ... up on a fresh volume.
@@ -68,12 +69,12 @@ services:
       retries: 5
     stop_grace_period: 45s
 
-  # Demo upstream (25 business endpoints) for the industry packs' object
-  # providers. Starts by default so the shipped demo tool sets work out of the
-  # box. To bring up only the app and its database:
+  # Demo upstream (25 business endpoints) for the service application examples'
+  # connections. Starts by default so copied examples can be configured without
+  # an external business system. To bring up only the app and its database:
   #   docker compose -f deploy/quickstart/compose.yaml up -d postgres app
   # Inside the compose network the app reaches it at http://mock-business:8010,
-  # which is also the address to put in 配置管理 → 工具集 → 服务地址.
+  # which is also the address to put in 服务应用 → 应用连接 → 服务地址.
   # 127.0.0.1:8010 on the host is the same service, handy for curl debugging.
   mock-business:
     build:

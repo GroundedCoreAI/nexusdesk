@@ -144,7 +144,8 @@ class TicketUpdate(Input):
 
 
 class ChannelInput(NameInput):
-    agent_id: UUID
+    application_id: UUID
+    application_version: int = Field(ge=1)
     signing_secret_ref: str | None = Field(
         default=None, pattern=r"^AGENT_CHANNEL_SECRET_[A-Z0-9_]+$"
     )
@@ -156,6 +157,10 @@ class ChannelInput(NameInput):
 class ChannelUpdateInput(Input):
     config: dict[str, object] | None = None
     credentials: dict[str, str] | None = None
+
+
+class ChannelApplicationVersionInput(Input):
+    application_version: int = Field(ge=1)
 
 
 def _ui_manifest_payload(manifest, user=None, extensions=None):
@@ -1110,11 +1115,27 @@ async def channel(body: ChannelInput, request: Request, user: Admin):
         user.tenant,
         user.actor,
         body.name,
-        body.agent_id,
+        body.application_id,
+        body.application_version,
         body.signing_secret_ref,
         provider=body.provider,
         config=body.config,
         credentials=body.credentials,
+    )
+
+
+@router.put("/channels/{cid}/application-version")
+async def switch_channel_application_version(
+    cid: UUID,
+    body: ChannelApplicationVersionInput,
+    request: Request,
+    user: Admin,
+):
+    return await business(request).channels.switch_application_version(
+        user.tenant,
+        user.actor,
+        cid,
+        body.application_version,
     )
 
 

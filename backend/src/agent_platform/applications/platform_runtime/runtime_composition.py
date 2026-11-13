@@ -276,7 +276,16 @@ async def runtime_services(
             platform.channels.bind_listener(listener)
             groups = build_service_groups(platform)
             bindings = build_runtime_bindings(groups)
-            factory = RuntimeFactory(runtime, bindings, client, settings, tools.limit, tool_policy)
+            factory = RuntimeFactory(
+                runtime,
+                bindings,
+                client,
+                settings,
+                tools.limit,
+                tool_policy,
+                application_runtime=platform.application_runtime,
+            )
+            platform.service_apps.preview_runner = factory
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             groups.application.evaluation = platform.evaluation
             identity = IdentityBindings(

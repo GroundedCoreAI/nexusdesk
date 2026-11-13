@@ -34,14 +34,21 @@ class Settings(BaseSettings):
     # first login. Development can set AGENT_REQUIRE_PASSWORD_CHANGE=false to skip
     # that gate; leave it enabled for any shared or production deployment.
     require_password_change: bool = True
-    # Bootstrap loads the full industry demo case set when enabled. Off by default so
-    # production stays clean; deploy/quickstart enables it explicitly.
+    # Bootstrap loads the independent industry demo case set when enabled. This is
+    # a knowledge/agent showcase, not part of the service-application lifecycle.
+    # Off by default so production stays clean; deploy/quickstart enables it.
     seed_industries: bool = False
-    # Bootstrap installs and publishes the four demo industry packs (shopping,
-    # gaming, creator, mobility) when enabled. Off by default so production stays
-    # clean: quickstart always loads them, and a production deployment opts in via
-    # AGENT_SEED_INDUSTRY_PACKS=true. Idempotent, so re-running is safe.
-    seed_industry_packs: bool = False
+    # Bootstrap installs code-owned immutable service application examples when
+    # enabled. Seeds never update an existing example or a copied user application.
+    service_app_examples_enabled: bool = True
+    service_app_connection_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    service_app_connection_timeout_max: int = Field(default=60, ge=1, le=60)
+    service_app_default_page_size: int = Field(default=10, ge=1, le=100)
+    # Draft previews are side-effect free by default. Enabling writes is an
+    # explicit deployment decision and must still pass skill safety rules.
+    service_app_preview_write_enabled: bool = False
+    # ``None`` deliberately reuses the installation-wide credential vault.
+    service_app_credential_key_file: Path | None = None
     # Language of the seeded memory demo datasets, matching the console's i18n
     # bundles: zh-TW/zh-HK/zh-MO/zh-Hant* → Traditional Chinese, zh* → Simplified
     # Chinese, en* → English, hi* → Hindi, anything else → Simplified Chinese.
@@ -285,6 +292,11 @@ class Settings(BaseSettings):
             raise ValueError("role tokens must be nonempty and distinct")
         if self.model_backend == "openai" and (not self.model_name or not self.model_api_key):
             raise ValueError("openai backend requires model_name and model_api_key")
+        if self.service_app_connection_timeout_seconds > self.service_app_connection_timeout_max:
+            raise ValueError(
+                "service_app_connection_timeout_seconds must not exceed "
+                "service_app_connection_timeout_max"
+            )
         return self
 
     @property
@@ -300,3 +312,13 @@ class Settings(BaseSettings):
         if self.embedded_channel_worker is not None:
             return self.embedded_channel_worker
         return self.embedded_worker
+
+    @property
+    def service_app_vault_key_file(self) -> Path:
+        """Vault path for application connection credentials.
+
+        Service applications share the installation-wide vault unless an
+        operator explicitly separates their key file.
+        """
+
+        return self.service_app_credential_key_file or self.model_credential_key_file

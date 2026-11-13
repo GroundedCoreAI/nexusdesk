@@ -72,6 +72,65 @@ async def platform():
                         text("DELETE FROM knowledge_tasks WHERE tenant_id=:t"),
                         {"t": settings.tenant_id},
                     )
+                    # Channel rows and outbox rows must go before applications,
+                    # because channels RESTRICT-delete through their published
+                    # application/version foreign keys.
+                    await c.execute(
+                        text(
+                            "DELETE FROM channel_delivery_attempts "
+                            "WHERE delivery_id IN (SELECT id FROM channel_deliveries "
+                            "WHERE channel_id IN (SELECT id FROM channels WHERE tenant_id=:t))"
+                        ),
+                        {"t": settings.tenant_id},
+                    )
+                    await c.execute(
+                        text(
+                            "DELETE FROM channel_deliveries "
+                            "WHERE channel_id IN (SELECT id FROM channels WHERE tenant_id=:t)"
+                        ),
+                        {"t": settings.tenant_id},
+                    )
+                    await c.execute(
+                        text("DELETE FROM channel_inbound_events WHERE tenant_id=:t"),
+                        {"t": settings.tenant_id},
+                    )
+                    await c.execute(
+                        text(
+                            "DELETE FROM channel_conversations "
+                            "WHERE channel_id IN (SELECT id FROM channels WHERE tenant_id=:t)"
+                        ),
+                        {"t": settings.tenant_id},
+                    )
+                    await c.execute(
+                        text(
+                            "DELETE FROM channel_receipts "
+                            "WHERE channel_id IN "
+                            "(SELECT id FROM channels WHERE tenant_id=:t)"
+                        ),
+                        {"t": settings.tenant_id},
+                    )
+                    await c.execute(
+                        text(
+                            "DELETE FROM service_application_turns WHERE tenant_id=:t"
+                        ),
+                        {"t": settings.tenant_id},
+                    )
+                    await c.execute(
+                        text(
+                            "DELETE FROM service_application_messages WHERE tenant_id=:t"
+                        ),
+                        {"t": settings.tenant_id},
+                    )
+                    await c.execute(
+                        text(
+                            "DELETE FROM service_application_conversations WHERE tenant_id=:t"
+                        ),
+                        {"t": settings.tenant_id},
+                    )
+                    await c.execute(
+                        text("DELETE FROM channels WHERE tenant_id=:t"),
+                        {"t": settings.tenant_id},
+                    )
                     for table in [
                         "open_request_logs",
                         "open_applications",
@@ -97,7 +156,6 @@ async def platform():
                         "gateway_connections",
                         "evaluation_reports",
                         "evaluation_cases",
-                        "channels",
                         "tickets",
                         "ticket_types",
                         "tenant_ticket_settings",
@@ -105,22 +163,10 @@ async def platform():
                         "handoffs",
                         "approval_requests",
                         "routing_decisions",
-                        "service_scenario_traces",
-                        "industry_pack_upgrades",
-                        "industry_pack_installations",
-                        "service_provider_registry",
+                        "service_application_traces",
                         "service_application_versions",
                         "service_applications",
-                        "service_scenario_versions",
-                        "service_scenarios",
                     ]:
-                        if table == "channels":
-                            await c.execute(
-                                text(
-                                    "DELETE FROM channel_receipts WHERE channel_id IN (SELECT id FROM channels WHERE tenant_id=:t)"
-                                ),
-                                {"t": settings.tenant_id},
-                            )
                         await c.execute(
                             text(f"DELETE FROM {table} WHERE tenant_id=:t"),
                             {"t": settings.tenant_id},
@@ -196,6 +242,47 @@ async def create_agent(client, tools=None, bases=None, publish=True):
     return agent, body
 
 
+async def create_published_application(client, agent, *, key=None, name="测试服务应用"):
+    """Create the minimal publishable v2 application for channel/run tests.
+
+    A published application is the only legal route to create a customer
+    channel. A handoff skill keeps the fixture small while satisfying release
+    readiness without an external connection or credential.
+    """
+
+    application_key = key or "test-app-" + uuid4().hex[:12]
+    response = await client.post(
+        "/api/v1/service-apps",
+        json={
+            "key": application_key,
+            "name": name,
+            "description": "渠道与运行时集成测试",
+            "agent_id": agent["id"],
+            "agent_version": 1,
+        },
+    )
+    assert response.status_code == 201, response.text
+
+    response = await client.post(
+        f"/api/v1/service-apps/{application_key}/skills",
+        json={
+            "key": "handoff",
+            "name": "转人工",
+            "type": "handoff",
+            "description": "需要人工处理时进入默认队列",
+        },
+    )
+    assert response.status_code == 201, response.text
+
+    detail = (await client.get(f"/api/v1/service-apps/{application_key}")).json()
+    published = await client.post(
+        f"/api/v1/service-apps/{application_key}/publish",
+        json={"revision": detail["revision"]},
+    )
+    assert published.status_code == 200, published.text
+    return (await client.get(f"/api/v1/service-apps/{application_key}")).json()
+
+
 async def conversation(client, agent=None):
     response = await client.post(
         "/api/v1/conversations", json={"external_id": str(uuid4()), "agent_id": agent}
@@ -209,6 +296,36 @@ async def execute_next(services, settings):
     assert row is not None
     await services.worker._execute(row)
     return await services.repository.get(row["id"], settings.tenant_id)
+
+
+async def _wait_for_channel_event(services, channel_id, message_id, *, limit=80):
+    event = None
+    for _ in range(limit):
+        async with services.groups.runtime.engine.connect() as connection:
+            event = (
+                (
+                    await connection.execute(
+                        text(
+                            """
+SELECT id,status,conversation_id,run_id
+FROM channel_inbound_events
+WHERE channel_id=:channel AND external_message_id=:message
+ORDER BY created_at DESC
+LIMIT 1
+"""
+                        ),
+                        {"channel": channel_id, "message": message_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if event and event["status"] == "processed" and event["run_id"]:
+            return dict(event)
+        if event and event["status"] == "failed":
+            raise AssertionError(f"inbound failed: {dict(event)}")
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"inbound not processed: {event}")
 
 
 async def test_agent_versions_conflicts_and_rollback(platform):
@@ -406,8 +523,16 @@ async def test_handoff_prevents_inflight_bot_reply(platform):
 async def test_channel_dedup_auth_and_replies(platform):
     client, services, settings = platform
     agent, _ = await create_agent(client)
+    application = await create_published_application(client, agent)
     channel = (
-        await client.post("/api/v1/channels", json={"name": "官网", "agent_id": agent["id"]})
+        await client.post(
+            "/api/v1/channels",
+            json={
+                "name": "官网",
+                "application_id": application["id"],
+                "application_version": application["published_version"],
+            },
+        )
     ).json()
     cid = channel["id"]
     headers = {"X-Channel-Token": channel["token"]}
@@ -426,8 +551,10 @@ async def test_channel_dedup_auth_and_replies(platform):
         )
     )
     assert all(r.status_code == 202 for r in replies), [r.text for r in replies]
-    assert len({r.json()["run_id"] for r in replies}) == 1
-    assert sum(r.json()["duplicate"] for r in replies) == 2
+    payloads = [r.json() for r in replies]
+    assert {payload["message_id"] for payload in payloads} == {"m1"}
+    assert all(payload["status"] == "queued" for payload in payloads)
+    assert sum(payload["duplicate"] for payload in payloads) == 2
     assert (
         await client.post(
             f"/api/v1/ingress/channels/{cid}/messages",
@@ -435,6 +562,8 @@ async def test_channel_dedup_auth_and_replies(platform):
             json={**body, "text": "不同内容"},
         )
     ).status_code == 409
+    event = await _wait_for_channel_event(services, cid, "m1")
+    assert event["run_id"]
     await execute_next(services, settings)
     response = await client.get(
         f"/api/v1/ingress/channels/{cid}/replies",
@@ -539,25 +668,26 @@ async def test_metrics_and_audit_reflect_real_operations(platform):
     metrics = (await client.get("/api/v1/observability/summary")).json()
     assert metrics["total"] == 1 and metrics["completed"] == 1
     assert metrics["p95_seconds"] is not None
-    runs = (await client.get("/api/v1/observability/runs", params={"page": 1, "page_size": 1})).json()
+    runs = (
+        await client.get("/api/v1/observability/runs", params={"page": 1, "page_size": 1})
+    ).json()
     assert len(runs["items"]) == 1
     assert runs["total"] == 1 and runs["page"] == 1 and runs["page_size"] == 1
     audit = await client.get("/api/v1/audit")
     audit_body = audit.json()
     assert any(r["action"] == "run.submitted" for r in audit_body["items"])
-    assert next(r for r in audit_body["items"] if r["action"] == "run.submitted")["ip"] == "203.0.113.77"
+    assert (
+        next(r for r in audit_body["items"] if r["action"] == "run.submitted")["ip"]
+        == "203.0.113.77"
+    )
     assert audit_body["total"] >= len(audit_body["items"])
     assert audit_body["page"] == 1 and audit_body["page_size"] == 10
     assert "platform-admin" not in audit.text
-    submitted = (
-        await client.get("/api/v1/audit", params={"action_type": "run.submitted"})
-    ).json()
+    submitted = (await client.get("/api/v1/audit", params={"action_type": "run.submitted"})).json()
     assert submitted["total"] >= 1
     assert all(row["action"] == "run.submitted" for row in submitted["items"])
     assert any(row["action"] == "run.submitted" for row in submitted["action_types"])
-    missing = (
-        await client.get("/api/v1/audit", params={"action_type": "does.not.exist"})
-    ).json()
+    missing = (await client.get("/api/v1/audit", params={"action_type": "does.not.exist"})).json()
     assert missing["total"] == 0 and missing["items"] == []
 
 
@@ -762,9 +892,9 @@ async def test_evaluation_case_workbook_template_and_import(platform):
     assert report.json()["results"][0]["passed"] is True
 
     # The sheet now round-trips the stored cases instead of the samples.
-    assert [row["name"] for row in parse_workbook(
-        (await client.get(f"{path}/template")).content
-    )] == ["知识检索"]
+    assert [
+        row["name"] for row in parse_workbook((await client.get(f"{path}/template")).content)
+    ] == ["知识检索"]
 
     # A broken upload is rejected before any row is written.
     bad = await client.post(f"{path}/import", content=b"not a workbook")
@@ -780,7 +910,10 @@ async def test_evaluation_case_workbook_import_respects_the_case_limit(platform)
 
     workbook = build_workbook(
         [
-            {"name": f"用例 {index}", "spec": {"input": f"输入 {index}", "expected_contains": ["x"]}}
+            {
+                "name": f"用例 {index}",
+                "spec": {"input": f"输入 {index}", "expected_contains": ["x"]},
+            }
             for index in range(24)
         ]
     )

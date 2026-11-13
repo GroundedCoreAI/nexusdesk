@@ -73,25 +73,24 @@ def test_seed_industries_defaults_off_and_is_env_overridable(monkeypatch):
     )
 
 
-def test_seed_industry_packs_is_opt_in_for_production(monkeypatch):
-    """A fresh production database opens to an empty console unless enabled."""
+def test_service_application_examples_default_on_and_are_env_overridable(monkeypatch):
+    """The v2 example catalog is independent from the optional industry cases."""
 
-    assert configuration().seed_industry_packs is False
-    monkeypatch.setenv("AGENT_SEED_INDUSTRY_PACKS", "true")
+    assert configuration().service_app_examples_enabled is True
+    monkeypatch.setenv("AGENT_SERVICE_APP_EXAMPLES_ENABLED", "false")
     assert (
         Settings(
             _env_file=None,
             database_url="postgresql+asyncpg://test:test@localhost/test",
-        ).seed_industry_packs
-        is True
+        ).service_app_examples_enabled
+        is False
     )
-    # The production template ships it off, documented next to the case switch.
     template = (ROOT / "deploy/production/.env.example").read_text(encoding="utf-8")
-    assert "AGENT_SEED_INDUSTRY_PACKS=false" in template
+    assert "AGENT_SERVICE_APP_EXAMPLES_ENABLED=true" in template
 
 
-def test_migrate_installs_demo_packs_only_when_opted_in(monkeypatch):
-    """The production migrate step owns initialization, packs included."""
+def test_migrate_installs_service_application_examples_only_when_enabled(monkeypatch):
+    """The production migrate step installs v2 examples, never removed packs."""
 
     import types
 
@@ -107,19 +106,27 @@ def test_migrate_installs_demo_packs_only_when_opted_in(monkeypatch):
     monkeypatch.setattr(
         bootstrap, "subprocess", types.SimpleNamespace(run=lambda *args, **kwargs: None)
     )
-    monkeypatch.setattr(bootstrap, "seed_demo_packs", lambda: seeds.append("packs"))
+    monkeypatch.setattr(
+        bootstrap,
+        "seed_service_applications",
+        lambda: seeds.append("service-apps") or True,
+    )
 
-    monkeypatch.setattr(bootstrap, "Settings", lambda: configuration())
+    monkeypatch.setattr(
+        bootstrap,
+        "Settings",
+        lambda: configuration(service_app_examples_enabled=False),
+    )
     bootstrap.main("migrate")
     assert seeds == []
 
-    monkeypatch.setattr(bootstrap, "Settings", lambda: configuration(seed_industry_packs=True))
+    monkeypatch.setattr(bootstrap, "Settings", lambda: configuration())
     bootstrap.main("migrate")
-    assert seeds == ["packs"]
+    assert seeds == ["service-apps"]
 
 
-def test_demo_pack_seed_never_blocks_startup(monkeypatch, capsys):
-    """Demo data may fail; the console still has to come up."""
+def test_service_application_seed_never_blocks_startup(monkeypatch, capsys):
+    """Example data may fail; the console still has to come up."""
 
     import subprocess as subprocess_module
 
@@ -138,13 +145,13 @@ def test_demo_pack_seed_never_blocks_startup(monkeypatch, capsys):
 
     failing = FakeSubprocess(error=subprocess_module.CalledProcessError(1, "seed"))
     monkeypatch.setattr(bootstrap, "subprocess", failing)
-    assert bootstrap.seed_demo_packs() is False
-    assert "seed_demo_packs" in capsys.readouterr().err
-    assert failing.calls[0][-1] == "agent_platform.applications.seed_demo_packs"
+    assert bootstrap.seed_service_applications() is False
+    assert "seed_service_apps" in capsys.readouterr().err
+    assert failing.calls[0][-1] == "agent_platform.applications.seed_service_apps"
 
     succeeding = FakeSubprocess()
     monkeypatch.setattr(bootstrap, "subprocess", succeeding)
-    assert bootstrap.seed_demo_packs() is True
+    assert bootstrap.seed_service_applications() is True
     assert capsys.readouterr().err == ""
 
 

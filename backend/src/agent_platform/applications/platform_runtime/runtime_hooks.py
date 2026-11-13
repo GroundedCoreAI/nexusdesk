@@ -5,6 +5,9 @@ import json
 from sqlalchemy import text
 
 from agent_platform.business_capabilities.conversation.service import add_message
+from agent_platform.business_capabilities.customer_service.service_apps.business_conversations import (
+    BusinessConversationService,
+)
 from agent_platform.business_capabilities.memory.decay import enqueue_reinforce_task
 from agent_platform.business_capabilities.memory.extraction import enqueue_extract_task
 from agent_platform.business_capabilities.memory.summary import enqueue_summary_task
@@ -14,7 +17,19 @@ class BusinessRuntimePersistenceHooks:
     """Keep conversation and memory side effects outside Core Platform."""
 
     async def add_message(self, conn, conversation_id, role, content, run_id=None):
-        await add_message(conn, conversation_id, role, content, run_id)
+        return await add_message(conn, conversation_id, role, content, run_id)
+
+    async def on_finished(self, conn, run, status, error):
+        if status != "completed" and run.get("business_id") and run.get("workspace_id"):
+            await BusinessConversationService.finish_turn_from_runtime(
+                conn,
+                runtime_run_id=run["id"],
+                tenant_id=run["tenant_id"],
+                business_id=run["business_id"],
+                workspace_id=run["workspace_id"],
+                status=status,
+                error_code=error,
+            )
 
     async def _enqueue_summary(
         self, conn, tenant, conversation_id, dropped, old_summary, max_input
@@ -63,13 +78,28 @@ class BusinessRuntimePersistenceHooks:
             .mappings()
             .one()
         )
-        await self.add_message(conn, run["conversation_id"], "assistant", output, run["id"])
+        runtime_message_id = await self.add_message(
+            conn,
+            run["conversation_id"],
+            "assistant",
+            output,
+            run["id"],
+        )
         await conn.execute(
             text(
                 """UPDATE runtime_conversations
                 SET history=CAST(:history AS jsonb) WHERE id=:id"""
             ),
             {"id": run["conversation_id"], "history": json.dumps(history or [])},
+        )
+        await BusinessConversationService.complete_turn_from_runtime(
+            conn,
+            tenant_id=run["tenant_id"],
+            business_id=run["business_id"],
+            workspace_id=run["workspace_id"],
+            runtime_run_id=run["id"],
+            assistant_content=str(output or ""),
+            runtime_message_id=runtime_message_id,
         )
         events = []
         if completion and completion.get("dropped"):

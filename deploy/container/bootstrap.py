@@ -133,28 +133,23 @@ def seed_memory_demo():
     subprocess.run([sys.executable, "-m", "agent_platform.applications.seed_memory_acceptance"], check=True)
 
 
-def seed_demo_packs():
-    """Install the four demo industry packs and publish them. Idempotent.
+def seed_service_applications() -> bool:
+    """Install immutable service application examples. Idempotent.
 
-    Installing a pack alone leaves every scenario as a draft, so this promotes the
-    pack to a usable state (providers enabled, scenarios and application
-    published). Quickstart always runs it; a production deployment opts in with
-    AGENT_SEED_INDUSTRY_PACKS.
-
-    A failure only costs the demo applications, so the caller keeps going and the
-    operator gets an explicit retry command. Blocking startup over demo data would
-    take a healthy console offline for no reason.
+    Quickstart defaults this on, while production opts in with
+    AGENT_SERVICE_APP_EXAMPLES_ENABLED. A failure only costs the examples, so the
+    caller keeps going and the operator gets an explicit retry command.
     """
     try:
         subprocess.run(
-            [sys.executable, "-m", "agent_platform.applications.seed_demo_packs"],
+            [sys.executable, "-m", "agent_platform.applications.seed_service_apps"],
             check=True,
         )
     except subprocess.CalledProcessError:
         print(
-            "WARNING: demo industry packs were not installed; the console starts "
-            "without them. Retry with: python -m "
-            "agent_platform.applications.seed_demo_packs",
+            "WARNING: service application examples were not installed; the "
+            "console starts without them. Retry with: python -m "
+            "agent_platform.applications.seed_service_apps",
             file=sys.stderr,
             flush=True,
         )
@@ -248,21 +243,18 @@ def main(mode):
     asyncio.run(initialize_key(settings))
     if mode == "migrate":
         asyncio.run(check_storage(settings))
-        if settings.seed_industry_packs:
-            # Opt-in, because a fresh production database otherwise opens to an
-            # empty service-application list. Same idempotent promotion quickstart
-            # uses, so a later deploy never duplicates or overwrites the packs.
-            seed_demo_packs()
+        if settings.service_app_examples_enabled:
+            # Production opts in explicitly. The seed only installs missing
+            # immutable examples and never overwrites user applications.
+            seed_service_applications()
         if settings.seed_industries:
             seed_industry_cases(settings)
             seed_memory_demo()
         print("Migrations and configured storage checks completed.", flush=True)
         return
     subprocess.run([sys.executable, "-m", "agent_platform.applications.seed"], check=True)
-    # Quickstart is a demonstration environment, so the four demo industry packs
-    # are installed and promoted to a published state. Production only does this
-    # when AGENT_SEED_INDUSTRY_PACKS is set.
-    seed_demo_packs()
+    if settings.service_app_examples_enabled:
+        seed_service_applications()
     if settings.seed_industries:
         seed_industry_cases(settings)
     seed_memory_demo()

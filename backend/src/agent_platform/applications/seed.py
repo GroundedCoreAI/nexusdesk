@@ -1,7 +1,8 @@
 """Create an optional sample workspace after migrations; safe to run again.
 
-Demo applications are no longer seeded here: the consumer-service shell is gone
-and the four demo industry packs are promoted by ``seed_demo_packs`` instead.
+This seed prepares the knowledge base and published Agent used by the service
+application examples. Service applications themselves are installed separately
+by ``seed_service_apps`` so the application-v2 lifecycle remains independent.
 """
 
 import asyncio
@@ -14,7 +15,6 @@ from agent_platform.core_platform.platform_services.model_gateway.contracts impo
     Model,
     Profile,
 )
-from agent_platform.core_platform.platform_services.persistence.store import one
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 
@@ -96,17 +96,10 @@ async def main():
                     await p.business.agents.publish(
                         tenant, actor, agent["id"], agent["draft_revision"]
                     )
-                async with p.runtime.engine.connect() as c:
-                    exists = await one(
-                        c,
-                        "SELECT id FROM runtime_conversations WHERE tenant_id=:t AND external_id='sample-support'",
-                        t=tenant,
-                    )
-                if not exists:
-                    await p.business.conversations.create(
-                        tenant, actor, "sample-support", agent["id"]
-                    )
-                print(f"示例数据就绪，租户：{tenant}；请打开工作台的 sample-support 会话。")
+                print(
+                    f"示例知识库与 Agent 就绪，租户：{tenant}；"
+                    "服务应用示例由 seed_service_apps 单独安装。"
+                )
             finally:
                 await lock.execute(text("SELECT pg_advisory_unlock(71432020)"))
 

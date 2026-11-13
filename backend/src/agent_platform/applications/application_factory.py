@@ -203,6 +203,12 @@ def create_app(
 
     @app.exception_handler(SQLAlchemyError)
     async def database_error(request: Request, exc: SQLAlchemyError):
+        logger.exception(
+            "database_error method=%s path=%s",
+            request.method,
+            request.url.path,
+            exc_info=exc,
+        )
         return JSONResponse(status_code=503, content={"detail": "database_unavailable"})
 
     app.add_exception_handler(PostgresError, database_error)

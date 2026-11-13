@@ -1,6 +1,7 @@
 # Service Scenario Platform
 
 > Status: draft product model and platformization blueprint, pending review
+> Superseded by: [`../service-application-platform-v2/README.en.md`](../service-application-platform-v2/README.en.md); this directory is retained only as historical context and is not a current product or implementation source of truth.
 > Created: 2026-10-31
 > Related: [Request Routing Roadmap](../request-routing/README.md),
 > [Zhihu / Douyin / Amap case study](../request-routing/case-studies/01-service-scenario-analysis-zhihu-douyin-amap.md)

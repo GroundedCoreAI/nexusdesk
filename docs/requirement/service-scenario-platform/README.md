@@ -1,6 +1,7 @@
 # 服务场景平台
 
 > 状态：产品模型与平台化蓝图草案，待评审
+> 取代说明：已被 [`../service-application-platform-v2/README.md`](../service-application-platform-v2/README.md) 取代；本目录仅保留历史背景，不作为当前产品或实现依据。
 > 创建：2026-10-31
 > 关联：[请求路由规划](../request-routing/README.md)、[知乎 / 抖音 / 高德案例分析](../request-routing/case-studies/01-service-scenario-analysis-zhihu-douyin-amap.md)
 

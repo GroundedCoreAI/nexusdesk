@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import text
 from test_memory_postgres import RecordingGateway, audit_records, force_claimable, memory_tasks
 from test_open_platform import application, session
-from test_platform_postgres import create_agent, execute_next
+from test_platform_postgres import create_agent, create_published_application, execute_next
 from test_platform_postgres import platform as _platform
 
 from agent_platform.business_capabilities.channel.service import session_id_hash
@@ -71,8 +71,14 @@ async def identities_of(engine, tenant):
 
 
 async def make_channel(client, agent):
+    application = await create_published_application(client, agent)
     response = await client.post(
-        "/api/v1/channels", json={"name": "官网", "agent_id": agent["id"]}
+        "/api/v1/channels",
+        json={
+            "name": "官网",
+            "application_id": application["id"],
+            "application_version": application["published_version"],
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -233,8 +239,16 @@ async def test_p2_ut_08_same_key_update_merges_with_prev_content(platform):
             c,
             tenant,
             customer_id,
-            [{"op": "update", "type": "profile", "key": "name", "content": "张工",
-              "confidence": 0.9, "reason": ""}],
+            [
+                {
+                    "op": "update",
+                    "type": "profile",
+                    "key": "name",
+                    "content": "张工",
+                    "confidence": 0.9,
+                    "reason": "",
+                }
+            ],
             "conv-2",
             0.8,
             0.5,
@@ -283,8 +297,16 @@ async def test_extracted_update_never_clobbers_human_edit(platform):
             c,
             tenant,
             customer_id,
-            [{"op": "update", "type": "profile", "key": "name", "content": "张四",
-              "confidence": 0.95, "reason": ""}],
+            [
+                {
+                    "op": "update",
+                    "type": "profile",
+                    "key": "name",
+                    "content": "张四",
+                    "confidence": 0.95,
+                    "reason": "",
+                }
+            ],
             "conv-9",
             0.8,
             0.5,
@@ -440,7 +462,9 @@ async def test_p2_it_04_playground_and_example_agents_stay_out_of_memory(platfor
     assert (await conversation_detail(client, incoming["conversation_id"]))["customer_id"] is None
     assert await memory_tasks(engine, tenant) == []
     assert await identities_of(engine, tenant) == []
-    assert await db_rows(engine, "SELECT id FROM memory_customers WHERE tenant_id=:t", t=tenant) == []
+    assert (
+        await db_rows(engine, "SELECT id FROM memory_customers WHERE tenant_id=:t", t=tenant) == []
+    )
 
 
 async def test_p2_it_05_extraction_debounces_per_conversation(platform):
@@ -582,7 +606,9 @@ async def test_p2_it_09_agent_switches_split_read_and_write(platform):
     worker = make_worker(
         services,
         settings,
-        RecordingGateway('[{"op":"add","type":"profile","key":"name","content":"张三","confidence":0.9}]'),
+        RecordingGateway(
+            '[{"op":"add","type":"profile","key":"name","content":"张三","confidence":0.9}]'
+        ),
     )
     assert await worker.run_once() is True
     assert len(await items_of(engine, tenant, customer_id)) == 1
@@ -750,7 +776,9 @@ async def test_p2_api_01_authorization_matrix(platform):
         assert (await client.get(path, headers=ANONYMOUS)).status_code == 401
     # Writes: viewer forbidden on every mutation verb.
     assert (
-        await client.patch(f"/api/v1/memory/items/{active['id']}", headers=VIEWER, json={"content": "x"})
+        await client.patch(
+            f"/api/v1/memory/items/{active['id']}", headers=VIEWER, json={"content": "x"}
+        )
     ).status_code == 403
     assert (
         await client.delete(f"/api/v1/memory/items/{active['id']}", headers=VIEWER)
@@ -795,7 +823,10 @@ async def test_p2_api_02_customer_list_search_and_pagination(platform):
     assert all(item["item_count"] == 0 and item["last_active_at"] is None for item in empties)
     searched = (await client.get("/api/v1/memory/customers", params={"q": "beta"})).json()
     assert searched["total"] == 2
-    assert {tuple(item["external_keys"]) for item in searched["items"]} == {("beta-2",), ("beta-3",)}
+    assert {tuple(item["external_keys"]) for item in searched["items"]} == {
+        ("beta-2",),
+        ("beta-3",),
+    }
     page1 = (
         await client.get("/api/v1/memory/customers", params={"page": 1, "page_size": 2})
     ).json()
@@ -813,9 +844,7 @@ async def test_p2_api_03_edit_turns_item_human_and_keeps_previous(platform):
         services, settings, "edit-key", [op_add("profile", "name", "张三", 0.95)]
     )
     item = (await items_of(engine, tenant, customer_id))[0]
-    response = await client.patch(
-        f"/api/v1/memory/items/{item['id']}", json={"content": "张叁"}
-    )
+    response = await client.patch(f"/api/v1/memory/items/{item['id']}", json={"content": "张叁"})
     assert response.status_code == 200, response.text
     edited = response.json()
     assert edited["content"] == "张叁" and edited["prev_content"] == "张三"
@@ -926,7 +955,9 @@ async def test_p2_cm_03_mutations_leave_content_free_audit(platform):
     worker = make_worker(
         services,
         settings,
-        RecordingGateway('[{"op":"add","type":"profile","key":"name","content":"张三","confidence":0.9}]'),
+        RecordingGateway(
+            '[{"op":"add","type":"profile","key":"name","content":"张三","confidence":0.9}]'
+        ),
     )
     assert await worker.run_once() is True
     item = (await items_of(engine, tenant, customer_id))[0]

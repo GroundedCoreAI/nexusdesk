@@ -1,8 +1,8 @@
-"""Mock business API for the console's demo industries.
+"""Mock business API for the service-application examples.
 
-Why this exists: the customer-service demo ships 15 object providers and 22
-tool providers, but a provider only stops being a placeholder once its
-``config.executors`` points at a real HTTP tool. This service is that upstream.
+Why this exists: applications reference application-owned connections and
+skills, so the demo needs a real HTTP upstream for query and action skills.
+This service is that upstream.
 
 Two rules keep it importable into the tool gateway:
 
@@ -13,8 +13,8 @@ Two rules keep it importable into the tool gateway:
    (``^[a-zA-Z][a-zA-Z0-9_]{0,63}$``), so importing the spec produces callable
    names instead of something that has to be renamed afterwards.
 
-Responses use one envelope so a provider executor can point ``result_root`` at
-``data`` (single object) or ``data.items`` (list) and leave the rest alone.
+Responses use one envelope so a skill's result mapping can point ``result_root``
+at ``data`` (single object) or ``data.items`` (list) and leave the rest alone.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ LATENCY_MS = int(os.environ.get("MOCK_LATENCY_MS", "0") or 0)
 app = FastAPI(
     title="NexusDesk mock business API",
     version="1.0.0",
-    description="本地演示用的外部业务系统，覆盖购物、游戏、创作者、出行、社区五个行业包。",
+    description="本地演示用的外部业务系统，覆盖购物、游戏、创作者、出行、社区五类服务应用场景。",
 )
 
 

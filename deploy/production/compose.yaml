@@ -77,7 +77,7 @@ services:
       api:
         condition: service_healthy
 
-  # Demo upstream for the industry packs' data executors (25 endpoints). Starts
+  # Demo upstream for service-application connections (25 endpoints). Starts
   # by default so a fresh deployment is usable without wiring a real system.
   # The api container reaches it at http://mock-business:8010, which must also
   # appear in AGENT_TOOL_ALLOWED_HOSTS in .env. No host port is published.

@@ -3,7 +3,7 @@ import json
 import time
 
 import pytest
-from test_platform_postgres import create_agent, execute_next
+from test_platform_postgres import create_agent, create_published_application, execute_next
 from test_platform_postgres import platform as _platform
 
 from agent_platform.core_platform.platform_services.integrations.channels.base import (
@@ -22,6 +22,31 @@ from agent_platform.core_platform.platform_services.persistence.store import man
 
 platform = _platform
 pytestmark = pytest.mark.postgres
+
+
+async def _create_channel(
+    client,
+    agent,
+    *,
+    name,
+    provider="generic_webhook",
+    config=None,
+    credentials=None,
+):
+    application = await create_published_application(client, agent)
+    response = await client.post(
+        "/api/v1/channels",
+        json={
+            "name": name,
+            "application_id": application["id"],
+            "application_version": application["published_version"],
+            "provider": provider,
+            "config": config or {},
+            "credentials": credentials or {},
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
 async def _wait_for_inbound_run(services, channel_id, limit=80):
@@ -51,18 +76,14 @@ async def test_wecom_callback_runs_agent_and_delivers_reply(platform, monkeypatc
         "token": "callback-token",
         "encoding_aes_key": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
     }
-    channel = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "企业微信测试",
-                "agent_id": agent["id"],
-                "provider": "wecom",
-                "config": {"corp_id": "corp-1", "agent_id": "100001"},
-                "credentials": credentials,
-            },
-        )
-    ).json()
+    channel = await _create_channel(
+        client,
+        agent,
+        name="企业微信测试",
+        provider="wecom",
+        config={"corp_id": "corp-1", "agent_id": "100001"},
+        credentials=credentials,
+    )
     xml = (
         "<xml><ToUserName>corp-1</ToUserName><FromUserName>user-1</FromUserName>"
         "<CreateTime>1</CreateTime><MsgType>text</MsgType><Content>hello</Content>"
@@ -80,9 +101,7 @@ async def test_wecom_callback_runs_agent_and_delivers_reply(platform, monkeypatc
         params={
             "timestamp": timestamp,
             "nonce": "nonce",
-            "msg_signature": wechat_signature(
-                credentials["token"], timestamp, "nonce", encrypted
-            ),
+            "msg_signature": wechat_signature(credentials["token"], timestamp, "nonce", encrypted),
         },
         content=f"<xml><Encrypt><![CDATA[{encrypted}]]></Encrypt></xml>",
     )
@@ -94,7 +113,8 @@ async def test_wecom_callback_runs_agent_and_delivers_reply(platform, monkeypatc
         return DeliveryResult(ok=True, external_message_id="out-1", http_status=200)
 
     monkeypatch.setattr(adapter_for("wecom"), "deliver", fake_deliver)
-    await execute_next(services, settings)
+    result = await execute_next(services, settings)
+    assert result["status"] == "completed", result.get("error_code")
     for _ in range(30):
         async with services.groups.runtime.engine.connect() as connection:
             delivery = await one(
@@ -114,18 +134,13 @@ async def test_wecom_callback_runs_agent_and_delivers_reply(platform, monkeypatc
 async def test_webhook_enqueues_inbound_and_dedups(platform):
     client, services, _settings = platform
     agent, _ = await create_agent(client)
-    channel = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "Telegram测试",
-                "agent_id": agent["id"],
-                "provider": "telegram",
-                "config": {},
-                "credentials": {"bot_token": "123:abc", "secret_token": "shh"},
-            },
-        )
-    ).json()
+    channel = await _create_channel(
+        client,
+        agent,
+        name="Telegram测试",
+        provider="telegram",
+        credentials={"bot_token": "123:abc", "secret_token": "shh"},
+    )
     body = json.dumps(
         {
             "update_id": 7,
@@ -161,15 +176,59 @@ async def test_webhook_resolves_tenant_from_channel(platform):
     agent, _ = await create_agent(client)
     other_channel = str(uuid4())
     async with services.groups.runtime.engine.begin() as connection:
+        application_id = uuid4()
+        config = {
+            "schema_version": "v2",
+            "agent": {"id": agent["id"], "version": 1},
+            "rules": {"fallback": "handoff", "handoff_queue": "customer-service"},
+            "channels": [],
+            "skills": [],
+            "connections": [],
+        }
+        await execute(
+            connection,
+            """INSERT INTO service_applications(
+                id,tenant_id,business_id,workspace_id,application_key,name,description,
+                agent_id,agent_version,origin,immutable,status,draft,draft_revision,
+                created_by,updated_by
+            ) VALUES(
+                :id,:tenant,'customer-service','other-workspace',:key,:name,'',
+                :agent_id,1,'user',false,'draft',CAST(:draft AS jsonb),1,'test','test'
+            )""",
+            id=application_id,
+            tenant="other-tenant",
+            key="other-" + uuid4().hex[:10],
+            name="跨租户应用",
+            agent_id=agent["id"],
+            draft=json.dumps(config),
+        )
+        await execute(
+            connection,
+            """INSERT INTO service_application_versions(
+                id,tenant_id,business_id,workspace_id,application_id,version,
+                schema_version,config,config_digest,created_by
+            ) VALUES(
+                gen_random_uuid(),:tenant,'customer-service','other-workspace',:application,
+                1,'v2',CAST(:config AS jsonb),:digest,'test'
+            )""",
+            tenant="other-tenant",
+            application=application_id,
+            config=json.dumps(config),
+            digest="sha256:" + "0" * 64,
+        )
         await execute(
             connection,
             """INSERT INTO channels(
-                id,tenant_id,name,agent_id,token_hash,provider,config,enabled
-            ) VALUES(:id,:t,:name,:aid,:hash,'telegram','{}'::jsonb,true)""",
+                id,tenant_id,business_id,workspace_id,name,application_id,
+                application_version,token_hash,provider,config,enabled
+            ) VALUES(
+                :id,:tenant,'customer-service','other-workspace',:name,:application,
+                1,:hash,'telegram','{}'::jsonb,true
+            )""",
             id=other_channel,
-            t="other-tenant",
+            tenant="other-tenant",
             name="跨租户渠道",
-            aid=agent["id"],
+            application=application_id,
             hash="x",
         )
     body = json.dumps(
@@ -202,28 +261,34 @@ async def test_webhook_resolves_tenant_from_channel(platform):
             "DELETE FROM channels WHERE id=:channel",
             channel=other_channel,
         )
+        await execute(
+            connection,
+            "DELETE FROM service_application_versions WHERE application_id=:application",
+            application=application_id,
+        )
+        await execute(
+            connection,
+            "DELETE FROM service_applications WHERE id=:application",
+            application=application_id,
+        )
 
 
 @pytest.mark.asyncio
 async def test_feishu_url_verification_returns_challenge(platform):
     client, _services, _settings = platform
     agent, _ = await create_agent(client)
-    channel = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "飞书测试",
-                "agent_id": agent["id"],
-                "provider": "feishu",
-                "config": {"app_id": "cli_test"},
-                "credentials": {
-                    "app_secret": "secret",
-                    "verification_token": "vtoken",
-                    "encrypt_key": "ekey",
-                },
-            },
-        )
-    ).json()
+    channel = await _create_channel(
+        client,
+        agent,
+        name="飞书测试",
+        provider="feishu",
+        config={"app_id": "cli_test"},
+        credentials={
+            "app_secret": "secret",
+            "verification_token": "vtoken",
+            "encrypt_key": "ekey",
+        },
+    )
     response = await client.post(
         f"/api/v1/ingress/channels/{channel['id']}/webhook/feishu",
         json={"type": "url_verification", "token": "vtoken", "challenge": "challenge-123"},
@@ -287,27 +352,18 @@ async def test_channel_pool_spawns_configured_number_of_loops(platform):
 async def test_rotate_token_only_for_generic_webhook(platform):
     client, _services, _settings = platform
     agent, _ = await create_agent(client)
-    generic = (
-        await client.post(
-            "/api/v1/channels",
-            json={"name": "閫氱敤", "agent_id": agent["id"]},
-        )
-    ).json()
+    generic = await _create_channel(client, agent, name="通用")
     rotated = await client.post(f"/api/v1/channels/{generic['id']}/rotate-token")
     assert rotated.status_code == 200, rotated.text
     assert rotated.json()["token"]
 
-    telegram = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "Telegram",
-                "agent_id": agent["id"],
-                "provider": "telegram",
-                "credentials": {"bot_token": "123:abc"},
-            },
-        )
-    ).json()
+    telegram = await _create_channel(
+        client,
+        agent,
+        name="Telegram",
+        provider="telegram",
+        credentials={"bot_token": "123:abc"},
+    )
     rejected = await client.post(f"/api/v1/channels/{telegram['id']}/rotate-token")
     assert rejected.status_code == 422, rejected.text
 
@@ -318,18 +374,14 @@ async def test_wecom_kf_sync_persists_cursor_and_multiple_messages(platform, mon
     agent, _ = await create_agent(client)
     key = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
     credentials = {"secret": "secret", "token": "callback-token", "encoding_aes_key": key}
-    channel = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "寰俊瀹㈡湇",
-                "agent_id": agent["id"],
-                "provider": "wecom_kf",
-                "config": {"corp_id": "corp-1", "open_kfid": "kf-1"},
-                "credentials": credentials,
-            },
-        )
-    ).json()
+    channel = await _create_channel(
+        client,
+        agent,
+        name="微信客服",
+        provider="wecom_kf",
+        config={"corp_id": "corp-1", "open_kfid": "kf-1"},
+        credentials=credentials,
+    )
 
     def envelope(mid):
         return IncomingEnvelope(
@@ -385,17 +437,13 @@ async def test_outbound_long_message_is_chunked(platform):
 
     client, services, _settings = platform
     agent, _ = await create_agent(client)
-    channel = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "Telegram",
-                "agent_id": agent["id"],
-                "provider": "telegram",
-                "credentials": {"bot_token": "123:abc"},
-            },
-        )
-    ).json()
+    channel = await _create_channel(
+        client,
+        agent,
+        name="Telegram",
+        provider="telegram",
+        credentials={"bot_token": "123:abc"},
+    )
     body = json.dumps(
         {
             "update_id": 21,
@@ -432,18 +480,13 @@ async def test_outbound_long_message_is_chunked(platform):
 async def test_slack_url_verification_returns_challenge(platform):
     client, _services, _settings = platform
     agent, _ = await create_agent(client)
-    channel = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "Slack测试",
-                "agent_id": agent["id"],
-                "provider": "slack",
-                "config": {},
-                "credentials": {"signing_secret": "s3cr3t", "bot_token": "xoxb-1"},
-            },
-        )
-    ).json()
+    channel = await _create_channel(
+        client,
+        agent,
+        name="Slack测试",
+        provider="slack",
+        credentials={"signing_secret": "s3cr3t", "bot_token": "xoxb-1"},
+    )
     body = json.dumps({"type": "url_verification", "challenge": "chal-1"}).encode()
     timestamp = str(int(time.time()))
     response = await client.post(
@@ -467,21 +510,19 @@ async def test_discord_ping_returns_pong(platform):
     client, _services, _settings = platform
     agent, _ = await create_agent(client)
     key = Ed25519PrivateKey.generate()
-    public_key = key.public_key().public_bytes(
-        serialization.Encoding.Raw, serialization.PublicFormat.Raw
-    ).hex()
-    channel = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "Discord测试",
-                "agent_id": agent["id"],
-                "provider": "discord",
-                "config": {"public_key": public_key},
-                "credentials": {"bot_token": "bot-token"},
-            },
-        )
-    ).json()
+    public_key = (
+        key.public_key()
+        .public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        .hex()
+    )
+    channel = await _create_channel(
+        client,
+        agent,
+        name="Discord测试",
+        provider="discord",
+        config={"public_key": public_key},
+        credentials={"bot_token": "bot-token"},
+    )
     body = json.dumps({"type": 1}).encode()
     timestamp = "1700000000"
     response = await client.post(
@@ -501,22 +542,18 @@ async def test_discord_ping_returns_pong(platform):
 async def test_feishu_message_runs_agent_and_delivers_reply(platform, monkeypatch):
     client, services, settings = platform
     agent, _ = await create_agent(client)
-    channel = (
-        await client.post(
-            "/api/v1/channels",
-            json={
-                "name": "飞书测试",
-                "agent_id": agent["id"],
-                "provider": "feishu",
-                "config": {"app_id": "cli_test"},
-                "credentials": {
-                    "app_secret": "secret",
-                    "verification_token": "vtoken",
-                    "encrypt_key": "ekey",
-                },
-            },
-        )
-    ).json()
+    channel = await _create_channel(
+        client,
+        agent,
+        name="飞书测试",
+        provider="feishu",
+        config={"app_id": "cli_test"},
+        credentials={
+            "app_secret": "secret",
+            "verification_token": "vtoken",
+            "encrypt_key": "ekey",
+        },
+    )
     payload = {
         "header": {"event_type": "im.message.receive_v1"},
         "event": {

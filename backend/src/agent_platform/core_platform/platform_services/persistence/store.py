@@ -54,7 +54,7 @@ async def audit(conn, tenant, actor, action, resource, **details):
         actor=actor,
         action=action,
         resource=str(resource),
-        details=json.dumps(details),
+        details=json.dumps(details, default=str),
         ip=audit_ip.get(),
     )
 

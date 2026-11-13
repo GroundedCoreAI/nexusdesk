@@ -54,3 +54,9 @@ sh nexusdesk quickstart
 - 用户可见的前端文案必须走 i18n，禁止硬编码
 - 数据库改动必须配 Alembic 迁移，禁止手工改库
 - `docs/` 目录下的文档（含根目录 `README*`、`CHANGELOG*`）新增或修改时必须**同时维护中英文对照两个版本**（如 `xxx.md` + `xxx.en.md`），并在同一提交中一并提交
+
+## 本地开发习惯
+
+- 本地开发不启用首次登录强制改密：`AGENT_REQUIRE_PASSWORD_CHANGE=false`。除非用户明确要求，不得改为 `true`。
+- PostgreSQL、pgvector、Milvus、MinIO 等开发数据库和中间件统一通过 Docker / Docker Compose 启动；不要改为在宿主机安装或启动原生服务。
+- 启动中间件前先检查现有容器和端口，避免重复启动；停止或删除容器及数据卷前必须得到用户明确要求。

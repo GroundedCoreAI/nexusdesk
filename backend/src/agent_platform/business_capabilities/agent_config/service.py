@@ -466,13 +466,16 @@ class AgentService:
                 raise DomainError("agent_revision_conflict", 409)
             if not agent["archived"]:
                 raise DomainError("agent_must_be_archived", 409)
+            application_scope_sql, application_scope_params = resource_scope_clause(alias="sa")
             if await one(
                 c,
-                "SELECT id FROM channels WHERE agent_id=:id" + scope_sql + " LIMIT 1",
+                "SELECT sa.id FROM service_applications sa WHERE sa.agent_id=:id"
+                + application_scope_sql
+                + " LIMIT 1",
                 id=aid,
-                **scope_params,
+                **application_scope_params,
             ):
-                raise DomainError("agent_referenced_by_channels", 409)
+                raise DomainError("agent_referenced_by_service_applications", 409)
             if await one(
                 c, "SELECT id FROM evaluation_cases WHERE agent_id=:id LIMIT 1", id=aid
             ) or await one(

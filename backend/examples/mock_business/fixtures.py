@@ -1,14 +1,12 @@
 """Fixed demo data for the mock business API.
 
-Every identifier here is stable on purpose: the console's demo providers are
-configured with these values, so a reset must reproduce exactly the same
-records, and a scenario must keep resolving the same facts.
+Every identifier here is stable on purpose: service-application connection and
+skill tests use these values, so a reset must reproduce exactly the same
+records.
 
-Field names are the ones the scenarios read, not prettier alternatives. A
-scenario fact is declared as ``key <- source``, e.g. ``order_status <- status``,
-so the response has to carry ``status`` — returning ``order_status`` would leave
-the fact empty. The mapping used here mirrors ``draft.facts[].source`` for every
-object in the four installed industry packs.
+Field names are the ones described by the application skill contracts. Result
+mappings can select a field such as ``status`` directly, so the response keeps
+stable business field names instead of wrapping every value in a display label.
 """
 
 from __future__ import annotations

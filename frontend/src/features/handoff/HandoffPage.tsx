@@ -173,7 +173,7 @@ export function HandoffPage() {
       : null,
     5000,
   );
-  // The server aggregates scenario, object, facts and decisions; the workbench
+  // The server aggregates the published application, object, facts and decisions; the workbench
   // never stitches this together from several internal endpoints.
   const context = useResource<HandoffContext>(
     selected
@@ -392,24 +392,24 @@ export function HandoffPage() {
               {context.loading && !serviceContext && <LoadingState label={t('正在加载')} />}
               {!context.loading && context.error && !serviceContext && <div className="handoff-state is-error">
                 <WarningOutlined aria-hidden />
-                <strong>{t('场景轨迹加载失败')}</strong>
+                <strong>{t('服务应用上下文加载失败')}</strong>
                 <span>{errorText(context.error)}</span>
                 <Button size="small" onClick={context.refresh}>{t('重新加载')}</Button>
               </div>}
 
-              {serviceContext && !serviceContext.scenario && <Empty>
-                {t('自动服务尚未绑定场景轨迹')}
+              {serviceContext && !serviceContext.application && <Empty>
+                {t('自动服务尚未绑定服务应用版本')}
               </Empty>}
 
-              {serviceContext?.scenario && <>
+              {serviceContext?.application && <>
                 <dl className="handoff-facts">
                   <div>
-                    <dt>{t('服务场景')}</dt>
-                    <dd>{serviceContext.scenario.name || serviceContext.scenario.key}</dd>
+                    <dt>{t('服务应用')}</dt>
+                    <dd>{serviceContext.application.name || serviceContext.application.key}</dd>
                   </div>
                   <div>
-                    <dt>{t('场景版本')}</dt>
-                    <dd className="mono">{serviceContext.scenario.version ?? t('暂无数据')}</dd>
+                    <dt>{t('应用版本')}</dt>
+                    <dd className="mono">{serviceContext.application.version ?? t('暂无数据')}</dd>
                   </div>
                   <div>
                     <dt>{t('业务对象')}</dt>

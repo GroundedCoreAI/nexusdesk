@@ -6,22 +6,13 @@ from agent_platform.business_capabilities.conversation.service import Conversati
 from agent_platform.business_capabilities.customer_service.confirmation import (
     CustomerConfirmationAdapter,
 )
-from agent_platform.business_capabilities.customer_service.industry_packs.installations import (
-    IndustryPackService,
-)
-from agent_platform.business_capabilities.customer_service.providers.service import (
-    ServiceProviderRegistry,
-)
 from agent_platform.business_capabilities.customer_service.routing.settings import (
     load_customer_service_routing_settings,
 )
-from agent_platform.business_capabilities.customer_service.scenarios.service import (
-    ScenarioService,
-)
-from agent_platform.business_capabilities.customer_service.scenarios.tool_bridge import (
-    ScenarioToolBridge,
-)
 from agent_platform.business_capabilities.customer_service.service import CustomerService
+from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
+    ApplicationRuntimeResolver,
+)
 from agent_platform.business_capabilities.customer_service.service_apps.service import (
     ServiceApplicationService,
 )
@@ -95,21 +86,8 @@ class PlatformServices:
         self.policy = ExecutionPolicy(self.tools, contributions)
         self.gateway = ModelGateway(engine, settings, model_client)
         self.agents = AgentService(engine, self.tools, self.gateway.catalog)
-        self.providers = ServiceProviderRegistry(engine)
-        # Scenarios may declare provider executors; the bridge is the only path
-        # from a scenario handler to a real gateway call.
-        self.scenarios = ScenarioService(
-            engine,
-            self.agents,
-            ScenarioToolBridge(self.tools, self.providers, self.tool_workspace),
-        )
-        self.industry_packs = IndustryPackService(engine, self.providers)
-        self.service_apps = ServiceApplicationService(
-            engine,
-            self.agents,
-            self.scenarios,
-            self.providers,
-        )
+        self.application_runtime = ApplicationRuntimeResolver(engine, self.agents, settings)
+        self.service_apps = ServiceApplicationService(engine, self.agents)
         self.knowledge = KnowledgeService(engine)
         self.ingestion = IngestionService(engine, self.knowledge, settings, model_client)
         self.vector_index = VectorIndex(engine, self.gateway, settings, model_client)
@@ -135,10 +113,15 @@ class PlatformServices:
             self.memory,
             events=self.event_bus,
             routing_settings=self.customer_routing_settings,
+            application_runtime=self.application_runtime,
         )
         self.confirmation = CustomerConfirmationAdapter(self.customer)
         self.channels = ChannelService(
-            engine, self.conversations, self.customer, self.agents, settings
+            engine,
+            self.conversations,
+            self.customer,
+            settings,
+            application_runtime=self.application_runtime,
         )
         self.tool_contributions = ()
         # Phase 7: settings feed the maintenance-overdue cadence of rule_scan

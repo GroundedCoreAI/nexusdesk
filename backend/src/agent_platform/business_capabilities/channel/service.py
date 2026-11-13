@@ -12,6 +12,12 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_platform.business_capabilities.customer_service.service_apps.business_conversations import (
+    BusinessConversationService,
+)
+from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
+    ApplicationRuntimeResolver,
+)
 from agent_platform.core_platform.platform_services.integrations.channels import provider_catalog
 from agent_platform.core_platform.platform_services.integrations.channels.base import (
     CHANNEL_WORK_CHANNEL,
@@ -60,17 +66,32 @@ def session_id_hash(session_id):
     return hashlib.sha256(session_id.encode()).hexdigest()
 
 
+def _target_user_name(target: dict[str, Any]) -> str | None:
+    for key in ("user_name", "display_name", "nickname", "name", "userName"):
+        value = target.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 class ChannelService:
     """Channel management, provider webhooks, inbound idempotency, and delivery."""
 
-    def __init__(self, engine, conversations, customer, agents, settings):
-        self.engine, self.conversations, self.customer, self.agents = (
+    def __init__(
+        self,
+        engine,
+        conversations,
+        customer,
+        settings,
+        application_runtime: ApplicationRuntimeResolver | None = None,
+    ):
+        self.engine, self.conversations, self.customer = (
             engine,
             conversations,
             customer,
-            agents,
         )
         self.settings = settings
+        self.application_runtime = application_runtime
         self.vault = CredentialVault(settings.model_credential_key_file)
         self.delivery_stopping = asyncio.Event()
         self.inbound_stopping = asyncio.Event()
@@ -97,16 +118,21 @@ class ChannelService:
         return provider_catalog()
 
     async def list(self, tenant):
-        scope_sql, scope_params = resource_scope_clause()
+        scope_sql, scope_params = resource_scope_clause(alias="c")
         async with self.engine.connect() as c:
             return await many(
                 c,
-                """SELECT id,name,agent_id,enabled,provider,config,last_error_code,
-                last_activity_at,created_at,
+                """SELECT c.id,c.name,c.application_id,c.application_version,
+                a.application_key,a.name AS application_name,c.enabled,c.provider,c.config,
+                c.last_error_code,c.last_activity_at,c.created_at,
                 encrypted_credentials IS NOT NULL AS credentials_configured
-                FROM channels c WHERE tenant_id=:t"""
+                FROM channels c
+                LEFT JOIN service_applications a
+                  ON a.id=c.application_id AND a.tenant_id=c.tenant_id
+                 AND a.business_id=c.business_id AND a.workspace_id=c.workspace_id
+                WHERE c.tenant_id=:t"""
                 + scope_sql
-                + " ORDER BY created_at DESC LIMIT 100",
+                + " ORDER BY c.created_at DESC LIMIT 100",
                 t=tenant,
                 **scope_params,
             )
@@ -116,7 +142,8 @@ class ChannelService:
         tenant,
         actor,
         name,
-        agent_id,
+        application_id,
+        application_version,
         signing_secret_ref=None,
         *,
         provider="generic_webhook",
@@ -133,7 +160,19 @@ class ChannelService:
             adapter_for(provider).validate(config, credentials)
         scope_values = resource_scope_values()
         async with self.engine.begin() as c:
-            await self.agents.snapshot(tenant, agent_id, c)
+            if self.application_runtime is None:
+                raise DomainError("application_runtime_unavailable", 503)
+            context = await self.application_runtime.resolve(
+                c,
+                tenant,
+                application_id,
+                application_version,
+                scope=BusinessScope(
+                    tenant_id=tenant,
+                    business_id=scope_values["business_id"],
+                    workspace_id=scope_values["workspace_id"],
+                ),
+            )
             channel_id = uuid4()
             encrypted = (
                 self._encrypt_credentials(tenant, channel_id, provider, credentials)
@@ -143,27 +182,40 @@ class ChannelService:
             row = await one(
                 c,
                 """INSERT INTO channels(
-                    id,tenant_id,business_id,workspace_id,name,agent_id,token_hash,
+                    id,tenant_id,business_id,workspace_id,name,application_id,
+                    application_version,token_hash,
                     signing_secret_ref,provider,config,encrypted_credentials
                 )
                 VALUES(
-                    :id,:t,:business_id,:workspace_id,:name,:aid,:hash,:ref,:provider,
+                    :id,:t,:business_id,:workspace_id,:name,:application_id,
+                    :application_version,:hash,:ref,:provider,
                     CAST(:config AS jsonb),:credentials
                 )
-                RETURNING id,name,agent_id,enabled,provider,config,signing_secret_ref,
+                RETURNING id,name,application_id,application_version,enabled,provider,config,
+                    signing_secret_ref,
                     encrypted_credentials IS NOT NULL AS credentials_configured""",
                 id=channel_id,
                 t=tenant,
                 **scope_values,
                 name=name,
-                aid=agent_id,
+                application_id=context.application_id,
+                application_version=context.application_version,
                 hash=hashlib.sha256(token.encode()).hexdigest(),
                 ref=signing_secret_ref,
                 provider=provider,
                 config=json.dumps(config),
                 credentials=encrypted,
             )
-            await audit(c, tenant, actor, "channel.created", row["id"], provider=provider)
+            await audit(
+                c,
+                tenant,
+                actor,
+                "channel.created",
+                row["id"],
+                provider=provider,
+                application_id=str(context.application_id),
+                application_version=context.application_version,
+            )
             return {**row, "token": token if provider == "generic_webhook" else None}
 
     async def update(
@@ -209,7 +261,7 @@ class ChannelService:
                 WHERE id=:id AND tenant_id=:t"""
                 + scope_sql
                 + """
-                RETURNING id,name,agent_id,enabled,provider,config,
+                RETURNING id,name,application_id,application_version,enabled,provider,config,
                     encrypted_credentials IS NOT NULL AS credentials_configured""",
                 id=cid,
                 t=tenant,
@@ -218,6 +270,66 @@ class ChannelService:
                 **scope_params,
             )
             await audit(c, tenant, actor, "channel.configured", cid, provider=row["provider"])
+            return updated
+
+    async def switch_application_version(
+        self,
+        tenant,
+        actor,
+        cid,
+        application_version: int,
+    ):
+        """Move a channel to another already-published application version."""
+
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.begin() as c:
+            row = required(
+                await one(
+                    c,
+                    "SELECT * FROM channels c WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " FOR UPDATE",
+                    id=cid,
+                    t=tenant,
+                    **scope_params,
+                ),
+                "channel_not_found",
+            )
+            if self.application_runtime is None:
+                raise DomainError("application_runtime_unavailable", 503)
+            context = await self.application_runtime.resolve(
+                c,
+                tenant,
+                row["application_id"],
+                application_version,
+                scope=BusinessScope(
+                    tenant_id=tenant,
+                    business_id=row["business_id"],
+                    workspace_id=row["workspace_id"],
+                ),
+            )
+            updated = await one(
+                c,
+                """UPDATE channels SET application_version=:version
+                WHERE id=:id AND tenant_id=:t"""
+                + scope_sql
+                + """
+                RETURNING id,name,application_id,application_version,enabled,provider,config,
+                    encrypted_credentials IS NOT NULL AS credentials_configured""",
+                id=cid,
+                t=tenant,
+                version=context.application_version,
+                **scope_params,
+            )
+            await audit(
+                c,
+                tenant,
+                actor,
+                "channel.application_version_changed",
+                cid,
+                application_id=str(context.application_id),
+                application_version=context.application_version,
+            )
             return updated
 
     async def toggle(self, tenant, actor, cid, enabled):
@@ -323,7 +435,12 @@ class ChannelService:
             text=body.text,
             target={},
         )
-        return await self._accept_envelope(channel, envelope)
+        queued = await self._enqueue_inbound(channel, envelope)
+        return {
+            "message_id": body.message_id,
+            "duplicate": not queued["event_ids"],
+            "status": "queued",
+        }
 
     async def webhook(
         self,
@@ -368,8 +485,10 @@ class ChannelService:
         channel,
         envelopes: Iterable[IncomingEnvelope],
         cursor: str | None = None,
-    ) -> None:
+    ) -> dict[str, object]:
         envelopes = list(envelopes)
+        event_ids: list[str] = []
+        duplicates = 0
         async with self.engine.begin() as c:
             for envelope in envelopes:
                 digest = hashlib.sha256(
@@ -385,18 +504,22 @@ class ChannelService:
                 inserted = await one(
                     c,
                     """INSERT INTO channel_inbound_events(
-                        id,channel_id,tenant_id,provider,external_message_id,
+                        id,channel_id,tenant_id,application_id,application_version,
+                        provider,external_message_id,
                         external_conversation_id,external_user_id,external_thread_id,
                         content,target,payload_hash
                     ) VALUES(
-                        :id,:channel,:tenant,:provider,:mid,:external,:user,:thread,
-                        :content,CAST(:target AS jsonb),:hash
+                        :id,:channel,:tenant,:application_id,:application_version,
+                        :provider,:mid,:external,:user,:thread,:content,
+                        CAST(:target AS jsonb),:hash
                     )
                     ON CONFLICT(channel_id,external_message_id) DO NOTHING
                     RETURNING id""",
                     id=uuid4(),
                     channel=channel["id"],
                     tenant=channel["tenant_id"],
+                    application_id=channel["application_id"],
+                    application_version=channel["application_version"],
                     provider=channel["provider"],
                     mid=envelope.external_message_id,
                     external=envelope.external_conversation_id,
@@ -407,6 +530,7 @@ class ChannelService:
                     hash=digest,
                 )
                 if not inserted:
+                    duplicates += 1
                     prior = await one(
                         c,
                         """SELECT payload_hash FROM channel_inbound_events
@@ -416,6 +540,8 @@ class ChannelService:
                     )
                     if prior and prior["payload_hash"] != digest:
                         raise DomainError("message_id_conflict", 409)
+                else:
+                    event_ids.append(str(inserted["id"]))
             if cursor is not None:
                 await execute(
                     c,
@@ -433,9 +559,14 @@ class ChannelService:
                 await execute(
                     c, "SELECT pg_notify(:ch, :kind)", ch=CHANNEL_WORK_CHANNEL, kind="inbound"
                 )
+        return {"event_ids": event_ids, "duplicates": duplicates}
 
-    async def _enqueue_inbound(self, channel, envelope: IncomingEnvelope) -> None:
-        await self._enqueue_inbound_batch(channel, [envelope])
+    async def _enqueue_inbound(
+        self,
+        channel,
+        envelope: IncomingEnvelope,
+    ) -> dict[str, object]:
+        return await self._enqueue_inbound_batch(channel, [envelope])
 
     async def replies(self, cid, token, session_id, after):
         scope_sql, scope_params = resource_scope_clause()
@@ -529,6 +660,9 @@ class ChannelService:
         self,
         channel,
         envelope: IncomingEnvelope,
+        *,
+        application_id,
+        application_version,
         scope: BusinessScope | None = None,
     ):
         digest = hashlib.sha256(
@@ -566,6 +700,29 @@ class ChannelService:
             )
             if not current:
                 raise DomainError("channel_not_found", 404)
+            try:
+                fixed_application_id = UUID(str(application_id))
+                fixed_application_version = int(application_version)
+                current_application_id = UUID(str(current["application_id"]))
+            except (TypeError, ValueError, AttributeError):
+                raise DomainError("channel_application_context_invalid", 422) from None
+            if fixed_application_version < 1:
+                raise DomainError("channel_application_context_invalid", 422)
+            if current_application_id != fixed_application_id:
+                raise DomainError("channel_application_mismatch", 409)
+            if self.application_runtime is None:
+                raise DomainError("application_runtime_unavailable", 503)
+            application_context = await self.application_runtime.resolve(
+                c,
+                current["tenant_id"],
+                fixed_application_id,
+                fixed_application_version,
+                scope=BusinessScope(
+                    tenant_id=current["tenant_id"],
+                    business_id=current["business_id"],
+                    workspace_id=current["workspace_id"],
+                ),
+            )
             prior = await one(
                 c,
                 "SELECT * FROM channel_receipts WHERE channel_id=:id AND message_id=:mid",
@@ -615,7 +772,7 @@ class ChannelService:
                         current["tenant_id"],
                         "channel",
                         external,
-                        current["agent_id"],
+                        application_context.agent_id,
                         c,
                         identity={
                             "source": "channel",
@@ -626,6 +783,9 @@ class ChannelService:
                             business_id=current["business_id"],
                             workspace_id=current["workspace_id"],
                         ),
+                        application_id=application_context.application_id,
+                        application_version=application_context.application_version,
+                        agent_version=application_context.agent_version,
                     )
                 await execute(
                     c,
@@ -658,19 +818,74 @@ class ChannelService:
                     external=envelope.external_conversation_id,
                     target=json.dumps(envelope.target),
                 )
+            runtime_scope = BusinessScope(
+                tenant_id=current["tenant_id"],
+                business_id=current["business_id"],
+                workspace_id=current["workspace_id"],
+            )
+            # Keep the cross-layer lock order Runtime -> business ledger. Runtime
+            # send locks the Runtime conversation, while the ledger helpers below
+            # lock the business conversation. Reversing these in the inbound path
+            # creates an A-B / B-A deadlock against completion and human replies.
             result = await self.customer.send(
                 current["tenant_id"],
                 "channel",
                 conv["id"],
                 envelope.text,
                 c,
-                scope=BusinessScope(
-                    tenant_id=current["tenant_id"],
-                    business_id=current["business_id"],
-                    workspace_id=current["workspace_id"],
-                ),
+                scope=runtime_scope,
+                application_context=application_context,
+            )
+            business_conversation = await BusinessConversationService.ensure_conversation(
+                c,
+                tenant=current["tenant_id"],
+                scope=runtime_scope,
+                application_id=application_context.application_id,
+                agent_id=application_context.agent_id,
+                agent_version=application_context.agent_version,
+                external_conversation_id=envelope.external_conversation_id,
+                kind="customer",
+                channel_id=current["id"],
+                customer_id=conv.get("customer_id"),
+                external_user_id=envelope.external_user_id,
+                user_name=_target_user_name(envelope.target),
+                runtime_conversation_id=conv["id"],
+                created_by="channel",
+                metadata={
+                    "provider": current["provider"],
+                    "external_thread_id": envelope.external_thread_id,
+                },
+            )
+            customer_message, _created = await BusinessConversationService.append_message(
+                c,
+                business_conversation,
+                role="customer",
+                content=envelope.text,
+                idempotency_key=(f"channel:{current['id']}:message:{envelope.external_message_id}"),
+                payload={
+                    "external_message_id": envelope.external_message_id,
+                    "external_user_id": envelope.external_user_id,
+                    "external_thread_id": envelope.external_thread_id,
+                },
             )
             run_id = result["run"]["id"] if result["run"] else None
+            if run_id:
+                turn, _turn_created = await BusinessConversationService.start_turn(
+                    c,
+                    business_conversation,
+                    customer_message_id=customer_message["id"],
+                    application_version=application_context.application_version,
+                    agent_id=application_context.agent_id,
+                    agent_version=application_context.agent_version,
+                    status=str(result["run"].get("status") or "queued"),
+                )
+                await BusinessConversationService.link_turn(
+                    c,
+                    turn,
+                    runtime_conversation_id=conv["id"],
+                    runtime_run_id=run_id,
+                    status=str(result["run"].get("status") or "queued"),
+                )
             await execute(
                 c,
                 """INSERT INTO channel_receipts(
@@ -777,7 +992,9 @@ class ChannelService:
             result = await self._accept_envelope(
                 {"id": row["channel_id"]},
                 envelope,
-                BusinessScope(
+                application_id=row["application_id"],
+                application_version=row["application_version"],
+                scope=BusinessScope(
                     tenant_id=row["tenant_id"],
                     business_id=row["business_id"],
                     workspace_id=row["workspace_id"],

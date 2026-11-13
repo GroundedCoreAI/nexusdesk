@@ -86,11 +86,7 @@ def test_platform_services_does_not_own_runtime_implementation():
 
 def test_shared_platform_runtime_does_not_import_customer_application():
     root = (
-        Path(__file__).parents[1]
-        / "src"
-        / "agent_platform"
-        / "applications"
-        / "platform_runtime"
+        Path(__file__).parents[1] / "src" / "agent_platform" / "applications" / "platform_runtime"
     )
     offenders = [
         str(path.relative_to(root))
@@ -185,9 +181,6 @@ def test_platform_services_exposes_explicit_service_groups_and_runtime_ports():
         "conversations": object(),
         "handoffs": object(),
         "customer": object(),
-        "scenarios": object(),
-        "providers": object(),
-        "industry_packs": object(),
         "service_apps": object(),
         "confirmation": object(),
         "channels": object(),
@@ -206,8 +199,6 @@ def test_platform_services_exposes_explicit_service_groups_and_runtime_ports():
     assert groups.tools.policy is values["policy"]
     assert groups.business.customer is values["customer"]
     assert groups.business.approval is values["approval"]
-    assert groups.business.providers is values["providers"]
-    assert groups.business.industry_packs is values["industry_packs"]
     assert groups.business.service_apps is values["service_apps"]
     assert groups.application.open_platform is values["open_platform"]
 
@@ -246,11 +237,7 @@ def test_migrated_routes_use_service_groups_instead_of_aggregate_attributes():
         root / "business_capabilities" / "knowledge" / "routes.py",
         root / "business_capabilities" / "memory" / "routes.py",
         root / "core_platform" / "platform_services" / "model_gateway" / "routes.py",
-        root
-        / "core_platform"
-        / "platform_services"
-        / "model_gateway"
-        / "management_routes.py",
+        root / "core_platform" / "platform_services" / "model_gateway" / "management_routes.py",
         root / "business_capabilities" / "open_platform" / "routes.py",
         root / "core_platform" / "tool_gateway" / "routes.py",
         root / "core_platform" / "platform_services" / "identity" / "access.py",
