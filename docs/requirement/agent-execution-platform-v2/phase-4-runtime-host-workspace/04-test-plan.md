@@ -5,6 +5,7 @@
 > 修订：2026-11-11（小团队轻量验收：复用自动化证据，移除多角色签字要求）
 > 修订：2026-11-14（08 R-1/R-3/R-5：复核真实 head 为 `0058_agent_execution_metadata` 后迁移由 `0054` 改号 `0059_execution_runtime_host`；新增 §2.1，登记当前 darwin 执行主机的 macOS 开发子集与 `pending_env` 规范性划分；测试文件命名遵循 `test_agent_execution_phase4_*`）
 > 修订：2026-11-14（协调裁定 08 R-11/R-12：P4-IT-13 增加同 Run 并发 prepare 收敛预期；P4-IT-15/P4-IT-21 断言"最近一次成功观测"磁盘记账——超限观测必须持久化并发结构化超限告警，删除前重观测一次）
+> 修订：2026-11-14（协调裁定 08 R-13/R-14：§2.1 登记 macOS `RLIMIT_AS` 近似以探针判定适用性，及平台无关的资源超额证据契约）
 > 依据：`02-requirements.md`（FR-1–FR-10、AC-1–AC-12）、`03-technical-design.md`（Host、进程组、恢复、Workdir、资源矩阵与回滚）
 
 ## 1. 测试范围与原则
@@ -49,6 +50,8 @@
 |---|---|
 | macOS 可实测 | 除 cgroup/配额/真实 mount 半边外的全部 P4-UT；P4-IT-01–08、10（身份替身半边）、11–18（非 mount 半边）、21（单文件半边）、22、23（macOS 列）、24–27；P4-CM-02–06、08–13；进程组 TERM/KILL 及后代、标注为非等价的 rlimit CPU/地址空间/单文件近似、输出上限、墙钟/截止期竞态、APFS 上路径/链接/替换竞态安全、Workdir 生命周期、注册表 reconcile 与进程级 SIGKILL+重启恢复、docker PG 上迁移 0059 升降级、默认关闭的 React 一致性、本地 Docker 上 quickstart 画像容器演练 |
 | `pending_env`（需 Linux） | P4-IT-19（cgroup memory 硬限半边与 CPU 组计量硬顶）、P4-IT-20（cgroup pids 每执行硬限）、P4-IT-21（文件系统/项目配额半边）、P4-IT-17 / P4-UT-13（真实 mount 命名空间半边）、P4-IT-10（确定性 OS PID 复用佐证半边）、P4-IT-09（生产镜像容器重启/停止期限半边）、P4-IT-29（生产运行时核查半边）、P4-IT-30（同时 `not_measured`：Phase 0 基线缺口，08 R-2）、P4-CM-07（完整支持矩阵签署） |
+
+协调裁定注记（2026-11-14，08 R-13/R-14）：macOS 地址空间（`RLIMIT_AS`）近似一行以 fork 适用性探针判定——探针不适用时按 `execution_resource_enforcement_required=true` fail-closed 拒绝启动、不记 pass，属对本表的细化而非矛盾（每执行内存硬限仍属 Linux `pending_env`）。跨平台资源超额证据断言稳定原因码 `runtime_host_resource_exceeded` 与 mechanism/strength 标签，不断言各平台原始信号/退出码数值。
 
 ## 3. 单元测试
 

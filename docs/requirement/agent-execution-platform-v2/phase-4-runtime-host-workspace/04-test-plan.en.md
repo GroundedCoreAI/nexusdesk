@@ -5,6 +5,7 @@
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements)
 > Revised: 2026-11-14 (08 R-1/R-3/R-5: migration renumbered `0054`→`0059_execution_runtime_host` after revalidating head `0058_agent_execution_metadata`; new §2.1 registers the normative macOS-development-subset versus `pending_env` mapping for the current darwin execution host; test-file naming follows `test_agent_execution_phase4_*`)
 > Revised: 2026-11-14 (coordination rulings 08 R-11/R-12: P4-IT-13 gains the same-Run concurrent-prepare convergence expectation; P4-IT-15/P4-IT-21 assert latest-successful-observation disk accounting — over-quota observations persisted with a structured excess alert and a final re-observation before deletion)
+> Revised: 2026-11-14 (coordination rulings 08 R-13/R-14: §2.1 registers probe-gated macOS `RLIMIT_AS` applicability and the platform-independent resource-excess evidence contract)
 > Basis: `02-requirements.md` (FR-1–FR-10, AC-1–AC-12), `03-technical-design.md` (Host, process groups, recovery, Workdir, resource matrix, and rollback)
 
 ## 1. Test Scope and Principles
@@ -49,6 +50,8 @@ The current execution host is macOS (darwin) with Docker available for PostgreSQ
 |---|---|
 | Measurable on macOS | All P4-UT except the cgroup/quota/mount live halves; P4-IT-01–08, 10 (identity-substitute half), 11–18 (non-mount half), 21 (per-file half), 22, 23 (macOS column), 24–27, P4-CM-02–06, 08–13; process-group TERM/KILL and descendants, rlimit CPU/address-space/file-size approximations labeled non-equivalent, output bounds, wall-time races, path/link/race safety on APFS, Workdir lifecycle, registry reconcile and SIGKILL+restart process-level recovery, migration 0059 up/down on docker PG, default-off React parity, quickstart-profile container drill on local Docker |
 | `pending_env` (Linux required) | P4-IT-19 (cgroup memory hard-limit half and CPU group-accounting hard ceiling), P4-IT-20 (cgroup pids per-Execution hard limit), P4-IT-21 (filesystem/project quota half), P4-IT-17 / P4-UT-13 (live mount-namespace half), P4-IT-10 (deterministic OS PID-reuse corroboration half), P4-IT-09 (production-image container restart/stop-timeout half), P4-IT-29 (production runtime-inspection half), P4-IT-30 (also `not_measured`: Phase 0 baseline gap, 08 R-2), P4-CM-07 (full support-matrix sign-off) |
+
+Coordination-ruling note (2026-11-14, 08 R-13/R-14): the macOS address-space (`RLIMIT_AS`) approximation row is probe-gated — a fork applicability probe decides; when the probe is not applicable, `execution_resource_enforcement_required=true` yields a fail-closed start rejection rather than a recorded pass, which refines but does not contradict this table (per-Execution memory hard limits remain Linux `pending_env`). Cross-platform resource-excess evidence asserts the stable reason code `runtime_host_resource_exceeded` plus mechanism/strength labels, never raw per-platform signal/exit values.
 
 ## 3. Unit Tests
 
