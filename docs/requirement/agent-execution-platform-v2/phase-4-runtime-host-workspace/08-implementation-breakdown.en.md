@@ -232,19 +232,53 @@ Phase 0–3 regression set with PG
 (`758 passed, 3 skipped` across `phase3 or phase4` selection), and the full
 non-PG repository suite (`2293 passed, 0 failed`).
 
-### 8.3 Quickstart local-Docker drill (P4-IT-09 local half, measured)
+### 8.3 Quickstart local-Docker drill (P4-IT-09 local half, measured — 2026-11-14 revision)
 
-`sh nexusdesk quickstart` rebuilt the app image (base layers seeded from the
-dockerproxy mirror because direct Docker Hub metadata resolution failed on
-this host), brought the stack up `Healthy`, then survived a
-`docker compose restart app` round-trip with `--wait` re-greening. Verified
-on the live containers: `alembic_version = 0059_execution_runtime_host`; both
-Phase 4 tables exist (`execution_workdirs`, `runtime_host_processes`); the
-app container carries `AGENT_EXECUTION_RUNTIME_HOST_ENABLED=false` with **no**
-runtime-host id, `/data` contains only `credentials/` and `tls/` — no
-`/data/execution` directory was created (default-off zero-side-effect
-invariant, 08 §1.7); the React root returns 200. The production-image
-runtime-worker half stays pending_env (8.1).
+Correction first: the B6 pass of this drill (earlier today) ran
+`sh nexusdesk quickstart` against **pre-existing named volumes** left from a
+prior boot. The quickstart bootstrap seed is idempotent per agent name, so on
+those volumes `ensure_agent` found the demo agents already present and skipped
+create+publish entirely — the run reported `Healthy` but never exercised the
+fresh-volume seed path, and the test lane's fresh-volume rerun correctly
+crashed there (defect D-1, see 8.3a). The Healthy/restart claims of the first
+write were therefore not reproducible and are superseded by this section; the
+test lane's evidence (06 appendix A-6 / T-Risk-2) is the authoritative record
+of the failure.
+
+**8.3a D-1 (P1, fixed with this revision).** On an empty volume the quickstart
+bootstrap seed (`deploy/container/bootstrap.py` → `seed_memory_demo` +
+`seed_memory_acceptance` → `seed_memory_common.ensure_agent`) mutated the
+legacy `model_profile_id`/`model_profile_version` fields **after** constructing
+`AgentConfig`, leaving the canonical `react` alias at its explicit nulls. The
+draft's JSONB round-trip through create → publish re-validation
+(`AgentService.parse_config` → the Phase 3 alias normalizer) then read
+`react.model_profile_id=None` against a set legacy alias, raised
+`execution_configuration_invalid`, and the app crash-looped before ever
+reaching Healthy. The defect shipped with the Phase 3 normalizer (`4318042`)
+and stayed latent because the drill itself had been deferred. Fix (lane (a),
+one seed file, no normalizer/contract change): `ensure_agent` now binds the
+profile **at construction** through `AgentConfig.model_validate` on a dump with
+both alias representations carrying the identical value; configs without a
+canonical react keep the historical plain assignment (no react alias exists to
+contradict). Phase 3 semantics untouched — the normalizer still rejects
+mutated post-assignment drafts and still accepts equal aliases (both halves
+pinned by new tests).
+
+**Measured on the fixed tree, fresh volumes (`down -v` first).** Base layers
+seeded from the dockerproxy mirror (direct Docker Hub metadata resolution
+fails on this host). Full chain: image build → `up -d --build --wait` → app
+`Healthy` on first boot **with** seed publication on empty volumes (2 published
+agent versions in `agents JOIN agent_versions`); `restart_count=0`; zero
+`execution_configuration_invalid`/Traceback lines in the app logs; React root
+returns 200; container DB at `alembic_version = 0059_execution_runtime_host`
+with both Phase 4 tables present; app env carries
+`AGENT_EXECUTION_RUNTIME_HOST_ENABLED=false` with no runtime-host id and
+`/data` contains only `credentials/` and `tls/` — no `/data/execution`
+directory (default-off zero-side-effect invariant, 08 §1.7); a
+`docker compose restart app` round-trip re-greened via `--wait`. Regression
+pins: `backend/tests/test_seed_agent_profile_binding.py` (3 cases: seed→publish
+survives the reparse; mutated-legacy draft stays rejected; equal aliases round
+trip clean). The production-image runtime-worker half stays pending_env (8.1).
 
 ### 8.4 OPEN_Q1 disposition (Phase 3 postgres fixtures, pre-B6)
 
