@@ -25,6 +25,9 @@ CASES = (
     "workdir-marker",
     "signal-crash",
     "env-silent",
+    "cpu-burn",
+    "alloc-write",
+    "child-group-probe",
 )
 
 
@@ -101,6 +104,58 @@ def main(argv: list[str]) -> int:
     if case == "env-silent":
         # Prints nothing about the environment; used to prove environment
         # values never leak into output or logs (P4-UT-21).
+        return 0
+    if case == "cpu-burn":
+        # Busy loop: RLIMIT_CPU is the kernel's own kill clock (approximate
+        # per-process mechanism of 03 §4.6; the sampler never enforces it).
+        import time as _time
+
+        start = _time.monotonic()
+        budget = float(param or "5")
+        while _time.monotonic() - start < budget:
+            pass
+        return 0
+    if case == "alloc-write":
+        # Write until an external RLIMIT_FSIZE bound trips. Hosts differ in
+        # whether the kernel kills with SIGXFSZ or the write fails with
+        # EFBIG first, so the trusted target normalizes both into the
+        # agreed excess contract: stderr marker + exit code 86
+        # (TARGET_EXIT_RESOURCE_EXCEEDED in the resource lane).
+        import errno as _errno
+        import signal as _signal
+
+        def _exceeded(*args):
+            _write(sys.stderr.buffer, b"resource-exceeded=fsize\n")
+            os._exit(86)
+
+        _signal.signal(_signal.SIGXFSZ, _exceeded)
+        limit = min(int(param or "16777216"), 16_777_216)
+        written = 0
+        try:
+            with open("resource.bin", "wb") as handle:
+                while written < limit:
+                    handle.write(b"w" * 8192)
+                    handle.flush()
+                    written += 8192
+        except OSError as exc:
+            if exc.errno == _errno.EFBIG:
+                _exceeded()
+            raise
+        return 0
+    if case == "child-group-probe":
+        # Same-session descendant: its process-group id must equal the
+        # leader's for the group-wide kill to reach it (P4-IT-05).
+        child = subprocess.Popen(  # fixed argv: this file, bounded token
+            [sys.executable, os.path.abspath(__file__), "sleep", "20"],
+            start_new_session=False,
+        )
+        own = os.getpgrp()
+        same = os.getpgid(child.pid) == own
+        _write(sys.stdout.buffer, f"group-match={int(same)}\n".encode())
+        try:
+            child.wait(timeout=25)
+        except subprocess.TimeoutExpired:  # pragma: no cover
+            pass
         return 0
     return 99  # pragma: no cover - CASES gate above
 

@@ -316,6 +316,9 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "host/process_supervisor.py",
         "host/process_registry.py",
         "host/runtime_host.py",
+        "host/sandbox_provider.py",
+        "host/local_sandbox_provider.py",
+        "host/resource_manager.py",
     }
     phase4_workspace_modules = {
         "workspace/__init__.py",

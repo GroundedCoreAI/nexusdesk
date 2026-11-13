@@ -41,6 +41,7 @@ from .process_registry import (
 )
 from .process_runner import ProcessRunner, StartedProcess, UntrustedTargetError
 from .process_supervisor import GroupHandle, ProcessSupervisor, SupervisorStateError
+from .sandbox_provider import SandboxPolicyError
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class ReconcileSummary:
 class _Tracked:
     started: StartedProcess
     result: ProcessResult | None = None
+    reservation: object | None = None
 
 
 class RuntimeHost:
@@ -163,6 +165,11 @@ class RuntimeHost:
             )
             raise HostStartError(REASON_UNTRUSTED_TARGET, exc.detail) from exc
 
+        # B4 ports: with a Sandbox/Resource Provider wired, support checks and
+        # the untrusted gate run here before any durable side effect (03 §4.2
+        # barrier order); unset slots skip the gate (Phase 3 seam rule).
+        reservation = await self._admit_resources(spec, run_id)
+
         record_id = managed_id or uuid4()
         await self._registry.register_starting(
             managed_id=record_id,
@@ -181,9 +188,11 @@ class RuntimeHost:
                 host_instance_id=self._registry.host_instance_id,
                 sandbox_provider=self._sandbox_provider_id,
                 working_dir=working_dir,
+                preexec=self._preexec_for(reservation),
             )
         except Exception as exc:
             code = getattr(exc, "code", REASON_SPAWN_FAILED)
+            await self._release(reservation)
             await self._registry.mark_state(
                 managed_id=record_id,
                 from_states=("starting",),
@@ -194,7 +203,7 @@ class RuntimeHost:
             raise HostStartError(code) from exc
 
         await self._registry.attach_spawn(managed=started.managed)
-        self._tracked[record_id] = _Tracked(started=started)
+        self._tracked[record_id] = _Tracked(started=started, reservation=reservation)
         return started.managed
 
     async def wait(
@@ -214,8 +223,10 @@ class RuntimeHost:
             wall_seconds=ceiling,
             run_deadline_monotonic=run_deadline_monotonic,
         )
+        result = self._classify(tracked, result)
         tracked.result = result
         await self._persist_result(result)
+        await self._release(tracked.reservation)
         self._untrack(managed_id)
         return result
 
@@ -228,8 +239,10 @@ class RuntimeHost:
             tracked.started,
             **({"reason": reason} if reason is not None else {}),
         )
+        result = self._classify(tracked, result)
         tracked.result = result
         await self._persist_result(result)
+        await self._release(tracked.reservation)
         self._untrack(managed_id)
         return result
 
@@ -320,6 +333,47 @@ class RuntimeHost:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    async def _admit_resources(self, spec: ProcessSpec, run_id: UUID):
+        if self.resource_manager is not None:
+            admit = self.resource_manager.admit
+        elif self.sandbox_provider is not None:
+            admit = self.sandbox_provider.prepare
+        else:
+            return None
+        try:
+            return await admit(spec, run_id=run_id)
+        except SandboxPolicyError as exc:
+            logger.warning("runtime host refused admission run_id=%s code=%s", run_id, exc.code)
+            raise HostStartError(exc.code) from exc
+
+    def _preexec_for(self, reservation):
+        if reservation is None:
+            return None
+        if self.resource_manager is not None:
+            return self.resource_manager.preexec_for(reservation)
+        if self.sandbox_provider is not None:
+            return self.sandbox_provider.preexec_for(reservation)
+        return None
+
+    async def _release(self, reservation) -> None:
+        if reservation is None:
+            return
+        if self.resource_manager is not None:
+            await self.resource_manager.release(reservation)
+        elif self.sandbox_provider is not None:
+            await self.sandbox_provider.release(reservation)
+
+    def _classify(self, tracked: _Tracked, result: ProcessResult) -> ProcessResult:
+        """Relabel kernel-enforced rlimit kills via the resource port (T12).
+
+        Purely a reason relabel (EXITED + SIGXCPU/SIGXFSZ -> resource
+        excess); states and the exit machine itself are untouched, and an
+        unset resource port passes the Supervisor's reason through.
+        """
+        if self.resource_manager is None or tracked.reservation is None:
+            return result
+        return self.resource_manager.classify_result(result, tracked.reservation)
 
     def _require_tracked(self, managed_id: UUID) -> _Tracked:
         tracked = self._tracked.get(managed_id)

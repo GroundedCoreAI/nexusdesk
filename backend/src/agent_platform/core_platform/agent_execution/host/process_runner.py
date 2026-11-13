@@ -263,6 +263,7 @@ class ProcessRunner:
         host_instance_id: str,
         sandbox_provider: str,
         working_dir: Path,
+        preexec: Callable[[], None] | None = None,
     ) -> StartedProcess:
         """Resolve through the allowlist, spawn in a new session, capture identity.
 
@@ -273,7 +274,9 @@ class ProcessRunner:
         if not working_dir.is_dir():
             raise ProcessSpawnError(REASON_PIPE_SETUP_FAILED, "workdir missing at spawn")
 
-        preexec_fn = self._preexec_factory(spec.resource_policy) if self._preexec_factory else None
+        preexec_fn = preexec or (
+            self._preexec_factory(spec.resource_policy) if self._preexec_factory else None
+        )
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
