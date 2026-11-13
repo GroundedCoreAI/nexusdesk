@@ -3,11 +3,12 @@
 > 状态：待实施（本阶段开发完成后执行；当前无测试结果）
 > 创建：2026-11-02
 > 修订：2026-11-11（小团队轻量验收：复用自动化证据，移除多角色签字要求）
+> 修订：2026-11-14（08 R-1/R-3/R-5：复核真实 head 为 `0058_agent_execution_metadata` 后迁移由 `0054` 改号 `0059_execution_runtime_host`；新增 §2.1，登记当前 darwin 执行主机的 macOS 开发子集与 `pending_env` 规范性划分；测试文件命名遵循 `test_agent_execution_phase4_*`）
 > 依据：`02-requirements.md`（FR-1–FR-10、AC-1–AC-12）、`03-technical-design.md`（Host、进程组、恢复、Workdir、资源矩阵与回滚）
 
 ## 1. 测试范围与原则
 
-**范围**：RuntimeHost/Adapter 解耦、Process Runner/Supervisor/Registry、有界 I/O、取消与超时、孤儿恢复、Workspace/Execution Workdir、安全路径与清理、资源限制、Sandbox Provider、健康观测、迁移 `0054`、部署和回滚。
+**范围**：RuntimeHost/Adapter 解耦、Process Runner/Supervisor/Registry、有界 I/O、取消与超时、孤儿恢复、Workspace/Execution Workdir、安全路径与清理、资源限制、Sandbox Provider、健康观测、迁移 `0059_execution_runtime_host`、部署和回滚。
 
 **原则**：
 
@@ -38,6 +39,15 @@
 | quickstart/production 部署检查环境 | 默认关闭、执行卷、单 Host、停止期限、非秘密配置与回滚 |
 
 **数据构造约定**：至少两个 tenant、多个 business/workspace scope 和并发 Run；可执行目标及 argv 白名单固定，子进程/CPU/内存/磁盘/输出负载由测试参数控制但不接受用户代码。外部链接目标均为隔离哨兵。PID 复用优先用身份决策替身确定性构造，再用独立 OS 试验佐证；禁止为“复用 PID”杀无关进程。每例独立清理进程组、资源句柄、Workdir 和 DB 行，清理失败必须作为结果发现。
+
+### 2.1 macOS 开发子集与 `pending_env` 划分（规范性，2026-11-14，08 R-3）
+
+当前执行主机为 macOS（darwin），PostgreSQL 通过 Docker 可用（独立 pgvector 容器，`TEST_DATABASE_URL`）。在 Linux 完整验收环境就绪前，以下划分管辖 §3–§5 全部用例，用例文字有歧义时以本表为准。本机实测项只有在附带环境标注时才可记 pass；`pending_env` 项继续阻断其对应启用承诺（原则 8、05 C14），绝不允许用近似实现冒充通过。
+
+| 划分 | 用例（半边） |
+|---|---|
+| macOS 可实测 | 除 cgroup/配额/真实 mount 半边外的全部 P4-UT；P4-IT-01–08、10（身份替身半边）、11–18（非 mount 半边）、21（单文件半边）、22、23（macOS 列）、24–27；P4-CM-02–06、08–13；进程组 TERM/KILL 及后代、标注为非等价的 rlimit CPU/地址空间/单文件近似、输出上限、墙钟/截止期竞态、APFS 上路径/链接/替换竞态安全、Workdir 生命周期、注册表 reconcile 与进程级 SIGKILL+重启恢复、docker PG 上迁移 0059 升降级、默认关闭的 React 一致性、本地 Docker 上 quickstart 画像容器演练 |
+| `pending_env`（需 Linux） | P4-IT-19（cgroup memory 硬限半边与 CPU 组计量硬顶）、P4-IT-20（cgroup pids 每执行硬限）、P4-IT-21（文件系统/项目配额半边）、P4-IT-17 / P4-UT-13（真实 mount 命名空间半边）、P4-IT-10（确定性 OS PID 复用佐证半边）、P4-IT-09（生产镜像容器重启/停止期限半边）、P4-IT-29（生产运行时核查半边）、P4-IT-30（同时 `not_measured`：Phase 0 基线缺口，08 R-2）、P4-CM-07（完整支持矩阵签署） |
 
 ## 3. 单元测试
 
@@ -95,7 +105,7 @@
 | P4-IT-23 | 在 macOS 开发子集/禁用 cgroup/不支持平台启动 | 仅明确支持项运行；required=true 时缺失能力启动拒绝，静默忽略为 0 | AC-9；FR-7、FR-10 |
 | P4-IT-24 | 替换 Sandbox 测试 Provider 并尝试不可信执行入口 | 不改 Adapter/Host 契约即可替换；任意命令/上传代码/不可信多租户均拒绝 | AC-10；FR-8 |
 | P4-IT-25 | 观察正常、崩溃、孤儿、清理失败、资源压力和 stalled reconcile | 指标/日志/告警完整可关联；公开读取不含秘密、PID/PGID 或完整路径 | AC-11；FR-9 |
-| P4-IT-26 | 从实际前驱升级 `0054` 并并发读写旧/新 Run | 只新增两表及索引，约束/锁正确，现有 Repository/React 读写不受阻 | AC-12；FR-4、FR-5、FR-10 |
+| P4-IT-26 | 从实际前驱 `0058_agent_execution_metadata` 升级 `0059_execution_runtime_host` 并并发读写旧/新 Run | 只新增两表及索引，约束/锁正确，现有 Repository/React 读写不受阻 | AC-12；FR-4、FR-5、FR-10 |
 | P4-IT-27 | 默认关闭运行 React，再执行停止接纳→排空→关闭→应用回滚 | React 与 Phase 0 基线一致；回滚零活跃孤儿，保留两表，无 downgrade 需求 | AC-12；FR-10 |
 | P4-IT-28 | 有活跃或 cleanup_failed 进程时尝试完整回滚 | 完整回滚被阻断；新接纳停止但恢复/清理继续，人工处置路径明确 | AC-5、AC-12；FR-4、FR-10 |
 | P4-IT-29 | 检查 quickstart/production 卷、Host 身份和 stop grace | 生产仅 runtime-worker 挂执行卷，无共享执行根；秘密不进入示例配置 | AC-12；FR-10 |

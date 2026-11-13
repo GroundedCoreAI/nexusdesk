@@ -3,6 +3,7 @@
 > Status: Pending execution (run before this phase goes live; no acceptance results currently exist)
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off)
+> Revised: 2026-11-14 (08 R-1: planned migration renumbered `0054`→`0059_execution_runtime_host`, actual predecessor `0058_agent_execution_metadata`)
 > Basis: `01-business-goals.md` (G1–G5, success metrics), `02-requirements.md` (AC-1–AC-12); test execution follows `04-test-plan.md`
 
 ## 1. Acceptance Scope and Responsibility
@@ -38,7 +39,7 @@ Confirm every AC and retain evidence for cleanup, isolation, resource, and obser
 | A9 | AC-9 | Exceed CPU/memory/PID/Workdir total and per-file/wall-time/output bounds individually under the full matrix, then start on an unsupported environment | Supported excess rejects/terminates within specified time and releases resources; missing required capabilities reject start; zero silent ignores or adjacent-Execution impact | FR-7; G4; US-5, US-6 |
 | A10 | AC-10 | Replace the Sandbox test Provider and attempt arbitrary commands, uploaded code, untrusted multi-tenant execution, and configuration bypasses | Replace without Adapter/Host contract changes; 100% of untrusted-execution entries reject; Local Provider makes no strong-sandbox/network/credential promise | FR-8; G4, G5; US-6 |
 | A11 | AC-11 | Observe normal, crash, orphan, cleanup_failed, resource-pressure, and stalled-reconcile states, then attempt public reads of internal fields | Metrics/logs/alerts cover every state and correlate Run/host; secrets, PID/PGID, and full paths stay out of public surfaces and evidence | FR-9; G5; US-3, US-7 |
-| A12 | AC-12 | Upgrade `0054` from the actual predecessor, verify default-off/legacy React, then drill stop admission → drain → verify → disable → application rollback | Only necessary tables/indexes are added; React has no regression; rollback leaves zero active orphans, retains both tables/audit, and needs no downgrade; cleanup_failed blocks full rollback | FR-4, FR-5, FR-10; G1, G5; US-2, US-3, US-7 |
+| A12 | AC-12 | Upgrade `0059_execution_runtime_host` from the actual predecessor `0058_agent_execution_metadata`, verify default-off/legacy React, then drill stop admission → drain → verify → disable → application rollback | Only necessary tables/indexes are added; React has no regression; rollback leaves zero active orphans, retains both tables/audit, and needs no downgrade; cleanup_failed blocks full rollback | FR-4, FR-5, FR-10; G1, G5; US-2, US-3, US-7 |
 
 Record for every scenario: executor, date, environment/support matrix, target commit, prerequisite data, actual operations, expected/actual result, decision, and process/resource/DB/filesystem/log evidence links. Failures or missing environments cannot be rewritten as passes; destructive evidence references only isolated sentinels and dedicated volumes.
 
@@ -67,7 +68,7 @@ Use these only to supplement operational usability that automation does not full
 | C7 | Logs, events, DB metadata, public APIs, and acceptance evidence contain no tokens, keys, secret argv/env, or full host paths | Veto | AC-2, AC-11; G5; FR-2, FR-9 |
 | C8 | Run, process, resource, and Workdir states are recorded separately; cleanup is idempotent, failures retryable, and Tombstones/audit retained | Must pass | AC-3–AC-6; G2, G3; FR-3–FR-5 |
 | C9 | Active/orphan/failure/resource/disk/recovery batches have structured observability and alerts without uncontrolled high-cardinality labels | Must pass | AC-11; G5; FR-9 |
-| C10 | `0054` predecessor is revalidated before implementation, only necessary tables/indexes are added, history is unchanged, and production rollback does not downgrade | Must pass | AC-12; G5; FR-4, FR-5, FR-10 |
+| C10 | `0059_execution_runtime_host` predecessor (`0058_agent_execution_metadata`) is revalidated before implementation, only necessary tables/indexes are added, history is unchanged, and production rollback does not downgrade | Must pass | AC-12; G5; FR-4, FR-5, FR-10 |
 | C11 | New Host is off by default, React/Worker/SSE matches the Phase 0 baseline, and Phase 3 behavior does not regress | Veto | AC-12; G1, G5; FR-10 |
 | C12 | Rollback stops admission and drains first, then rolls back the application at zero active; cleanup_failed blocks full rollback and records are not deleted | Veto | AC-12; G5; FR-10 |
 | C13 | No real Codex, strong-sandbox/network/credential capability, or shared-execution-root multi-replica is enabled, and no Phase 5/6 scope leaks in | Must pass | AC-10, AC-12; G4; FR-8, FR-10 |

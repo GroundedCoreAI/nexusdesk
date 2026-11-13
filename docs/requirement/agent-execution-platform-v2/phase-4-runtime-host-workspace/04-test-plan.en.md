@@ -3,11 +3,12 @@
 > Status: Pending execution (run after this phase is implemented; no test results currently exist)
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements)
+> Revised: 2026-11-14 (08 R-1/R-3/R-5: migration renumbered `0054`→`0059_execution_runtime_host` after revalidating head `0058_agent_execution_metadata`; new §2.1 registers the normative macOS-development-subset versus `pending_env` mapping for the current darwin execution host; test-file naming follows `test_agent_execution_phase4_*`)
 > Basis: `02-requirements.md` (FR-1–FR-10, AC-1–AC-12), `03-technical-design.md` (Host, process groups, recovery, Workdir, resource matrix, and rollback)
 
 ## 1. Test Scope and Principles
 
-**Scope**: RuntimeHost/Adapter decoupling, Process Runner/Supervisor/Registry, bounded I/O, cancellation/timeout, orphan recovery, Workspace/Execution Workdir, safe paths/cleanup, resource limits, Sandbox Provider, health observability, migration `0054`, deployment, and rollback.
+**Scope**: RuntimeHost/Adapter decoupling, Process Runner/Supervisor/Registry, bounded I/O, cancellation/timeout, orphan recovery, Workspace/Execution Workdir, safe paths/cleanup, resource limits, Sandbox Provider, health observability, migration `0059_execution_runtime_host`, deployment, and rollback.
 
 **Principles**:
 
@@ -38,6 +39,15 @@
 | quickstart/production deployment-check environment | Default-off, execution volume, one Host, stop timeout, non-secret settings, and rollback |
 
 **Data conventions**: use at least two tenants, multiple business/workspace scopes, and concurrent Runs. Executable targets and argv allowlists are fixed; child-process/CPU/memory/disk/output workloads are parameterized for tests but accept no user code. External link targets are isolated sentinels. Construct PID reuse deterministically with identity-decision substitutes first, then corroborate with an isolated OS experiment; never kill unrelated processes to “reuse a PID.” Each case independently cleans process groups, resource handles, Workdirs, and DB rows, and cleanup failure is itself a reported result.
+
+### 2.1 macOS development-subset versus `pending_env` mapping (normative, 2026-11-14, 08 R-3)
+
+The current execution host is macOS (darwin) with Docker available for PostgreSQL (dedicated pgvector container, `TEST_DATABASE_URL`). Until a Linux full-acceptance environment exists, the following partition governs every case in §3–§5 and overrides any ambiguity in a case's wording. Items measured here report pass only with the environment label attached; `pending_env` items keep their enablement promises blocked (Principle 8, 05 C14) and must never be approximated into a pass.
+
+| Partition | Cases (halves) |
+|---|---|
+| Measurable on macOS | All P4-UT except the cgroup/quota/mount live halves; P4-IT-01–08, 10 (identity-substitute half), 11–18 (non-mount half), 21 (per-file half), 22, 23 (macOS column), 24–27, P4-CM-02–06, 08–13; process-group TERM/KILL and descendants, rlimit CPU/address-space/file-size approximations labeled non-equivalent, output bounds, wall-time races, path/link/race safety on APFS, Workdir lifecycle, registry reconcile and SIGKILL+restart process-level recovery, migration 0059 up/down on docker PG, default-off React parity, quickstart-profile container drill on local Docker |
+| `pending_env` (Linux required) | P4-IT-19 (cgroup memory hard-limit half and CPU group-accounting hard ceiling), P4-IT-20 (cgroup pids per-Execution hard limit), P4-IT-21 (filesystem/project quota half), P4-IT-17 / P4-UT-13 (live mount-namespace half), P4-IT-10 (deterministic OS PID-reuse corroboration half), P4-IT-09 (production-image container restart/stop-timeout half), P4-IT-29 (production runtime-inspection half), P4-IT-30 (also `not_measured`: Phase 0 baseline gap, 08 R-2), P4-CM-07 (full support-matrix sign-off) |
 
 ## 3. Unit Tests
 
@@ -95,7 +105,7 @@
 | P4-IT-23 | Start on the macOS development subset, with cgroup disabled, and on an unsupported platform | Only explicitly supported items run; required=true rejects missing capabilities, with zero silent ignores | AC-9; FR-7, FR-10 |
 | P4-IT-24 | Replace the Sandbox test Provider and attempt untrusted-execution entries | Replace without Adapter/Host contract changes; arbitrary commands/uploaded code/untrusted multi-tenant execution all reject | AC-10; FR-8 |
 | P4-IT-25 | Observe normal, crash, orphan, cleanup-failure, resource-pressure, and stalled-reconcile states | Metrics/logs/alerts are complete and correlated; public reads expose no secrets, PID/PGID, or full paths | AC-11; FR-9 |
-| P4-IT-26 | Upgrade `0054` from the actual predecessor and concurrently read/write old/new Runs | Only two tables/indexes are added, constraints/locks are correct, and existing Repository/React reads/writes are unimpeded | AC-12; FR-4, FR-5, FR-10 |
+| P4-IT-26 | Upgrade `0059_execution_runtime_host` from the actual predecessor `0058_agent_execution_metadata` and concurrently read/write old/new Runs | Only two tables/indexes are added, constraints/locks are correct, and existing Repository/React reads/writes are unimpeded | AC-12; FR-4, FR-5, FR-10 |
 | P4-IT-27 | Run React with default-off, then stop admission → drain → disable → application rollback | React matches the Phase 0 baseline; rollback leaves zero active orphans, retains both tables, and needs no downgrade | AC-12; FR-10 |
 | P4-IT-28 | Attempt full rollback with active or cleanup_failed processes | Full rollback is blocked; new admission stops while recovery/cleanup continues, with explicit manual remediation | AC-5, AC-12; FR-4, FR-10 |
 | P4-IT-29 | Inspect quickstart/production volumes, Host identity, and stop grace | Production mounts the execution volume only on runtime-worker, with no shared execution root and no secrets in example settings | AC-12; FR-10 |

@@ -3,7 +3,8 @@
 > 状态：待评审（未开始实施；以下模块、表与部署变更均为规划）
 > 创建：2026-11-02
 > 依据：`01-business-goals.md`（G1–G5）、`02-requirements.md`（FR-1–FR-10、AC-1–AC-12）、架构文档第 3、7～10、15～17、19～22 节
-> 现状核查：2026-11-02 对 `integration` 工作树；Phase 3 规划前驱为 `0053_agent_execution_metadata`
+> 现状核查：2026-11-02 对 `integration` 工作树；2026-11-14 在 Phase 4 分支复核
+> 修订：2026-11-14（实施拆解 R-1/R-4/R-5/R-6/R-8：规划迁移因真实 head 为 `0058_agent_execution_metadata` 由 `0054` 改号 `0059_execution_runtime_host`；`ExecutionHandle` 无 PID 条款限定为公共面，既有内部字段 `process_id` 对 Host 管理的执行保持不赋值；测试文件名改用仓库 `test_agent_execution_phase4_*` 约定；因无 psutil 依赖新增 `host/process_identity.py` 模块行；§5.1 登记 Phase 4 配置族的指纹豁免纪律）
 
 ## 1. 现状映射与设计裁定
 
@@ -22,10 +23,11 @@
 
 | 层 | 文件 | 改动 |
 |---|---|---|
-| 迁移 | `backend/migrations/versions/0054_execution_runtime_host.py` | 规划新增 `execution_workdirs` 与 `runtime_host_processes` 两表及必要索引；实施前重验前驱 |
+| 迁移 | `backend/migrations/versions/0059_execution_runtime_host.py` | 新增 `execution_workdirs` 与 `runtime_host_processes` 两表及必要索引（由规划号 `0054` 改号；真实前驱为 `0058_agent_execution_metadata`，见 08 R-1） |
 | Host 模型 | `backend/src/agent_platform/core_platform/agent_execution/host/host_models.py` | ProcessSpec、ResourcePolicy、ManagedProcess、ProcessResult、HostHealth 内部模型 |
 | Host 接口 | `backend/src/agent_platform/core_platform/agent_execution/host/runtime_host.py` | start/cancel/wait/reconcile/health/close 契约与组合入口 |
 | Runner | `backend/src/agent_platform/core_platform/agent_execution/host/process_runner.py` | 可信目标启动、新进程组、有界 I/O、启动身份采集 |
+| 身份探针 | `backend/src/agent_platform/core_platform/agent_execution/host/process_identity.py` | 仅用标准库采集启动身份（Linux `/proc`，macOS `ps` 尽力而为；身份不可得即视为不匹配=禁止发信号）；不引入 psutil 依赖（08 R-6） |
 | Supervisor | `backend/src/agent_platform/core_platform/agent_execution/host/process_supervisor.py` | TERM/KILL、超时、退出收集、幂等清理与资源释放 |
 | Registry | `backend/src/agent_platform/core_platform/agent_execution/host/process_registry.py` | 进程记录、锁、孤儿核对、重启恢复与人工处置 |
 | 资源 | `backend/src/agent_platform/core_platform/agent_execution/host/resource_manager.py` | 支持探测、每 Execution 限额、采样与释放 |
@@ -38,7 +40,7 @@
 | 组合 | `backend/src/agent_platform/applications/platform_runtime/runtime_composition.py` | 组装 Host/Supervisor/Workspace/Resource/Sandbox，管理启动与停止 |
 | 配置 | `backend/src/agent_platform/core_platform/platform_services/platform_settings/settings.py` | FR-10 配置、边界与启用时交叉校验 |
 | 部署 | `deploy/quickstart/compose.yaml`、`deploy/production/compose.yaml`、`deploy/production/.env.example` | 执行卷、稳定 host_id、非秘密限额与停止策略 |
-| 测试 | `backend/tests/test_runtime_host.py`、`test_process_supervisor.py`、`test_execution_workdir.py`、`test_runtime_host_postgres.py`、`test_execution_runtime_host_migrations.py` | 规划真实进程、故障、恶意路径、资源与迁移测试；辅助程序仅测试内置可信目标 |
+| 测试 | `backend/tests/test_agent_execution_phase4_workdir.py`、`test_agent_execution_phase4_runner.py`、`test_agent_execution_phase4_supervisor.py`、`test_agent_execution_phase4_registry.py`、`test_agent_execution_phase4_runtime_host.py`、`test_agent_execution_phase4_sandbox.py`、`test_agent_execution_phase4_orchestration.py`、`test_agent_execution_phase4_settings.py`、`test_agent_execution_phase4_migration.py`、`test_agent_execution_phase4_deployment.py` | 真实进程、故障、恶意路径、资源与迁移测试，文件名遵循仓库 `test_agent_execution_phase4_*` 约定（08 R-5）；辅助程序仅测试内置可信目标 |
 
 ## 3. 数据模型
 
@@ -48,9 +50,9 @@ Worker 重启后内存中的 asyncio Task、PID 和目录句柄全部消失。�
 
 不建立通用 RuntimeHost 服务表：稳定 `host_id` 来自部署，boot 级 `host_instance_id` 由进程生成，Host 健康可由进程记录的观测时间与结构化健康状态推导。除非后续出现多 Host 调度需求，不提前增加控制面实体。
 
-### 3.2 迁移 `0054_execution_runtime_host.py`
+### 3.2 迁移 `0059_execution_runtime_host.py`
 
-> 规划编号：以 Phase 3 的 `0053_agent_execution_metadata` 为规划前驱。实施前必须重验真实 head/down_revision；若中间已有迁移，使用新链接并修订文档，禁止修改历史迁移。
+> 2026-11-14 由规划号 `0054` 改号：Phase 3 迁移本身已从 `0053` 改号为 `0058_agent_execution_metadata`，Phase 4 分支复核的真实 head 即 `0058_agent_execution_metadata`（down_revision `0057_industry_pack_runtime`），因此本迁移取 `down_revision = "0058_agent_execution_metadata"`。禁止修改已应用的历史迁移；若实施前 head 再次变化，按同一"改号并修订文档"流程处理（08 R-1）。
 
 #### 表 `execution_workdirs`
 
@@ -105,7 +107,7 @@ Worker 重启后内存中的 asyncio Task、PID 和目录句柄全部消失。�
 | `reconcile` | 核对持久记录与 OS 事实、回收孤儿、重试清理 | 不恢复 Engine 会话、不重新执行有副作用请求 |
 | `health/close` | 报告支持矩阵/活跃/失败；停止接纳并排空 | 组合根管理生命周期；Worker 不直接调用 OS |
 
-公共 ExecutionHandle 不包含 PID/PGID、启动 token、完整路径或环境。测试必须用至少两个 Adapter 验证 Host 无 Engine 条件分支。
+公共 ExecutionHandle 不包含 PID/PGID、启动 token、完整路径或环境。范围限定（08 R-4）："公共"约束 HTTP/OpenAPI、AgentEvent、Run 元数据与日志面；既有内部字段 `ExecutionHandle.process_id`（默认 `None`）对 Host 管理的执行**保持不赋值**——OS 身份只存在于内部 `ManagedProcess`——并以钉选测试断言序列化后的公共负载中不出现非零进程 ID 或宿主机路径。测试必须用至少两个 Adapter 验证 Host 无 Engine 条件分支。
 
 ### 4.2 正常启动与退出
 
@@ -188,6 +190,7 @@ FR-10 数值均使用有界 Pydantic Field；启用时额外要求：
 - grace、kill、reconcile、sample、cleanup interval 均大于 0且有上限；wall timeout、CPU/memory/PID/disk/output 限额不得为 0 或负数。
 - `execution_resource_enforcement_required=true` 时启动前计算支持矩阵，缺少任一请求所需能力则不接纳新进程。
 - `execution_runtime_host_enabled=false` 不阻止已有记录恢复/清理；只有零活跃后才允许完全停止 Supervisor。
+- 指纹纪律（08 R-8，Phase 3 R-48 先例）：Phase 4 全部配置族（`execution_runtime_host_*`、`execution_workdir_*`、`execution_process_*`、`execution_resource_*`、`execution_sandbox_provider`）均从运行时配置指纹中排除；改开关或限额绝不让已入队 Run 报 `configuration_changed`。
 
 ### 5.2 部署先例与变更
 
@@ -213,7 +216,7 @@ Phase 4 不新增模型调用或凭据路径。React 继续进程内 Model Gatew
 | PostgreSQL/迁移 | 两表约束/索引、锁与幂等、旧 React、默认关闭、应用回滚和 disposable downgrade |
 | 回归 | Phase 0 React/Worker/Repository/SSE、Phase 3 能力/配置/快照，以及 quickstart/production 部署检查 |
 
-详细用例见 `04-test-plan.md`；资源专项环境不可用时标 `pending_env`，不得把开发近似能力写成完整支持。
+详细用例见 `04-test-plan.md`；资源专项环境不可用时标 `pending_env`，不得把开发近似能力写成完整支持。当前 darwin 执行主机的 macOS 开发子集与 `pending_env` 的规范性划分登记在 `04` §2.1 与 `08` §5（08 R-3）。
 
 ## 8. 上线与回滚
 

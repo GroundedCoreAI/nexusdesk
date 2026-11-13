@@ -3,6 +3,7 @@
 > 状态：待实施（本阶段上线前执行；当前无验收结果）
 > 创建：2026-11-02
 > 修订：2026-11-11（小团队轻量验收：复用自动化证据，移除独立 UAT、重复指标与多角色签字）
+> 修订：2026-11-14（08 R-1：规划迁移由 `0054` 改号 `0059_execution_runtime_host`，实际前驱 `0058_agent_execution_metadata`）
 > 依据：`01-business-goals.md`（G1–G5、成功指标）、`02-requirements.md`（AC-1–AC-12）；测试执行依据见 `04-test-plan.md`
 
 ## 1. 验收范围与责任
@@ -38,7 +39,7 @@
 | A9 | AC-9 | 在完整矩阵逐项越过 CPU/内存/PID/Workdir 总量与单文件/wall time/输出边界，并在不支持环境启动 | 支持项按规定期限拒绝/终止且释放资源；required 能力缺失时启动拒绝；静默忽略与相邻 Execution 影响均为 0 | FR-7；G4；US-5、US-6 |
 | A10 | AC-10 | 替换 Sandbox 测试 Provider，并尝试任意命令、上传代码、不可信多租户及配置绕过 | 不改 Adapter/Host 契约即可替换；不可信执行入口 100% 拒绝；Local Provider 无强沙箱/网络/凭据承诺 | FR-8；G4、G5；US-6 |
 | A11 | AC-11 | 观察正常、崩溃、孤儿、cleanup_failed、资源压力和 stalled reconcile，并尝试公开读取内部字段 | 指标/日志/告警覆盖全部状态且可关联 Run/host；秘密、PID/PGID、完整路径不进入公共面或证据 | FR-9；G5；US-3、US-7 |
-| A12 | AC-12 | 从实际前驱升级 `0054`，验证默认关闭/旧 React，再演练停止接纳→排空→核对→关闭→应用回滚 | 仅新增必要两表/索引；React 无回归；回滚零活跃孤儿、两表/审计保留且无需 downgrade；cleanup_failed 阻断完整回滚 | FR-4、FR-5、FR-10；G1、G5；US-2、US-3、US-7 |
+| A12 | AC-12 | 从实际前驱 `0058_agent_execution_metadata` 升级 `0059_execution_runtime_host`，验证默认关闭/旧 React，再演练停止接纳→排空→核对→关闭→应用回滚 | 仅新增必要两表/索引；React 无回归；回滚零活跃孤儿、两表/审计保留且无需 downgrade；cleanup_failed 阻断完整回滚 | FR-4、FR-5、FR-10；G1、G5；US-2、US-3、US-7 |
 
 每个场景执行记录：执行人、日期、环境/支持矩阵、目标提交、前置数据、实际操作、预期/实际、判定、进程/资源/DB/文件系统/日志证据链接。失败或环境缺失不得改写成通过；破坏性证据仅引用隔离哨兵和专用卷。
 
@@ -67,7 +68,7 @@
 | C7 | 日志、事件、DB metadata、公共 API 与验收证据不含 Token、Key、秘密 argv/env 或完整宿主路径 | 一票否决 | AC-2、AC-11；G5；FR-2、FR-9 |
 | C8 | Run、进程、资源与 Workdir 状态分别记录；清理幂等、失败可重试、Tombstone/审计保留 | 必须通过 | AC-3～AC-6；G2、G3；FR-3～FR-5 |
 | C9 | 活跃/孤儿/失败/资源/磁盘/恢复批次有结构化观测和告警，无失控高基数标签 | 必须通过 | AC-11；G5；FR-9 |
-| C10 | `0054` 实施前重验前驱，仅加必要两表/索引，历史迁移未改；生产回滚不 downgrade | 必须通过 | AC-12；G5；FR-4、FR-5、FR-10 |
+| C10 | `0059_execution_runtime_host` 实施前重验前驱（`0058_agent_execution_metadata`），仅加必要两表/索引，历史迁移未改；生产回滚不 downgrade | 必须通过 | AC-12；G5；FR-4、FR-5、FR-10 |
 | C11 | 新 Host 默认关闭，React/Worker/SSE 与 Phase 0 基线无差异，Phase 3 行为不回归 | 一票否决 | AC-12；G1、G5；FR-10 |
 | C12 | 回滚先停止接纳并排空，零活跃后回滚应用；cleanup_failed 阻断完整回滚且记录不删除 | 一票否决 | AC-12；G5；FR-10 |
 | C13 | 不开放真实 Codex、强沙箱/网络/凭据能力或共享执行根多副本，无 Phase 5/6 范围偷跑 | 必须通过 | AC-10、AC-12；G4；FR-8、FR-10 |
