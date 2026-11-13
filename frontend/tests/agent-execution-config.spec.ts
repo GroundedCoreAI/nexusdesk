@@ -49,6 +49,36 @@ const CAPS = {
 // verbatim like the backend settings. Both on is the regular deployment state,
 // so the pre-existing cases keep exercising the Phase 3 entries.
 const FLAGS = { execution_phase3_enabled: true, execution_orchestrator_enabled: true };
+// One stored conversation with one finished Run, used only by the M3
+// "history and Run stay viewable" cases (P3-FE-20/21).
+const RECORD = {
+  id: 'conv-record',
+  external_id: 'record-run-1',
+  mode: 'bot',
+  agent_id: 'agent-1',
+  assigned_to: null,
+  source: 'playground',
+  last_message: '记录里的最后一条回答',
+  updated_at: '2026-10-02T00:00:00Z',
+};
+const RECORD_ANSWER = '历史运行给出的回答';
+const RECORD_RUN_ID = 'run-record';
+/**
+ * `GET /runs/{run-record}/events` as the backend sends it: SSE frames ended by
+ * `run.completed`, so the reader stops instead of reconnecting (05 M3 asserts a
+ * past Run can still be opened, which needs a stream that actually finishes).
+ */
+const RUN_EVENT_STREAM = [
+  'id: 1',
+  'event: model.completed',
+  'data: {"round":1,"tool_calls":0,"duration_ms":120,"first_token_ms":30,"usage":{"total_tokens":42}}',
+  '',
+  'id: 2',
+  'event: run.completed',
+  'data: {"status":"completed"}',
+  '',
+  '',
+].join('\n');
 
 /** A Phase 0 / Phase 2 draft: no `engine`, no `react`, no `disabled_capabilities`. */
 function legacyDraft(overrides: Record<string, unknown> = {}) {
@@ -183,6 +213,29 @@ async function editor(page: import('@playwright/test').Page, options: Options): 
     if (path === '/agents/agent-1/evaluation-reports') {
       return route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 1, versions: [] } });
     }
+    // Read-only history/Run views (05 M3, P3-FE-20/21). These stay mocked like
+    // everything else, and only for the record view's own endpoints — the
+    // catch-all below keeps answering `{}` for any path this spec does not
+    // deliberately cover.
+    if (path === '/agents/agent-1/conversations') {
+      return route.fulfill({ json: { items: [RECORD], total: 1, page: 1, page_size: 12 } });
+    }
+    if (path === `/conversations/${RECORD.id}`) {
+      return route.fulfill({
+        json: {
+          ...RECORD,
+          messages: [
+            { id: 'msg-1', seq: 1, role: 'user', content: '历史提问', created_at: '2026-10-02T00:00:01Z', run_id: null },
+            { id: 'msg-2', seq: 2, role: 'assistant', content: RECORD_ANSWER, created_at: '2026-10-02T00:00:02Z', run_id: RECORD_RUN_ID },
+          ],
+          runs: [{ id: RECORD_RUN_ID, conversation_id: RECORD.id, status: 'completed', error_code: null, created_at: '2026-10-02T00:00:02Z' }],
+          actions: [],
+        },
+      });
+    }
+    if (path === `/runs/${RECORD_RUN_ID}/events`) {
+      return route.fulfill({ contentType: 'text/event-stream', body: RUN_EVENT_STREAM });
+    }
     if (path.startsWith('/model-gateway/catalog/')) {
       return route.fulfill({ json: { items: [{ id: '6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f', name: '线上方案', enabled: true, published_version: 3, spec: { operation: 'chat' } }], total: 1 } });
     }
@@ -235,6 +288,34 @@ const settleReads = async (page: import('@playwright/test').Page, harness: Harne
   expect(count, 'the switches may be read at most once per mount (StrictMode doubles it)').toBeLessThanOrEqual(2);
   return count;
 };
+
+/**
+ * 05 M3's other half — "历史发布与 Run 仍可查看". Opens the record view, one
+ * stored conversation and the Run trace behind its assistant answer, and fails
+ * if any of that is missing, disabled or served empty. The two Phase 3
+ * switches must never gate this path (03 §8, FR-9/AC-10).
+ */
+async function recordsStayOpen(page: import('@playwright/test').Page, language = 'zh-CN') {
+  const local = (key: string) => tr(language, key);
+  // The workspace nav entry is visible and clickable.
+  const recordsEntry = page.getByRole('button', { name: local('对话记录') });
+  await expect(recordsEntry).toBeVisible();
+  await expect(recordsEntry).toBeEnabled();
+  await recordsEntry.click();
+  await expect(page.locator('.agent-records-heading')).toContainText(local('对话记录'));
+  // The stored conversation is listed and opens.
+  const recordLink = page.getByRole('button', { name: RECORD.external_id, exact: true });
+  await expect(recordLink).toBeVisible();
+  await recordLink.click();
+  await expect(page.locator('.agent-record-detail')).toContainText(RECORD_ANSWER);
+  // The past Run behind that answer still opens its trace.
+  await page.getByRole('button', { name: local('查看运行轨迹') }).click();
+  await expect(page.locator('.ant-modal-title')).toHaveText(local('运行详情'));
+  // The event stream really was read and parsed, not merely a closed drawer:
+  // the stable machine event names come straight off `GET /runs/{id}/events`.
+  await expect(page.locator('.trace')).toContainText('model.completed');
+  await expect(page.locator('.trace')).toContainText('run.completed');
+}
 
 test('P3-FE-01 (M1) an old draft opens without default-filled fields or dirty state', async ({ page }) => {
   const harness = await open(page, {});
@@ -451,14 +532,32 @@ test('P3-FE-10 a disabled Phase 3 keeps the panel inert', async ({ page }) => {
   await expect(page.locator('.agent-capability-row')).toHaveCount(0);
 });
 
+/**
+ * A strict-schema rejection in the shape the backend answers with (03 §7.3:
+ * 422 with a pydantic error list). Shared by P3-FE-10b and the four-locale
+ * follow-up P3-FE-10c so both exercise the identical payload.
+ * `msg` is what pydantic sends — always English by design; only the framework
+ * copy around it is translated.
+ */
+const STRICT_SCHEMA_REJECTION = [
+  { loc: ['body', 'config', 'react', 'max_model_rounds'], msg: 'Input should be a valid integer', type: 'int_type' },
+  { loc: ['body', 'config', 'disabled_capabilities', 3], msg: 'Input should be a valid capability', type: 'enum' },
+  { loc: ['body', 'config', 'system_prompt'], msg: 'String should have at least 1 character', type: 'min_length' },
+];
+/**
+ * The line `ExecutionConfigSection.locateExecutionErrors` renders for one
+ * rejected path: the framework sentence is read out of `language`'s own
+ * dictionary and interpolated the way i18next would, so an assertion built here
+ * can only be satisfied by that locale's copy.
+ */
+const locatedLine = (language: string, path: string, msg: string) => tr(language, '字段 {{v0}}：{{v1}}')
+  .replace('{{v0}}', path)
+  .replace('{{v1}}', msg);
+
 test('P3-FE-10b a strict schema rejection names the execution field path', async ({ page }) => {
   await open(page, {
     previewStatus: 422,
-    previewError: [
-      { loc: ['body', 'config', 'react', 'max_model_rounds'], msg: 'Input should be a valid integer', type: 'int_type' },
-      { loc: ['body', 'config', 'disabled_capabilities', 3], msg: 'Input should be a valid capability', type: 'enum' },
-      { loc: ['body', 'config', 'system_prompt'], msg: 'String should have at least 1 character', type: 'min_length' },
-    ],
+    previewError: STRICT_SCHEMA_REJECTION,
   });
   await page.getByRole('button', { name: '预览能力' }).click();
   const alert = section(page).locator('[role="alert"]');
@@ -468,6 +567,40 @@ test('P3-FE-10b a strict schema rejection names the execution field path', async
   // generic handling, so the panel does not claim responsibility for them.
   await expect(alert).not.toContainText('system_prompt');
 });
+
+// 05 M2/A9, 04 §6.1: the 422 field-path location must be located *and*
+// readable in every locale, not only in the Chinese source UI.
+for (const language of ['zh-CN', 'zh-TW', 'en', 'hi']) {
+  test(`P3-FE-10c ${language} frames a 422 field path with its own dictionary copy`, async ({ page }) => {
+    await page.addInitScript(value => localStorage.setItem('agent-platform-language', value), language);
+    await open(page, {
+      previewStatus: 422,
+      previewError: STRICT_SCHEMA_REJECTION,
+    }, language);
+    await page.getByRole('button', { name: tr(language, '预览能力') }).click();
+    const alert = section(page).locator('[role="alert"]');
+    // The framework sentence is this locale's translation of `字段 {{v0}}：{{v1}}`
+    // (or the test fails against a fallback); the server's English `msg` inside
+    // it is pydantic's own text and stays as sent — translating it is not part
+    // of the contract.
+    await expect(alert).toContainText(locatedLine(language, 'react.max_model_rounds', 'Input should be a valid integer'));
+    await expect(alert).toContainText(locatedLine(language, 'disabled_capabilities', 'Input should be a valid capability'));
+    // The contract path stays verbatim inside the sentence, so it can be
+    // pointed at in a bug report regardless of the UI language.
+    await expect(alert).toContainText('react.max_model_rounds');
+    await expect(alert).toContainText('disabled_capabilities');
+    // An unrelated path is not claimed, and the structured body is never dumped
+    // raw: without the located copy the panel falls back to the generic
+    // `请检查必填项和输入格式 (422)` line, which points at nothing.
+    await expect(alert).not.toContainText('system_prompt');
+    await expect(alert).not.toContainText('"loc"');
+    await expect(alert).not.toContainText('422 ·');
+    if (language === 'en' || language === 'hi') {
+      // No Chinese framework text may survive the lookup.
+      expect(await alert.innerText()).not.toMatch(/[㐀-鿿]/);
+    }
+  });
+}
 
 test('P3-FE-11 a rejected save points at the offending execution field', async ({ page }) => {
   await open(page, { saveStatus: 409 });
@@ -688,6 +821,72 @@ test('P3-FE-19 (M3) a save the server refuses while phase3 is off stays translat
   expect(harness.calls.filter(call => call.startsWith('POST') || call.includes('/agents/execution-preview'))).toEqual([]);
 });
 
+// 05 M3 closes with two halves, and the acceptance read-out only counted the
+// first one so far: the Phase 3 entries must disappear *and* "历史发布与 Run 仍
+// 可查看" must hold. P3-FE-14/16 prove the hiding side; these two prove the
+// viewing side survives the very same two deployment states, because hiding
+// more than the Phase 3 entries would itself be an FR-9/AC-10 violation.
+test('P3-FE-20 (M3) phase3 off still opens the conversation records and a past Run', async ({ page }) => {
+  const harness = await open(page, { flags: { execution_phase3_enabled: false, execution_orchestrator_enabled: true } });
+  // The Phase 3 editing entries are gone, exactly as P3-FE-14 established.
+  await expect(page.getByRole('button', { name: '预览能力' })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: /收窄/ })).toHaveCount(0);
+  // The record view and the Run behind it stay reachable.
+  await recordsStayOpen(page);
+  // Opening a past Run is pure reading: the run event stream was fetched, and
+  // not one Phase 3 or write request was attempted.
+  expect(harness.calls.filter(call => call === 'GET /runs/run-record/events').length).toBeGreaterThanOrEqual(1);
+  expect(harness.calls.filter(call => !call.startsWith('GET'))).toEqual([]);
+  expect(harness.previews).toEqual([]);
+  expect(harness.saves).toEqual([]);
+});
+
+test('P3-FE-21 (M3) a failed flags read still leaves the records and Run viewable', async ({ page }) => {
+  const harness = await open(page, { flagsStatus: 500 });
+  await settleReads(page, harness);
+  // Fail-closed hid the Phase 3 entries without claiming a proven off switch.
+  await expect(page.getByRole('button', { name: '预览能力' })).toHaveCount(0);
+  await expect(section(page).getByText(OFF_HINT)).toHaveCount(0);
+  // The unknown deployment state must not cost the operator their history.
+  await recordsStayOpen(page);
+  expect(harness.calls.filter(call => call === 'GET /runs/run-record/events').length).toBeGreaterThanOrEqual(1);
+  expect(harness.calls.filter(call => !call.startsWith('GET'))).toEqual([]);
+  expect(harness.previews).toEqual([]);
+});
+
+/**
+ * The `known` code table inside `errorText` (`src/i18n/index.ts`). Its values
+ * are looked up as dictionary keys at runtime, and `check:i18n` cannot see any
+ * of it: `scripts/check-i18n.mjs` walks the AST for `t('literal')` call sites
+ * only (line 75: `ts.isCallExpression(node) && … === 't'`), so a table entry is
+ * never a scanned call site and a code whose sentence misses a locale passes
+ * `check:i18n` silently — the UI then falls back to the Chinese source text.
+ *
+ * P3-FE-13 is therefore the ONLY guard for that table. T10 must not delete or
+ * narrow it, and any new `execution_*` code (or any other domain code) added to
+ * `errorText` without all four translations must turn this test red.
+ */
+function errorTextCodeTable(): Record<string, string> {
+  const source = readFileSync(fileURLToPath(new URL('../src/i18n/index.ts', import.meta.url)), 'utf8');
+  const block = source.split('const known:Record<string,string>={')[1];
+  expect(block, 'errorText must keep its `known` code table in src/i18n/index.ts for P3-FE-13 to cover it').toBeTruthy();
+  const table: Record<string, string> = {};
+  for (const line of block!.split('\n  };')[0].split('\n')) {
+    // Both shapes the table uses: `code:'sentence'`, `code:"sentence"` and `code:t('sentence')`.
+    const entry = /^\s*([a-z][a-z0-9_]*):\s*(?:t\()?["']([^"']*)["']\)?,?$/.exec(line);
+    if (entry)
+      table[entry[1]] = entry[2];
+  }
+  return table;
+}
+
+// Codes whose table sentence is a key in no locale, so the UI shows the Chinese
+// source in en/hi. Pre-existing and outside Phase 3 (reported at the T9
+// close-up, owned by the i18n follow-up); listed explicitly so a *new*
+// untranslated code cannot hide behind it — the moment one appears that is not
+// in this list, P3-FE-13 fails.
+const UNTRANSLATED_ERROR_COPY = ['model_not_configured'];
+
 test('P3-FE-13 every new execution key exists in all four locales', () => {
   const keys = [
     '执行与能力', '执行配置', 'React 配置', '能力（Effective）', '配置字段',
@@ -716,6 +915,39 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
       expect(JSON.stringify([...value!.matchAll(/{{\s*(\w+)\s*}}/g)].map(m => m[1]).sort()), `${language} placeholders for ${key}`)
         .toBe(JSON.stringify([...key.matchAll(/{{\s*(\w+)\s*}}/g)].map(m => m[1]).sort()));
     }
+  }
+  // Every code `errorText` maps must resolve to copy the four dictionaries
+  // actually carry, not just the ones spot-checked by the key list above.
+  const table = errorTextCodeTable();
+  expect(Object.keys(table).length, 'the errorText code table was not parsed').toBeGreaterThan(0);
+  // 03 §7.3 lists exactly these four stable execution domain codes. Growing the
+  // set is fine, but it has to be a deliberate act: add the new code here *and*
+  // its sentence to all four locales, or this stays red.
+  const executionCodes = Object.keys(table).filter(code => code.startsWith('execution_')).sort();
+  expect(executionCodes, 'the execution_* codes in errorText changed shape')
+    .toEqual(['execution_configuration_invalid', 'execution_engine_unavailable', 'execution_phase3_disabled', 'execution_policy_unavailable']);
+  const untranslated: string[] = [];
+  for (const [code, sentence] of Object.entries(table)) {
+    const placeholders = (value: string) => JSON.stringify([...value.matchAll(/{{\s*(\w+)\s*}}/g)].map(match => match[1]).sort());
+    let missing = false;
+    for (const language of Object.keys(DICTIONARIES)) {
+      const value = DICTIONARIES[language][sentence];
+      if (!value || !value.trim()) {
+        missing = true;
+        continue;
+      }
+      expect(placeholders(value), `${language} changes the placeholders of the sentence behind ${code}`).toBe(placeholders(sentence));
+      if (language === 'en' || language === 'hi') {
+        expect(value, `${language} shows raw Chinese for the code ${code}`).not.toMatch(/[㐀-鿿]/);
+      }
+    }
+    if (missing)
+      untranslated.push(code);
+  }
+  // The known legacy holes are the only tolerated ones; anything else means a
+  // code was added to `errorText` without translating it.
+  for (const code of untranslated) {
+    expect(UNTRANSLATED_ERROR_COPY, `${code} maps to a sentence no locale defines; translate it in all four dictionaries`).toContain(code);
   }
   expect(keys.length).toBeGreaterThanOrEqual(40);
 });
