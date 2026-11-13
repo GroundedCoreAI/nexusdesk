@@ -5,6 +5,7 @@
 > Basis: `01-business-goals.md` (G1–G5), `02-requirements.md` (FR-1–FR-10, AC-1–AC-12), architecture Sections 3, 7–10, 15–17, and 19–22
 > Current-state review: `integration` working tree on 2026-11-02; re-reviewed on the Phase 4 branch on 2026-11-14
 > Revised: 2026-11-14 (implementation breakdown R-1/R-4/R-5/R-6/R-8: planned migration renumbered `0054`→`0059_execution_runtime_host` because the actual head is `0058_agent_execution_metadata`; the `ExecutionHandle` no-PID clause is scoped to public surfaces with the pre-existing internal `process_id` field staying unset; test-file names follow the repository `test_agent_execution_phase4_*` convention; a `host/process_identity.py` module row was added because no psutil dependency exists; the fingerprint-exclusion discipline for Phase 4 settings was registered in §5.1)
+> Revised: 2026-11-14 (coordination rulings 08 R-11/R-12: §4.2 records the Workdir `prepare` ready-or-refuse barrier contract with self-convergence of concurrent `preparing` rows; §3.2 pins `size_bytes` to the latest **successful** observation — persisted even when over quota, never overwritten by a failed observation, and re-observed once before physical deletion)
 
 ## 1. Current-State Mapping and Design Decisions
 
@@ -63,7 +64,7 @@ Do not create a generic RuntimeHost service table: stable `host_id` comes from d
 | `tenant_id/business_id/workspace_id` | TEXT NOT NULL | Trusted tenant and logical scope, rechecked before cleanup |
 | `relative_path` | TEXT NOT NULL UNIQUE | Platform-generated path relative to configured execution root; never client-supplied |
 | `status` | TEXT NOT NULL CHECK | `preparing/ready/active/retained/cleaning/deleted/cleanup_failed` |
-| `quota_bytes/size_bytes` | BIGINT NOT NULL | Configured total ceiling and latest observed usage; size defaults to 0 |
+| `quota_bytes/size_bytes` | BIGINT NOT NULL | Configured total ceiling and latest **successful** observed usage (08 R-12): a successful observation is persisted even when over quota, a failed/partial observation never overwrites, and cleanup re-observes once before physical deletion; size defaults to 0 |
 | `file_count` | INTEGER NOT NULL DEFAULT 0 | Observed file count and cleanup diagnostics |
 | `expires_at` | TIMESTAMPTZ NULL | Retention expiry |
 | `last_error_code` | TEXT NULL | Stable prepare/cleanup error, without raw paths or secret exception text |
@@ -121,6 +122,8 @@ Orchestrator validates Phase 3 Effective and trusted target
 
 - Every failure cleans in reverse order; if a process started before record failure, terminate the group through the same managed handle rather than leaving it unowned after a DB error.
 - Run completion/failure/cancellation and Workdir retained/deleted commit separately; `cleanup_failed` remains visible and retryable.
+- Workdir `prepare` follows the ready-or-refuse contract (08 R-11): a concurrent or retried prepare converges a lingering `preparing` row through the same idempotent handle-based build and the guarded conditional transition, so the Orchestrator barrier starts only against a returned `ready`/`active` record, and any prepare refusal is a fail-closed start-prevention event.
+- Workdir disk bookkeeping follows 08 R-12: `size_bytes` is the latest successful observation — persisted even when over quota (with a structured excess signal in the resource reason-code vocabulary), never overwritten by a failed observation, and re-observed once before physical deletion so the Tombstone carries the final value.
 - Bound stdout/stderr independently; at the limit, stop reading and terminate the group, without logging complete output or environment.
 
 ### 4.3 Cancellation, timeout, and stop

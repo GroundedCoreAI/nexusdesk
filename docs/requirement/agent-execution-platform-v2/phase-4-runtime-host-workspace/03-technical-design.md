@@ -5,6 +5,7 @@
 > 依据：`01-business-goals.md`（G1–G5）、`02-requirements.md`（FR-1–FR-10、AC-1–AC-12）、架构文档第 3、7～10、15～17、19～22 节
 > 现状核查：2026-11-02 对 `integration` 工作树；2026-11-14 在 Phase 4 分支复核
 > 修订：2026-11-14（实施拆解 R-1/R-4/R-5/R-6/R-8：规划迁移因真实 head 为 `0058_agent_execution_metadata` 由 `0054` 改号 `0059_execution_runtime_host`；`ExecutionHandle` 无 PID 条款限定为公共面，既有内部字段 `process_id` 对 Host 管理的执行保持不赋值；测试文件名改用仓库 `test_agent_execution_phase4_*` 约定；因无 psutil 依赖新增 `host/process_identity.py` 模块行；§5.1 登记 Phase 4 配置族的指纹豁免纪律）
+> 修订：2026-11-14（协调裁定 08 R-11/R-12：§4.2 登记 Workdir `prepare` 的"就绪-或-拒绝"屏障契约（并发 `preparing` 行自收敛）；§3.2 将 `size_bytes` 钉为最近一次**成功**观测——超限亦持久化、失败观测不覆盖、物理删除前重观测一次）
 
 ## 1. 现状映射与设计裁定
 
@@ -63,7 +64,7 @@ Worker 重启后内存中的 asyncio Task、PID 和目录句柄全部消失。�
 | `tenant_id/business_id/workspace_id` | TEXT NOT NULL | 可信租户与逻辑 scope，清理前复核 |
 | `relative_path` | TEXT NOT NULL UNIQUE | 相对配置执行根的平台生成路径，不接受客户端值 |
 | `status` | TEXT NOT NULL CHECK | `preparing/ready/active/retained/cleaning/deleted/cleanup_failed` |
-| `quota_bytes/size_bytes` | BIGINT NOT NULL | 配置总量上限与最近观测用量，size 默认 0 |
+| `quota_bytes/size_bytes` | BIGINT NOT NULL | 配置总量上限与最近一次**成功**观测用量（08 R-12）：成功的观测即使超限也必须持久化，失败/不完整的观测不得覆盖，清理在物理删除前重观测一次；size 默认 0 |
 | `file_count` | INTEGER NOT NULL DEFAULT 0 | 观测文件数与清理诊断 |
 | `expires_at` | TIMESTAMPTZ NULL | 保留到期时间 |
 | `last_error_code` | TEXT NULL | 稳定清理/准备错误，不含原始路径或异常秘密 |
@@ -121,6 +122,8 @@ Orchestrator 校验 Phase 3 Effective 与可信目标
 
 - 任一步失败按逆序清理；Process 已启动但记录失败时，以同一受管句柄终止整组，不能因 DB 异常留下无主进程。
 - Run 完成/失败/取消与 Workdir retained/deleted 分开提交；`cleanup_failed` 必须可见并可重试。
+- Workdir `prepare` 遵循"就绪-或-拒绝"契约（08 R-11）：并发或重试的 prepare 以同一幂等句柄构建与受限条件转移收敛残留的 `preparing` 行，Orchestrator 屏障只在返回 `ready`/`active` 时启动，任何 prepare 拒绝都是 fail-closed 的阻止启动事件。
+- Workdir 磁盘记账遵循 08 R-12：`size_bytes` 为最近一次成功观测——超限亦持久化（并附资源原因码体系的结构化超限信号），失败观测绝不覆盖，且物理删除前重观测一次，使 Tombstone 保留最终值。
 - stdout/stderr 分流有界，达到上限即停止读取并终止进程组；不将完整输出或环境写日志。
 
 ### 4.3 取消、超时与停止

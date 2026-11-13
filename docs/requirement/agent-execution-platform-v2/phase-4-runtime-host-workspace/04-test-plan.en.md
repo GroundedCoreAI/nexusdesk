@@ -4,6 +4,7 @@
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements)
 > Revised: 2026-11-14 (08 R-1/R-3/R-5: migration renumbered `0054`→`0059_execution_runtime_host` after revalidating head `0058_agent_execution_metadata`; new §2.1 registers the normative macOS-development-subset versus `pending_env` mapping for the current darwin execution host; test-file naming follows `test_agent_execution_phase4_*`)
+> Revised: 2026-11-14 (coordination rulings 08 R-11/R-12: P4-IT-13 gains the same-Run concurrent-prepare convergence expectation; P4-IT-15/P4-IT-21 assert latest-successful-observation disk accounting — over-quota observations persisted with a structured excess alert and a final re-observation before deletion)
 > Basis: `02-requirements.md` (FR-1–FR-10, AC-1–AC-12), `03-technical-design.md` (Host, process groups, recovery, Workdir, resource matrix, and rollback)
 
 ## 1. Test Scope and Principles
@@ -92,15 +93,15 @@ The current execution host is macOS (darwin) with Docker available for PostgreSQ
 | P4-IT-10 | Construct PID reuse, start-token/digest mismatch, and unreadable identity | Zero mistaken kills of new processes, records enter manual remediation with alerts, and directories are not blindly deleted | AC-5; FR-4, FR-6 |
 | P4-IT-11 | DB disconnection, lock conflicts, and partial batch failures during recovery | No blind scan/kill; bounded retries, no cross-batch privilege expansion, and observable stalled state | AC-5; FR-4, FR-9 |
 | P4-IT-12 | Process alive after Run terminal state, and process exited with resource-cleanup failure | Both still clean up/alert according to actual state; neither Run nor exited substitutes for resource release | AC-3, AC-5, AC-11; FR-3, FR-4 |
-| P4-IT-13 | Concurrently create Workdirs for multiple same-tenant/cross-tenant Runs | Unique paths, correct 0700/0600 permissions, no scope mixing, and complete records before start | AC-6; FR-5 |
+| P4-IT-13 | Concurrently create Workdirs for multiple same-tenant/cross-tenant Runs | Unique paths, correct 0700/0600 permissions, no scope mixing, and complete records before start; concurrent or repeated prepare of the **same Run** converges to one `ready` record and never returns `preparing` (08 R-11) | AC-6; FR-5 |
 | P4-IT-14 | Retention expiry after completion/failure/cancellation and Host restart recovery | Each retention policy applies, states recover, and expiry does not prematurely delete failure evidence | AC-6; FR-5 |
-| P4-IT-15 | Permission/disk/DB failure during cleanup followed by repeated retries | cleanup_failed is visible/alerted, retries complete idempotently after repair, and Tombstone remains | AC-6; FR-5, FR-9 |
+| P4-IT-15 | Permission/disk/DB failure during cleanup followed by repeated retries | cleanup_failed is visible/alerted, retries complete idempotently after repair, and Tombstone remains, carrying the final successful usage observation re-asserted before deletion (08 R-12) | AC-6; FR-5, FR-9 |
 | P4-IT-16 | Submit traversal, encoding, cross-tenant paths, and unapproved mounts through raw API/internal calls | All reject before touching external resources, valid relative paths work, and no client host-path entry exists | AC-7; FR-6 |
 | P4-IT-17 | Create symlinks/hardlinks/mount points to external sentinels, then read/write/export/clean | Zero successful external reads/writes/deletes, stable denial reasons, and no external content in artifacts | AC-8; FR-6 |
 | P4-IT-18 | Replace directory/file with a link after checking while cleanup runs concurrently | Handles/no-follow block the race; uncertain scope stops, sentinel remains unchanged, and an alert fires | AC-8; FR-6 |
 | P4-IT-19 | Exceed CPU-time and memory limits separately in the full-support environment | Timely termination and group release per the support matrix, stable resource errors, and no adjacent-Execution impact | AC-9; FR-7 |
 | P4-IT-20 | Spawn processes beyond the PID limit | Reject/terminate at the configured bound without substituting host totals, with complete resource records | AC-9; FR-7 |
-| P4-IT-21 | Exceed Workdir per-file and total limits separately | Reject/terminate and safely clean; disk usage remains isolated from other Runs/tenants | AC-9; FR-5, FR-7 |
+| P4-IT-21 | Exceed Workdir per-file and total limits separately | Reject/terminate and safely clean; disk usage remains isolated from other Runs/tenants; over-quota usage observed at retain or cleanup is persisted in `size_bytes` with a structured excess alert, never warn-only over a stale record (08 R-12) | AC-9; FR-5, FR-7 |
 | P4-IT-22 | Exceed wall time and output limits with added resource-sampling delay | Terminate within bounded time, backpressure works, and no unbounded buffering or supervisor-coroutine leak occurs | AC-4, AC-9; FR-2, FR-3, FR-7 |
 | P4-IT-23 | Start on the macOS development subset, with cgroup disabled, and on an unsupported platform | Only explicitly supported items run; required=true rejects missing capabilities, with zero silent ignores | AC-9; FR-7, FR-10 |
 | P4-IT-24 | Replace the Sandbox test Provider and attempt untrusted-execution entries | Replace without Adapter/Host contract changes; arbitrary commands/uploaded code/untrusted multi-tenant execution all reject | AC-10; FR-8 |

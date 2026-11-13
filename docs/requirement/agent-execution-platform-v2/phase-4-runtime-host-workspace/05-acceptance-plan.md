@@ -4,6 +4,7 @@
 > 创建：2026-11-02
 > 修订：2026-11-11（小团队轻量验收：复用自动化证据，移除独立 UAT、重复指标与多角色签字）
 > 修订：2026-11-14（08 R-1：规划迁移由 `0054` 改号 `0059_execution_runtime_host`，实际前驱 `0058_agent_execution_metadata`）
+> 修订：2026-11-14（协调裁定 08 R-11/R-12：A6 证据含同 Run prepare 收敛；A9 证据含超限观测持久化与结构化超限告警，而非仅告警日志）
 > 依据：`01-business-goals.md`（G1–G5、成功指标）、`02-requirements.md`（AC-1–AC-12）；测试执行依据见 `04-test-plan.md`
 
 ## 1. 验收范围与责任
@@ -33,10 +34,10 @@
 | A3 | AC-3 | 进程派生多层忽略 TERM 的后代后取消，重复取消并提交迟到成功 | grace 后 KILL 整组且后代实际退出；Run 保持 cancelled；清理幂等、迟到结果无效 | FR-3；G2；US-2、US-5 |
 | A4 | AC-4 | 分别触发 Run deadline、process wall timeout 及二者与取消的竞态 | 较早期限生效；组/资源释放；终态和原因稳定，无重复终态、僵尸或泄漏 | FR-3；G2；US-2、US-5 |
 | A5 | AC-5 | 强杀 Worker/重启容器留下进程；再构造 PID 复用、身份不匹配/缺失和 DB 故障 | 匹配孤儿被回收；不匹配误杀为 0；DB 故障无盲扫/盲杀；人工处置与告警明确，无 Session 重放 | FR-4；G2、G5；US-3、US-5 |
-| A6 | AC-6 | 并发创建跨 tenant Workdir，完成/失败/取消后验证保留、重启恢复、清理失败与重试 | 目录唯一且权限正确；状态/归属可恢复；保留期正确；清理幂等，失败可见可重试并留 Tombstone | FR-5；G3、G5；US-3、US-4 |
+| A6 | AC-6 | 并发创建跨 tenant Workdir，完成/失败/取消后验证保留、重启恢复、清理失败与重试 | 目录唯一且权限正确；状态/归属可恢复；保留期正确；清理幂等，失败可见可重试并留 Tombstone；对中断的同 Run 记录重复 prepare 收敛为 `ready` 或显式 fail-closed 拒绝，绝不返回 `preparing`（08 R-11） | FR-5；G3、G5；US-3、US-4 |
 | A7 | AC-7 | 通过原始输入提交绝对路径、`..`、编码/分隔符绕过、跨租户路径和未批准挂载 | 触及外部资源前全部拒绝；合法相对路径成功；公共 API 无宿主路径入口 | FR-6；G3；US-4、US-5 |
 | A8 | AC-8 | 在隔离命名空间构造指向外部哨兵的软链/硬链/挂载点及检查后替换竞态，再读写/清理 | 目录外读/写/删成功数为 0；哨兵不变；范围不明即停止告警，无宿主级递归删除 | FR-6；G3；US-4、US-5 |
-| A9 | AC-9 | 在完整矩阵逐项越过 CPU/内存/PID/Workdir 总量与单文件/wall time/输出边界，并在不支持环境启动 | 支持项按规定期限拒绝/终止且释放资源；required 能力缺失时启动拒绝；静默忽略与相邻 Execution 影响均为 0 | FR-7；G4；US-5、US-6 |
+| A9 | AC-9 | 在完整矩阵逐项越过 CPU/内存/PID/Workdir 总量与单文件/wall time/输出边界，并在不支持环境启动 | 支持项按规定期限拒绝/终止且释放资源；required 能力缺失时启动拒绝；静默忽略与相邻 Execution 影响均为 0；超限磁盘观测必须持久化到 `size_bytes` 并发结构化超限告警，而非仅告警留陈旧记录（08 R-12） | FR-7；G4；US-5、US-6 |
 | A10 | AC-10 | 替换 Sandbox 测试 Provider，并尝试任意命令、上传代码、不可信多租户及配置绕过 | 不改 Adapter/Host 契约即可替换；不可信执行入口 100% 拒绝；Local Provider 无强沙箱/网络/凭据承诺 | FR-8；G4、G5；US-6 |
 | A11 | AC-11 | 观察正常、崩溃、孤儿、cleanup_failed、资源压力和 stalled reconcile，并尝试公开读取内部字段 | 指标/日志/告警覆盖全部状态且可关联 Run/host；秘密、PID/PGID、完整路径不进入公共面或证据 | FR-9；G5；US-3、US-7 |
 | A12 | AC-12 | 从实际前驱 `0058_agent_execution_metadata` 升级 `0059_execution_runtime_host`，验证默认关闭/旧 React，再演练停止接纳→排空→核对→关闭→应用回滚 | 仅新增必要两表/索引；React 无回归；回滚零活跃孤儿、两表/审计保留且无需 downgrade；cleanup_failed 阻断完整回滚 | FR-4、FR-5、FR-10；G1、G5；US-2、US-3、US-7 |
