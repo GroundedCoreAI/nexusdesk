@@ -94,19 +94,34 @@ class FakeClock:
 
 
 class GatedSleeper:
-    """Records warmer round intervals and blocks until the test releases."""
+    """Records warmer round intervals and blocks until the test releases.
+
+    Queue-based one-shot handshake: each round the sleeper publishes a parked
+    token and then waits for a release token. ``wait_parked`` consumes exactly
+    one token, so a stale "already parked" state can never satisfy the next
+    wait. The previous Event-polarity protocol relied on ``asyncio.wait_for``
+    yielding before an already-set Event returns; that is true on Python 3.11
+    but not 3.12+, which raced the second warmer round and failed CI with
+    assert 1 == 2 (probe calls / warm_calls / intervals).
+    """
 
     def __init__(self) -> None:
         self.intervals: list[float] = []
-        self.entered = asyncio.Event()
-        self.release = asyncio.Event()
+        self._parked: asyncio.Queue[None] = asyncio.Queue()
+        self._released: asyncio.Queue[None] = asyncio.Queue()
 
     async def __call__(self, seconds: float) -> None:
         self.intervals.append(seconds)
-        self.entered.set()
-        await self.release.wait()
-        self.entered.clear()
-        self.release.clear()
+        self._parked.put_nowait(None)
+        await self._released.get()
+
+    async def wait_parked(self, timeout: float = 1.0) -> None:
+        """Block until the warmer loop has entered its next sleep round."""
+        await asyncio.wait_for(self._parked.get(), timeout=timeout)
+
+    def release(self) -> None:
+        """Let the currently parked sleep round return."""
+        self._released.put_nowait(None)
 
 
 @dataclass
@@ -1207,15 +1222,15 @@ async def test_p3_ut22_warmer_initial_population_refresh_and_close_without_task_
     assert env.created == []  # no adapter factory ran for metadata or warming
 
     warmer.start()
-    await asyncio.wait_for(sleeper.entered.wait(), timeout=1.0)
+    await sleeper.wait_parked()
     assert len(env.probe.calls) == 1  # initial round populated the cache
     assert env.created == []  # warmer must not create Adapter/Run objects
     warmed = await env.resolver.resolve(env.request)
     assert item_map(warmed.effective.items)["streaming"].effective is True
 
     # Before TTL expiry the warmer refreshes again (interval < ttl).
-    sleeper.release.set()
-    await asyncio.wait_for(sleeper.entered.wait(), timeout=1.0)
+    sleeper.release()
+    await sleeper.wait_parked()
     assert len(env.probe.calls) == 2
     assert sleeper.intervals == [10.0, 10.0]
 
@@ -1404,7 +1419,7 @@ async def test_review_warmer_round_exception_keeps_loop_alive_with_backoff(caplo
     try:
         with caplog.at_level(logging.WARNING):
             warmer.start()
-            await asyncio.wait_for(sleeper.entered.wait(), timeout=1.0)
+            await sleeper.wait_parked()
         assert sleeper.intervals == [2.0]
         assert warmer.next_refresh_delay == 2.0
         warnings = [
@@ -1415,8 +1430,8 @@ async def test_review_warmer_round_exception_keeps_loop_alive_with_backoff(caplo
         assert warnings, caplog.text
         assert warnings[0].error_type == "ConfigurationError"
 
-        sleeper.release.set()
-        await asyncio.wait_for(sleeper.entered.wait(), timeout=1.0)
+        sleeper.release()
+        await sleeper.wait_parked()
         assert sleeper.intervals == [2.0, 2.0]
 
         # T-strength-2: a declared round error whose raw text carries
@@ -1437,7 +1452,7 @@ async def test_review_warmer_round_exception_keeps_loop_alive_with_backoff(caplo
             records_before = len(caplog.records)
             with caplog.at_level(logging.WARNING):
                 marker_warmer.start()
-                await asyncio.wait_for(marker_sleeper.entered.wait(), timeout=1.0)
+                await marker_sleeper.wait_parked()
             assert marker_resolver.warm_calls == 1
             assert marker_sleeper.intervals == [2.0]
             marker_warnings = [
@@ -1719,7 +1734,7 @@ async def test_review_warmer_undocumented_round_exception_keeps_loop_alive(caplo
     try:
         with caplog.at_level(logging.WARNING):
             warmer.start()
-            await asyncio.wait_for(sleeper.entered.wait(), timeout=1.0)
+            await sleeper.wait_parked()
         assert resolver.warm_calls == 1
         assert sleeper.intervals == [2.0]
         assert warmer.next_refresh_delay == 2.0
@@ -1736,8 +1751,8 @@ async def test_review_warmer_undocumented_round_exception_keeps_loop_alive(caplo
         assert "/srv" not in diagnostics
 
         # The loop must reach and survive a second failing round.
-        sleeper.release.set()
-        await asyncio.wait_for(sleeper.entered.wait(), timeout=1.0)
+        sleeper.release()
+        await sleeper.wait_parked()
         assert resolver.warm_calls == 2
         assert sleeper.intervals == [2.0, 2.0]
     finally:
