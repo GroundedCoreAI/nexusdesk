@@ -2,6 +2,7 @@
 
 > Status: Pending review (implementation has not started)
 > Created: 2026-11-02
+> Revised: 2026-11-14 (08 R-1: AC-12's planned migration renumbered `0054`→`0059_execution_runtime_host` after revalidating the actual head `0058_agent_execution_metadata`)
 > Basis: `01-business-goals.md` (G1–G5); architecture Sections 3, 7–10, 17 Phase 4, 20, and 22
 
 ## User Stories
@@ -170,4 +171,4 @@
 | AC-9 | Exceed CPU, memory, PID, Workdir total/per-file, wall-time, and output boundaries within the support matrix, then start on an unsupported environment | Excess is rejected/terminated within specified time and resources are released; unsupported required capabilities reject start, with zero silent ignores | FR-7; G4; US-5, US-6 |
 | AC-10 | Replace the Sandbox test Provider and attempt arbitrary commands, uploaded code, and untrusted multi-tenant execution | Host swaps Providers without Adapter changes; every untrusted-execution entry remains denied and Local Provider makes no strong-sandbox claim | FR-8; G4, G5; US-6 |
 | AC-11 | Observe normal, crash, orphan, cleanup-failure, and resource-pressure states, then attempt public reads of internal fields | Metrics/logs/alerts cover every state and correlate Run/host; secrets and PID/PGID/full paths stay out of public surfaces | FR-9; G5; US-3, US-7 |
-| AC-12 | Upgrade planned `0054`, verify legacy React and default-off, then drill stop admission → drain → disable → application rollback | Only necessary process/Workdir tables are added; React has no regression; rollback leaves zero active orphans, retains records, and needs no downgrade | FR-4, FR-5, FR-10; G1, G5; US-2, US-3, US-7 |
+| AC-12 | Upgrade `0059_execution_runtime_host` from its actual predecessor `0058_agent_execution_metadata` (renumbered from the planned `0054`, 08 R-1), verify legacy React and default-off, then drill stop admission → drain → disable → application rollback | Only necessary process/Workdir tables are added; React has no regression; rollback leaves zero active orphans, retains records, and needs no downgrade | FR-4, FR-5, FR-10; G1, G5; US-2, US-3, US-7 |

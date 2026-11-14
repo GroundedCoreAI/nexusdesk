@@ -306,12 +306,36 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "instructions/react_provider.py",
         "instructions/test_provider.py",
     }
+    # Phase 4 (08 R-10): the Host and Workspace lanes land as new
+    # implementation subpackages of agent_execution.
+    phase4_host_modules = {
+        "host/__init__.py",
+        "host/host_models.py",
+        "host/observability.py",
+        "host/process_identity.py",
+        "host/process_runner.py",
+        "host/process_supervisor.py",
+        "host/process_registry.py",
+        "host/runtime_host.py",
+        "host/sandbox_provider.py",
+        "host/local_sandbox_provider.py",
+        "host/resource_manager.py",
+    }
+    phase4_workspace_modules = {
+        "workspace/__init__.py",
+        "workspace/workspace_policy.py",
+        "workspace/execution_workdir.py",
+        "workspace/workspace_provider.py",
+        "workspace/workspace_manager.py",
+    }
     implementation_packages = {
         "registry",
         "adapters",
         "orchestration",
         "capability",
         "instructions",
+        "host",
+        "workspace",
     }
     execution_marker = "agent_platform.core_platform.agent_execution."
 
@@ -338,6 +362,8 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         | t4_modules
         | phase3_capability_modules
         | phase3_instruction_modules
+        | phase4_host_modules
+        | phase4_workspace_modules
     )
     actual_modules = {str(path.relative_to(package_root)) for path in package_root.rglob("*.py")}
     assert actual_modules == expected_modules

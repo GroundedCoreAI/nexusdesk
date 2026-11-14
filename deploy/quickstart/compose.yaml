@@ -47,6 +47,19 @@ services:
       AGENT_EMBEDDED_WORKER: "true"
       # Opt in explicitly for the embedded Worker; default remains legacy execution.
       AGENT_EXECUTION_ORCHESTRATOR_ENABLED: ${AGENT_EXECUTION_ORCHESTRATOR_ENABLED:-false}
+      # Phase 4 Runtime Host stays off by default (FR-10). The Host subsystem
+      # assembles ONLY when a stable AGENT_EXECUTION_RUNTIME_HOST_ID is set for
+      # the process that owns the execution root; quickstart leaves it unset,
+      # so no Host, no loops and no directories are constructed at all
+      # (08 R-7). Setting the id plus flipping this switch is the deliberate
+      # trial path. The default 5s+5s cancel/kill windows fit the 45s
+      # stop_grace_period below; raising execution_process_* values requires
+      # raising that grace too (03 §4.3).
+      AGENT_EXECUTION_RUNTIME_HOST_ENABLED: ${AGENT_EXECUTION_RUNTIME_HOST_ENABLED:-false}
+      AGENT_EXECUTION_WORKDIR_ROOT: /data/execution
+      AGENT_EXECUTION_PROCESS_CANCEL_GRACE_SECONDS: "5"
+      AGENT_EXECUTION_PROCESS_KILL_TIMEOUT_SECONDS: "5"
+      # AGENT_EXECUTION_RUNTIME_HOST_ID: quickstart-runtime
       AGENT_WORKER_CONCURRENCY: "2"
       AGENT_DATABASE_POOL_SIZE: "5"
       AGENT_REQUIRE_PASSWORD_CHANGE: "false"

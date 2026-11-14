@@ -153,7 +153,11 @@ def test_0058_upgrade_old_new_concurrent_repository_and_disposable_downgrade(
             await engine.dispose()
 
     old_run_id = asyncio.run(create_old_row())
-    migrate(url, "head")
+    # Phase 4 (08 R-1) added migration 0059 behind this chain; the drift fix
+    # targets the pinned 0058 revision explicitly instead of "head" so the
+    # semantics ("upgrade to the revision under test adds exactly these
+    # columns") survive any future migration, assertions unchanged.
+    migrate(url, REVISION)
 
     columns_after = _runtime_columns(url)
     added_columns = set(columns_after) - set(columns_before)
@@ -240,6 +244,6 @@ def test_0058_upgrade_old_new_concurrent_repository_and_disposable_downgrade(
         "migration compatibility"
     )
 
-    migrate(url, "head")
+    migrate(url, REVISION)
     assert query(url, "SELECT version_num FROM alembic_version")[0][0] == REVISION
     assert set(_runtime_columns(url)) - set(columns_before) == set(SNAPSHOT_COLUMNS)

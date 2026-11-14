@@ -3,11 +3,14 @@
 > 状态：待实施（本阶段开发完成后执行；当前无测试结果）
 > 创建：2026-11-02
 > 修订：2026-11-11（小团队轻量验收：复用自动化证据，移除多角色签字要求）
+> 修订：2026-11-14（08 R-1/R-3/R-5：复核真实 head 为 `0058_agent_execution_metadata` 后迁移由 `0054` 改号 `0059_execution_runtime_host`；新增 §2.1，登记当前 darwin 执行主机的 macOS 开发子集与 `pending_env` 规范性划分；测试文件命名遵循 `test_agent_execution_phase4_*`）
+> 修订：2026-11-14（协调裁定 08 R-11/R-12：P4-IT-13 增加同 Run 并发 prepare 收敛预期；P4-IT-15/P4-IT-21 断言"最近一次成功观测"磁盘记账——超限观测必须持久化并发结构化超限告警，删除前重观测一次）
+> 修订：2026-11-14（协调裁定 08 R-13/R-14：§2.1 登记 macOS `RLIMIT_AS` 近似以探针判定适用性，及平台无关的资源超额证据契约）
 > 依据：`02-requirements.md`（FR-1–FR-10、AC-1–AC-12）、`03-technical-design.md`（Host、进程组、恢复、Workdir、资源矩阵与回滚）
 
 ## 1. 测试范围与原则
 
-**范围**：RuntimeHost/Adapter 解耦、Process Runner/Supervisor/Registry、有界 I/O、取消与超时、孤儿恢复、Workspace/Execution Workdir、安全路径与清理、资源限制、Sandbox Provider、健康观测、迁移 `0054`、部署和回滚。
+**范围**：RuntimeHost/Adapter 解耦、Process Runner/Supervisor/Registry、有界 I/O、取消与超时、孤儿恢复、Workspace/Execution Workdir、安全路径与清理、资源限制、Sandbox Provider、健康观测、迁移 `0059_execution_runtime_host`、部署和回滚。
 
 **原则**：
 
@@ -38,6 +41,17 @@
 | quickstart/production 部署检查环境 | 默认关闭、执行卷、单 Host、停止期限、非秘密配置与回滚 |
 
 **数据构造约定**：至少两个 tenant、多个 business/workspace scope 和并发 Run；可执行目标及 argv 白名单固定，子进程/CPU/内存/磁盘/输出负载由测试参数控制但不接受用户代码。外部链接目标均为隔离哨兵。PID 复用优先用身份决策替身确定性构造，再用独立 OS 试验佐证；禁止为“复用 PID”杀无关进程。每例独立清理进程组、资源句柄、Workdir 和 DB 行，清理失败必须作为结果发现。
+
+### 2.1 macOS 开发子集与 `pending_env` 划分（规范性，2026-11-14，08 R-3）
+
+当前执行主机为 macOS（darwin），PostgreSQL 通过 Docker 可用（独立 pgvector 容器，`TEST_DATABASE_URL`）。在 Linux 完整验收环境就绪前，以下划分管辖 §3–§5 全部用例，用例文字有歧义时以本表为准。本机实测项只有在附带环境标注时才可记 pass；`pending_env` 项继续阻断其对应启用承诺（原则 8、05 C14），绝不允许用近似实现冒充通过。
+
+| 划分 | 用例（半边） |
+|---|---|
+| macOS 可实测 | 除 cgroup/配额/真实 mount 半边外的全部 P4-UT；P4-IT-01–08、10（身份替身半边）、11–18（非 mount 半边）、21（单文件半边）、22、23（macOS 列）、24–27；P4-CM-02–06、08–13；进程组 TERM/KILL 及后代、标注为非等价的 rlimit CPU/地址空间/单文件近似、输出上限、墙钟/截止期竞态、APFS 上路径/链接/替换竞态安全、Workdir 生命周期、注册表 reconcile 与进程级 SIGKILL+重启恢复、docker PG 上迁移 0059 升降级、默认关闭的 React 一致性、本地 Docker 上 quickstart 画像容器演练 |
+| `pending_env`（需 Linux） | P4-IT-19（cgroup memory 硬限半边与 CPU 组计量硬顶）、P4-IT-20（cgroup pids 每执行硬限）、P4-IT-21（文件系统/项目配额半边）、P4-IT-17 / P4-UT-13（真实 mount 命名空间半边）、P4-IT-10（确定性 OS PID 复用佐证半边）、P4-IT-09（生产镜像容器重启/停止期限半边）、P4-IT-29（生产运行时核查半边）、P4-IT-30（同时 `not_measured`：Phase 0 基线缺口，08 R-2）、P4-CM-07（完整支持矩阵签署） |
+
+协调裁定注记（2026-11-14，08 R-13/R-14）：macOS 地址空间（`RLIMIT_AS`）近似一行以 fork 适用性探针判定——探针不适用时按 `execution_resource_enforcement_required=true` fail-closed 拒绝启动、不记 pass，属对本表的细化而非矛盾（每执行内存硬限仍属 Linux `pending_env`）。跨平台资源超额证据断言稳定原因码 `runtime_host_resource_exceeded` 与 mechanism/strength 标签，不断言各平台原始信号/退出码数值。
 
 ## 3. 单元测试
 
@@ -82,20 +96,20 @@
 | P4-IT-10 | 构造 PID 复用、start token/digest 不匹配和身份不可读 | 新进程误杀为 0，记录转人工处置并告警，目录不盲目删除 | AC-5；FR-4、FR-6 |
 | P4-IT-11 | 恢复期间 DB 断连、锁冲突和部分批次失败 | 不盲扫/盲杀；有界重试，其他批次不越权， stalled 状态可观测 | AC-5；FR-4、FR-9 |
 | P4-IT-12 | Run 已终态但进程仍存活，以及进程 exited 但资源清理失败 | 两者仍按真实状态清理/告警，不以 Run 或 exited 冒充资源释放 | AC-3、AC-5、AC-11；FR-3、FR-4 |
-| P4-IT-13 | 并发创建同 tenant/跨 tenant 多 Run Workdir | 路径唯一、0700/0600 权限正确，scope 不串用，启动前记录完整 | AC-6；FR-5 |
+| P4-IT-13 | 并发创建同 tenant/跨 tenant 多 Run Workdir | 路径唯一、0700/0600 权限正确，scope 不串用，启动前记录完整；**同 Run** 并发/重复 prepare 收敛为唯一 `ready` 记录，绝不返回 `preparing`（08 R-11） | AC-6；FR-5 |
 | P4-IT-14 | 完成/失败/取消后的保留到期与 Host 重启恢复 | 各保留策略正确，状态可恢复，过期清理不提前删除失败证据 | AC-6；FR-5 |
-| P4-IT-15 | 清理中权限/磁盘/DB 故障并重复重试 | cleanup_failed 可见可告警，修复后幂等完成，Tombstone 保留 | AC-6；FR-5、FR-9 |
+| P4-IT-15 | 清理中权限/磁盘/DB 故障并重复重试 | cleanup_failed 可见可告警，修复后幂等完成，Tombstone 保留且携带物理删除前重观测得到的最后一次成功用量（08 R-12） | AC-6；FR-5、FR-9 |
 | P4-IT-16 | 原始 API/内部调用提交穿越、编码、跨租户路径和未批准挂载 | 触及外部资源前全部拒绝，合法相对路径成功，无客户端宿主路径入口 | AC-7；FR-6 |
 | P4-IT-17 | 构造指向外部哨兵的软链/硬链/挂载点并读写/导出/清理 | 外部读/写/删成功数为 0，拒绝原因稳定，无外部内容进入产物 | AC-8；FR-6 |
 | P4-IT-18 | 检查后把目录/文件替换为链接并并发清理 | 句柄/no-follow 阻断竞态；范围不明即停，哨兵不变且有告警 | AC-8；FR-6 |
 | P4-IT-19 | 在完整支持环境分别超过 CPU 时间与内存上限 | 按支持矩阵及时终止并释放整组，稳定资源错误，不影响相邻 Execution | AC-9；FR-7 |
 | P4-IT-20 | 派生进程超过 PID 上限 | 在配置边界拒绝/终止，不用宿主总量替代，资源记录完整 | AC-9；FR-7 |
-| P4-IT-21 | 分别超过 Workdir 单文件与总量上限 | 拒绝/终止并安全清理；磁盘用量与其他 Run/tenant 隔离 | AC-9；FR-5、FR-7 |
+| P4-IT-21 | 分别超过 Workdir 单文件与总量上限 | 拒绝/终止并安全清理；磁盘用量与其他 Run/tenant 隔离；retain/清理中观测到的超限用量必须持久化到 `size_bytes` 并发结构化超限告警，不得只告警而留陈旧记录（08 R-12） | AC-9；FR-5、FR-7 |
 | P4-IT-22 | 越过 wall time 与输出上限并叠加资源采样延迟 | 有界时间内终止，背压有效，无无限缓冲或监督协程泄漏 | AC-4、AC-9；FR-2、FR-3、FR-7 |
 | P4-IT-23 | 在 macOS 开发子集/禁用 cgroup/不支持平台启动 | 仅明确支持项运行；required=true 时缺失能力启动拒绝，静默忽略为 0 | AC-9；FR-7、FR-10 |
 | P4-IT-24 | 替换 Sandbox 测试 Provider 并尝试不可信执行入口 | 不改 Adapter/Host 契约即可替换；任意命令/上传代码/不可信多租户均拒绝 | AC-10；FR-8 |
 | P4-IT-25 | 观察正常、崩溃、孤儿、清理失败、资源压力和 stalled reconcile | 指标/日志/告警完整可关联；公开读取不含秘密、PID/PGID 或完整路径 | AC-11；FR-9 |
-| P4-IT-26 | 从实际前驱升级 `0054` 并并发读写旧/新 Run | 只新增两表及索引，约束/锁正确，现有 Repository/React 读写不受阻 | AC-12；FR-4、FR-5、FR-10 |
+| P4-IT-26 | 从实际前驱 `0058_agent_execution_metadata` 升级 `0059_execution_runtime_host` 并并发读写旧/新 Run | 只新增两表及索引，约束/锁正确，现有 Repository/React 读写不受阻 | AC-12；FR-4、FR-5、FR-10 |
 | P4-IT-27 | 默认关闭运行 React，再执行停止接纳→排空→关闭→应用回滚 | React 与 Phase 0 基线一致；回滚零活跃孤儿，保留两表，无 downgrade 需求 | AC-12；FR-10 |
 | P4-IT-28 | 有活跃或 cleanup_failed 进程时尝试完整回滚 | 完整回滚被阻断；新接纳停止但恢复/清理继续，人工处置路径明确 | AC-5、AC-12；FR-4、FR-10 |
 | P4-IT-29 | 检查 quickstart/production 卷、Host 身份和 stop grace | 生产仅 runtime-worker 挂执行卷，无共享执行根；秘密不进入示例配置 | AC-12；FR-10 |

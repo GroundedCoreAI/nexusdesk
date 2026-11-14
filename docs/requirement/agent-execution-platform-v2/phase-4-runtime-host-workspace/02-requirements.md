@@ -2,6 +2,7 @@
 
 > 状态：待评审（未开始实施）
 > 创建：2026-11-02
+> 修订：2026-11-14（08 R-1：复核真实 head 为 `0058_agent_execution_metadata` 后，AC-12 的规划迁移由 `0054` 改号 `0059_execution_runtime_host`）
 > 依据：`01-business-goals.md`（G1–G5）、架构文档第 3、7～10、17 节 Phase 4、20、22 节
 
 ## 用户故事
@@ -170,4 +171,4 @@
 | AC-9 | 在支持矩阵内分别越过 CPU、内存、PID、Workdir 总量/单文件、wall time 和输出边界，并在不支持环境启动 | 超限按规定时间拒绝/终止并释放资源；所需能力不支持时启动拒绝，静默忽略为 0 | FR-7；G4；US-5、US-6 |
 | AC-10 | 替换 Sandbox 测试 Provider，并尝试任意命令、上传代码与不可信多租户执行 | Host 无需改 Adapter 即可替换 Provider；所有不可信执行入口保持拒绝，Local Provider 无强沙箱声明 | FR-8；G4、G5；US-6 |
 | AC-11 | 观察正常、崩溃、孤儿、清理失败和资源压力，并尝试公共读取内部字段 | 指标/日志/告警覆盖全部状态且可关联 Run/host；秘密和 PID/PGID/完整路径不进入公共面 | FR-9；G5；US-3、US-7 |
-| AC-12 | 升级规划 `0054`，验证旧 React、默认关闭、停止接纳→排空→关闭→应用回滚 | 仅新增进程/Workdir 必要表；React 无回归；回滚后零活跃孤儿、记录保留且无需 downgrade | FR-4、FR-5、FR-10；G1、G5；US-2、US-3、US-7 |
+| AC-12 | 升级 `0059_execution_runtime_host`（实际前驱 `0058_agent_execution_metadata`；由规划号 `0054` 改号，见 08 R-1），验证旧 React、默认关闭、停止接纳→排空→关闭→应用回滚 | 仅新增进程/Workdir 必要表；React 无回归；回滚后零活跃孤儿、记录保留且无需 downgrade | FR-4、FR-5、FR-10；G1、G5；US-2、US-3、US-7 |

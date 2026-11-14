@@ -1,6 +1,7 @@
 """Fixed-selector execution orchestration with exclusive Worker event delivery."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -30,8 +31,10 @@ from ..contracts import (
 )
 from ..contracts.capabilities import NO_EXECUTION_RESTRICTIONS
 from ..contracts.config import ExecutionConfig
+from ..host.runtime_host import RuntimeHost
 from ..instructions import resolve_instruction_provider
 from ..registry import AdapterRegistry
+from ..workspace.workspace_provider import WorkdirRecord, WorkspaceProvider
 from .execution_context import (
     PRODUCTION_ADAPTER_SELECTOR,
     ExecutionContext,
@@ -52,6 +55,8 @@ from .execution_lifecycle import (
     as_acknowledging_event_stream,
     as_outcome_collecting_adapter,
 )
+
+logger = logging.getLogger(__name__)
 
 WorkerEmit: TypeAlias = Callable[[str, dict[str, JsonValue]], Awaitable[None]]
 AdapterSelector: TypeAlias = tuple[str, str, str]
@@ -172,6 +177,8 @@ class ExecutionOrchestrator:
         snapshot_barrier: ExecutionSnapshotBarrier | None = None,
         snapshot_max_bytes: int | None = None,
         instruction_preparer: InstructionPreparer | None = None,
+        workdir_provider: WorkspaceProvider | None = None,
+        runtime_host: RuntimeHost | None = None,
     ) -> None:
         if (
             not isinstance(selector, tuple)
@@ -188,6 +195,12 @@ class ExecutionOrchestrator:
         self._snapshot_barrier = snapshot_barrier
         self._snapshot_max_bytes = snapshot_max_bytes
         self._instruction_preparer = instruction_preparer
+        # Phase 4 (08 R-4c): the Host/Workspace lanes arrive as injected seams
+        # exactly like the Phase 3 pattern. Unset, or set against a selector
+        # whose declared capabilities do not require a workspace (React), the
+        # Run path stays byte-identical to the accepted Phase 3 behaviour.
+        self._workdir_provider = workdir_provider
+        self._runtime_host = runtime_host
 
     @property
     def selector(self) -> AdapterSelector:
@@ -202,6 +215,21 @@ class ExecutionOrchestrator:
             and self._snapshot_max_bytes is not None
             and self._instruction_preparer is not None
         )
+
+    @property
+    def execution_paths_enabled(self) -> bool:
+        """True only when the Phase 4 Workdir/Host seams are both wired."""
+        return self._workdir_provider is not None and self._runtime_host is not None
+
+    def _process_capable_selection(self) -> bool:
+        # The declared capability of the selected registration decides, never a
+        # settings value: React declares workspace_required=False and therefore
+        # keeps the byte-identical Phase 3 path even with the seams wired.
+        try:
+            descriptor = self._registry.metadata(*self._selector)
+        except Exception:  # noqa: BLE001 - unresolvable metadata cannot enable paths.
+            return False
+        return descriptor.declared.workspace_required
 
     async def execute(
         self,
@@ -238,12 +266,59 @@ class ExecutionOrchestrator:
             except Exception as exception:  # noqa: BLE001 - assembly crosses a safe boundary.
                 return _failed_outcome(_safe_legacy_code(exception))
 
+        workdir: WorkdirRecord | None = None
+        if self.execution_paths_enabled and self._process_capable_selection():
+            # 08 T13 fixed order: the Effective validation above has passed,
+            # then Workdir prepare (ONE R-11 call), the Host admission state
+            # as the support check, and activate before adapter.start. Every
+            # refusal cleans in reverse and lands inside the existing R-50
+            # vocabulary; nothing here commits Run terminal state.
+            ids = _process_scope_ids(context)
+            if ids is None:
+                return _failed_outcome(_CONFIG_INVALID_CODE)
+            try:
+                workdir = await self._workdir_provider.prepare(
+                    run_id=request.execution_id,
+                    tenant_id=ids[0],
+                    business_id=ids[1],
+                    workspace_id=ids[2],
+                )
+            except Exception:  # noqa: BLE001 - start-prevention keeps the engine code.
+                workdir = None
+                return _failed_outcome(_ENGINE_UNAVAILABLE_CODE)
+            if workdir.status not in ("ready", "active"):
+                # R-11 says prepare never returns this shape; refuse anyway
+                # rather than start against a not-usable record.
+                await self._cleanup_workdir(workdir)
+                workdir = None
+                return _failed_outcome(_ENGINE_UNAVAILABLE_CODE)
+            if not self._runtime_host.health().admission_enabled:
+                await self._cleanup_workdir(workdir)
+                workdir = None
+                return _failed_outcome(_ENGINE_UNAVAILABLE_CODE)
+            try:
+                workdir = await self._workdir_provider.activate(
+                    workdir_id=workdir.workdir_id,
+                    run_id=request.execution_id,
+                    tenant_id=ids[0],
+                )
+            except Exception:  # noqa: BLE001
+                await self._cleanup_workdir(workdir)
+                workdir = None
+                return _failed_outcome(_ENGINE_UNAVAILABLE_CODE)
+            request = request.model_copy(update={"execution_workdir": workdir.relative_path})
+
         outcome_collector = as_outcome_collecting_adapter(adapter)
         try:
             handle = await adapter.start(request)
         except (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit):
             raise
         except Exception as exception:  # noqa: BLE001 - start crosses a safe boundary.
+            if workdir is not None:
+                # Reverse order (03 §4.2): the process never started - the
+                # Host cleans its own record - so the prepared directory
+                # goes back too.
+                await self._cleanup_workdir(workdir)
             return _failed_outcome(_safe_legacy_code(exception))
 
         stream: AsyncIterator[AgentEvent] | None = None
@@ -267,8 +342,11 @@ class ExecutionOrchestrator:
             stage = "collect"
             collect_attempted = True
             if outcome_collector is not None:
-                return await outcome_collector.collect_outcome(handle)
-            return _public_result_outcome(await adapter.collect_result(handle))
+                outcome = await outcome_collector.collect_outcome(handle)
+            else:
+                outcome = _public_result_outcome(await adapter.collect_result(handle))
+            await self._settle_workdir(workdir, outcome)
+            return outcome
         # Pure ExceptionGroups are ordinary failures; groups containing control flow
         # do not subclass Exception and reach the following re-raise boundary.
         except Exception as exception:  # noqa: BLE001 - normalize stage failures safely.
@@ -277,9 +355,11 @@ class ExecutionOrchestrator:
                 # the runner; its terminal state must not become the execution outcome.
                 with suppress(Exception):
                     await adapter.cancel(handle)
-                return _failed_outcome("execution_error")
+                outcome = _failed_outcome("execution_error")
+                await self._settle_workdir(workdir, outcome)
+                return outcome
             cleanup_failed = await _abort_and_close(stream, acknowledging, exception)
-            return await self._collect_failure(
+            outcome = await self._collect_failure(
                 adapter,
                 outcome_collector,
                 handle,
@@ -287,6 +367,8 @@ class ExecutionOrchestrator:
                 failure_from_stream=stage == "stream",
                 cleanup_failed=cleanup_failed,
             )
+            await self._settle_workdir(workdir, outcome)
+            return outcome
         except (
             asyncio.CancelledError,
             KeyboardInterrupt,
@@ -298,6 +380,18 @@ class ExecutionOrchestrator:
                 await _abort_and_close(stream, acknowledging, exception)
             else:
                 await adapter.cancel(handle)
+            if workdir is not None:
+                # AC-3/AC-4: user cancellation wins over late success. Route
+                # the group through the same Supervisor machine (idempotent,
+                # retained progress) and settle the Workdir on the
+                # cancellation decision. The shield lets both finish even
+                # when this task itself is being cancelled.
+                with suppress(BaseException):
+                    await asyncio.shield(adapter.cancel(handle))
+                with suppress(BaseException):
+                    await asyncio.shield(
+                        self._settle_workdir(workdir, ExecutionOutcome(status="cancelled"))
+                    )
             raise
 
     async def _phase3_barrier(self, context: ExecutionContext) -> _BarrierSuccess | _BarrierFailure:
@@ -437,6 +531,42 @@ class ExecutionOrchestrator:
             }
         )
 
+    async def _settle_workdir(
+        self, workdir: WorkdirRecord | None, outcome: ExecutionOutcome
+    ) -> None:
+        """Post-Run Workdir decision, decoupled from the Run terminal state.
+
+        completed/cancelled enter the default retention window, failed enters
+        the failed-retention window (FR-10); the sweeper deletes later. A
+        retain failure must never rewrite the Run outcome: the durable record
+        simply stays a cleanup retry candidate (Repository remains the sole
+        owner of terminal state).
+        """
+        if workdir is None:
+            return
+        window = "success" if outcome.status in ("completed", "cancelled") else "failed"
+        try:
+            await self._workdir_provider.retain(
+                workdir_id=workdir.workdir_id,
+                run_id=workdir.run_id,
+                tenant_id=workdir.tenant_id,
+                outcome=window,
+            )
+        except Exception:  # noqa: BLE001 - the record retries via the sweeper.
+            logger.warning("execution workdir retain deferred run_id=%s", workdir.run_id)
+
+    async def _cleanup_workdir(self, workdir: WorkdirRecord) -> None:
+        if workdir is None:
+            return
+        try:
+            await self._workdir_provider.cleanup(
+                workdir_id=workdir.workdir_id,
+                run_id=workdir.run_id,
+                tenant_id=workdir.tenant_id,
+            )
+        except Exception:  # noqa: BLE001 - cleanup_failed records stay alertable.
+            logger.warning("execution workdir cleanup deferred run_id=%s", workdir.run_id)
+
     async def _collect_failure(
         self,
         adapter: AgentEngineAdapter,
@@ -477,6 +607,33 @@ class ExecutionOrchestrator:
         # ExecutionErrorCode values are not private legacy codes; only a completed
         # public collect_result fallback may apply the R14 timeout translation.
         return _failed_outcome("execution_error")
+
+
+def _process_scope_ids(context: ExecutionContext) -> tuple[str, str, str] | None:
+    """Derive the trusted tenant/business/workspace triple or refuse.
+
+    The Workspace record pins these ids for the ownership recheck before any
+    deletion (03 §4.5 rule 3), so an incomplete scope fails closed as a
+    configuration error instead of defaulting into a shared bucket (FR-6).
+    """
+    row = context.row
+    try:
+        tenant_id = row["tenant_id"]
+    except Exception:  # noqa: BLE001 - malformed claimed rows refuse.
+        return None
+    if not isinstance(tenant_id, str) or not tenant_id:
+        return None
+    scope = context.scope
+    business_id = scope.business_id if scope is not None else None
+    workspace_id = (scope.workspace_id if scope is not None else None) or row.get("workspace_id")
+    if (
+        not isinstance(business_id, str)
+        or not business_id
+        or not isinstance(workspace_id, str)
+        or not workspace_id
+    ):
+        return None
+    return tenant_id, business_id, workspace_id
 
 
 def _classify_barrier_failure(failure: BaseException) -> str:
