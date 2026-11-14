@@ -5,7 +5,7 @@
 > Basis: `05-acceptance-plan.en.md` (revised 2026-11-14 for 08 R-1 and for the R-11/R-12 coordination rulings — A1–A12, C1–C14, M1–M3, §2 preconditions, §6 conclusion definitions), `06-test-report.en.md` (the authoritative execution: §2 E01–E17, §3–§5 case tables, §7 D-1, §8 register, §10 exit verdict), `02-requirements.en.md` (AC-1–AC-12, FR-1–FR-10), `08-implementation-breakdown.en.md` (§2 rulings R-1–R-14, §5 normative macOS/`pending_env` split, §6 concession boundaries, §8.1–8.5 closure register)
 > Acceptance owner: acceptance sub-agent (last link of the four-role Phase 4 flow; single conclusion, no fabricated product/QA/business/security/operations roles)
 > Executor: acceptance sub-agent (same role — low-cost read-only verification V01–V17 in §2.3 plus evidence assembly; the test suite was **not** re-executed, per 05 §3 "Evidence reuse" and 06 §10.1)
-> Target SHA: `e400cafe8e8f2673c069f3ac7f389a7aec95da51` (`e400caf`), 13 unpushed commits `6988fb9..e400caf` on the Phase 3 base `c63fd4a` (full list in §2.1)
+> Target SHA: `e400cafe8e8f2673c069f3ac7f389a7aec95da51` (`e400caf`), 13 unpushed commits `6988fb9..e400caf` on the Phase 3 base `c63fd4a` (full list in §2.1). **Superseded by §9**: after CI found and the team fixed defect D-2, the reported target is `8e2dcf1` with CI green (run `43555155652`); §9 is an appendix and rewrites nothing above it
 > Discipline: `skip` / `pending_env` / `not_measured` are never written as passing; "conditionally passed" never covers a veto gate nor converts a blocked promise into an approved one; AC-5 and AC-9 are recorded as **partially proven** and are explicitly *not* claimed as fully proven; this report modifies no number in 06 and no line of 01–05.
 
 ## 1. Acceptance Scope, Responsibility, and Conclusion Ceiling
@@ -197,3 +197,38 @@ Compliance checking follows the lightweight rule: these are **risk hard gates ju
 - **L-3**: **new** this round (M1/M3 documentation face, V17) — did not exist as a registered item before acceptance inspected the operator-facing documents.
 - **L-4**: **new** this round as an issue-backed residual, promoted from 06 T-Risk-5/T-Risk-6 (P3 code-hygiene debt) into #135.
 - 06 T-Risk-1/T-Risk-2/T-Risk-3: **closed** (D-1 fixed, divergence explained, seed→publish coverage added and executed at E15); nothing further owed.
+
+## 9. Post-Conclusion Appendix: CI Evidence and the D-2 Fix (2026-11-14, same day)
+
+This appendix is added under the rule stated in §5 L-6 — *"if CI disagrees with 06's local numbers, **CI prevails** and this report is reissued by appendix (never by rewriting these conclusions)"*. **Nothing above this line is rewritten.** The conclusion remains **conditionally passed** on the macOS development subset; the ceiling is unchanged and, if anything, better supported.
+
+### 9.1 What happened after the conclusion
+
+The branch was pushed and PR **#137** was opened against `integration`. Two facts in §5 L-6 and §5 L-7 are now **superseded as process statements** (the analytical content of both items stands unchanged):
+
+| Superseded statement | Current fact |
+|---|---|
+| "PR #131 is still OPEN and `origin/integration` is still `3969258`, so Phase 3 is not merged" | **PR #131 was merged** on 2026-11-14T01:55:23Z (merge commit `40103c1`); `origin/integration` now contains the Phase 3 tip `c63fd4a`. PR #137 is therefore a clean 14-commit delta with no stacked-PR dependency |
+| "CI evidence pending: the 13 Phase 4 commits are unpushed" | The branch is pushed; CI has run twice at two SHAs (below). L-6 closes |
+
+### 9.2 CI evidence
+
+| Run | SHA | Result |
+|---|---|---|
+| `43544575078` | `68191ca` (13 commits) | **fail** — `Backend tests (postgres 1/2)`: 274 passed, **1 failed**, 9 skipped. Lint, unit, postgres 2/2, and frontend all passed |
+| `43555155652` | `8e2dcf1` (after the D-2 fix) | **success — 5/5 jobs pass** (lint, unit, postgres 1/2, postgres 2/2, frontend) |
+
+The single CI failure was **not** a local-number error to be reconciled: it was defect **D-2 (P1)**, recorded in 06 §7.1 and fixed in `8e2dcf1`. CI therefore did exactly what this report's L-6 rule anticipated — it found a real platform defect that macOS could not show.
+
+### 9.3 D-2 effect on the A/C rows
+
+| Item | Judgment | Basis |
+|---|---|---|
+| **AC-9** (resource boundaries) | **Improves from "partially proven" to "partially proven, with the CPU-approximation half now proven on the production platform kernel"** — the `pending_env` half is unchanged | On Linux, `soft==hard` `RLIMIT_CPU` delivers SIGKILL(9) where macOS delivers SIGXCPU(24); the pre-fix code attributed excess by signal number, so CPU excess fell through to a plain `exited` on Linux — an FR-7 / R-14 violation on exactly the platform that matters. Now attributed from the Reservation's recorded `cpu_rlimit` fact; non-interference pinned both ways (no applied CPU rlimit keeps a SIGKILL a plain exit; Supervisor-initiated kills are never reattributed). Verified by running the **full** Phase 4 suite on a Linux kernel container (independent PostgreSQL): `341 passed, 3 attributed skips`, identical to macOS |
+| **C2 / C4 (evidence integrity of resource claims)** | **Unchanged — satisfied, and strengthened** | The defect was found by CI rather than by the local lane; recording it, fixing it, and re-verifying on both platforms is the discipline C2 requires. No number in 06 was retroactively softened |
+| A1–A8, A10–A12 and all other C rows | **Unchanged** | The fix touched only `host/resource_manager.py` classification plus tests and reports; no `workspace/`, orchestrator, observability, deployment, or migration code changed |
+| L-1 (the enablement gate) | **Unchanged — still blocks enablement** | D-2 was a correctness bug in a *measured* lane, not a change to the `pending_env` register. #133 remains the enablement gate. A new fact is registered in 08 §8.6: `/sys/fs/cgroup` is read-only inside the Docker Desktop Linux VM, so a "Linux container" still cannot close the cgroup lanes — #133 needs a real Linux host |
+
+### 9.4 Re-stated decision
+
+**Conditionally passed** — unchanged, at target SHA `8e2dcf1` (superseding `e400caf` as the reported target), with CI green at that SHA, two P1 defects found and fixed (D-1 seed binding, D-2 Linux CPU attribution), no P0 and no open P1, and the nine Linux-only `pending_env` lanes still honestly blocking `execution_runtime_host_enabled=true` in any real environment (issue **#133**), plus L-2/L-3/L-5/L-7 as previously listed. The scopes explicitly **not** authorized by this report (§6) are unchanged.
