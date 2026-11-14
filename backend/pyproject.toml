@@ -44,7 +44,10 @@ packages = ["src/agent_platform"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["postgres: integration tests requiring TEST_DATABASE_URL"]
+markers = [
+    "postgres: integration tests requiring TEST_DATABASE_URL",
+    "p0: mandatory P0 production-readiness failure-path regression tests",
+]
 
 [tool.ruff]
 line-length = 100

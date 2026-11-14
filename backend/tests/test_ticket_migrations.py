@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+from conftest import require_migration_database_url
 
 pytestmark = pytest.mark.postgres
 BACKEND = Path(__file__).resolve().parents[1]
@@ -16,9 +17,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def migration_database():
-    url = os.environ.get("MIGRATION_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("Requires a test PostgreSQL role with CREATEDB")
+    url = require_migration_database_url()
     from urllib.parse import urlsplit, urlunsplit
 
     url = url.replace("postgresql+asyncpg://", "postgresql://")
@@ -138,9 +137,7 @@ def test_backfill_constraints_and_downgrade_guards(migration_database):
     # (foreign_key_violation).  Both represent the intended protected
     # relationship; PostgreSQL 18/asyncpg 0.31 exposes the former as its
     # dedicated exception class.
-    with pytest.raises(
-        (asyncpg.ForeignKeyViolationError, asyncpg.RestrictViolationError)
-    ):
+    with pytest.raises((asyncpg.ForeignKeyViolationError, asyncpg.RestrictViolationError)):
         query(url, "DELETE FROM runtime_conversations WHERE id=$1", cid)
     with pytest.raises(asyncpg.ForeignKeyViolationError):
         query(url, "UPDATE tickets_detail SET tenant_id='other' WHERE ticket_id=$1", tid)

@@ -80,6 +80,17 @@ pytest
 npm run build      # 含 i18n 检查与 TypeScript 编译
 ```
 
+### 必需的 CI 门禁（PR 必跑 vs 按需/联调）
+
+所有 Pull Request 合入前必须通过以下不修改跟踪文件的检查：
+
+- **后端 lint 与架构门禁**（`Backend lint (ruff + architecture)`）：`uv run ruff check .`、针对变更 Python 文件的 `uv run ruff format --check`、`python scripts/check_architecture.py` 以及 JS SDK 单测（`sdk/javascript`：`npm test`）。
+- **后端单元测试**（`Backend tests (unit)`）：`pytest -m "not postgres"`。
+- **后端 Postgres 集成测试**（`Backend tests (postgres 1/2)`、`Backend tests (postgres 2/2)`）：先执行 `alembic upgrade head`，再跑 `pytest -m postgres`。在 `CI=true` 或 `REQUIRE_POSTGRES_TESTS=1` 环境下若缺失 `TEST_DATABASE_URL` / `MIGRATION_TEST_DATABASE_URL` 会直接报错失败，不会静默跳过。
+- **前端构建检查**（`Frontend (i18n + typecheck + build)`）：`npm run check:i18n` 与 `npm run build`（含 `tsc --noEmit` 与 Vite 构建）。
+
+依赖外部实况服务的测试（`KNOWLEDGE_LIVE=1`、`NEXUSDESK_LIVE_QUICKSTART=1` 与 Playwright `npm run test:e2e`）不作为每次提交的 PR 阻塞门禁，按需针对真实环境执行；CI 摘要会分别列出测试失败、环境/夹具错误与跳过项。
+
 ### 一些约定
 
 - **文档以英文撰写**：`docs/`、`README*`、`CHANGELOG*` 的新增或修改只需英文版本。现有中文版本

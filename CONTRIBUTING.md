@@ -78,6 +78,17 @@ In the `frontend` directory:
 npm run build      # includes the i18n check and the TypeScript build
 ```
 
+### Required CI gates (PR vs opt-in/live)
+
+Every pull request must pass these non-mutating checks before merge (none rewrite tracked files):
+
+- **Backend lint & architecture** (`Backend lint (ruff + architecture)`): `uv run ruff check .`, `uv run ruff format --check` on changed Python files, `python scripts/check_architecture.py`, and JS SDK tests (`sdk/javascript`: `npm test`).
+- **Backend unit tests** (`Backend tests (unit)`): `pytest -m "not postgres"`.
+- **Backend Postgres integration tests** (`Backend tests (postgres 1/2)`, `Backend tests (postgres 2/2)`): `alembic upgrade head` followed by `pytest -m postgres`. Missing `TEST_DATABASE_URL` or `MIGRATION_TEST_DATABASE_URL` fails closed when `CI=true` or `REQUIRE_POSTGRES_TESTS=1` rather than silently skipping.
+- **Frontend** (`Frontend (i18n + typecheck + build)`): `npm run check:i18n` and `npm run build` (`tsc --noEmit` + Vite build).
+
+Opt-in live-service suites (`KNOWLEDGE_LIVE=1`, `NEXUSDESK_LIVE_QUICKSTART=1`, and Playwright `npm run test:e2e`) are excluded from per-commit PR blockers and run on demand against live stacks. CI step summaries report test failures, fixture/infrastructure errors, and skipped tests separately.
+
 ### Conventions
 
 - **Documentation is written in English**: new or updated documentation (`docs/`, `README*`, `CHANGELOG*`) only requires an English version. Existing Chinese versions (e.g. `README.zh-CN.md`, `CONTRIBUTING.zh-CN.md`) are optional and may be kept, updated, or retired over time. Frontend locale files are still maintained in parallel under `frontend/src/i18n/locales/`.
