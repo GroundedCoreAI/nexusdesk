@@ -24,6 +24,7 @@ samples are aggregate numbers plus stable codes.
 
 import asyncio
 import logging
+import signal
 import subprocess
 import time
 from collections.abc import Callable
@@ -31,11 +32,15 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .host_models import REASON_EXITED, REASON_RESOURCE_EXCEEDED, ProcessResult, ResourcePolicy
-from .sandbox_provider import SandboxReservation
+from .sandbox_provider import CAP_CPU_RLIMIT, SandboxReservation
 
 logger = logging.getLogger(__name__)
 
 # Signals whose default disposition is the kernel enforcing an applied rlimit.
+# These are unambiguous: no other path in the Host delivers SIGXCPU/SIGXFSZ to
+# a managed group. (08 R-14: the stable reason code is the contract; these
+# numbers are only a fast path for the two signals that cannot be confused
+# with our own escalation.)
 _RLIMIT_SIGNALS = {24, 25}  # SIGXCPU, SIGXFSZ
 
 # Trusted-target normalized excess contract: hosts differ in whether
@@ -43,6 +48,20 @@ _RLIMIT_SIGNALS = {24, 25}  # SIGXCPU, SIGXFSZ
 # repository-fixed target converts either into exit code 86 with a stable
 # stderr marker; classifying it keeps the excess honest on both behaviours.
 TARGET_EXIT_RESOURCE_EXCEEDED = 86
+
+
+def _cpu_rlimit_applied(reservation: SandboxReservation) -> bool:
+    """Whether this Execution had a CPU rlimit actually applied child-side.
+
+    The initiator's own fact (03 §4.6 resolution), not a signal-number guess:
+    the CPU dimension resolved to the ``cpu_rlimit`` capability at a strength
+    that applies it. Used to attribute an otherwise-ambiguous SIGKILL to the
+    kernel's RLIMIT_CPU hard-limit enforcement.
+    """
+    return any(
+        r.dimension == "cpu" and r.capability == CAP_CPU_RLIMIT and r.strength != "unenforced"
+        for r in reservation.resolutions
+    )
 
 
 @dataclass(frozen=True)
@@ -284,15 +303,27 @@ class ResourceManager:
         approximation doing its job; they leave the exit machine with the
         stable excess code instead of a bare signal death (P4-IT-19/21
         measurable halves). Anything else keeps the Supervisor's reason.
+
+        CPU hard-limit SIGKILL (08 R-14, Linux): we apply RLIMIT_CPU with
+        soft==hard, so on Linux the kernel reaches the hard limit in the same
+        tick it would raise SIGXCPU and delivers SIGKILL(9) instead; macOS
+        stops at SIGXCPU(24). The signal number alone cannot distinguish that
+        kernel kill from our own Supervisor KILL - but the Supervisor never
+        yields ``reason_code == REASON_EXITED`` (its escalations set
+        CANCELLED / WALL_TIMEOUT / OUTPUT_LIMIT / PIPE_SETUP), so a natural-exit
+        SIGKILL over a Reservation that applied a CPU rlimit IS the kernel's
+        CPU-limit enforcement. We attribute it from the initiator's recorded
+        fact, never from the raw signal value, keeping the stable reason code
+        the only cross-platform contract.
         """
-        if (
-            result.final_state == "exited"
-            and (
-                result.term_signal in _RLIMIT_SIGNALS
-                or result.exit_code == TARGET_EXIT_RESOURCE_EXCEEDED
-            )
-            and result.reason_code == REASON_EXITED
-        ):
+        if result.final_state != "exited" or result.reason_code != REASON_EXITED:
+            return result
+        excess = (
+            result.exit_code == TARGET_EXIT_RESOURCE_EXCEEDED
+            or result.term_signal in _RLIMIT_SIGNALS
+            or (result.term_signal == signal.SIGKILL and _cpu_rlimit_applied(reservation))
+        )
+        if excess:
             return result.model_copy(update={"reason_code": REASON_RESOURCE_EXCEEDED})
         return result
 

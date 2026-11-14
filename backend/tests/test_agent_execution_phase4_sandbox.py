@@ -329,11 +329,24 @@ def test_release_is_idempotent_through_resource_manager():
 def test_rlimit_kill_classification_and_non_interference():
     manager = ResourceManager(_RecordingProvider(), sample_interval_seconds=0.1)
     reservation = _reservation()
+    # Explicit CPU-applied reservation: the attribution under test must not
+    # depend on what the *host* happens to probe for cpu_rlimit.
+    cpu_provider = LocalSandboxProvider(probes={CAP_CPU_RLIMIT: lambda: "approximate"})
+    reservation_cpu = _reservation(
+        resolutions=resolve_support(cpu_provider.support_matrix(), enforcement_required=False)
+    )
 
     assert manager.classify_result(_result(term_signal=24), reservation).reason_code == (
         REASON_RESOURCE_EXCEEDED
     )
     assert manager.classify_result(_result(term_signal=25), reservation).reason_code == (
+        REASON_RESOURCE_EXCEEDED
+    )
+    # 08 R-14: on Linux a soft==hard RLIMIT_CPU delivers SIGKILL(9) in the same
+    # tick as the would-be SIGXCPU, so a natural-exit SIGKILL over a Reservation
+    # that applied the cpu_rlimit is the kernel's CPU enforcement - attributed
+    # from the recorded mechanism, not from the ambiguous signal number.
+    assert manager.classify_result(_result(term_signal=9), reservation_cpu).reason_code == (
         REASON_RESOURCE_EXCEEDED
     )
     # untouched reasons pass through: plain exit, cancellation, other signals.
@@ -343,6 +356,27 @@ def test_rlimit_kill_classification_and_non_interference():
     assert manager.classify_result(cancelled, reservation) is cancelled
     sigsegv = _result(term_signal=11)
     assert manager.classify_result(sigsegv, reservation).reason_code == REASON_EXITED
+    # Non-interference: a SIGKILL with NO cpu rlimit applied (e.g. an external
+    # kill) stays a plain exit - the attribution is gated on the CPU mechanism,
+    # never on "any SIGKILL".
+    no_cpu = LocalSandboxProvider(
+        probes={CAP_CPU_GROUP: lambda: "unsupported", CAP_CPU_RLIMIT: lambda: "unsupported"}
+    )
+    reservation_no_cpu = _reservation(
+        resolutions=resolve_support(no_cpu.support_matrix(), enforcement_required=False)
+    )
+    assert (
+        manager.classify_result(_result(term_signal=9), reservation_no_cpu).reason_code
+        == REASON_EXITED
+    )
+    # A Supervisor-initiated SIGKILL never reaches classify_result as EXITED
+    # (its reason is CANCELLED/WALL_TIMEOUT/...), so it is never misattributed.
+    assert (
+        manager.classify_result(
+            _result(term_signal=9, reason=REASON_CANCELLED), reservation_cpu
+        ).reason_code
+        == REASON_CANCELLED
+    )
 
 
 def test_sampling_excess_decisions_pid_and_disk():
@@ -584,26 +618,47 @@ def test_local_provider_end_to_end_admits_applies_releases(sandbox_database, tmp
 
 @pytest.mark.postgres
 def test_rlimit_cpu_excess_classifies_and_terminates(sandbox_database, tmp_path):
-    # P4-IT-19 CPU-approximation half: the applied RLIMIT_CPU kills the busy
-    # child with SIGXCPU and the Host records the stable resource reason.
+    # P4-IT-19 CPU-approximation half. The applied RLIMIT_CPU (soft==hard)
+    # kills the busy child; the Host must record the STABLE resource reason on
+    # every platform (08 R-14: the reason code is the contract, the raw signal
+    # is only a platform observation detail). The kernel path differs:
+    #   - macOS: soft limit raises SIGXCPU(24), default disposition terminates.
+    #   - Linux: soft==hard means the hard limit is reached in the same tick,
+    #     so the kernel delivers SIGKILL(9) instead of a catchable SIGXCPU.
+    # Both are the CPU rlimit doing its job; classify_result attributes the
+    # Linux SIGKILL from the Reservation's recorded cpu_rlimit fact (never from
+    # the signal number), so the reason code is identical cross-platform.
     root = tmp_path / "exec-root"
     root.mkdir()
 
     async def flow(engine):
-        resources = ResourceManager(
-            LocalSandboxProvider(enforcement_required=False),
-            sample_interval_seconds=0.2,
-        )
+        provider = LocalSandboxProvider(enforcement_required=False)
+        resources = ResourceManager(provider, sample_interval_seconds=0.2)
         host = _host(engine, resources=resources, host_id="worker-cpu")
         run_id = await _make_run(engine)
         spec = make_spec("cpu-burn", "30")
         spec = spec.model_copy(
             update={"resource_policy": spec.resource_policy.model_copy(update={"cpu_seconds": 1})}
         )
+        # R-14 mechanism/strength label: the cpu dimension resolved to the
+        # cpu_rlimit approximation (never "hard" - hard CPU is the cgroup lane,
+        # pending_env). This is the platform-independent evidence that the kill
+        # came from the CPU rlimit mechanism.
+        reservation = await provider.prepare(spec, run_id=run_id)
+        cpu = next(r for r in reservation.resolutions if r.dimension == "cpu")
+        assert cpu.capability == CAP_CPU_RLIMIT
+        assert cpu.strength == "approximate"
+
         managed = await host.start(spec, run_id=run_id, tenant_id=TENANT, working_dir=root)
         result = await host.wait(managed.managed_id)
-        assert result.term_signal == 24
+        # Contract: stable excess reason code (both platforms).
         assert result.reason_code == REASON_RESOURCE_EXCEEDED
+        # Honest shape: killed by a signal, not a clean exit; the observed
+        # signal is one of the two documented kernel paths (SIGXCPU 24 on
+        # macOS, SIGKILL 9 on Linux) - asserted as a set, never a single
+        # platform's number, per R-14.
+        assert result.final_state == "exited"
+        assert result.term_signal in (24, 9)
         assert not process_alive(managed.os_pid)
         row = await host.registry.fetch_one(managed.managed_id)
         assert row is not None

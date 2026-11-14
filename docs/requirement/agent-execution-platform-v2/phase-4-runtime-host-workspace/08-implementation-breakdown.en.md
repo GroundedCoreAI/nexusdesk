@@ -303,3 +303,25 @@ while Phase 4 fixtures normalize either form internally.
   authenticated internal REST surface is registered as an issue candidate.
 - Alert routing/dashboards beyond emitting `AlertSink` records: unchanged
   deferral (08 §6).
+
+### 8.6 Linux-container cross-check (2026-11-14, round 4 — CI-driven)
+
+CI on PR #137 surfaced defect **D-2 (P1)**, now fixed: with `soft==hard`
+`RLIMIT_CPU` the Linux kernel delivers **SIGKILL(9)** in the same tick where
+macOS stops at SIGXCPU(24), so a signal-number-only attribution left CPU excess
+misclassified as a plain exit on the production target platform. Attribution now
+uses the initiator's recorded fact (a `cpu_rlimit` resolution at non-`unenforced`
+strength) rather than the ambiguous signal value; see 06 §7.1 for the defect
+record and both-platform verification.
+
+Cross-check facts gathered while reproducing it inside a Linux container
+(`nexusdesk-quickstart:local` runtime image, kernel-level, independent PG on
+`host.docker.internal:5444`; code injected over `PYTHONPATH` so the image's
+non-editable install cannot shadow it):
+
+| Fact | Consequence for §8.1 |
+|---|---|
+| Full `-k phase4` suite on Linux: `341 passed, 3 skipped` — identical to macOS | The measured halves of every case are genuinely platform-independent, not macOS artifacts |
+| `/sys/fs/cgroup` is **read-only** inside the Docker Desktop Linux VM (child-cgroup `mkdir` denied) | cgroup `memory.max` / `pids.max` lanes stay `pending_env` even on a "Linux" container; #133 still needs a real Linux host, not just any Linux kernel |
+| `ps` is absent from the slim runtime image (provisioned manually for the run) | `default_group_observer` correctly degrades to "no data" rather than zero usage; production images need procps for group sampling to be informative |
+| Linux kernel probe: `RLIMIT_CPU=(1,1)` → `WIFSIGNALED=True, WTERMSIG=9` | Documents the observed kernel path behind D-2 without making the number a contract (R-14) |
