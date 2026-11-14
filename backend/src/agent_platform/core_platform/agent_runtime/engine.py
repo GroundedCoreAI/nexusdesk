@@ -17,6 +17,12 @@ class RunState(TypedDict):
     output: str
 
 
+def _clip(value, limit: int = 800) -> str:
+    """Serialise injected arguments for the trace, capped so one call cannot bloat a run."""
+    text = json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
 class RuntimeEngine:
     def __init__(self, model, tools, settings):
         self.model, self.tools, self.settings = model, tools, settings
@@ -115,7 +121,17 @@ class RuntimeEngine:
             signatures.append(signature)
 
         async def invoke(call):
-            await emit("tool.started", {"name": call["name"], "call_id": call["id"]})
+            # Arguments and round go out with the start event: without them the trace can
+            # only show "a tool ran for 1.1s", never what the model actually asked for.
+            await emit(
+                "tool.started",
+                {
+                    "name": call["name"],
+                    "call_id": call["id"],
+                    "round": state["rounds"],
+                    "args": _clip(call["args"]),
+                },
+            )
             tool_started = time.monotonic()
             result = await self.tools.execute(call["name"], call["args"])
             await emit(
@@ -123,12 +139,17 @@ class RuntimeEngine:
                 {
                     "name": call["name"],
                     "call_id": call["id"],
+                    "round": state["rounds"],
                     "ok": result["ok"],
                     "error": result.get("error"),
                     "gateway_call_id": result.get("call_id"),
                     "execution_status": result.get("execution_status"),
                     "tool_version": result.get("tool_version"),
                     "duration_ms": int((time.monotonic() - tool_started) * 1000),
+                    # Result size explains jumps in the next round's input tokens.
+                    "result_chars": len(
+                        json.dumps(result, ensure_ascii=False, default=str, sort_keys=True)
+                    ),
                 },
             )
             return ToolMessage(

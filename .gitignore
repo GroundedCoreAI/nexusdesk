@@ -42,5 +42,15 @@ work/
 # Local dev-server logs and pytest scratch directories
 .uvicorn*.log
 .vite*.log
+backend/backend-uvicorn*.log
+backend/mock-business*.log
+backend/uvicorn-*.log
+frontend/vite-dev*.log
 pytest-of-*/
 frontend/.tmp/
+frontend/.tmp-*
+
+# Local verification screenshots and scratch outputs
+outputs/
+customer-preview-*.png
+frontend/shot-*.png

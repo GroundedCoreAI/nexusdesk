@@ -30,7 +30,7 @@ import {
 } from 'antd';
 import type { TableProps } from 'antd';
 import { dateTime } from '../../../i18n/index';
-import { useAccess } from '../../../shared/components/ui';
+import { KnowledgeRecall, useAccess, type RunKnowledgeRetrieval } from '../../../shared/components/ui';
 import { getApplicationExperience, previewApplication } from '../api';
 import type {
     ApplicationDetail,
@@ -388,6 +388,18 @@ export function CustomerInteractionWorkspace({
         },
     ];
 
+    // Preview retrieval is real — the runtime executes read-only contributions —
+    // and its evidence arrives inside the trace, so the drawer can show what was
+    // recalled. Retrieval is a platform capability rather than an application
+    // skill, so it is read from the trace and reported on its own line.
+    const retrievals = ((selectedRun?.result?.trace || {}) as {
+        retrieval?: RunKnowledgeRetrieval[];
+    }).retrieval || [];
+    const recalledSources = retrievals.reduce(
+        (total, item) => total + (item.sources?.length || 0),
+        0,
+    );
+
     const timelineItems = selectedRun
         ? [
             {
@@ -398,6 +410,17 @@ export function CustomerInteractionWorkspace({
                     <small>{dateTime(selectedRun.createdAt)}</small>
                 </div>,
             },
+            ...retrievals.map(item => ({
+                color: 'green',
+                children: <div className="sa-cp-timeline-item">
+                    <strong>{say('知识检索')}</strong>
+                    <p>
+                        {item.query}
+                        {' · '}
+                        {say('{{v0}} 条', { v0: item.sources?.length || 0 })}
+                    </p>
+                </div>,
+            })),
             ...(selectedRun.result?.skills || []).map(skill => ({
                 color: skill.status === 'completed' ? 'green' : 'orange',
                 children: <div className="sa-cp-timeline-item">
@@ -790,11 +813,17 @@ export function CustomerInteractionWorkspace({
                     <section className="sa-cp-diagnostic-section">
                         <div className="sa-cp-diagnostic-section-title">
                             <h4>{say('技能与 Trace')}</h4>
-                            {selectedRun.result?.skills.length
-                                ? <Tag>{selectedRun.result.skills.length}</Tag>
+                            {(selectedRun.result?.skills.length || retrievals.length)
+                                ? <Tag>{(selectedRun.result?.skills.length || 0) + retrievals.length}</Tag>
                                 : <span>{say('暂无技能调用')}</span>}
                         </div>
                         <div className="sa-cp-skill-chips">
+                            {retrievals.map((item, index) => <Tag
+                                key={`knowledge-${index}`}
+                                color="green"
+                            >
+                                {say('知识检索')} · {say('{{v0}} 条', { v0: item.sources?.length || 0 })}
+                            </Tag>)}
                             {(selectedRun.result?.skills || []).map(skill => <Tag
                                 key={skill.key}
                                 color={skill.status === 'completed' ? 'green' : 'orange'}
@@ -802,6 +831,15 @@ export function CustomerInteractionWorkspace({
                                 {skill.key} · {skill.status}
                             </Tag>)}
                         </div>
+                    </section>
+                    <section className="sa-cp-diagnostic-section">
+                        <div className="sa-cp-diagnostic-section-title">
+                            <h4>{say('知识召回')}</h4>
+                            {recalledSources
+                                ? <Tag>{recalledSources}</Tag>
+                                : <span>{say('本次预览没有调用知识检索')}</span>}
+                        </div>
+                        <KnowledgeRecall items={retrievals}/>
                     </section>
                     <section className="sa-cp-diagnostic-section">
                         <h4>{say('原始 JSON')}</h4>

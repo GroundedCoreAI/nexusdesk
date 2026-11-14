@@ -67,10 +67,14 @@ class Catalog:
             _ = url.port
         except ValueError:
             raise DomainError("invalid_model_address") from None
+        # A single "*" entry disables the hostname allowlist (deployment opt-in for
+        # arbitrary providers). Scheme, embedded credentials, query and fragment
+        # checks still apply, and plain http stays loopback-only.
+        allowed = self.settings.model_gateway_allowed_hosts
         if (
             url.scheme not in ("http", "https")
             or not url.hostname
-            or url.hostname.lower() not in self.settings.model_gateway_allowed_hosts
+            or ("*" not in allowed and url.hostname.lower() not in allowed)
             or url.username
             or url.password
             or url.query

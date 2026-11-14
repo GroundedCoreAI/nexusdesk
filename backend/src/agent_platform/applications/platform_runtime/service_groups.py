@@ -51,6 +51,7 @@ class ApplicationOnlyServices:
     staff: object
     members: object
     observability: object
+    monitoring: object
     open_platform: object
     evaluation: object | None
 
@@ -106,6 +107,7 @@ def build_service_groups(services: object) -> PlatformServiceGroups:
             staff=services.staff,
             members=services.members,
             observability=services.observability,
+            monitoring=services.monitoring,
             open_platform=services.open_platform,
             evaluation=services.evaluation,
         ),

@@ -85,6 +85,11 @@ class LostItemReport(Body):
     item: str = Field(description="遗失物品描述")
 
 
+class SafetyReport(Body):
+    trip_no: str = Field(description="行程号")
+    description: str = Field(description="事件描述")
+
+
 class FareDispute(Body):
     fare_trip_no: str = Field(description="行程号")
     reason: str = Field(default="", description="异议说明")
@@ -417,6 +422,24 @@ async def lost_item_report(body: LostItemReport) -> Any:
         "item": body.item or "未填写",
         "report_status": "已登记",
         "contact_deadline": "48 小时内联系",
+    }
+    CREATED.append(report)
+    return ok(report)
+
+
+@app.post(
+    "/mobility/safety-reports", operation_id="mobility_safety_report", summary="上报安全事件"
+)
+async def safety_report(body: SafetyReport) -> Any:
+    trip_no = body.trip_no.strip()
+    if trip_no not in fx.TRIPS:
+        return not_found(f"行程不存在: {trip_no}")
+    report = {
+        "report_no": next_no("SR"),
+        "trip_no": trip_no,
+        "description": body.description,
+        "report_status": "已受理",
+        "handling": "安全专员将尽快与您联系",
     }
     CREATED.append(report)
     return ok(report)

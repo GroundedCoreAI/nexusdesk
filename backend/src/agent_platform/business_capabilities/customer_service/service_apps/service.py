@@ -74,6 +74,7 @@ _SKILL_CONFIG_FIELDS = {
     "result_schema",
     "safety",
     "write_operation",
+    "knowledge_base_ids",
 }
 _V1_FIELDS = {
     "scenarios",
@@ -190,6 +191,7 @@ class ServiceApplicationService:
         examples: object | None = None,
         preview_runner: object | None = None,
         conversations: object | None = None,
+        sessions: object | None = None,
     ) -> None:
         self.engine = engine
         self.agents = agents
@@ -199,6 +201,36 @@ class ServiceApplicationService:
         self.examples = examples
         self.preview_runner = preview_runner
         self.conversations = conversations
+        self.sessions = sessions
+
+    def bind_sessions(
+        self,
+        *,
+        conversations: object,
+        customer: object,
+        application_runtime: object,
+    ) -> None:
+        """Attach the customer-session entry once the container is assembled.
+
+        Kept out of ``__init__`` because the Runtime conversation service and
+        ``CustomerService`` are constructed after this service in the container.
+        """
+
+        from .sessions import ApplicationSessionService
+
+        self.sessions = ApplicationSessionService(
+            self.engine,
+            conversations=conversations,
+            customer=customer,
+            application_runtime=application_runtime,
+        )
+
+    def _session_service(self) -> object:
+        if self.sessions is None:
+            # Only reachable when the container never bound the runtime
+            # dependencies (tests, partial assemblies).
+            raise DomainError("application_runtime_unavailable", 503)
+        return self.sessions
 
     def _connection_service(self) -> object:
         if self.connections is None:
@@ -541,6 +573,9 @@ WHERE a.tenant_id=:tenant
             },
         )
         item["write_operation"] = bool(config.get("write_operation", False))
+        # Knowledge scope lives beside the mappings rather than inside them, so the
+        # UI can read it without parsing ``config``. Empty means inherited.
+        item["knowledge_base_ids"] = config.get("knowledge_base_ids") or []
         item["config"] = config
         item["last_test"] = row.get("last_test")
         return item
@@ -1295,6 +1330,7 @@ FOR UPDATE
             "result_mapping",
             "result_schema",
             "safety",
+            "knowledge_base_ids",
         ):
             value = _provided(body, field_name)
             if value is not _MISSING:
@@ -1773,6 +1809,44 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
             scope=scope,
         )
 
+    async def open_session(
+        self,
+        tenant: str,
+        key: str,
+        *,
+        actor: str,
+        scope: BusinessScope | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return await self._session_service().open_session(
+            tenant,
+            key,
+            actor=actor,
+            scope=scope,
+            **kwargs,
+        )
+
+    async def send_session_message(
+        self,
+        tenant: str,
+        key: str,
+        conversation_id: UUID | str,
+        content: str,
+        *,
+        actor: str,
+        scope: BusinessScope | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return await self._session_service().send_message(
+            tenant,
+            key,
+            conversation_id,
+            content,
+            actor=actor,
+            scope=scope,
+            **kwargs,
+        )
+
     async def record_trace(
         self,
         tenant: str,
@@ -1922,6 +1996,44 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
             raise DomainError("service_application_skill_connection_not_found", 422)
         return str(row["id"]), str(row["connection_key"])
 
+    async def _skill_knowledge_bases(
+        self,
+        connection: Any,
+        tenant: str,
+        scope: BusinessScope,
+        body: object,
+    ) -> None:
+        """Reject knowledge bases this release could never search.
+
+        Retrieval fails the whole tool call with ``knowledge_base_not_found`` when a
+        single id is missing or disabled, so a stale id would surface as a broken
+        assistant in a preview rather than as a validation error at save time.
+        """
+
+        submitted = _provided(body, "knowledge_base_ids")
+        if submitted in (_MISSING, None):
+            return
+        ids = [str(item) for item in submitted if str(item)]
+        if not ids:
+            return
+        rows = await many(
+            connection,
+            """
+SELECT k.id FROM knowledge_bases k
+WHERE k.tenant_id=:tenant
+  AND k.business_id=:scope_business
+  AND k.workspace_id=:scope_workspace
+  AND k.enabled
+  AND k.id=ANY(CAST(:ids AS uuid[]))
+""",
+            tenant=tenant,
+            scope_business=scope.business_id,
+            scope_workspace=scope.workspace_id,
+            ids=ids,
+        )
+        if {str(row["id"]) for row in rows} != set(ids):
+            raise DomainError("service_application_knowledge_base_not_found", 422)
+
     async def create_skill(
         self,
         tenant: str,
@@ -1960,6 +2072,7 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
                 application["id"],
                 body,
             )
+            await self._skill_knowledge_bases(connection, tenant, resolved, body)
             config = self._normalise_skill_config(body)
             contract = self._skill_contract(
                 key=skill_key,
@@ -2116,6 +2229,7 @@ WHERE id=:id
                     body,
                     fallback_id=current["connection_id"],
                 )
+                await self._skill_knowledge_bases(connection, tenant, resolved, body)
                 config = self._normalise_skill_config(
                     body,
                     current=(current["config"] if isinstance(current["config"], dict) else {}),
@@ -2857,8 +2971,10 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
         connections = [item for item in release.connections if item.key in connection_keys]
         from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
             ApplicationRuntimeContext,
+            declared_builtin_tools,
         )
 
+        skill_payloads = tuple(skill.model_dump(mode="json") for skill in skills)
         context = ApplicationRuntimeContext(
             application_id=application["id"],
             application_version=preview_version or 0,
@@ -2866,11 +2982,14 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
             business_id=resolved.business_id,
             workspace_id=resolved.workspace_id,
             agent_snapshot=agent_snapshot,
-            skills=tuple(skill.model_dump(mode="json") for skill in skills),
+            skills=skill_payloads,
             connections=tuple(item.model_dump(mode="json") for item in connections),
-            builtin_tools=tuple(
-                str(name) for name in agent_snapshot["config"].get("tool_names", []) if str(name)
-            ),
+            # The preview authorises exactly what a customer run authorises: the
+            # release's own skills. Copying the Agent's ``tool_names`` here made a
+            # preview retrieve while the released application, with the skill
+            # switched off, could not — the drawer then showed a trace the customer
+            # would never get.
+            builtin_tools=declared_builtin_tools(skill_payloads),
         )
         try:
             result = await runner.preview_application(
@@ -2911,6 +3030,9 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
                     "duration_ms": None,
                 }
                 for name in calls
+                # Built-in capabilities are not application skills; retrieval has
+                # its own section in the trace.
+                if str(name) not in context.builtin_tools
             ],
             "trace": {
                 **context.trace_payload(),
@@ -2918,6 +3040,7 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
                 "upstream_called": False,
                 "tool_calls": calls,
                 "tool_violations": result.get("violations", []),
+                "retrieval": result.get("retrieval", []),
             },
         }
 

@@ -100,6 +100,74 @@ def _tool_name(skill: Mapping[str, Any]) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", key)
 
 
+def _knowledge_tool_name() -> str:
+    # Imported lazily for the same reason as the schema catalog: the knowledge
+    # capability owns this definition, and a module-scope import would make the
+    # loader order depend on this module.
+    from agent_platform.business_capabilities.knowledge.tools import KNOWLEDGE_SEARCH_TOOL
+
+    return KNOWLEDGE_SEARCH_TOOL.name
+
+
+def declared_builtin_tools(skills: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    """Return the platform tools an application declares through its skills.
+
+    A ``knowledge`` skill is what declares retrieval: it is configured on the
+    release, enabled or disabled there, and the platform tool behind it belongs to
+    the knowledge capability rather than to the skill key. Both alternatives were
+    dishonest. Reading the Agent's ``tool_names`` made the Agent a second, silent
+    permission source — a release could retrieve without declaring anything, and
+    disabling the skill changed nothing. Reading the skill key made the declaration
+    depend on a spelling: a skill named anything but ``knowledge_search`` declared
+    retrieval and silently lost it.
+
+    So the enabled skills are the only input, and the platform tool is resolved by
+    type. Duplicate knowledge skills collapse to one capability call, which is what
+    the model sees regardless.
+    """
+
+    declared = any(
+        skill.get("enabled", True) is not False and skill.get("type") == "knowledge"
+        for skill in skills
+    )
+    if not declared:
+        return ()
+    name = _knowledge_tool_name()
+    return (name,) if name in _builtin_schema_names() else ()
+
+
+def application_knowledge_base_ids(
+    skills: Sequence[Mapping[str, Any]],
+    agent_knowledge_base_ids: object,
+) -> tuple[str, ...]:
+    """Return the knowledge bases one application release searches.
+
+    Retrieval scope used to come from the bound Agent version alone, so two
+    applications sharing an Agent could not search different bases — narrowing one
+    narrowed the other, and neither could narrow at all. A knowledge skill may now
+    name its own bases; that declaration wins.
+
+    An empty declaration is not "search nothing". It means the release has not
+    scoped anything, which keeps the historical behaviour of inheriting the Agent's
+    list. Otherwise every release written before this field existed would start
+    answering from an empty scope, and "no setting" would be indistinguishable from
+    "no knowledge" in the trace. To search nothing, disable the skill.
+    """
+
+    inherited = tuple(
+        dict.fromkeys(str(item) for item in (agent_knowledge_base_ids or ()) if str(item))
+    )
+    for skill in skills:
+        if skill.get("type") != "knowledge" or skill.get("enabled", True) is False:
+            continue
+        declared = tuple(
+            dict.fromkeys(str(item) for item in (skill.get("knowledge_base_ids") or ()) if str(item))
+        )
+        if declared:
+            return declared
+    return inherited
+
+
 @dataclass(frozen=True, slots=True)
 class ApplicationRuntimeContext:
     """Resolved, immutable application context for one conversation turn."""
@@ -351,10 +419,7 @@ class ApplicationRuntimeResolver:
         if missing:
             raise DomainError("service_application_connection_missing", 422)
 
-        agent_config = _mapping(agent_snapshot.get("config"))
-        agent_tools = {_text(name) for name in agent_config.get("tool_names", []) if _text(name)}
-        builtin_names = _builtin_schema_names()
-        builtin_tools = tuple(name for name in sorted(agent_tools) if name in builtin_names)
+        builtin_tools = declared_builtin_tools(skills)
         tool_names = [
             _tool_name(skill) for skill in skills if skill.get("type") in {"query", "action"}
         ]
@@ -518,12 +583,12 @@ def authorized_tool_names(application: Mapping[str, Any]) -> list[str]:
         == "http"
         and _text((connections.get(_text(skill.get("connection_key"))) or {}).get("endpoint"))
     ]
-    builtins = [
-        _text(name)
-        for name in application.get("builtin_tools", [])
-        if _text(name) in _builtin_schema_names()
-    ]
-    return list(dict.fromkeys([*skill_names, *builtins]))
+    declared = declared_builtin_tools(skills)
+    # ``builtin_tools`` stays in the snapshot as a record of what a run was
+    # authorised for, but it is not read back here: the skills it was derived
+    # from are in the same snapshot, so re-deriving keeps one input instead of
+    # two that can disagree.
+    return list(dict.fromkeys([*skill_names, *declared]))
 
 
 __all__ = [
@@ -531,4 +596,5 @@ __all__ = [
     "ApplicationRuntimeContext",
     "ApplicationRuntimeResolver",
     "authorized_tool_names",
+    "declared_builtin_tools",
 ]

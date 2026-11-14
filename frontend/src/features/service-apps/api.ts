@@ -125,6 +125,8 @@ function normalizeSkill(raw: unknown): ApplicationSkill {
         argument_mapping: record(value.argument_mapping ?? config.argument_mapping),
         result_mapping: record(value.result_mapping ?? config.result_mapping),
         result_schema: record(value.result_schema ?? config.result_schema),
+        knowledge_base_ids: array<string>(value.knowledge_base_ids ?? config.knowledge_base_ids)
+            .filter(item => typeof item === 'string'),
         safety: {
             requires_confirmation: boolean(nestedSafety.requires_confirmation),
             max_amount: nullableNumber(nestedSafety.max_amount),

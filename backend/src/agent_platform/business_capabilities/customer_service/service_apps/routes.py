@@ -91,6 +91,9 @@ class SkillInput(Input):
     result_schema: dict[str, Any] = Field(default_factory=dict)
     safety: dict[str, Any] = Field(default_factory=dict)
     write_operation: bool | None = None
+    # Empty means "search whatever the bound Agent searches". Only knowledge
+    # skills may set it; the model validator rejects it on any other type.
+    knowledge_base_ids: list[UUID] = Field(default_factory=list, max_length=20)
     config: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -143,6 +146,19 @@ class ConnectionUpdateInput(Input):
 
 class CredentialsInput(Input):
     credentials: dict[str, Any] = Field(default_factory=dict, min_length=1)
+
+
+class SessionOpenInput(Input):
+    external_conversation_id: str | None = Field(default=None, max_length=128)
+    external_user_id: str | None = Field(default=None, max_length=128)
+    user_name: str | None = Field(default=None, max_length=100)
+
+
+class SessionMessageInput(Input):
+    content: str = Field(min_length=1, max_length=4000)
+    idempotency_key: str | None = Field(default=None, max_length=128)
+    external_user_id: str | None = Field(default=None, max_length=128)
+    user_name: str | None = Field(default=None, max_length=100)
 
 
 def _applications(request: Request):
@@ -458,6 +474,47 @@ async def application_conversation(
         key,
         conversation_id,
         scope=request.state.business_scope,
+    )
+
+
+@router.post("/{key}/sessions", status_code=201)
+async def open_application_session(
+    key: str,
+    body: SessionOpenInput,
+    request: Request,
+    user: Operator,
+):
+    """Open a customer session pinned to the application's published release."""
+
+    return await _applications(request).open_session(
+        user.tenant,
+        key,
+        actor=user.actor,
+        scope=request.state.business_scope,
+        **body.model_dump(),
+    )
+
+
+@router.post("/{key}/sessions/{conversation_id}/messages", status_code=202)
+async def send_application_session_message(
+    key: str,
+    conversation_id: UUID,
+    body: SessionMessageInput,
+    request: Request,
+    user: Operator,
+):
+    """Run one customer turn inside an application session."""
+
+    return await _applications(request).send_session_message(
+        user.tenant,
+        key,
+        conversation_id,
+        body.content,
+        actor=user.actor,
+        scope=request.state.business_scope,
+        idempotency_key=body.idempotency_key,
+        external_user_id=body.external_user_id,
+        user_name=body.user_name,
     )
 
 

@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # standalone ``agent_platform.applications.worker.channel`` container. Set this
     # explicitly to decouple the two.
     embedded_channel_worker: bool | None = None
+    # Knowledge is a first-class capability, so every deployment is expected to
+    # run a consumer: the API embeds one when ``embedded_worker`` is on, and the
+    # production topology runs ``worker.knowledge`` as its own container. Only a
+    # deployment that deliberately removed knowledge should set this false,
+    # otherwise a missing consumer never reaches the checklist.
+    knowledge_worker_expected: bool = True
     # Deployments seed the default administrator password and force a change on the
     # first login. Development can set AGENT_REQUIRE_PASSWORD_CHANGE=false to skip
     # that gate; leave it enabled for any shared or production deployment.
@@ -208,6 +214,11 @@ class Settings(BaseSettings):
     model_base_url: str | None = None
     model_use_responses_api: bool = True
     model_max_output_tokens: int = Field(default=1024, ge=64, le=8192)
+    # Gateway egress allowlist for model connections. A single "*" entry disables
+    # the hostname check entirely (deployment opt-in for arbitrary providers);
+    # the scheme, embedded-credential, query and fragment checks in
+    # Catalog.validate_address still apply, and non-loopback plain http remains
+    # rejected. The default stays explicit: add the hosts a deployment uses.
     model_gateway_allowed_hosts: list[str] = [
         "localhost",
         "127.0.0.1",
@@ -235,7 +246,67 @@ class Settings(BaseSettings):
     # Upper bound for trusted extension lifecycle hooks. A hung external
     # implementation is degraded instead of blocking application startup.
     extension_lifecycle_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    # Monitoring centre (health checklist + notification events). The scanner
+    # never runs on a request path; these cadences decide how fresh a snapshot
+    # may be. Thresholds are starting values, not invariants: every one of them
+    # is configurable so tuning never needs a code change.
+    monitor_enabled: bool = True
+    monitor_fast_interval_seconds: int = Field(default=60, ge=5, le=3600)
+    monitor_business_interval_seconds: int = Field(default=300, ge=30, le=86400)
+    monitor_integration_interval_seconds: int = Field(default=300, ge=30, le=86400)
+    monitor_model_probe_interval_seconds: int = Field(default=300, ge=60, le=86400)
+    monitor_daily_interval_seconds: int = Field(default=86400, ge=3600, le=604800)
+    monitor_stale_after_seconds: int = Field(default=180, ge=30, le=86400)
+    # A check must stay failing for N rounds before it notifies; that is what
+    # keeps a single flapping probe out of the bell.
+    monitor_p0_confirm_rounds: int = Field(default=1, ge=1, le=10)
+    monitor_p1_confirm_rounds: int = Field(default=2, ge=1, le=10)
+    monitor_p2_confirm_rounds: int = Field(default=3, ge=1, le=10)
+    monitor_recover_rounds: int = Field(default=3, ge=1, le=10)
+    monitor_reminder_minutes: int = Field(default=120, ge=1, le=10080)
+    monitor_pg_latency_warn_ms: int = Field(default=500, ge=1, le=60000)
+    monitor_pool_warn_ratio: float = Field(default=0.8, ge=0, le=1)
+    monitor_pool_fail_ratio: float = Field(default=0.95, ge=0, le=1)
+    # Host capacity: 75% is a yellow warning, 90% is red.
+    monitor_cpu_warn_ratio: float = Field(default=0.75, ge=0, le=1)
+    monitor_cpu_fail_ratio: float = Field(default=0.9, ge=0, le=1)
+    monitor_memory_warn_ratio: float = Field(default=0.75, ge=0, le=1)
+    monitor_memory_fail_ratio: float = Field(default=0.9, ge=0, le=1)
+    monitor_queue_warn_age_seconds: int = Field(default=300, ge=1, le=86400)
+    monitor_queue_fail_age_seconds: int = Field(default=900, ge=1, le=86400)
+    monitor_worker_heartbeat_timeout_seconds: int = Field(default=60, ge=5, le=3600)
+    monitor_probe_warn_age_minutes: int = Field(default=15, ge=1, le=1440)
+    monitor_probe_fail_age_minutes: int = Field(default=30, ge=1, le=1440)
+    monitor_model_success_warn_ratio: float = Field(default=0.95, ge=0, le=1)
+    monitor_model_success_fail_ratio: float = Field(default=0.8, ge=0, le=1)
+    monitor_model_error_warn_ratio: float = Field(default=0.1, ge=0, le=1)
+    monitor_model_latency_warn_ratio: float = Field(default=0.5, ge=0, le=10)
+    monitor_model_latency_fail_ratio: float = Field(default=1.0, ge=0, le=10)
+    monitor_quota_warn_ratio: float = Field(default=0.7, ge=0, le=1)
+    monitor_quota_fail_ratio: float = Field(default=0.9, ge=0, le=1)
+    monitor_run_failure_warn_ratio: float = Field(default=0.05, ge=0, le=1)
+    monitor_run_failure_fail_ratio: float = Field(default=0.1, ge=0, le=1)
+    monitor_tool_failure_warn_ratio: float = Field(default=0.02, ge=0, le=1)
+    monitor_tool_failure_fail_ratio: float = Field(default=0.05, ge=0, le=1)
+    monitor_handoff_warn_age_seconds: int = Field(default=900, ge=60, le=86400)
+    monitor_handoff_fail_age_seconds: int = Field(default=1800, ge=60, le=86400)
+    # Retention runs inside the scanner loop rather than in a second scheduler.
+    # Active notifications are never pruned: an unresolved fault must stay
+    # visible no matter how old it is.
+    monitor_prune_interval_seconds: int = Field(default=86400, ge=3600, le=604800)
+    monitor_notification_retention_days: int = Field(default=90, ge=1, le=3650)
+    monitor_scan_retention_days: int = Field(default=7, ge=1, le=365)
     knowledge_parser_url: str | None = None
+    # Knowledge vector store backend. pgvector keeps vectors in the same
+    # PostgreSQL database as the documents, so retrieval joins visibility
+    # filters and vectors in one transaction and needs no extra service;
+    # milvus moves them to a dedicated cluster. Switch by config only.
+    knowledge_vector_backend: Literal["pgvector", "milvus"] = "pgvector"
+    # pgvector cannot index a typmod-free ``vector`` column, so the HNSW index
+    # is created lazily per embedding dimension (a partial expression index).
+    # Set false to stay on exact scan, which is exact and fast enough for the
+    # 10k-chunk ceiling but slower as a library grows.
+    knowledge_pgvector_hnsw: bool = True
     milvus_url: str | None = None
     milvus_token: SecretStr | None = None
     knowledge_s3_endpoint: str | None = None
@@ -312,6 +383,52 @@ class Settings(BaseSettings):
         if self.embedded_channel_worker is not None:
             return self.embedded_channel_worker
         return self.embedded_worker
+
+    @property
+    def memory_loops_enabled(self) -> bool:
+        """Whether any memory loop is expected to run at all.
+
+        Mirrors the gate in ``business_capabilities.memory.bootstrap``: a
+        deployment that turned every memory feature off legitimately has no
+        memory loop, embedded or standalone, so it must not be expected to
+        beat either.
+        """
+
+        return (
+            self.summary_enabled
+            or self.memory_extract_enabled
+            or self.memory_event_enabled
+            or self.memory_decay_enabled
+            or self.memory_rule_scan_interval_minutes > 0
+        )
+
+    @property
+    def expected_worker_roles(self) -> tuple[str, ...]:
+        """Heartbeat roles this deployment must see fresh on every scan.
+
+        The set follows whichever process owns each loop, so one check covers
+        both topologies: quickstart embeds the loops in the API process,
+        production hands them to standalone containers. Either way the role
+        name is identical, so the check cannot tell (and does not need to)
+        which process wrote the beat.
+
+        A role only belongs here when something is actually supposed to start
+        it — expecting a loop the deployment never runs turns the checklist
+        permanently red and trains operators to ignore it.
+        """
+
+        roles = ["webhook"]
+        if self.embedded_worker:
+            roles.append("runtime")
+            if self.channel_worker_embedded:
+                roles += ["channel_delivery", "channel_inbound"]
+        else:
+            roles += ["runtime", "channel_delivery", "channel_inbound"]
+        if self.memory_loops_enabled:
+            roles.append("memory")
+        if self.embedded_worker or self.knowledge_worker_expected:
+            roles.append("knowledge")
+        return tuple(roles)
 
     @property
     def service_app_vault_key_file(self) -> Path:

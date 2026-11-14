@@ -25,6 +25,7 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
 )
 from agent_platform.extension_contracts import BusinessScope
 
+from .parsers import LOCAL_FORMATS, parse_file
 from .service import DocumentInput
 
 FORMATS = {
@@ -73,7 +74,9 @@ class IngestionService:
             raise DomainError("unsupported_document_format", 415)
         if not content or len(content) > self.settings.knowledge_upload_bytes:
             raise DomainError("document_size_exceeded", 413)
-        if extension not in {".txt", ".md"} and not self.settings.knowledge_parser_url:
+        # Same split as the workspace path: everything in LOCAL_FORMATS is parsed
+        # in-process, so gate on the local formats rather than on txt/md alone.
+        if extension not in LOCAL_FORMATS and not self.settings.knowledge_parser_url:
             raise DomainError("parser_not_configured", 503)
         digest = hashlib.sha256(content).hexdigest()
         base_scope_sql, base_scope_params = resource_scope_clause(alias="k")
@@ -220,8 +223,20 @@ class IngestionService:
                         "knowledge/" + str(job["kb_id"]) + "/" + str(job["id"]) + "/original",
                         bytes(job["content"]),
                     )
-                if PurePath(job["filename"]).suffix.lower() in {".txt", ".md"}:
-                    pages = [ParsedPage(page_num=1, text=bytes(job["content"]).decode("utf-8-sig"))]
+                if PurePath(job["filename"]).suffix.lower() in LOCAL_FORMATS:
+                    # Reuse the in-process parser instead of refusing formats the
+                    # workspace path already handles (xlsx/docx/pptx/pdf/csv).
+                    parsed = await asyncio.to_thread(
+                        parse_file, job["filename"], bytes(job["content"])
+                    )
+                    pages = [
+                        ParsedPage(
+                            page_num=item["page_num"],
+                            text=item["text"],
+                            elements=item.get("elements") or [],
+                        )
+                        for item in parsed
+                    ]
                 else:
                     # Fixed deployment endpoint; parser owns format conversion and OCR.
                     async with self.client.stream(

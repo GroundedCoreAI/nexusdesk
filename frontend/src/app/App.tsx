@@ -1,5 +1,6 @@
 import {AuthBoundary} from '../features/auth/AuthBoundary';
 import {AccountMenu} from '../features/auth/AccountMenu';
+import { NotificationButton } from '../features/notifications/NotificationButton';
 import { useTranslation } from 'react-i18next';
 import { LanguageSelector } from '../i18n/LanguageSelector';
 import { t } from '../i18n/index';
@@ -146,7 +147,7 @@ function Shell({ reset }: {
     {page === 'service-apps'
       ? <Button className="service-apps-nav-toggle" type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/>
       : <div className="console-heading"><Button type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/><div><h1>{labelFor(page)}</h1><p className="page-description">{page === 'memory' ? t("查看客户档案与记忆，处理待确认的写入。") : page === 'tickets' ? t("跟进每一个问题，记录每一次处理。") : page === 'overview' ? t("了解服务运行情况，管理你的客服工作空间。") : page === 'models' ? t("统一接入模型服务，管理模型能力与发布方案。") : page === 'evaluation' ? t("跨 Agent 查看评测通过率、待复核队列与回归。") : page === 'members' ? t("管理组织成员、角色和访问状态。") : page === 'roles' ? t("查看固定角色的权限范围。") : page === 'security' ? t("管理当前账号的登录会话和访问安全。") : page === 'extensions' ? t("管理插件生命周期、配置版本和运行状态。") : page === 'approvals' ? t("处理待审批请求，查看决策记录。") : t("管理服务配置与协作，让客户问题得到持续跟进。")}</p></div></div>}
-    <div className="console-header-actions"><LanguageSelector /><AccountMenu access={() => navigate('access')}><Button type="text" aria-label={t("账户菜单")}><Avatar size="small">{role[0].toUpperCase()}</Avatar>{me.data?.tenant || t("未连接")}<Tag>{role}</Tag></Button></AccountMenu></div>
+    <div className="console-header-actions"><LanguageSelector /><NotificationButton onNavigate={path => router.navigate(path)} /><AccountMenu access={() => navigate('access')}><Button type="text" aria-label={t("账户菜单")}><Avatar size="small">{role[0].toUpperCase()}</Avatar>{me.data?.tenant || t("未连接")}<Tag>{role}</Tag></Button></AccountMenu></div>
   </Layout.Header>
     <Layout.Content className="console-content">{me.error && page !== 'access' && <div role="alert" className="alert error">{t("无法连接后端或读取权限：")}{me.error} <Button onClick={() => me.refresh()}>{t("重试")}</Button> <Button onClick={() => navigate('access')}>{t("设置凭据")}</Button></div>}{uiExtensions.error && <div role="alert" className="alert error">{t("无法加载 UI 扩展：")}{uiExtensions.error}</div>}{capabilities.error && <div role="alert" className="alert error">{t("无法加载扩展能力状态：")}{capabilities.error}</div>}<div className={`page module-page module-${page}`} key={page}><Suspense fallback={<Spin tip={t("正在加载页面")}><div style={{ minHeight: 160 }}/></Spin>}>{pageContent || <Empty>{t("扩展页面不可用")}</Empty>}</Suspense></div></Layout.Content>
   </Layout></Layout></Role.Provider>;

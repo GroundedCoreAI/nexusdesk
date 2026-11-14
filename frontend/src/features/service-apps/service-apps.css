@@ -1138,6 +1138,27 @@
 
 .module-service-apps .sa-skills-panel .sa-section-head .ant-input { width: 220px; }
 
+.module-service-apps .sa-section-head .sa-skill-execution-summary {
+  color: var(--sa-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.module-service-apps .sa-section-head .sa-skill-execution-hint {
+  color: var(--sa-warn-text, #ad6800);
+}
+
+/* Inherited skills are a fact to know, not a warning to fix. */
+
+.module-service-apps .sa-section-head .sa-skill-origin-hint {
+  color: var(--sa-muted);
+}
+
+.module-service-apps .sa-origin-tag {
+  margin-inline-end: 0;
+  white-space: nowrap;
+}
+
 .module-service-apps .sa-connections { margin-top: 0; }
 
 /* Drawers */

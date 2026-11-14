@@ -28,6 +28,27 @@ export const groups = [
     ],
   },
   {
+    key: 'scenarios',
+    zh: '业务场景',
+    en: 'Business scenarios',
+    pages: [
+      {
+        slug: 'scenarios/customer-service/overview',
+        source: 'docs/scenarios/customer-service/overview.md',
+        zh: '智能客服',
+        en: 'Customer service',
+        children: [
+          {
+            slug: 'scenarios/customer-service/recommended-questions',
+            source: 'docs/scenarios/customer-service/recommended-questions.md',
+            zh: '推荐问题设计取舍',
+            en: 'Recommended question design trade-offs',
+          },
+        ],
+      },
+    ],
+  },
+  {
     key: 'guides',
     zh: '使用指南',
     en: 'User guide',
@@ -136,4 +157,10 @@ export const groups = [
   },
 ];
 
-export const allPages = groups.flatMap((group) => group.pages);
+// Flatten nested page trees (`children`) so doc-sync publishes every listed
+// page, not just top-level ones.
+function flattenPages(pages) {
+  return pages.flatMap((page) => [page, ...(page.children ? flattenPages(page.children) : [])]);
+}
+
+export const allPages = groups.flatMap((group) => flattenPages(group.pages));

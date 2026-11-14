@@ -45,6 +45,66 @@ function testTag(skill: ApplicationSkill) {
     </Tag>;
 }
 
+/**
+ * Whether a run can actually call this skill.
+ *
+ * The list used to show "已启用" for skills that could never run, so operators
+ * only discovered the gap by debugging. Executability is derived from what the
+ * runtime checks: retrieval is a platform capability that needs no connection,
+ * query and action need an HTTP endpoint, and a handoff has no executor yet.
+ */
+export function executionState(
+    skill: ApplicationSkill,
+    connections: ApplicationConnection[],
+): { executable: boolean; reason: string } {
+    if (skill.type === 'knowledge') {
+        return { executable: true, reason: say('由平台内置的知识检索提供，无需连接。') };
+    }
+    if (skill.type === 'handoff') {
+        return { executable: false, reason: say('转人工技能尚未接入执行器，运行时会跳过。') };
+    }
+    const connection = connections.find(item => item.id === skill.connection_id);
+    if (!connection) {
+        return { executable: false, reason: say('技能没有绑定连接，运行时会跳过。') };
+    }
+    if (connection.executor_kind !== 'http') {
+        return { executable: false, reason: say('该连接的执行方式不是 HTTP，运行时会跳过。') };
+    }
+    if (!connection.endpoint) {
+        return { executable: false, reason: say('连接缺少服务地址，运行时会跳过。') };
+    }
+    return { executable: true, reason: connection.endpoint };
+}
+
+function executionTag(state: { executable: boolean; reason: string }) {
+    return state.executable
+        ? <Tooltip title={state.reason}><Tag color="green">{say('可执行')}</Tag></Tooltip>
+        : <Tooltip title={state.reason}><Tag>{say('未接入')}</Tag></Tooltip>;
+}
+
+/**
+ * Where a skill's behaviour comes from.
+ *
+ * Tool authorization is not inherited any more — the release's own skills decide
+ * what a run may call. What can still be inherited is the retrieval scope: a
+ * knowledge skill that names no bases searches whatever the Agent is bound to.
+ * Once it names bases, the release has taken that decision away from the Agent,
+ * and the tag says so — two applications on one Agent can then search differently.
+ */
+function originTag(skill: ApplicationSkill) {
+    if (skill.type === 'knowledge') {
+        const scoped = skill.knowledge_base_ids?.length || 0;
+        return <Tooltip title={scoped
+            ? say('已指定 {{v0}} 个知识库，只在这些库内检索。', { v0: scoped })
+            : say('平台内置技能：标识固定、无需连接，检索范围继承 Agent 绑定的知识库。')}>
+            <Tag color={scoped ? 'gold' : 'geekblue'}>
+                {scoped ? say('本应用指定') : say('继承 Agent')}
+            </Tag>
+        </Tooltip>;
+    }
+    return <Tag>{say('应用自建')}</Tag>;
+}
+
 export function SkillsTab({
     applicationKey,
     readOnly,
@@ -141,8 +201,20 @@ export function SkillsTab({
         {
             title: say('类型'),
             dataIndex: 'type',
-            width: 120,
+            width: 110,
             render: value => <Tag color="purple">{skillTypeLabel(value)}</Tag>,
+        },
+        {
+            title: say('来源'),
+            key: 'origin',
+            width: 120,
+            render: (_, skill) => originTag(skill),
+        },
+        {
+            title: say('运行'),
+            key: 'executable',
+            width: 100,
+            render: (_, skill) => executionTag(executionState(skill, connections)),
         },
         {
             title: say('连接'),
@@ -235,6 +307,16 @@ export function SkillsTab({
         },
     ];
 
+    const executableCount = items.filter(
+        skill => executionState(skill, connections).executable,
+    ).length;
+    const inheritedCount = items.filter(
+        skill => skill.type === 'knowledge' && !skill.knowledge_base_ids?.length,
+    ).length;
+    const scopedCount = items.filter(
+        skill => skill.type === 'knowledge' && Boolean(skill.knowledge_base_ids?.length),
+    ).length;
+
     return <div className="sa-skills-tab">
         <section className="sa-skills-panel">
             <div className="sa-section-head">
@@ -242,6 +324,25 @@ export function SkillsTab({
                     <span className="sa-eyebrow">{say('技能')}</span>
                     <h3>{say('技能')}</h3>
                     <p>{say('技能直接属于应用，只能使用本应用连接；发布时固定当前配置。')}</p>
+                    <p className="sa-skill-execution-summary">
+                        {say('本页 {{v0}} 个可执行 · {{v1}} 个未接入', {
+                            v0: executableCount,
+                            v1: items.length - executableCount,
+                        })}
+                    </p>
+                    {items.length > executableCount && <p className="sa-skill-execution-hint">
+                        {say('未接入的技能可以保存和发布，但运行时不会调用；调整连接后即可执行。')}
+                    </p>}
+                    {inheritedCount > 0 && <p className="sa-skill-origin-hint">
+                        {say('{{v0}} 个技能继承自 Agent：检索范围沿用 Agent 绑定的知识库，本页不单独设置。', {
+                            v0: inheritedCount,
+                        })}
+                    </p>}
+                    {scopedCount > 0 && <p className="sa-skill-origin-hint">
+                        {say('{{v0}} 个技能已指定知识库：只在这些库内检索，不再跟随 Agent。', {
+                            v0: scopedCount,
+                        })}
+                    </p>}
                 </div>
                 <Space>
                     <Input
@@ -275,7 +376,7 @@ export function SkillsTab({
                 dataSource={items}
                 loading={loading}
                 size="middle"
-                scroll={{ x: 980 }}
+                scroll={{ x: 1200 }}
                 pagination={{
                     current: page,
                     pageSize,

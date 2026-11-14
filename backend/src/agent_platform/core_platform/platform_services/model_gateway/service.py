@@ -1,3 +1,4 @@
+import re
 from typing import Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
@@ -13,6 +14,17 @@ class ChatModel(Protocol):
 class DemoModel:
     """Deterministic plumbing demo. Never represents real model or business results."""
 
+    #: Application skill lookups the demo model can drive, so the example
+    #: applications demonstrate their HTTP skill chain against mock-business
+    #: without a real model backend. Each entry: keyword, tool name, argument
+    #: name, fixture-ID regex, fallback fixture ID.
+    _SKILL_ROUTES: tuple[tuple[str, str, str, str, str], ...] = (
+        ("订单", "order_lookup", "order_no", r"PO\d+", "PO20261110001"),
+        ("行程", "trip_lookup", "trip_no", r"TR\d+", "TR20261110001"),
+        ("作品", "content_status", "work_id", r"WK\d+", "WK20261110001"),
+        ("角色", "player_lookup", "role_id", r"ROLE-\d+", "ROLE-1001"),
+    )
+
     def __init__(self, schemas=None):
         self.available = {s["function"]["name"] for s in (schemas or [])}
 
@@ -20,6 +32,19 @@ class DemoModel:
         if isinstance(messages[-1], ToolMessage):
             return AIMessage(content="[演示模式] API 工具结果：" + str(messages[-1].content))
         text = str(messages[-1].content)
+        for keyword, tool, argument, pattern, fallback in self._SKILL_ROUTES:
+            if keyword in text and tool in self.available:
+                match = re.search(pattern, text)
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": f"demo_{tool}",
+                            "name": tool,
+                            "args": {argument: match.group(0) if match else fallback},
+                        }
+                    ],
+                )
         if "工单" in text and "propose_ticket" in self.available:
             return AIMessage(
                 content="",

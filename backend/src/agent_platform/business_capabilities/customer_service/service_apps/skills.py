@@ -234,6 +234,40 @@ WHERE c.tenant_id=:tenant
         )
         return row
 
+    async def _knowledge_bases(
+        self,
+        connection: Any,
+        tenant: str,
+        application: dict[str, Any],
+        ids: list[UUID],
+    ) -> None:
+        """Reject knowledge bases the release could never search.
+
+        Retrieval fails the whole tool call with ``knowledge_base_not_found`` when
+        one id is missing or disabled, so a typo would otherwise surface as a broken
+        assistant in the preview rather than as a validation error at save time.
+        """
+
+        if not ids:
+            return
+        rows = await many(
+            connection,
+            """
+SELECT k.id FROM knowledge_bases k
+WHERE k.tenant_id=:tenant
+  AND k.business_id=:business
+  AND k.workspace_id=:workspace
+  AND k.enabled
+  AND k.id=ANY(CAST(:ids AS uuid[]))
+""",
+            tenant=tenant,
+            business=application["scope"].business_id,
+            workspace=application["scope"].workspace_id,
+            ids=[str(item) for item in ids],
+        )
+        if {row["id"] for row in rows} != set(ids):
+            raise DomainError("service_application_knowledge_base_not_found", 404)
+
     async def _get_row(
         self,
         connection: Any,
@@ -351,6 +385,12 @@ ORDER BY s.type,s.name,s.skill_key
                     application,
                     validated.connection_key,
                 )
+            await self._knowledge_bases(
+                connection,
+                tenant,
+                application,
+                validated.knowledge_base_ids,
+            )
             duplicate = await one(
                 connection,
                 """
@@ -455,6 +495,12 @@ WHERE id=:application_id
                     application,
                     validated.connection_key,
                 )
+            await self._knowledge_bases(
+                connection,
+                tenant,
+                application,
+                validated.knowledge_base_ids,
+            )
             await execute(
                 connection,
                 """

@@ -12,7 +12,11 @@ x-backend: &backend
     AGENT_ENVIRONMENT: production
     AGENT_QUICKSTART_MODE: "false"
     AGENT_EMBEDDED_WORKER: "false"
+    AGENT_KNOWLEDGE_WORKER_EXPECTED: "true"
     AGENT_MODEL_CREDENTIAL_KEY_FILE: /data/credentials/master.key
+    # Where the prewired example applications reach the demo upstream from
+    # inside the api container. Must stay consistent with AGENT_TOOL_ALLOWED_HOSTS.
+    AGENT_EXAMPLE_MOCK_BASE_URL: ${AGENT_EXAMPLE_MOCK_BASE_URL:-http://mock-business:8010}
   volumes:
     - credentials:/data/credentials
   stop_grace_period: 45s

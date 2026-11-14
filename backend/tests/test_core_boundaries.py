@@ -187,6 +187,7 @@ def test_platform_services_exposes_explicit_service_groups_and_runtime_ports():
         "staff": object(),
         "members": object(),
         "observability": object(),
+        "monitoring": object(),
         "open_platform": object(),
         "evaluation": object(),
     }

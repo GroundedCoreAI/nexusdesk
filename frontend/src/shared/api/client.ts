@@ -554,3 +554,75 @@ export const patch = <T,>(path: string, body: unknown) => api<T>(path, { method:
 export const retryExtensionEvent = (eventId: string) =>
   post<ExtensionEventTask>(`/extensions/events/${eventId}/retry`);
 export const getModules = (signal?: AbortSignal) => api<PlatformModule[]>('/modules', { signal });
+
+// Notification centre: the checklist is a backend-owned snapshot (the browser
+// never probes dependencies itself), notifications are state transitions.
+export type MonitorStatus = 'pass' | 'warn' | 'fail' | 'not_configured' | 'unknown' | 'stale';
+export type MonitorSeverity = 'P0' | 'P1' | 'P2' | 'P3';
+export interface MonitorCheck {
+  check_id: string;
+  type: 'required' | 'conditional' | 'optional';
+  status: MonitorStatus;
+  severity: MonitorSeverity;
+  title: string;
+  summary: string;
+  evidence: Record<string, string | number | boolean | null>;
+  checked_at: string | null;
+  first_seen_at: string | null;
+  changed_at: string | null;
+  stale: boolean;
+  action: { label: string; route: string } | null;
+}
+export interface MonitorCheckGroup { id: string; title: string; status: string; items: MonitorCheck[] }
+export interface MonitorChecklist {
+  overall_status: 'healthy' | 'degraded' | 'down' | 'unknown';
+  generated_at: string;
+  scan_age_seconds: number | null;
+  counts: Record<MonitorSeverity, number>;
+  groups: MonitorCheckGroup[];
+}
+export interface MonitorNotification {
+  id: string;
+  check_id: string;
+  kind: 'opened' | 'recovered' | 'reminder' | 'unstable';
+  severity: MonitorSeverity;
+  status: 'active' | 'acknowledged' | 'resolved' | 'suppressed';
+  title: string;
+  impact: string;
+  evidence: Record<string, string | number | boolean | null>;
+  source: string;
+  action_label: string | null;
+  action_route: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  created_at: string;
+  /** Read state is independent of status: reading a live alert never silences it. */
+  read_at: string | null;
+}
+/** Paged feed: the modal needs a total to size its pagination, the bell does not. */
+export interface MonitorNotificationPage { items: MonitorNotification[]; total: number }
+export interface MonitorNotificationQuery {
+  status?: 'active' | 'acknowledged' | 'resolved' | 'suppressed';
+  severity?: MonitorSeverity;
+  unread?: boolean;
+  limit?: number;
+  offset?: number;
+}
+export const getMonitorChecklist = (signal?: AbortSignal) =>
+  api<MonitorChecklist>('/notifications/checklist', { signal });
+export const getNotificationUnreadCount = (signal?: AbortSignal) =>
+  api<{ count: number }>('/notifications/unread-count', { signal });
+export const getMonitorNotifications = (query: MonitorNotificationQuery = {}, signal?: AbortSignal) => {
+  const params = new URLSearchParams();
+  if (query.status) params.set('status', query.status);
+  if (query.severity) params.set('severity', query.severity);
+  if (query.unread) params.set('unread', 'true');
+  params.set('limit', String(query.limit ?? 20));
+  params.set('offset', String(query.offset ?? 0));
+  return api<MonitorNotificationPage>(`/notifications?${params.toString()}`, { signal });
+};
+export const markNotificationRead = (id: string) =>
+  post<{ id: string; read_at: string }>(`/notifications/${id}/read`);
+export const markAllNotificationsRead = () => post<{ updated: number }>('/notifications/read-all');
+export const acknowledgeNotification = (id: string) => post<{ id: string; status: string }>(`/notifications/${id}/acknowledge`);

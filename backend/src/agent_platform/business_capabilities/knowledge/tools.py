@@ -24,6 +24,34 @@ class KnowledgeSearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=500)
 
 
+def trace_sources(results) -> list[dict]:
+    """Shape retrieval hits for a trace payload.
+
+    Shared by the real tool and the application preview so both traces read the
+    same. The excerpt keeps the whole chunk — chunk size is already bounded by
+    the chunking policy, and a window that stops at the repeated table header
+    shows a reviewer nothing. ``score`` is the RRF fusion score (1/(60+rank)
+    summed over channels), not a cosine similarity, so the per-channel scores
+    travel with it: without them a reviewer reads 0.03 as "3% relevant" when it
+    means "ranked first in both channels".
+    """
+
+    return [
+        {
+            "document_id": str(result["document_id"]),
+            "title": result["title"],
+            "version": result["version"],
+            "chunk_id": str(result["chunk_id"]),
+            "score": result.get("score"),
+            "channels": result.get("channels"),
+            "scores": result.get("scores"),
+            "rerank_score": result.get("rerank_score"),
+            "excerpt": (result.get("excerpt") or "").strip(),
+        }
+        for result in results
+    ]
+
+
 KNOWLEDGE_SEARCH_TOOL = ToolDefinition(
     name="knowledge_search",
     description="搜索授权知识库，返回标题、版本、片段和来源。回答请引用标题及版本。",
@@ -68,13 +96,16 @@ class KnowledgeToolContribution:
             knowledge_base_ids,
         )
         results = json.loads(json.dumps(results, default=str))
-        sources = [
-            {key: result[key] for key in ("document_id", "title", "version", "chunk_id")}
-            for result in results
-        ]
+        # The trace needs to answer "what did the model ask, what came back". Title and
+        # ids alone only prove a call happened; the excerpt and score are the evidence.
+        sources = trace_sources(results)
         if emit is not None:
-            await emit("knowledge.retrieved", {"sources": sources})
-        if self.events is not None:
+            await emit("knowledge.retrieved", {"query": params.query, "sources": sources})
+        # The bus is keyed by run: without one (an application preview runs with
+        # no persisted run) the envelope has no aggregate to attach to and every
+        # query would collide on "None". The local emit above still feeds the
+        # preview's diagnosis, so nothing is lost.
+        if self.events is not None and request.context.run_id is not None:
             await self.events.publish(
                 EventEnvelope(
                     event_type="knowledge.retrieved",

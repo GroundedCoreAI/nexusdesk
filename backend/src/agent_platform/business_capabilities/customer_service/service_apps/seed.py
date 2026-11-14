@@ -1,18 +1,32 @@
 """Immutable service-application examples installed at startup.
 
-The examples are application-v2 templates. They deliberately contain no
-credentials and no external side effects: copied applications must configure
-their own connection secrets before publishing.
+The examples are application-v2 templates. They carry no credentials; their
+``query``/``action`` skills point at the bundled mock-business demo API (base
+URL overridable via ``AGENT_EXAMPLE_MOCK_BASE_URL``), so a fresh install demos
+skill orchestration out of the box while copied applications still configure
+their own real connections before publishing.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from typing import Any
 
 EXAMPLE_KEY_PREFIX = "example-"
-EXAMPLE_TEMPLATE_VERSION = "2026-11-12.2"
+EXAMPLE_TEMPLATE_VERSION = "2026-11-15.1"
+
+#: Base URL of the bundled mock-business demo API. Examples ship wired to it so
+#: a fresh install demos skill orchestration out of the box; deployments reach
+#: it at ``127.0.0.1:8010`` from the host or ``http://mock-business:8010`` from
+#: a containerised backend.
+MOCK_BASE_URL_ENV = "AGENT_EXAMPLE_MOCK_BASE_URL"
+MOCK_BASE_URL_DEFAULT = "http://127.0.0.1:8010"
+
+
+def mock_base_url() -> str:
+    return os.environ.get(MOCK_BASE_URL_ENV, "").strip() or MOCK_BASE_URL_DEFAULT
 
 
 def _digest(value: object) -> str:
@@ -29,8 +43,9 @@ def _connection(
     key: str,
     name: str,
     *,
-    executor_kind: str = "internal",
-    method: str = "POST",
+    executor_kind: str = "http",
+    endpoint: str | None = None,
+    method: str = "GET",
     auth_kind: str = "none",
     timeout_seconds: int = 10,
 ) -> dict[str, Any]:
@@ -38,7 +53,7 @@ def _connection(
         "key": key,
         "name": name,
         "executor_kind": executor_kind,
-        "endpoint": None,
+        "endpoint": endpoint,
         "method": method,
         "public_headers": {},
         "auth_kind": auth_kind,
@@ -191,18 +206,39 @@ def _template(
 def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
     """Return the code-owned application examples for a published Agent."""
 
-    order_connection = _connection("orders", "订单业务接口")
-    refund_connection = _connection("after-sales", "售后业务接口")
+    base = mock_base_url()
     knowledge_connection = _connection(
         "knowledge",
         "知识库检索",
         executor_kind="internal",
         method="POST",
     )
-    ticket_connection = _connection("tickets", "人工工单接口")
-    account_connection = _connection("accounts", "玩家账号接口")
-    content_connection = _connection("content", "内容发布接口")
-    trip_connection = _connection("trips", "行程接口")
+    # One connection per (URL, method) pair: a tool's URL is the connection
+    # endpoint verbatim, so GET lookups and POST submissions cannot share one.
+    shopping_order_connection = _connection(
+        "orders", "订单查询接口", endpoint=f"{base}/orders", method="GET"
+    )
+    shopping_refund_connection = _connection(
+        "after-sales", "售后受理接口", endpoint=f"{base}/after-sales", method="POST"
+    )
+    game_role_connection = _connection(
+        "accounts", "游戏角色接口", endpoint=f"{base}/game/roles", method="GET"
+    )
+    game_appeal_connection = _connection(
+        "tickets", "处罚申诉接口", endpoint=f"{base}/game/sanctions/appeal", method="POST"
+    )
+    creator_work_connection = _connection(
+        "content", "作品审核接口", endpoint=f"{base}/creator/works", method="GET"
+    )
+    creator_appeal_connection = _connection(
+        "tickets", "版权投诉接口", endpoint=f"{base}/creator/copyright/complaints", method="POST"
+    )
+    mobility_trip_connection = _connection(
+        "trips", "行程查询接口", endpoint=f"{base}/mobility/trips", method="GET"
+    )
+    mobility_safety_connection = _connection(
+        "tickets", "安全事件接口", endpoint=f"{base}/mobility/safety-reports", method="POST"
+    )
 
     game_experience = _experience(
         welcome_text=(
@@ -798,7 +834,7 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
             description="处理账号、充值、道具与封禁申诉的标准案例。",
             agent=agent,
             handoff_queue="game-support",
-            connections=[knowledge_connection, account_connection, ticket_connection],
+            connections=[knowledge_connection, game_role_connection, game_appeal_connection],
             experience=game_experience,
             skills=[
                 _skill(
@@ -813,12 +849,17 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
                     "玩家资料查询",
                     "query",
                     connection_key="accounts",
-                    description="按玩家 ID 查询账号状态。",
+                    description="按角色 ID 查询游戏账号状态。",
                     parameters={
                         "type": "object",
                         "additionalProperties": False,
-                        "properties": {"player_id": {"type": "string"}},
-                        "required": ["player_id"],
+                        "properties": {
+                            "role_id": {
+                                "type": "string",
+                                "description": "角色 ID，如 ROLE-1001",
+                            }
+                        },
+                        "required": ["role_id"],
                     },
                 ),
                 _skill(
@@ -826,7 +867,22 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
                     "创建封禁申诉",
                     "action",
                     connection_key="tickets",
-                    description="创建需要人工审核的封禁申诉。",
+                    description="提交处罚申诉（需要处罚记录号，如 SN20261110001）。",
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "record_no": {
+                                "type": "string",
+                                "description": "处罚记录号，如 SN20261110001",
+                            },
+                            "note": {
+                                "type": "string",
+                                "description": "申诉说明",
+                            },
+                        },
+                        "required": ["record_no"],
+                    },
                     requires_confirmation=True,
                     write_operation=True,
                 ),
@@ -838,7 +894,7 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
             description="订单、物流、退款和发票问题的标准案例。",
             agent=agent,
             handoff_queue="order-support",
-            connections=[knowledge_connection, order_connection, refund_connection],
+            connections=[knowledge_connection, shopping_order_connection, shopping_refund_connection],
             experience=shopping_experience,
             skills=[
                 _skill(
@@ -857,7 +913,12 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
                     parameters={
                         "type": "object",
                         "additionalProperties": False,
-                        "properties": {"order_no": {"type": "string"}},
+                        "properties": {
+                            "order_no": {
+                                "type": "string",
+                                "description": "订单号，如 PO20261110001",
+                            }
+                        },
                         "required": ["order_no"],
                     },
                 ),
@@ -866,7 +927,22 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
                     "发起退款申请",
                     "action",
                     connection_key="after-sales",
-                    description="创建退款申请，执行前必须由人工确认。",
+                    description="创建售后/退款申请，执行前必须由人工确认。",
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "order_no": {
+                                "type": "string",
+                                "description": "订单号，如 PO20261110001",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "售后原因",
+                            },
+                        },
+                        "required": ["order_no"],
+                    },
                     requires_confirmation=True,
                     write_operation=True,
                 ),
@@ -878,7 +954,7 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
             description="处理内容发布、版权申诉和创作激励咨询的标准案例。",
             agent=agent,
             handoff_queue="creator-support",
-            connections=[knowledge_connection, content_connection, ticket_connection],
+            connections=[knowledge_connection, creator_work_connection, creator_appeal_connection],
             experience=creator_experience,
             skills=[
                 _skill(
@@ -893,14 +969,40 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
                     "内容审核状态",
                     "query",
                     connection_key="content",
-                    description="查询内容审核状态与原因。",
+                    description="查询作品审核状态与原因。",
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "work_id": {
+                                "type": "string",
+                                "description": "作品 ID，如 WK20261110001",
+                            }
+                        },
+                        "required": ["work_id"],
+                    },
                 ),
                 _skill(
                     "copyright_appeal",
                     "版权申诉",
                     "action",
                     connection_key="tickets",
-                    description="提交版权申诉并进入人工复核。",
+                    description="提交版权/审核投诉并进入人工复核。",
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "work_id": {
+                                "type": "string",
+                                "description": "作品 ID，如 WK20261110001",
+                            },
+                            "evidence": {
+                                "type": "string",
+                                "description": "权属证明说明",
+                            },
+                        },
+                        "required": ["work_id"],
+                    },
                     requires_confirmation=True,
                     write_operation=True,
                 ),
@@ -912,7 +1014,7 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
             description="行程、费用和司乘安全问题的标准案例。",
             agent=agent,
             handoff_queue="mobility-support",
-            connections=[knowledge_connection, trip_connection, ticket_connection],
+            connections=[knowledge_connection, mobility_trip_connection, mobility_safety_connection],
             experience=mobility_experience,
             skills=[
                 _skill(
@@ -928,13 +1030,39 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
                     "query",
                     connection_key="trips",
                     description="查询行程与费用明细。",
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "trip_no": {
+                                "type": "string",
+                                "description": "行程号，如 TR20261110001",
+                            }
+                        },
+                        "required": ["trip_no"],
+                    },
                 ),
                 _skill(
                     "safety_report",
                     "安全事件上报",
                     "action",
                     connection_key="tickets",
-                    description="登记安全事件并立即转人工。",
+                    description="登记行程安全事件并立即转人工。",
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "trip_no": {
+                                "type": "string",
+                                "description": "行程号，如 TR20261110001",
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "事件描述",
+                            },
+                        },
+                        "required": ["trip_no", "description"],
+                    },
                     requires_confirmation=True,
                     write_operation=True,
                 ),
@@ -946,5 +1074,8 @@ def example_applications(agent: dict[str, Any]) -> list[dict[str, Any]]:
 __all__ = [
     "EXAMPLE_KEY_PREFIX",
     "EXAMPLE_TEMPLATE_VERSION",
+    "MOCK_BASE_URL_DEFAULT",
+    "MOCK_BASE_URL_ENV",
     "example_applications",
+    "mock_base_url",
 ]

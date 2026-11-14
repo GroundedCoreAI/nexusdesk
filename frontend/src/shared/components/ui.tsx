@@ -148,6 +148,23 @@ export interface RunTool {
     error?: string | null;
     durationMs?: number;
 }
+/** One hit inside a knowledge.retrieved payload. */
+export interface RunKnowledgeSource {
+    document_id?: string;
+    title?: string;
+    version?: number;
+    chunk_id?: string;
+    /** RRF fusion score (1/(60+rank) per channel), not a similarity. */
+    score?: number | null;
+    channels?: string[] | null;
+    scores?: Record<string, number | null> | null;
+    rerank_score?: number | null;
+    excerpt?: string;
+}
+export interface RunKnowledgeRetrieval {
+    query?: string;
+    sources?: RunKnowledgeSource[];
+}
 /**
  * Subscribe to a run's event stream. Durable events come from the log and carry a
  * seq cursor; token deltas arrive live and are transient, so they are accumulated
@@ -356,12 +373,39 @@ export function usePacedText(): [string, (value: string) => void] {
 function seconds(ms?: number | null): string {
     return ms == null ? '\u2014' : `${(ms / 1000).toFixed(2)}s`;
 }
+/** Four decimals for fusion scores (0.0328) and three for similarities (0.612). */
+function score(value?: number | null): string {
+    if (value == null)
+        return '\u2014';
+    return Math.abs(value) >= 0.1 ? value.toFixed(3) : value.toFixed(4);
+}
+function channelLabel(channel: string): string {
+    if (channel === 'vector')
+        return t("向量");
+    if (channel === 'keyword')
+        return t("关键词");
+    return channel;
+}
+/** One block per retrieval call: what was asked, which chunks answered, how they scored. */
+export function KnowledgeRecall({ items }: {
+    items: RunKnowledgeRetrieval[];
+}) {
+    return <>{items.map((item, i) => <div key={`recall-${i}`} className="trace-recall"><div className="trace-recall-head"><strong>{t("知识召回")}</strong><span className="mono">{item.query}</span><span className="muted">{t("{{v0}} 条", { v0: item.sources?.length ?? 0 })}</span></div>
+    {!item.sources?.length && <small className="muted">{t("本次检索没有命中任何片段")}</small>}
+    {(item.sources ?? []).map((source, j) => <div key={`${source.chunk_id}-${j}`} className="trace-recall-hit"><div className="trace-recall-meta"><span className="trace-recall-rank">{j + 1}</span><strong>{source.title || t("未命名文档")}</strong>{source.version != null && <span className="mono muted">v{source.version}</span>}{(source.channels ?? []).map(channel => <span key={channel} className="badge">{channelLabel(channel)}</span>)}{source.rerank_score != null && <span className="mono muted">{t("重排 {{v0}}", { v0: score(source.rerank_score) })}</span>}<span className="mono muted" title={t("融合分是各通道排名的 RRF 分值，不是相似度；看下方通道分判断相关性。")}>{t("融合 {{v0}}", { v0: score(source.score) })}</span></div>
+    {source.scores && <div className="mono muted trace-recall-scores">{(source.channels ?? Object.keys(source.scores)).map(channel => `${channelLabel(channel)} ${score(source.scores?.[channel])}`).join(' · ')}</div>}
+    <p className="trace-recall-text">{source.excerpt || t("（无摘录）")}</p></div>)}
+    </div>)}</>;
+}
 export function Trace({ runId }: {
     runId: string | null;
 }) {
     const { events, rounds, tools, error } = useRunStream(runId);
     if (!runId)
         return <Empty>{t("选择一次运行查看事件")}</Empty>;
+    // Retrieval evidence is the point of tracing a RAG run; the raw event log buries
+    // it behind two clicks, so the hits are also rendered as their own block.
+    const retrievals = events.flatMap(event => event.type === 'knowledge.retrieved' ? [event.data as RunKnowledgeRetrieval] : []);
     const modelMs = rounds.reduce((sum, r) => sum + (r.durationMs || 0), 0);
     const toolMs = tools.reduce((sum, x) => sum + (x.durationMs || 0), 0);
     const tokens = rounds.reduce((sum, r) => sum + (r.tokens || 0), 0);
@@ -370,6 +414,7 @@ export function Trace({ runId }: {
     {rounds.map(r => <div key={r.round} className={`trace-verdict ${r.toolCalls ? 'is-preamble' : 'is-answer'}`}><strong>{t("第 {{v0}} 轮", { v0: r.round })}</strong><Badge value={r.toolCalls ? t("过程") : t("最终回答")}/><span className="mono muted">{seconds(r.durationMs)}</span>{r.firstTokenMs != null && <span className="mono muted">{t("首字 {{v0}}", { v0: `${r.firstTokenMs}ms` })}</span>}{r.toolCalls ? <span className="muted">{t("调用 {{v0}} 个工具", { v0: r.toolCalls })}</span> : null}{r.tokens ? <span className="mono muted">{r.tokens.toLocaleString()} tokens</span> : null}</div>)}
     {tools.map((x, i) => <div key={`${x.callId}-${i}`} className="trace-verdict"><Badge value={x.ok ? t("成功") : t("失败")}/><span className="mono">{x.name}</span><span className="mono muted">{seconds(x.durationMs)}</span>{x.error && <small className="error-text">{x.error}</small>}</div>)}
     </div>}
+    {retrievals.length > 0 && <KnowledgeRecall items={retrievals}/>}
     {rounds.map(r => <div key={r.round} className="trace-round"><small className="mono muted">{t("第 {{v0}} 轮", { v0: r.round })}{r.toolCalls ? t("（过程）") : ''}</small>{r.reasoning ? <details open><summary>{t("思维链")}</summary><pre className="mono">{r.reasoning}</pre></details> : null}{r.text ? <pre className="mono">{r.text}</pre> : null}</div>)}
     {events.length > 0 && <details className="trace-raw"><summary>{t("原始事件（{{v0}}）", { v0: events.length })}</summary>{events.map(event => <details key={event.id}><summary><span className="mono">{String(event.id).padStart(2, '0')}</span> {event.type}</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details>)}</details>}
     {events.length === 0 && rounds.length === 0 && <Empty>{t("等待执行事件\u2026")}</Empty>}</div>;

@@ -172,6 +172,12 @@ class ApplicationSkill(ServiceApplicationModel):
     result_schema: dict[str, Any] = Field(default_factory=dict)
     safety: SkillSafety = Field(default_factory=SkillSafety)
     write_operation: bool = False
+    # A knowledge skill may name the bases it searches. Empty keeps the behaviour
+    # every existing release relies on: search whatever the bound Agent searches.
+    # It stays empty rather than being filled with the Agent's list at save time,
+    # because that list belongs to an Agent version — copying it here would make a
+    # release silently keep searching bases the Agent no longer has.
+    knowledge_base_ids: list[UUID] = Field(default_factory=list, max_length=20)
 
     @field_validator("parameters", mode="before")
     @classmethod
@@ -214,6 +220,10 @@ class ApplicationSkill(ServiceApplicationModel):
             )
         if self.safety.max_amount is not None and self.type != SkillType.ACTION:
             raise ValueError("max_amount is only valid for action skills")
+        if self.knowledge_base_ids and self.type != SkillType.KNOWLEDGE:
+            raise ValueError("only knowledge skills may scope knowledge bases")
+        if len(set(self.knowledge_base_ids)) != len(self.knowledge_base_ids):
+            raise ValueError("knowledge_base_ids must be unique")
         return self
 
 
@@ -524,6 +534,7 @@ class ApplicationSkillUpdate(ServiceApplicationModel):
     result_schema: dict[str, Any] = Field(default_factory=dict)
     safety: SkillSafety = Field(default_factory=SkillSafety)
     write_operation: bool = False
+    knowledge_base_ids: list[UUID] = Field(default_factory=list, max_length=20)
     revision: int = Field(ge=1)
 
     @model_validator(mode="after")

@@ -1,0 +1,146 @@
+.notice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 18px;
+}
+
+.notice-row + .notice-row {
+  border-top: 1px solid #f5f6fa;
+}
+
+/* The severity chip is a label, not a colour bar: without flex-start the flex
+   container stretches it to the full row height. */
+.notice-row > .monitor-severity {
+  margin-top: 2px;
+  min-width: 24px;
+  text-align: center;
+}
+
+.notice-row.is-unread .notice-row-title {
+  color: #1f2330;
+}
+
+.notice-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notice-row-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #565b6b;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notice-row-time {
+  flex: none;
+  margin-left: auto;
+  color: #a3a8b4;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.notice-status {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.notice-status.is-resolved { background: #e9f7ef; color: #24804f; }
+.notice-status.is-acknowledged { background: #eef2fb; color: #47628f; }
+.notice-status.is-suppressed { background: #f4f5f8; color: #737887; }
+
+/* Impact text and actions share one line, so a row is two lines tall, not four. */
+.notice-row-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.notice-row-impact {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: #7b8090;
+  font-size: 12px;
+  line-height: 20px;
+  word-break: break-word;
+}
+
+.notice-row-actions {
+  display: flex;
+  flex: none;
+  gap: 10px;
+}
+
+.notice-row-actions .ant-btn {
+  height: 20px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+/* Unread marker: a quiet dot, not a coloured bar, so the list stays readable. */
+.notice-row.is-unread .notice-row-head::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6356d9;
+}
+
+/* Modal list: denser rows, but the same component as the popover preview. */
+.notification-modal-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: min(56vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.notification-modal-empty {
+  padding: 46px 0;
+  text-align: center;
+}
+
+.notification-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notification-modal-total {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  color: #8f94a2;
+  font-size: 12px;
+}
+
+/* Read state is a bookmark, not a fix: say so where the button sits. */
+.notification-modal-hint {
+  color: #b0b4c0;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.notification-modal-actions {
+  display: inline-flex;
+  gap: 8px;
+}

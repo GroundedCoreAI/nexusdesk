@@ -34,6 +34,7 @@ from agent_platform.core_platform.platform_services.access_control.service impor
 from agent_platform.core_platform.platform_services.events import DurableEventBus
 from agent_platform.core_platform.platform_services.identity.staff import StaffDirectory
 from agent_platform.core_platform.platform_services.model_gateway.gateway import ModelGateway
+from agent_platform.core_platform.platform_services.monitoring.service import MonitoringService
 from agent_platform.core_platform.platform_services.observability.service import (
     ObservabilityService,
 )
@@ -46,6 +47,8 @@ from agent_platform.core_platform.tool_gateway.ledger import ToolOperationLedger
 from agent_platform.core_platform.tool_gateway.registry import ToolRegistry
 from agent_platform.core_platform.tool_gateway.replay import DurableToolReplayCache
 from agent_platform.core_platform.tool_gateway.workspace import ToolWorkspace
+
+from .monitoring_checks import BUSINESS_REGISTRATIONS
 
 
 class PlatformServices:
@@ -116,6 +119,13 @@ class PlatformServices:
             application_runtime=self.application_runtime,
         )
         self.confirmation = CustomerConfirmationAdapter(self.customer)
+        # B1: the application-scoped customer-session entry needs the Runtime
+        # conversation service and CustomerService, both constructed above.
+        self.service_apps.bind_sessions(
+            conversations=self.conversations,
+            customer=self.customer,
+            application_runtime=self.application_runtime,
+        )
         self.channels = ChannelService(
             engine,
             self.conversations,
@@ -127,6 +137,11 @@ class PlatformServices:
         # Phase 7: settings feed the maintenance-overdue cadence of rule_scan
         # (2x the configured scan interval) in the memory health sections.
         self.observability = ObservabilityService(engine, settings)
+        # Health checklist and notification centre. Platform checks ship with the
+        # core module; capability-level backlog probes are registered here so
+        # core_platform never imports business_capabilities.
+        self.monitoring = MonitoringService(engine, settings)
+        self.monitoring.register(BUSINESS_REGISTRATIONS)
         self.scope = TenantScopeService(engine)
         self.open_platform = OpenPlatform(self)
         self.evaluation = None

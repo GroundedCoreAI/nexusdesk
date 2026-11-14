@@ -47,6 +47,8 @@ export interface ApplicationSkill {
     argument_mapping: Record<string, unknown>;
     result_mapping: Record<string, unknown>;
     result_schema: Record<string, unknown>;
+    // Bases this skill searches. Empty means it inherits the Agent's list.
+    knowledge_base_ids: string[];
     safety: SkillSafety;
     last_test?: {
         status: 'passed' | 'failed' | 'untested';
@@ -379,6 +381,7 @@ export interface SkillInput {
     argument_mapping: Record<string, unknown>;
     result_mapping: Record<string, unknown>;
     result_schema: Record<string, unknown>;
+    knowledge_base_ids?: string[];
     safety: SkillSafety;
 }
 

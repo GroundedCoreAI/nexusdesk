@@ -48,8 +48,22 @@ class ExecutionPolicy:
             raise DomainError("tool_not_allowed", 403)
         return decision
 
-    async def evaluate_tool(self, context, name, allowed, risk: ToolRisk = "read"):
-        """Return a contract-level decision for a trusted tool invocation."""
+    async def evaluate_tool(
+        self,
+        context,
+        name,
+        allowed,
+        risk: ToolRisk = "read",
+        *,
+        registry_exempt: frozenset[str] = frozenset(),
+    ):
+        """Return a contract-level decision for a trusted tool invocation.
+
+        ``registry_exempt`` carries tool names the caller vouches are authorised
+        by a validated snapshot (application skill tools) and therefore do not
+        live in the tool registry at all. The registry check still applies to
+        every other name, so an operator-disabled registered tool stays blocked.
+        """
 
         policy_context = PolicyContext(
             tenant_id=context.tenant_id,
@@ -75,7 +89,8 @@ class ExecutionPolicy:
         )
         facts = ResourceFacts(
             context.tenant_id,
-            await self.registry.enabled(context.tenant_id, name),
+            name in registry_exempt
+            or await self.registry.enabled(context.tenant_id, name),
             name,
             frozenset(allowed),
         )

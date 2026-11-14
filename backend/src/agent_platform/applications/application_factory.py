@@ -14,6 +14,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from agent_platform.applications.business_registry import BusinessRegistry
 from agent_platform.applications.platform_runtime.runtime_composition import runtime_services
+from agent_platform.applications.platform_runtime.worker_heartbeat import serve_heartbeats
+from agent_platform.business_capabilities.knowledge.bootstrap import embedded_knowledge_worker
 from agent_platform.business_capabilities.memory.bootstrap import embedded_memory_worker
 from agent_platform.core_platform.agent_runtime.schemas import BusyError, CapacityError
 from agent_platform.core_platform.platform_services.access_control.routes import (
@@ -99,7 +101,16 @@ def create_app(
             )
             memory_worker = embedded_memory_worker(services.groups, settings)
             memory_task = asyncio.create_task(memory_worker.serve()) if memory_worker else None
+            knowledge_worker = embedded_knowledge_worker(business, settings)
+            knowledge_task = (
+                asyncio.create_task(knowledge_worker.serve()) if knowledge_worker else None
+            )
             webhook_task = asyncio.create_task(application.open_platform.webhooks.serve())
+            monitor_task = (
+                asyncio.create_task(application.monitoring.serve())
+                if settings.monitor_enabled
+                else None
+            )
             channel_task = (
                 asyncio.create_task(business.channels.serve_deliveries())
                 if settings.channel_worker_embedded
@@ -110,12 +121,35 @@ def create_app(
                 if settings.channel_worker_embedded
                 else None
             )
+            heartbeat_task = asyncio.create_task(
+                serve_heartbeats(
+                    services.groups.runtime.engine,
+                    {
+                        name: running
+                        for name, running in {
+                            "runtime": task,
+                            "memory": memory_task,
+                            "knowledge": knowledge_task,
+                            "webhook": webhook_task,
+                            "channel_delivery": channel_task,
+                            "channel_inbound": channel_inbound_task,
+                        }.items()
+                        if running is not None
+                    },
+                )
+            )
             try:
                 yield
             finally:
                 application.open_platform.webhooks.stopping.set()
                 webhook_task.cancel()
                 await asyncio.gather(webhook_task, return_exceptions=True)
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+                if monitor_task is not None:
+                    application.monitoring.stop()
+                    monitor_task.cancel()
+                    await asyncio.gather(monitor_task, return_exceptions=True)
                 if channel_task is not None:
                     channel_task.cancel()
                     await asyncio.gather(channel_task, return_exceptions=True)
@@ -128,6 +162,10 @@ def create_app(
                     memory_worker.stop()
                 if memory_task:
                     await memory_task
+                if knowledge_worker:
+                    knowledge_worker.stop()
+                if knowledge_task:
+                    await knowledge_task
                 if task:
                     await task
 

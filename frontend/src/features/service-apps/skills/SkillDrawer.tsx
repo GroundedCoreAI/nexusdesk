@@ -11,8 +11,10 @@ import {
     Space,
     Switch,
     Tabs,
+    Tag,
 } from 'antd';
-import { toast } from '../../../shared/components/ui';
+import { toast, useResource } from '../../../shared/components/ui';
+import type { KnowledgeBase } from '../../../shared/api/client';
 import {
     createSkill,
     testSkill,
@@ -33,6 +35,7 @@ interface Values {
     type: SkillInput['type'];
     enabled: boolean;
     connection_id?: string | null;
+    knowledge_base_ids: string[];
     parameters_json: string;
     argument_mapping_json: string;
     result_mapping_json: string;
@@ -91,6 +94,13 @@ export function SkillDrawer({
     const [activeTab, setActiveTab] = useState('basic');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
+    const skillType = Form.useWatch('type', form) ?? skill?.type ?? 'query';
+    // Retrieval is a platform capability: it has no endpoint, no argument mapping
+    // and no per-call safety rule, so the drawer only asks what the runtime reads.
+    const knowledgeOnly = skillType === 'knowledge';
+    // Only retrieval needs the list, and only while the drawer is open.
+    const bases = useResource<KnowledgeBase[]>(open && knowledgeOnly ? '/knowledge-bases' : null);
+    const scopedBases = Form.useWatch('knowledge_base_ids', form) as string[] | undefined;
 
     useEffect(() => {
         if (!open) return;
@@ -105,6 +115,7 @@ export function SkillDrawer({
             type: skill?.type || 'query',
             enabled: skill?.enabled ?? true,
             connection_id: skill?.connection_id || undefined,
+            knowledge_base_ids: skill?.knowledge_base_ids || [],
             parameters_json: pretty(skill?.parameters || {}),
             argument_mapping_json: pretty(skill?.argument_mapping || {}),
             result_mapping_json: pretty(skill?.result_mapping || {}),
@@ -117,6 +128,14 @@ export function SkillDrawer({
             on_error: safety.on_error,
         });
     }, [form, open, skill]);
+
+    useEffect(() => {
+        if (!open || !knowledgeOnly) return;
+        // One retrieval skill per application, and the backend derives the tool
+        // from the type: the identifier is a label, not a configuration knob.
+        if (!skill) form.setFieldValue('key', 'knowledge_search');
+        setActiveTab('basic');
+    }, [form, knowledgeOnly, open, skill]);
 
     function validateJson(values: Values) {
         const errors: Array<{ name: keyof Values; errors: string[] }> = [];
@@ -146,7 +165,17 @@ export function SkillDrawer({
 
     async function persist(): Promise<ApplicationSkill> {
         const values = await form.validateFields();
-        const objects = validateJson(values);
+        const knowledge = values.type === 'knowledge';
+        // The platform owns retrieval's contract: the drawer must not ask an
+        // operator to hand-write a schema for a tool the runtime already has.
+        const objects = knowledge
+            ? {
+                parameters: { type: 'object', properties: {}, additionalProperties: false },
+                argument_mapping: {},
+                result_mapping: {},
+                result_schema: { type: 'object', additionalProperties: true },
+            }
+            : validateJson(values);
         const safety: SkillSafety = {
             requires_confirmation: values.requires_confirmation,
             max_amount: values.max_amount ?? null,
@@ -168,6 +197,11 @@ export function SkillDrawer({
             ...objects,
             safety,
         };
+        // Only retrieval searches. Sending the field on any other type would be
+        // rejected by the contract, so the drawer simply leaves it off.
+        if (knowledge) {
+            input.knowledge_base_ids = values.knowledge_base_ids || [];
+        }
         return skill
             ? updateSkill(applicationKey, skill.key, input, skill.revision)
             : createSkill(applicationKey, input);
@@ -214,7 +248,7 @@ export function SkillDrawer({
                 { pattern: /^[a-z][a-z0-9_]{1,63}$/, message: say('技能标识只能使用小写字母、数字和下划线') },
             ]}
         >
-            <Input className="mono" disabled={Boolean(skill)} maxLength={64}/>
+            <Input className="mono" disabled={Boolean(skill) || knowledgeOnly} maxLength={64}/>
         </Form.Item>
         <Form.Item
             name="name"
@@ -235,7 +269,26 @@ export function SkillDrawer({
                 }))}
             />
         </Form.Item>
-        <Form.Item name="connection_id" label={say('连接')}>
+        {knowledgeOnly && <Form.Item
+            className="sa-form-span-2"
+            name="knowledge_base_ids"
+            label={say('知识库范围')}
+            extra={say('留空则继承 Agent 绑定的知识库；选中后只在这些库内检索。')}
+        >
+            <Select
+                mode="multiple"
+                allowClear
+                loading={bases.loading}
+                placeholder={say('继承 Agent 绑定的知识库')}
+                options={(bases.data || [])
+                    .filter(base => base.enabled)
+                    .map(base => ({
+                        value: base.id,
+                        label: `${base.name} · ${base.document_count}`,
+                    }))}
+            />
+        </Form.Item>}
+        {!knowledgeOnly && <Form.Item name="connection_id" label={say('连接')}>
             <Select
                 allowClear
                 options={connections.map(connection => ({
@@ -243,7 +296,7 @@ export function SkillDrawer({
                     label: `${connection.name} · ${connection.key}`,
                 }))}
             />
-        </Form.Item>
+        </Form.Item>}
         <Form.Item
             className="sa-form-span-2"
             name="description"
@@ -261,6 +314,21 @@ export function SkillDrawer({
         {skill && <Form.Item label={say('版本')}>
             <span className="mono">r{skill.revision}</span>
         </Form.Item>}
+        {knowledgeOnly && <div className="sa-form-span-2">
+            <Alert
+                type="info"
+                showIcon
+                message={<Space size={6} align="start">
+                    <Tag
+                        color={scopedBases?.length ? 'gold' : 'geekblue'}
+                        className="sa-origin-tag"
+                    >
+                        {scopedBases?.length ? say('本应用指定') : say('继承 Agent')}
+                    </Tag>
+                    <span>{say('知识检索由平台提供：标识固定、连接自动、参数由平台生成。知识库范围默认继承 Agent，也可在这里收窄。')}</span>
+                </Space>}
+            />
+        </div>}
     </div>;
 
     const mapping = <div className="sa-drawer-json-grid">
@@ -358,11 +426,13 @@ export function SkillDrawer({
             <Tabs
                 activeKey={activeTab}
                 onChange={setActiveTab}
-                items={[
-                    { key: 'basic', label: say('基本信息'), children: basic },
-                    { key: 'mapping', label: say('参数映射'), children: mapping },
-                    { key: 'safety', label: say('安全规则'), children: safety },
-                ]}
+                items={knowledgeOnly
+                    ? [{ key: 'basic', label: say('基本信息'), children: basic }]
+                    : [
+                        { key: 'basic', label: say('基本信息'), children: basic },
+                        { key: 'mapping', label: say('参数映射'), children: mapping },
+                        { key: 'safety', label: say('安全规则'), children: safety },
+                    ]}
             />
         </Form>
     </Drawer>;

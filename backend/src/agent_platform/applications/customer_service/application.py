@@ -11,6 +11,9 @@ from agent_platform.business_capabilities.knowledge.routes import router as know
 from agent_platform.business_capabilities.memory.routes import router as memory_router
 from agent_platform.business_capabilities.open_platform.routes import management as open_management
 from agent_platform.business_capabilities.open_platform.routes import public as open_public
+from agent_platform.core_platform.platform_services.monitoring.routes import (
+    router as notifications_router,
+)
 
 from .platform_routes import ingress
 from .platform_routes import router as platform_router
@@ -33,6 +36,7 @@ def register_customer_service_routes(
     app.include_router(memory_router, prefix=api_prefix)
     app.include_router(approval_router, prefix=api_prefix)
     app.include_router(service_app_router, prefix=api_prefix)
+    app.include_router(notifications_router, prefix=api_prefix)
     app.include_router(ingress, prefix=api_prefix)
     app.include_router(open_management, prefix=api_prefix)
     app.include_router(open_public, prefix=openapi_prefix)
