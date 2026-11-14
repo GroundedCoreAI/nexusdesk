@@ -1,13 +1,26 @@
 import asyncio
 import json
+from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from agent_platform.core_platform.agent_execution.contracts.snapshots import (
+    SNAPSHOT_COLUMNS,
+    ExecutionSnapshotError,
+    deserialize_execution_snapshots,
+)
 from agent_platform.core_platform.agent_runtime.hooks import RuntimePersistenceHooks
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL, channel
-from agent_platform.core_platform.agent_runtime.schemas import TERMINAL, BusyError, CapacityError
+from agent_platform.core_platform.agent_runtime.schemas import (
+    TERMINAL,
+    BusyError,
+    CapacityError,
+    ExecutionSnapshotPayloads,
+    SnapshotWriteOutcome,
+    SnapshotWriteResult,
+)
 from agent_platform.core_platform.platform_services.persistence.store import (
     DomainError,
     transaction,
@@ -249,6 +262,209 @@ class RunRepository:
                 "summary": history["summary"],
                 "customer_id": history["customer_id"],
             }
+
+    async def write_execution_snapshots(
+        self, run_id: UUID, owner: UUID, payloads: ExecutionSnapshotPayloads
+    ) -> SnapshotWriteResult:
+        """Write-once barrier for the five Phase 3 startup snapshots (03 §5.3).
+
+        Entry validation first (the payloads are the caller's handiwork, so
+        nothing is trusted): every column must be a JSON object string, and the
+        startup identity inside the DTO *and* inside each payload must be this
+        row's ``run_id`` (R-9: the identity lives in the snapshot, so a foreign
+        ``execution_id`` could otherwise be parked in an empty row and read back
+        as this run's authorization). A malformed payload raises
+        :class:`ExecutionSnapshotError`; an identity that is not this run's is
+        reported as ``audit_conflict`` without touching the database.
+
+        The write itself stays one conditional UPDATE in one transaction: the
+        row must be a live, running, lease-held claim by this owner and either
+        (a) all five snapshot columns are still NULL — the write then lands
+        atomically, so a statement or commit failure can never leave a partial
+        row — or (b) the row already carries this startup ``execution_id`` and
+        the same five payloads, so a retry of the same startup validates and
+        reuses without rewriting. Comparison (b) is PostgreSQL ``jsonb`` value
+        equality: the stored documents have to carry the same semantics, not the
+        same bytes, because ``jsonb`` re-encodes key order and whitespace. The
+        SQL enforces the identity invariant from both sides: every incoming
+        payload body — ``:config``, ``:declared``, ``:available``,
+        ``:effective``, ``:policy`` — is bound to the ``id`` of the row being
+        updated, while the stored branch accepts only a row whose
+        ``execution_config_snapshot`` already names this startup. The payload
+        side is the independent anchor: ``:execution_id`` is itself taken from
+        the caller's payloads, so binding to it would prove nothing. With all
+        five bodies bound, even a caller that skipped the entry guard cannot
+        land a column naming another run, and cannot point a row at another
+        run.
+
+        The result is a :class:`SnapshotWriteResult` (D-3), because a plain
+        boolean collapsed four different conditions into one word. Mapping for
+        the orchestration caller: ``audit_conflict`` -> fail closed with
+        ``Adapter.start`` at zero; ``not_claimed`` / ``lease_lost`` -> the
+        existing lost-lease / cancellation path, never a configuration error.
+        When the UPDATE matches no row a second, read-only statement classifies
+        why in the same transaction; that classification only picks the label,
+        it never decides whether the write happens. Historical rows keep NULL
+        snapshots; reads never backfill.
+        """
+
+        bodies = self._validated_snapshot_bodies(payloads)
+        if payloads.execution_id != run_id or any(
+            body.get("execution_id") != str(run_id) for body in bodies.values()
+        ):
+            # R-9: the identity inside the snapshot *is* this row's startup
+            # identity, so a foreign one is an audit conflict, never a write.
+            # This runs before the cleaning gate on purpose: whose row this is
+            # stays a controlled outcome (D-3's distinguishable ``audit_conflict``)
+            # and must not be re-reported as a payload-shape error.
+            return SnapshotWriteResult("audit_conflict")
+        # R-51: nothing below this line may reach SQL without the strict gate.
+        self._clean_snapshot_payloads(payloads)
+        async with self.engine.begin() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text("""WITH target AS (
+                SELECT execution_config_snapshot IS NULL
+                AND declared_capabilities_snapshot IS NULL
+                AND available_capabilities_snapshot IS NULL
+                AND effective_capabilities_snapshot IS NULL
+                AND execution_policy_snapshot IS NULL AS was_absent
+                FROM runtime_runs WHERE id=:id),
+                applied AS (
+                UPDATE runtime_runs SET execution_config_snapshot=CAST(:config AS jsonb),
+                declared_capabilities_snapshot=CAST(:declared AS jsonb),
+                available_capabilities_snapshot=CAST(:available AS jsonb),
+                effective_capabilities_snapshot=CAST(:effective AS jsonb),
+                execution_policy_snapshot=CAST(:policy AS jsonb)
+                WHERE id=:id AND owner=:owner AND status='running' AND lease_until>now()
+                AND CAST(:config AS jsonb)->>'execution_id'=CAST(id AS TEXT)
+                AND CAST(:declared AS jsonb)->>'execution_id'=CAST(id AS TEXT)
+                AND CAST(:available AS jsonb)->>'execution_id'=CAST(id AS TEXT)
+                AND CAST(:effective AS jsonb)->>'execution_id'=CAST(id AS TEXT)
+                AND CAST(:policy AS jsonb)->>'execution_id'=CAST(id AS TEXT)
+                AND (execution_config_snapshot IS NULL
+                     OR execution_config_snapshot->>'execution_id'=:execution_id)
+                AND ((execution_config_snapshot IS NULL
+                      AND declared_capabilities_snapshot IS NULL
+                      AND available_capabilities_snapshot IS NULL
+                      AND effective_capabilities_snapshot IS NULL
+                      AND execution_policy_snapshot IS NULL)
+                  OR (execution_config_snapshot->>'execution_id'=:execution_id
+                      AND execution_config_snapshot=CAST(:config AS jsonb)
+                      AND declared_capabilities_snapshot=CAST(:declared AS jsonb)
+                      AND available_capabilities_snapshot=CAST(:available AS jsonb)
+                      AND effective_capabilities_snapshot=CAST(:effective AS jsonb)
+                      AND execution_policy_snapshot=CAST(:policy AS jsonb)))
+                RETURNING id)
+                SELECT EXISTS(SELECT 1 FROM applied) AS applied,
+                (SELECT was_absent FROM target) AS was_absent"""),
+                        {
+                            "id": run_id,
+                            "owner": owner,
+                            "execution_id": str(payloads.execution_id),
+                            "config": payloads.execution_config_snapshot,
+                            "declared": payloads.declared_capabilities_snapshot,
+                            "available": payloads.available_capabilities_snapshot,
+                            "effective": payloads.effective_capabilities_snapshot,
+                            "policy": payloads.execution_policy_snapshot,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            if row["applied"]:
+                # ``was_absent`` is the state this statement itself saw before
+                # writing, so it cannot be shifted by our own UPDATE. A
+                # concurrent writer that committed in between can still make
+                # both sides report ``written``; the label is diagnostic only
+                # and the stored row is identical either way.
+                return SnapshotWriteResult("written" if row["was_absent"] else "reused")
+            classified = (
+                (
+                    await conn.execute(
+                        text("""SELECT status, owner, lease_until>now() AS lease_valid
+                FROM runtime_runs WHERE id=:id"""),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return SnapshotWriteResult(self._snapshot_write_diagnosis(classified, owner))
+
+    @staticmethod
+    def _clean_snapshot_payloads(payloads: ExecutionSnapshotPayloads) -> None:
+        """The R-51 cleaning gate: strict re-validation, before any SQL.
+
+        Shape checking alone cannot see the two classes 04 P3-IT-08 requires
+        refused on their own - a *missing* entry and a *duplicated* one - because
+        ``assert_snapshot_payload_clean`` only walks keys and value shapes. Re-
+        running the public deserializer per column adds exactly that coverage:
+        the denylist and value scans, the strict ``extra="forbid"`` schema with
+        full capability coverage, the canonical round-trip (which is what catches
+        a de-duplicated or truncated collection) and cross-column identity.
+
+        It stays in Python and in front of ``engine.begin()``, so a refused
+        payload performs no statement at all and the row keeps its five NULL
+        columns, and it is a domain ``ExecutionSnapshotError`` naming only the
+        column, never the rejected content.
+        """
+
+        deserialize_execution_snapshots(
+            {column: getattr(payloads, column) for column in SNAPSHOT_COLUMNS}
+        )
+
+    @staticmethod
+    def _validated_snapshot_bodies(payloads: ExecutionSnapshotPayloads) -> dict[str, dict]:
+        """Reject non-canonical payload input before it reaches ``CAST(... AS jsonb)``.
+
+        A caller that bypasses ``serialize_execution_snapshots`` would otherwise
+        get a database-level ``invalid input syntax for type json`` instead of a
+        domain error, and the fail-closed mapping in the orchestrator would never
+        see it. Only the column name and a stable code are reported — never the
+        offending content.
+
+        This is the shape half of the entry guard; the strict half is
+        :meth:`_clean_snapshot_payloads`, which runs after the identity comparison
+        so that a foreign startup keeps its own distinguishable outcome.
+        """
+
+        bodies: dict[str, dict] = {}
+        for column in SNAPSHOT_COLUMNS:
+            value = getattr(payloads, column)
+            if not isinstance(value, str):
+                raise ExecutionSnapshotError("snapshot_payload_type_invalid", (column,)) from None
+            try:
+                body = json.loads(value)
+            except ValueError:
+                raise ExecutionSnapshotError("snapshot_field_invalid", (column,)) from None
+            if not isinstance(body, dict):
+                raise ExecutionSnapshotError("snapshot_field_invalid", (column,)) from None
+            bodies[column] = body
+        return bodies
+
+    @staticmethod
+    def _snapshot_write_diagnosis(
+        classified: Mapping[str, object] | None, owner: UUID
+    ) -> SnapshotWriteOutcome:
+        """Label for a conditional UPDATE that matched no row.
+
+        Read-only and diagnostic only — the write decision was already made by
+        the statement's own WHERE. Order matters: an absent or non-running row is
+        never a configuration fault, a foreign owner/expired lease is the
+        existing lost-lease condition, and only a live owned claim that still
+        refused the row means the stored audit disagrees with this startup.
+        """
+
+        if classified is None:
+            return "not_claimed"
+        if classified["status"] != "running":
+            return "not_claimed"
+        if classified["owner"] != owner or not classified["lease_valid"]:
+            return "lease_lost"
+        return "audit_conflict"
 
     async def append(self, run_id, owner, kind, data):
         async with self.engine.begin() as conn:

@@ -1,24 +1,28 @@
 # NexusDesk Agent Execution Platform v2 · Phased Planning Documents
 
-> Status: Phase 0 implementation is committed and pushed, but clean committed-artifact CI double-runs, authorized real historical samples, and human sign-offs remain open, so formal acceptance is incomplete; Phase 1 code has merged into integration through merge `0a6c4b5`, while human acceptance remains a separate matter; Phase 2 design is frozen under R1–R14 and was revised for independent specification review on 2026-11-11, with no implementation before APPROVED re-review and no development, testing, or acceptance started; Phases 3–6 are not being implemented; Phase 7 is deferred as of 2026-11-07 because the project is in its early stage, with requirements retained as lowest-priority P4 issues
+> Status: formal Phase 0 and Phase 1 acceptance remains incomplete; Phase 2 code merged into integration through `3969258`, and its 07 conclusion is **conditionally passed**, with production performance, CI/real deployment, human UAT/sign-off, and durable evidence still open; Phase 3 01–05 were calibrated against merged code and 08 was added on 2026-11-12, and T1–T9 are implemented on the feature branch `feat/agent-execution-platform-v2-phase3` per 08 and the merged test lane passed (task-level dual review plus acceptance: T5 and T9 are **conditionally passed**, with T9 condition ① awaiting a real-stack re-run and folded into #128, while T6/T7/T8 have no blocking findings); there are 4 local commits (`4318042` backend, `d662a4b` frontend, `90f1630` docs, `e647788` chore), **not pushed and not merged into main/integration**, and the T6 instruction layer with its hardening round, the T7 execution integration, the T8 preview API, plus this third documentation batch remain uncommitted in the working tree; T10 and T11 are in progress, so the phase-level 06/07 reports do not exist yet; **T12 and T13 have been moved out of this phase into separate iterations (issue #127 seed, #128 fresh quickstart, see 08 R-39)**; Phases 4–6 have not started; Phase 7 is deferred
 > Created: 2026-11-02
-> Revised: 2026-11-11 (Phase 2 independent specification-review revision)
-> Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 17, 19, 20, and 22
+> Revised: 2026-11-13 (Phase 3 status line updated: T1–T9 implemented and the merged test lane passed, T6/T7/T8 with no blocking findings and their implementation plus this third documentation batch still uncommitted, T10/T11 in progress so 06/07 do not exist yet, T9 condition ① folded into #128; 08 §2 gains rulings R-42–R-52 and bilingual 03/04/05 carry the same batch content)
+> Revised: 2026-11-13 (Phase 3 status line updated: T1–T6 plus T9 implemented, T5/T9 conditionally passed, T6 past test evidence and hardening, 4 unpushed local commits not merged, T7/T8 and T10/T11 not started so 06/07 do not exist; T12/T13 moved out of this phase to issues #127/#128 (08 R-39))
+> Revised: 2026-11-13 (Phase 3 T1–T4 working-tree implementation status and task-level review/acceptance conclusions; phase-level 06/07 still not created)
+> Revised: 2026-11-12 (synchronized actual Phase 2 status and froze Phase 3 design/breakdown)
+> Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 17, 19, 20, and 22; actual phase 06/07 reports
 
 ## Background
 
-Today `RuntimeWorker` directly invokes the fixed LangGraph ReAct Runtime built by `RuntimeFactory`. A stable Engine Adapter boundary between execution governance, engine selection, and concrete reasoning implementations is missing. Adding external engines such as Codex directly would spread protocol, process, and credential branches through Worker and Runtime.
+The code now retains both the legacy Runtime and a default-off Orchestrator path. Phase 1 exact Registry/Adapter contracts and Phase 2 `ExecutionOrchestrator`, `ExecutionContext`, `ReactAdapter`, and composition wiring exist, but AgentConfig still lacks typed Engine configuration, capability-policy resolution, decision snapshots, and Instruction Providers. Adding external Engines directly would still spread configuration, authorization, and instruction-format branches through Worker and Runtime.
 
-This directory is the single planning root for Agent Execution Platform v2. Documents `01`–`05` must be reviewed before each phase proceeds to breakdown, implementation, testing, and acceptance. These plans do not claim that any capability already exists.
+This directory is the single planning root for Agent Execution Platform v2. Code merge, development entry, automated assisted acceptance, and final launch gates are different facts. Plans do not claim implemented capabilities, and conditional acceptance of one phase does not mean all upstream phases are formally accepted.
 
 ## Overall Principles
 
-1. **Contract first, incremental refactoring**: stabilize the Execution Contract and Registries before migrating React and integrating external Engines.
+1. **Contract first, incremental refactoring**: extend the existing Execution Contract, Registry, Orchestrator, and ReactAdapter rather than building a parallel execution stack.
 2. **Unify governance, not Engine internals**: preserve each Engine's reasoning loop, tool model, and native protocol.
-3. **Compatibility and reversibility**: reuse existing Runs, the Worker queue, Lease/Heartbeat, events, and Agent publication snapshots; use flags to switch between old and new paths.
-4. **Capability is not authorization**: the platform must derive Effective capabilities from deployment availability and tenant policy; client input cannot elevate privileges.
-5. **Security is a launch gate**: isolation, credentials, network controls, and resource governance are mandatory before untrusted multi-tenant code execution.
-6. **Verify every phase independently**: G/US/FR/AC, test cases, and acceptance steps remain traceable; actual test and acceptance outcomes belong in separate reports.
+3. **Compatibility and reversibility**: reuse Runs, the Worker queue, Lease/Heartbeat, events, and Agent publication snapshots; explicit flag matrices select paths.
+4. **Capability is not authorization**: the server monotonically narrows Declared capabilities through deployment Available and trusted Policy into Effective; client input cannot elevate privileges.
+5. **Security and evidence are launch gates**: isolation, credentials, network controls, and resource governance precede untrusted multi-tenant execution; `pending_env`, skips, and unmeasured items are never passes.
+6. **Lightweight small-team acceptance**: reuse automated evidence, retain only an acceptance owner and executor (who may be the same person), a few manual checks, and one acceptance record; invent no independent roles.
+7. **Verify every phase independently**: G/US/FR/AC, test cases, and acceptance steps remain traceable; create 06/07 only after actual testing/acceptance.
 
 ## Phase Roadmap
 
@@ -27,57 +31,47 @@ This directory is the single planning root for Agent Execution Platform v2. Docu
 | Phase 0 | Baseline and inventory | Freeze current behavior, compatibility fixtures, and regression safeguards | P0 | ~1–1.5 weeks | [phase-0-baseline-inventory/](phase-0-baseline-inventory/) |
 | Phase 1 | Execution Contract and Registries | Establish a stable Engine/Protocol/Adapter boundary | P0 | ~1.5–2 weeks | [phase-1-execution-contract-registries/](phase-1-execution-contract-registries/) |
 | Phase 2 | React Provider and Execution Orchestrator | Remove Worker dependency on a concrete Runtime | P0 | ~2–3 weeks | [phase-2-react-provider-orchestrator/](phase-2-react-provider-orchestrator/) |
-| Phase 3 | Capability, configuration, and instructions | Typed multi-Engine configuration, capability governance, and snapshots | P0 | ~2 weeks | [phase-3-capability-config-instructions/](phase-3-capability-config-instructions/) |
+| Phase 3 | Capability, configuration, and instructions | Typed multi-Engine configuration, capability governance, and snapshots | P0 | ~2 weeks, re-estimate before implementation | [phase-3-capability-config-instructions/](phase-3-capability-config-instructions/) |
 | Phase 4 | Runtime Host, process supervision, and Workspace | Managed processes and isolated work directories for external Engines | P1 | ~3–4 weeks | [phase-4-runtime-host-workspace/](phase-4-runtime-host-workspace/) |
 | Phase 5 | Codex integration | Validate the multi-protocol architecture with CLI, then App-Server | P1 | ~8 weeks (A/B serial) | [phase-5-codex-integration/](phase-5-codex-integration/) |
 | Phase 6 | Security, reliability, and event governance | Meet the production gate for untrusted multi-tenant execution | P1 | ~4–6 weeks | [phase-6-security-reliability-events/](phase-6-security-reliability-events/) |
-| Phase 7 | Advanced Engine capabilities and scale | Expand the ecosystem, governance, and cost controls in independent slices | P4 (deferred) | Review per slice after rescheduling | [phase-7-advanced-engines-scale/](phase-7-advanced-engines-scale/) |
+| Phase 7 | Advanced Engine capabilities and scale | Expand ecosystem, governance, and cost controls in independent slices | P4 (deferred) | Review per slice after rescheduling | [phase-7-advanced-engines-scale/](phase-7-advanced-engines-scale/) |
 
-> **Phase 7 deferral (2026-11-07)**: Because the project is in its early stage, no Phase 7 requirement is entering implementation, testing, or acceptance. All requirements are tracked at the lowest priority, P4. FR-1~FR-11 map to #110~#120; see [Deferral and Requirement Tracking](phase-7-advanced-engines-scale/02-requirements.en.md#deferral-and-requirement-tracking). The plans are not delivery commitments unless the phase is explicitly reactivated.
+> **Phase 7 deferral (2026-11-07)**: no implementation, testing, or acceptance is active. FR-1~FR-11 remain lowest-priority P4 issues #110~#120 and are not delivery commitments until explicitly reactivated.
 
-\* Estimates support planning discussions only and are not delivery commitments; re-estimate after the Phase 0 baseline.
+\* Estimates support planning only and are not commitments; re-estimate against actual baselines and open gates.
 
-Each phase contains:
+Every phase has bilingual `01`–`05`; large phases also have bilingual `08`. Create `06-test-report.md` / `07-acceptance-report.md` only after actual testing/acceptance. Post-acceptance checks such as quickstart only append to existing reports and never prewrite outcomes.
 
-- `01-business-goals.md` / `.en.md`: problems, goals, success metrics, scope, and risks;
-- `02-requirements.md` / `.en.md`: US, FR, non-functional requirements, and AC;
-- `03-technical-design.md` / `.en.md`: current-state mapping, file-level changes, data and flows, rollout and rollback;
-- `04-test-plan.md` / `.en.md`: UT/IT/CM, regression scope, defect levels, and exit criteria;
-- `05-acceptance-plan.md` / `.en.md`: AC-by-AC acceptance, a few key manual checks, applicable security/data/release hard gates, and a single acceptance record; by default, reuse automated evidence without standalone UAT, duplicate business-metric tables, or multi-role sign-off;
-- `06-test-report.md` and `07-acceptance-report.md`: created only after actual testing/acceptance;
-- `08-implementation-breakdown.md`: created for large phases after design review and before implementation.
+## Dependencies, Development Entry, and Migration Conventions
 
-## Dependency and Migration Conventions
+- The default order is Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7; Phase 7 is deferred.
+- **Phase 3 development entry**: baseline `3969258` provides the required Phase 1/2 code, with a focused baseline of 163 passed / 5 skipped. This permits implementation under 08; it does not prove full CI, upstream formal acceptance, or production approval.
+- **Phase 3 final launch gate**: besides this phase's A/C items, upstream real-history samples, CI/real deployment, performance, and human-acceptance gaps remain governed by their reports. Any gap affecting this phase stays `pending_env` / not passed until closed; merged code or deleted gates cannot substitute for evidence.
+- The migration head measured on 2026-11-12 is `0057_industry_pack_runtime`, and `0053_routing_decisions` already occupies the old planned number. Phase 3 therefore plans `0058_agent_execution_metadata` with `down_revision="0057_industry_pack_runtime"`. T2 must dynamically revalidate the target head; if it changes, revise the documents in lockstep and never edit applied migration history.
+- When design conflicts with code reality, record an R-n decision and revise all affected bilingual files before implementation.
 
-- The default order is Phase 0 → 1 → 2 → 3 → 4 → 5A → 5B → 6 → 7. Security items may be reviewed earlier, but later launch gates must not be weakened. Phase 7 is currently deferred and excluded from the active implementation sequence.
-- The migration head observed during planning on 2026-11-02 was `0052_memory_tasks_tenant_index`; both the Phase 0 implementation check on 2026-11-07 and the Phase 2 design check on 2026-11-10 observed `0057_industry_pack_runtime`. Numbers `0053+` in these documents are **planned identifiers**. Each phase must revalidate the head and adjust `down_revision` against its target commit, never edit an applied historical migration, and never treat a historical planning number or Phase 2's read-only observation as a permanent acceptance value.
-- Phase 0 dependency maps, lifecycle records, and compatibility baselines remain under this root in the corresponding phase, avoiding a second documentation source.
-- The user explicitly requested Phase 1 startup on 2026-11-08; open Phase 0 items are only an accepted entry risk tracked by the product owner and QA, not formal Phase 0 acceptance, sign-off, or approval. Phase 1 merging into integration likewise does not constitute formal Phase 1 human acceptance.
-- If a design conflicts with code reality, record a decision and revise the affected documents before changing implementation.
+## Phase 2 Deliverables and Phase 3 Continuation
 
-## Phase 2 Current Deliverables and Subsequent Gates
+Phase 2 ReactAdapter creates a gated runner in `start`; RuntimeFactory subsequently assembles the model, tools, and effective system prompt inside that runner. The Orchestrator preserves worker_emit/runtime_emit dual emission, structured acknowledgment, Memory Outcome, and public Run/SSE semantics. Phase 2 07 and appendices record conditional passage and quickstart follow-up evidence, not unrestricted formal acceptance.
 
-Phase 2's [01–05 planning suite](phase-2-react-provider-orchestrator/03-technical-design.en.md) and [08 implementation breakdown](phase-2-react-provider-orchestrator/08-implementation-breakdown.en.md) are frozen under R1–R14 and revised for independent specification review: fixed `react/native/v1`, UUID/restricted-nil identity boundaries, synchronous ContextVar capture with asynchronous Runtime assembly inside the runner, worker_emit/runtime_emit dual-emit isolation, first-emission gate and React-private no-stream state machine, Core-private structured acknowledgment with explicit decisions for all 25 public-suite functions, public Result/private Outcome separation, open business events, backpressure, distinct append/finish control flow, Adapter first-terminal-wins versus Run first-commit-wins, serial/parallel parity rules, default-off rollout, and rollback without data reversal. Functional exit is separate from real performance submetrics; performance pending_env caps T9 at conditionally passed.
-
-The remaining order cannot be reversed: T2–T7 implementation and integration → bilingual 06 only after T8 actually executes every test → bilingual 07 only after T9 formal acceptance with controlled fixtures → T10 adds the Phase 2-specific idempotent low-sensitivity example seed → T11 performs quickstart off/on, both-SSE, and rollback validation and only appends post-acceptance sections to existing 06/07. Do not currently create Phase 2 06/07, prewrite passage, or add seed data early.
+Phase 3 extends these components rather than copying the execution chain. `Repository.claim` still publishes `run.started` first; the Phase 3 “start barrier” refers specifically to `Adapter.start` and Runtime/tool/model side effects, without changing public event order. With the Phase 3 flag off, the deployment's original Phase 2 on/off path is preserved exactly. Non-React in any off state fails explicitly with `execution_phase3_disabled` and never silently runs as React.
 
 ## Explicit Overall Non-Goals
 
-- **No microservice split in the initial migration**: establish modular-monolith boundaries first.
+- **No microservice split in the initial migration**: retain a modular monolith.
 - **No scheduler rewrite**: retain the persistent Worker queue, Lease/Heartbeat, and existing terminal-state ownership.
-- **No immediate Task/Execution dual-table model**: initially, a Run is one Execution attempt.
+- **No Task/Execution dual-table model**: a Run remains one Execution attempt.
 - **No mandatory Session/approval/interaction support for every Engine**: these remain declared and resolved optional capabilities.
 - **No erasure of native events**: standardize the envelope without forcing ReAct Tool Calling semantics.
 - **No shared-storage change without measurements**: assess capacity, latency, isolation, and cost first.
 - **No unrestricted host privileges for untrusted tasks**: isolation, credentials, and network policy are hard gates.
+- **No Postman publication, external preview service, or new frontend test framework**: retain OpenAPI, Playwright, and the current deployment shape.
 
 ## Review Guide
 
-- Phase 0: reproducibility of the current-state and test baseline; representativeness of historical configuration fixtures; identifier freeze.
-- Phase 1: contract stability without host-detail leakage; explicit Adapter versioning, cancellation, and error semantics.
-- Phase 2: safe UUID/nil identity boundaries; old/new React serial/parallel equivalence under the frozen rules; deterministic private acknowledgment, event ownership, cancellation, and terminal cleanup; Worker depends only on Orchestrator; rollback requires no data reversal; example seed work strictly follows formal acceptance.
-- Phase 3: lossless legacy defaults; client cannot elevate Effective capabilities; snapshots explain every execution decision.
-- Phase 4: process-tree cleanup, path/symlink isolation, and resource limits survive failure and adversarial tests.
-- Phase 5: App-Server starts only after CLI stabilizes; native protocols stay inside Providers; untrusted execution remains gated.
-- Phase 6: Fencing, Outbox, deduplication, and SSE replay cover races; secrets are masked across logs, events, and artifacts.
-- Phase 7 (currently deferred; applies after reactivation): delivery remains sliced; routing and fallback re-evaluate policy; Engines without advanced capabilities retain basic execution.
+- Phase 0/1: track formal acceptance gaps in their own 07 reports; later merges do not retroactively complete them.
+- Phase 2: preserve conditional-pass boundaries, performance/real-deployment gaps, and appendix evidence without rewriting history.
+- Phase 3: review legacy aliases and canonical diffs, draft validation without Adapter instances, least privilege and cache invalidation, the five-snapshot start barrier, single-pass Provider rendering, the two-flag matrix, preview tenant isolation, and C11's 100 real samples.
+- Phase 4/5/6: review process/Workspace isolation, native-protocol encapsulation, and security/event governance respectively; do not pull their scope into Phase 3.
+- Phase 7: after reactivation, review small independent slices.

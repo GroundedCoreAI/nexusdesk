@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, StringConstraints, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -71,6 +71,41 @@ class Settings(BaseSettings):
     # Process-level rollout switch; changing it requires a restart and never
     # changes the runtime configuration fingerprint used by claimed rows.
     execution_orchestrator_enabled: bool = False
+    # Phase 3 remains opt-in. Capability and snapshot settings are non-secret
+    # deployment controls; runtime composition and fail-closed semantics are wired
+    # by the execution orchestration tasks that consume them.
+    execution_phase3_enabled: bool = False
+    # R-20: same grammar as the execution contracts' AdapterVersion, inlined so
+    # platform_services keeps importing nothing from agent_execution (v1, v2, ...
+    # never "v0", bare digits, or empty). Consumed for provenance by T7 wiring.
+    execution_capability_policy_version: Annotated[
+        str, StringConstraints(min_length=2, pattern=r"^v[1-9][0-9]*$")
+    ] = "v1"
+    execution_capability_probe_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
+    # R-18: bounded wait for one trusted policy provider round (T7 wiring).
+    execution_capability_policy_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
+    # R-19: cache TTLs must be strictly positive. The old ge=0 allowed a
+    # "disable caching" value the caches themselves reject at construction;
+    # stale-serving degradation is a cache concern, not a zero TTL.
+    execution_capability_probe_cache_seconds: int = Field(default=30, gt=0, le=300)
+    execution_capability_policy_cache_seconds: int = Field(default=30, gt=0, le=300)
+    # R-18: probe fan-out ceiling, sanitized cache capacity and failed-round
+    # retry floor for the capability caches (T7 wiring).
+    execution_capability_probe_max_concurrency: int = Field(default=4, ge=1, le=32)
+    execution_capability_cache_capacity: int = Field(default=512, ge=16, le=100000)
+    execution_capability_cache_retry_seconds: float = Field(default=5.0, gt=0, le=60)
+    # R-18: background warmer cadence. While Phase 3 is enabled this must stay
+    # strictly below the shortest cache TTL so entries refresh before expiry
+    # (validated in validate_execution_capability_window below).
+    execution_capability_warm_refresh_seconds: float = Field(default=10.0, gt=0, le=300)
+    # R-18: deployment identity segment of the capability cache keys. Same
+    # grammar as the execution contracts' Slug, inlined for the same layering
+    # reason as the policy version above.
+    execution_capability_deployment_identity: Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=200, pattern=r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$"),
+    ] = "default"
+    execution_snapshot_max_bytes: int = Field(default=65536, ge=4096, le=262144)
     model_timeout_seconds: float = Field(default=30, gt=0)
     # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
     # Enabled by default for the typewriter UI. A deployment can opt out with
@@ -288,6 +323,25 @@ class Settings(BaseSettings):
             raise ValueError("role tokens must be nonempty and distinct")
         if self.model_backend == "openai" and (not self.model_name or not self.model_api_key):
             raise ValueError("openai backend requires model_name and model_api_key")
+        return self
+
+    @model_validator(mode="after")
+    def validate_execution_capability_window(self):
+        # R-18: while Phase 3 runs, the warmer must fire before any capability
+        # cache entry expires, so the cadence must stay strictly below the
+        # shortest of the two TTLs. Off-state deployments are exempt: operators
+        # may stage the values independently before flipping the rollout switch.
+        if not self.execution_phase3_enabled:
+            return self
+        shortest_ttl = min(
+            self.execution_capability_probe_cache_seconds,
+            self.execution_capability_policy_cache_seconds,
+        )
+        if self.execution_capability_warm_refresh_seconds >= shortest_ttl:
+            raise ValueError(
+                "execution_capability_warm_refresh_seconds must stay strictly below "
+                "the shortest capability cache TTL while execution_phase3_enabled is true"
+            )
         return self
 
     @property

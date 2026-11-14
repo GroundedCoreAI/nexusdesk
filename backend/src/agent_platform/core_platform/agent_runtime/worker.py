@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
     build_execution_context,
+    enforce_execution_rollout,
 )
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL
 from agent_platform.core_platform.agent_runtime.schemas import RuntimeFault
@@ -13,7 +14,12 @@ from agent_platform.core_platform.platform_services.tenant_isolation.context imp
     bind_scope,
     reset_scope,
 )
-from agent_platform.extension_contracts import BusinessScope, MemoryInjectionPort
+from agent_platform.extension_contracts import (
+    DEFAULT_BUSINESS_ID,
+    DEFAULT_WORKSPACE_ID,
+    BusinessScope,
+    MemoryInjectionPort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +78,12 @@ class RuntimeWorker:
     async def _execute(self, row):
         started_at = monotonic()
         monitor_failure = False
-        scope_token = bind_scope(
-            BusinessScope(
-                tenant_id=row["tenant_id"],
-                business_id=row.get("business_id") or "customer-service",
-                workspace_id=row.get("workspace_id") or "default",
-            )
+        scope = BusinessScope(
+            tenant_id=row["tenant_id"],
+            business_id=row.get("business_id") or DEFAULT_BUSINESS_ID,
+            workspace_id=row.get("workspace_id") or DEFAULT_WORKSPACE_ID,
         )
+        scope_token = bind_scope(scope)
 
         async def emit(kind, data):
             if kind == "model.delta":
@@ -103,12 +108,34 @@ class RuntimeWorker:
                     task.cancel()
                     return
 
+        # Both rollout flags are read exactly once per claim, before any other
+        # decision, and kept in locals: the matrix, the selected path and every
+        # later log line - including the exception and terminal branches below -
+        # read these values instead of self.settings, so flipping a flag mid-Run
+        # cannot re-decide a claimed row (03 §4.3, R-11/R-48). Reading them ahead
+        # of the fingerprint guard is what keeps the earlier failure paths bound.
+        #
+        # The compared triple is the production registration, never
+        # ``orchestrator.selector``: a double-injected selector is a test seam
+        # for an Engine-specific adapter, and treating a published React row as
+        # a mismatch under that seam would refuse the legacy path P2-IT-14
+        # freezes. The refusal R-11/AC-10 requires is of a published
+        # configuration that does not name the engine this deployment
+        # registered (R-50).
+        phase3_enabled = self.settings.execution_phase3_enabled
+        orchestrator_enabled = self.settings.execution_orchestrator_enabled
         execution = None
         watcher = None
         try:
             if row["config"]["fingerprint"] != self.fingerprint:
                 raise RuntimeFault("configuration_changed")
-            if self.settings.execution_orchestrator_enabled:
+            enforce_execution_rollout(
+                row,
+                phase3_enabled=phase3_enabled,
+                orchestrator_enabled=orchestrator_enabled,
+                fault=RuntimeFault,
+            )
+            if orchestrator_enabled:
                 if self.orchestrator is None:
                     raise RuntimeFault("execution_error")
                 context = build_execution_context(
@@ -118,6 +145,9 @@ class RuntimeWorker:
                     customer_memory=await self._customer_memory(row),
                     trace_id=row.get("trace_id"),
                     timeout_seconds=self.settings.run_timeout_seconds,
+                    owner=self.owner,
+                    scope=scope,
+                    execution_phase3_enabled=phase3_enabled,
                 )
                 execution = asyncio.create_task(self.orchestrator.execute(context, emit))
                 watcher = asyncio.create_task(monitor(execution))
@@ -167,7 +197,7 @@ class RuntimeWorker:
         except asyncio.CancelledError:
             if execution:
                 execution.cancel()
-            if self.settings.execution_orchestrator_enabled:
+            if orchestrator_enabled:
                 self._log_orchestrator_terminal(
                     row, "failed" if monitor_failure else "cancelled", started_at
                 )
@@ -178,16 +208,16 @@ class RuntimeWorker:
                 error="worker_lost" if monitor_failure else None,
             )
         except RuntimeFault as exc:
-            if self.settings.execution_orchestrator_enabled:
+            if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
             await self.repository.finish(row["id"], self.owner, "failed", error=exc.code)
         except TimeoutError:
-            if self.settings.execution_orchestrator_enabled:
+            if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
             await self.repository.finish(row["id"], self.owner, "failed", error="run_timeout")
         except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
             # Provider errors may contain credentials or customer data; never expose raw messages.
-            if self.settings.execution_orchestrator_enabled:
+            if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
             else:
                 logger.error("Run %s failed", row["id"])

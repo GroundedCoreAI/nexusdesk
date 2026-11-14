@@ -261,6 +261,134 @@ async def test_sparse_raw_version_exposes_direct_snapshot_tool_names_limitation(
     assert caught.value.args == ("tool_names",)
 
 
+def test_react_descriptor_metadata_matches_between_standalone_and_production_registries():
+    """Minor-3 lock, rewritten per R-45: value-equivalent without losing strictness.
+
+    Exactly one descriptor field is deployment-derived: ``policy_version``, which
+    production reads from ``execution_capability_policy_version`` while the
+    standalone mirror keeps its own literal (R-31 forbids forcing it). Every other
+    field must stay field-identical, so the parity is not weakened; each side's
+    derivation source is pinned separately, because "both default to v1" would
+    hide a deployment that overrides the settings value.
+    """
+    from agent_platform.applications.platform_runtime import runtime_composition
+    from agent_platform.business_capabilities.agent_config import service as agent_service
+
+    settings = Settings(_env_file=None)
+    production_registry = runtime_composition._execution_adapter_registry()
+    runtime_composition._build_execution_orchestrator(None, production_registry, settings=settings)
+    production = production_registry.metadata("react", "native", "v1")
+    standalone = agent_service._standalone_execution_registry().metadata("react", "native", "v1")
+
+    assert standalone.model_dump(exclude={"policy_version"}) == production.model_dump(
+        exclude={"policy_version"}
+    )
+    assert production.policy_version == settings.execution_capability_policy_version
+    assert (
+        standalone.policy_version
+        == Settings.model_fields["execution_capability_policy_version"].default
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_corrupt_stored_draft_update_degrades_audit_instead_of_500(platform):
+    """A historical corrupt draft must not turn the audit diff into a 500.
+
+    Chosen semantics: degrade. The submitted config already passed the strict
+    parse/execution gates, so the save succeeds; the unreadable baseline only
+    degrades the audit ``changes`` field to an empty diff. Blocking with a 409
+    would make such an agent permanently unrepairable through the API.
+    """
+    client, runtime, settings = platform
+    agent, _, _, legacy = await _create_legacy_agent(
+        client, runtime, settings, "legacy-core-shape.v1.json"
+    )
+    async with runtime.repository.engine.begin() as connection:
+        result = await connection.execute(
+            text("UPDATE agents SET draft=CAST(:draft AS jsonb) WHERE id=:id"),
+            {"id": UUID(agent["id"]), "draft": "{}"},
+        )
+        assert result.rowcount == 1
+
+    repaired = copy.deepcopy(legacy)
+    repaired["system_prompt"] = "Repaired after a corrupt stored draft"
+    response = await client.put(
+        f"/api/v1/agents/{agent['id']}",
+        json={"name": agent["name"], "revision": agent["draft_revision"], "config": repaired},
+    )
+    assert response.status_code == 200, response.text
+
+    stored = await client.get(f"/api/v1/agents/{agent['id']}")
+    # ``update`` stores the canonical serialization of the submitted config.
+    assert stored.json()["draft"] == AgentConfig.model_validate(repaired).model_dump(mode="json")
+
+    async with runtime.repository.engine.connect() as connection:
+        audit_row = (
+            (
+                await connection.execute(
+                    text(
+                        "SELECT details FROM audit_records "
+                        "WHERE tenant_id=:tenant AND resource=:resource "
+                        "AND action='agent.updated' ORDER BY id DESC LIMIT 1"
+                    ),
+                    {"tenant": settings.tenant_id, "resource": agent["id"]},
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert audit_row["details"]["changes"] == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_corrupt_stored_draft_update_still_records_name_change_despite_degraded_diff(
+    platform,
+):
+    """Degradation is scoped to the config diff only; name/description audit survives."""
+    client, runtime, settings = platform
+    agent, _, _, legacy = await _create_legacy_agent(
+        client, runtime, settings, "legacy-core-shape.v1.json"
+    )
+    async with runtime.repository.engine.begin() as connection:
+        result = await connection.execute(
+            text("UPDATE agents SET draft=CAST(:draft AS jsonb) WHERE id=:id"),
+            {"id": UUID(agent["id"]), "draft": "{}"},
+        )
+        assert result.rowcount == 1
+
+    renamed = copy.deepcopy(legacy)
+    response = await client.put(
+        f"/api/v1/agents/{agent['id']}",
+        json={
+            "name": f"{agent['name']}-renamed",
+            "revision": agent["draft_revision"],
+            "config": renamed,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    async with runtime.repository.engine.connect() as connection:
+        audit_row = (
+            (
+                await connection.execute(
+                    text(
+                        "SELECT details FROM audit_records "
+                        "WHERE tenant_id=:tenant AND resource=:resource "
+                        "AND action='agent.updated' ORDER BY id DESC LIMIT 1"
+                    ),
+                    {"tenant": settings.tenant_id, "resource": agent["id"]},
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert audit_row["details"]["changes"] == {
+        "name": {"from": agent["name"], "to": f"{agent['name']}-renamed"}
+    }
+
+
 def _identity_pattern(identity: tuple[str, str, str]) -> str:
     return r"\(\s*" + r"\s*,\s*".join(map(re.escape, identity)) + r"\s*\)"
 
@@ -507,6 +635,273 @@ async def test_p2_t9_a1_published_snapshot_serial_no_tool_off_on_parity():
         assert [event["seq"] for event in capture["replay"]] == list(
             range(1, len(capture["replay"]) + 1)
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_it_01_legacy_get_is_read_only_and_default_diff_is_empty(platform):
+    client, runtime, settings = platform
+    agent, _, _, legacy = await _create_legacy_agent(
+        client, runtime, settings, "legacy-core-shape.v1.json"
+    )
+    agent_id = UUID(agent["id"])
+
+    async def stored_draft():
+        async with runtime.repository.engine.connect() as connection:
+            return dict(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT draft,draft_revision,updated_at FROM agents "
+                            "WHERE id=:id AND tenant_id=:tenant"
+                        ),
+                        {"id": agent_id, "tenant": settings.tenant_id},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+
+    before = await stored_draft()
+    first = await client.get(f"/api/v1/agents/{agent['id']}")
+    second = await client.get(f"/api/v1/agents/{agent['id']}")
+    assert first.status_code == second.status_code == 200
+    assert first.json()["draft"] == second.json()["draft"] == legacy
+    assert await stored_draft() == before
+
+    published = await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
+    assert published.status_code == 200, published.text
+    diff = await client.get(f"/api/v1/agents/{agent['id']}/diff?version=1")
+    assert diff.status_code == 200, diff.text
+    assert diff.json()["changes"] == []
+
+    updated = await client.put(
+        f"/api/v1/agents/{agent['id']}",
+        json={"name": agent["name"], "revision": 1, "config": legacy},
+    )
+    assert updated.status_code == 200, updated.text
+    diff = await client.get(f"/api/v1/agents/{agent['id']}/diff?version=1")
+    assert diff.json()["changes"] == []
+    async with runtime.repository.engine.connect() as connection:
+        audit_row = (
+            (
+                await connection.execute(
+                    text(
+                        "SELECT details FROM audit_records "
+                        "WHERE tenant_id=:tenant AND resource=:resource "
+                        "AND action='agent.updated' ORDER BY id DESC LIMIT 1"
+                    ),
+                    {"tenant": settings.tenant_id, "resource": agent["id"]},
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert audit_row["details"]["changes"] == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_it_02_new_react_publish_and_metadata_validation_never_create_adapter(
+    platform, monkeypatch
+):
+    from agent_platform.applications.platform_runtime.react_adapter_factory import (
+        ReactAdapterFactory,
+    )
+
+    client, runtime, settings = platform
+    _, _, profile = await setup(client, "chat")
+    factory_calls = 0
+
+    def forbidden_factory(self):
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("AgentConfig metadata validation must not resolve an adapter")
+
+    monkeypatch.setattr(ReactAdapterFactory, "__call__", forbidden_factory)
+    config = {
+        "system_prompt": "Canonical React config",
+        "engine": {
+            "engine_id": "react",
+            "protocol_id": "native",
+            "adapter_version": "v1",
+        },
+        "react": {
+            "model_profile_id": profile["id"],
+            "model_profile_version": 1,
+            "max_model_rounds": 4,
+        },
+        "disabled_capabilities": ["streaming", "streaming"],
+        "tool_names": [],
+        "knowledge_base_ids": [],
+    }
+    created = await client.post(
+        "/api/v1/agents", json={"name": "canonical-react", "config": config}
+    )
+    assert created.status_code == 201, created.text
+    agent = created.json()
+    assert agent["draft"]["engine"]["engine_id"] == "react"
+    assert agent["draft"]["react"]["max_model_rounds"] == 4
+    assert agent["draft"]["disabled_capabilities"] == ["streaming"]
+
+    published = await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
+    assert published.status_code == 200, published.text
+    stored = await _stored_version(runtime, agent["id"], 1)
+    assert stored["config"]["react"]["model_profile_id"] == profile["id"]
+    assert stored["config"]["model_profile_id"] == profile["id"]
+    assert stored["config"]["disabled_capabilities"] == ["streaming"]
+    snapshot = await _snapshot(runtime, settings.tenant_id, agent["id"], version=1)
+    assert snapshot["config"]["engine"]["adapter_version"] == "v1"
+    assert snapshot["config"]["max_model_rounds"] == 4
+    assert factory_calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_it_02_unknown_engine_is_rejected_before_publish_without_adapter(platform):
+    client, runtime, settings = platform
+    agent, _, _, legacy = await _create_legacy_agent(
+        client, runtime, settings, "legacy-core-shape.v1.json"
+    )
+    unknown = copy.deepcopy(legacy)
+    unknown.update(
+        engine={
+            "engine_id": "missing",
+            "protocol_id": "native",
+            "adapter_version": "v1",
+        },
+        react=None,
+        model_profile_id=None,
+        model_profile_version=None,
+    )
+    async with runtime.repository.engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE agents SET draft=CAST(:draft AS jsonb) WHERE id=:id"),
+            {"id": UUID(agent["id"]), "draft": json.dumps(unknown)},
+        )
+
+    response = await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "execution_engine_unavailable"
+    assert (await client.get(f"/api/v1/agents/{agent['id']}/versions")).json() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_it_02_invalid_stored_config_has_stable_publish_rejection(platform):
+    client, runtime, settings = platform
+    agent, _, _, legacy = await _create_legacy_agent(
+        client, runtime, settings, "legacy-core-shape.v1.json"
+    )
+    invalid = copy.deepcopy(legacy)
+    invalid["max_model_rounds"] = 0
+    async with runtime.repository.engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE agents SET draft=CAST(:draft AS jsonb) WHERE id=:id"),
+            {"id": UUID(agent["id"]), "draft": json.dumps(invalid)},
+        )
+
+    response = await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "execution_configuration_invalid"
+    assert (await client.get(f"/api/v1/agents/{agent['id']}/versions")).json() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_it_02_alias_conflict_is_rejected_before_update(platform):
+    client, runtime, settings = platform
+    agent, _, _, legacy = await _create_legacy_agent(
+        client, runtime, settings, "legacy-core-shape.v1.json"
+    )
+    conflict = copy.deepcopy(legacy)
+    conflict["react"] = {
+        "model_profile_id": legacy["model_profile_id"],
+        "model_profile_version": legacy["model_profile_version"],
+        "max_model_rounds": legacy["max_model_rounds"] + 1,
+    }
+
+    response = await client.put(
+        f"/api/v1/agents/{agent['id']}",
+        json={"name": agent["name"], "revision": 1, "config": conflict},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "react.max_model_rounds" in response.text
+    assert (await client.get(f"/api/v1/agents/{agent['id']}")).json()["draft"] == legacy
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_it_16_new_react_does_not_bypass_model_capability_validation(platform):
+    client, _runtime, _settings = platform
+    _, _, profile = await setup(client, "chat", model_extra={"tool_calling": False})
+    config = {
+        "system_prompt": "Model checks still apply",
+        "react": {
+            "model_profile_id": profile["id"],
+            "model_profile_version": 1,
+            "max_model_rounds": 6,
+        },
+        "tool_names": ["lookup"],
+        "knowledge_base_ids": [],
+    }
+    created = await client.post(
+        "/api/v1/agents", json={"name": "model-capability-boundary", "config": config}
+    )
+    assert created.status_code == 201, created.text
+
+    response = await client.post(
+        f"/api/v1/agents/{created.json()['id']}/publish", json={"revision": 1}
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "agent_model_capability_mismatch"
+    assert (await client.get(f"/api/v1/agents/{created.json()['id']}/versions")).json() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_p3_it_16_new_react_preserves_tool_resolution_and_snapshot(platform):
+    client, runtime, settings = platform
+    _, _, profile = await setup(client, "chat")
+    spec = {
+        "name": "phase3_lookup",
+        "description": "v1",
+        "url": "http://localhost/orders",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    }
+    tool = await client.post("/api/v1/tools", json=spec)
+    assert tool.status_code == 201, tool.text
+    created = await client.post(
+        "/api/v1/agents",
+        json={
+            "name": "canonical-react-tools",
+            "config": {
+                "system_prompt": "Use the released tool",
+                "react": {
+                    "model_profile_id": profile["id"],
+                    "model_profile_version": 1,
+                    "max_model_rounds": 6,
+                },
+                "tool_names": ["phase3_lookup"],
+                "knowledge_base_ids": [],
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    agent = created.json()
+
+    published = await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
+
+    assert published.status_code == 200, published.text
+    snapshot = await _snapshot(runtime, settings.tenant_id, agent["id"], version=1)
+    assert snapshot["config"]["tool_names"] == ["phase3_lookup"]
+    assert snapshot["config"]["react"]["model_profile_id"] == profile["id"]
+    assert [tool["spec"]["name"] for tool in snapshot["tools"]] == ["phase3_lookup"]
+    assert snapshot["tools"][0]["version"] == 1
 
 
 @pytest.mark.asyncio

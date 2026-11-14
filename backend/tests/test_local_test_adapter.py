@@ -263,8 +263,11 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "contracts/result.py",
         "contracts/events.py",
         "contracts/capabilities.py",
+        "contracts/config.py",
         "contracts/errors.py",
         "contracts/adapter.py",
+        "contracts/snapshots.py",
+        "contracts/instructions.py",
     }
     registry_modules = {
         "registry/__init__.py",
@@ -289,8 +292,52 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "adapters/react/event_mapper.py",
     }
     t4_modules = {"orchestration/orchestrator.py"}
+    phase3_capability_modules = {
+        "capability/__init__.py",
+        "capability/cache.py",
+        "capability/ports.py",
+        "capability/resolver.py",
+        "capability/production.py",
+        "capability/snapshots.py",
+        "capability/warmer.py",
+    }
+    phase3_instruction_modules = {
+        "instructions/__init__.py",
+        "instructions/react_provider.py",
+        "instructions/test_provider.py",
+    }
+    implementation_packages = {
+        "registry",
+        "adapters",
+        "orchestration",
+        "capability",
+        "instructions",
+    }
+    execution_marker = "agent_platform.core_platform.agent_execution."
+
+    def escapes_into_implementation(name: str, level: int, own_escape_level: int) -> bool:
+        """Whether one import leaves its own package for an implementation package.
+
+        ``.split(".")[0]`` on the path after ``agent_execution.`` is deliberate:
+        the contracts layer owns ``contracts.capabilities`` while
+        ``agent_execution.capability`` is a separate implementation package, and a
+        substring check would conflate the two.
+        """
+        if level:
+            return level >= own_escape_level and name.split(".")[0] in implementation_packages
+        return name.startswith(execution_marker) and (
+            name.removeprefix(execution_marker).split(".")[0] in implementation_packages
+        )
+
     expected_modules = (
-        contract_modules | registry_modules | adapter_modules | t2_modules | t3_modules | t4_modules
+        contract_modules
+        | registry_modules
+        | adapter_modules
+        | t2_modules
+        | t3_modules
+        | t4_modules
+        | phase3_capability_modules
+        | phase3_instruction_modules
     )
     actual_modules = {str(path.relative_to(package_root)) for path in package_root.rglob("*.py")}
     assert actual_modules == expected_modules
@@ -324,11 +371,57 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
             imports,
         )
         if relative_path in contract_modules:
-            forbidden = (*common_forbidden, ".registry", ".adapters")
+            forbidden = (*common_forbidden, ".registry", ".adapters", ".instructions")
             assert not any(part in name for name in names for part in forbidden), relative_path
+            # The contracts layer stays a leaf: escaping it must never land in one
+            # of the execution implementation packages, spelled relatively
+            # (``from ..capability import ...``) or absolutely.
+            escaping_level = 1 if relative_path == "__init__.py" else 2
+            assert not [
+                (name, level)
+                for name, level in imports
+                if escapes_into_implementation(name, level, escaping_level)
+            ], (relative_path, imports)
         if relative_path in registry_modules - {"registry/__init__.py"}:
             forbidden = (*common_forbidden, ".adapters", ".testing")
             assert not any(part in name for name in names for part in forbidden), relative_path
+        if relative_path in phase3_capability_modules:
+            forbidden = (*common_forbidden, ".adapters", ".orchestration", ".testing")
+            assert not any(part in name for name in names for part in forbidden), (
+                relative_path,
+                imports,
+            )
+        if relative_path in phase3_instruction_modules:
+            # Instruction formatting is the lowest execution layer above the
+            # contracts: it may reach the contracts and the standard library,
+            # and nothing else. A Provider that imported the Registry, an
+            # Adapter, or the Orchestrator would be a second execution path.
+            forbidden = (*common_forbidden, ".registry", ".adapters", ".orchestration", ".testing")
+            assert not any(part in name for name in names for part in forbidden), (
+                relative_path,
+                imports,
+            )
+            # Relative imports resolve level-by-level: from inside the
+            # instructions package, level 2 leaves it for an
+            # ``agent_execution`` child, so that is the escape depth to test.
+            # The contract layers (``contracts`` and ``extension_contracts``)
+            # stay permitted; the five implementation packages do not.
+            assert not [
+                (name, level)
+                for name, level in imports
+                if escapes_into_implementation(name, level, 2)
+            ], (relative_path, imports)
+            assert not [
+                name
+                for name in names
+                if name.startswith("agent_platform") and ".agent_execution.contracts" not in name
+            ], (relative_path, imports)
+        if relative_path == "instructions/__init__.py":
+            # Production registration is React-only: the test format must stay
+            # unreachable from the Registry entry point (AC-8, P3-UT-19).
+            source = source_file.read_text(encoding="utf-8")
+            assert "test_provider" not in source
+            assert "TestInstructionProvider" not in source
         if relative_path == "adapters/testing/local_test_adapter.py":
             assert not any("registry" in name for name in names)
             forbidden_calls = {"uuid4", "now", "utcnow", "sleep", "random"}

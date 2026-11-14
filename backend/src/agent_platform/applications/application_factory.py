@@ -14,6 +14,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from agent_platform.applications.business_registry import BusinessRegistry
 from agent_platform.applications.platform_runtime.runtime_composition import runtime_services
+from agent_platform.applications.security_audit import (
+    CATEGORY_FORGED_OR_INVALID_BODY,
+    is_audited_path,
+    record_request_rejection,
+    sanitized_body_paths,
+    sanitized_error_types,
+)
 from agent_platform.business_capabilities.memory.bootstrap import embedded_memory_worker
 from agent_platform.core_platform.agent_runtime.schemas import BusyError, CapacityError
 from agent_platform.core_platform.platform_services.access_control.routes import (
@@ -61,6 +68,56 @@ def _private_identity_path(path: str) -> bool:
         or "/auth/local/" in path
         or "/open-platform/identity/" in path
     )
+
+
+def _sanitized_validation_detail(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """Keep the existing 422 style but never echo submitted values.
+
+    Pydantic's own rendering of a nested ``ValidationError`` (raised through a
+    before-validator, e.g. the execution normalizer inside ``AgentConfig``)
+    quotes ``input_value=...`` in the message body. The stable first line is
+    kept verbatim; continuation lines are dropped, while ``type`` and ``loc``
+    still locate the rejected field (03 §7.3 "无敏感回显").
+    """
+    detail = []
+    for error in exc.errors():
+        message = str(error.get("msg", "")).splitlines()
+        detail.append(
+            {
+                "type": error.get("type"),
+                "loc": list(error.get("loc", ())),
+                "msg": message[0] if message else "",
+            }
+        )
+    return detail
+
+
+async def request_validation_handler(request: Request, exc: RequestValidationError):
+    """422 face plus the R-13 forged-field security audit.
+
+    03 §7.3: a 422 alone is not an audit. On the Run/Agent/preview management
+    faces a rejection that concerns the request *body* (forged capability /
+    policy / tenant fields, malformed config, a smuggled unknown key) writes
+    one sanitized audit row: trusted subject, route template, request id,
+    stable category, sanitized body field paths. Query/path-only rejections
+    are ordinary client mistakes, not escalation attempts, so the hook is
+    triggered by route **and** the stable body field path together. The
+    exception's parsed values and the request body never leave this function.
+    """
+    detail = _sanitized_validation_detail(exc)
+    if is_audited_path(request.url.path):
+        errors = [
+            {"type": entry["type"], "loc": entry["loc"], "msg": entry["msg"]} for entry in detail
+        ]
+        body_paths = sanitized_body_paths(errors)
+        if body_paths:
+            await record_request_rejection(
+                request,
+                category=CATEGORY_FORGED_OR_INVALID_BODY,
+                field_paths=body_paths,
+                error_types=sanitized_error_types(errors),
+            )
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 def create_app(
@@ -192,14 +249,7 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request: Request, exc: RequestValidationError):
-        return JSONResponse(
-            status_code=422,
-            content={
-                "detail": [
-                    {key: error[key] for key in ("type", "loc", "msg")} for error in exc.errors()
-                ]
-            },
-        )
+        return await request_validation_handler(request, exc)
 
     @app.exception_handler(SQLAlchemyError)
     async def database_error(request: Request, exc: SQLAlchemyError):

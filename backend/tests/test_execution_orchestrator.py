@@ -14,6 +14,7 @@ from uuid import UUID
 import httpx
 import pytest
 
+from agent_platform.applications.platform_runtime import runtime_composition
 from agent_platform.applications.platform_runtime.react_adapter_factory import (
     ReactAdapterFactory,
 )
@@ -1990,17 +1991,72 @@ def test_execution_orchestrator_settings_reject_invalid_environment(monkeypatch)
         Settings(_env_file=None)
 
 
-def test_runtime_fingerprint_excludes_only_the_orchestrator_rollout_flag():
+def test_runtime_fingerprint_excludes_both_rollout_flags_and_the_phase3_tuning_family():
+    """R-48 repair of 03 §4.3: operational tuning must not invalidate queued Runs.
+
+    Two faces are pinned at once. An already-queued Run may never report
+    ``configuration_changed`` because an operator flipped ``execution_phase3_enabled``
+    or re-tuned a capability knob, while a change that really alters Runtime
+    assembly - the model, the retained window, the round budget - must still change
+    the fingerprint, otherwise the exclude set would be swallowing inputs the
+    Runtime is built from.
+    """
+    base = Settings(_env_file=None)
     off = Settings(_env_file=None, execution_orchestrator_enabled=False)
     on = Settings(_env_file=None, execution_orchestrator_enabled=True)
+    phase3 = Settings(_env_file=None, execution_phase3_enabled=not base.execution_phase3_enabled)
+    tuned = Settings(
+        _env_file=None,
+        execution_capability_probe_cache_seconds=base.execution_capability_probe_cache_seconds + 1,
+        execution_capability_policy_cache_seconds=(
+            base.execution_capability_policy_cache_seconds + 1
+        ),
+        execution_capability_probe_timeout_seconds=(
+            base.execution_capability_probe_timeout_seconds + 0.5
+        ),
+        execution_capability_policy_timeout_seconds=(
+            base.execution_capability_policy_timeout_seconds + 0.5
+        ),
+        execution_capability_probe_max_concurrency=(
+            base.execution_capability_probe_max_concurrency + 1
+        ),
+        execution_capability_cache_capacity=base.execution_capability_cache_capacity + 16,
+        execution_capability_cache_retry_seconds=(
+            base.execution_capability_cache_retry_seconds + 1
+        ),
+        execution_capability_warm_refresh_seconds=(
+            base.execution_capability_warm_refresh_seconds + 1
+        ),
+        execution_capability_deployment_identity="a-different-deployment",
+        execution_capability_policy_version="v2",
+        execution_snapshot_max_bytes=base.execution_snapshot_max_bytes + 4096,
+    )
     changed_runtime = Settings(
         _env_file=None,
         execution_orchestrator_enabled=True,
         model_name="different-runtime-model",
     )
+    changed_history = Settings(_env_file=None, history_turns=base.history_turns + 1)
+    changed_rounds = Settings(_env_file=None, max_model_rounds=base.max_model_rounds + 1)
 
-    assert _runtime_fingerprint(off, []) == _runtime_fingerprint(on, [])
-    assert _runtime_fingerprint(on, []) != _runtime_fingerprint(changed_runtime, [])
+    for unchanged in (off, on, phase3, tuned):
+        assert _runtime_fingerprint(base, []) == _runtime_fingerprint(unchanged, [])
+    for changed in (changed_runtime, changed_history, changed_rounds):
+        assert _runtime_fingerprint(base, []) != _runtime_fingerprint(changed, [])
+
+
+def test_runtime_fingerprint_exclude_set_names_every_phase3_field():
+    """The exclude set is a rule, not a coincidence: every Phase 3 field is listed."""
+    excluded = runtime_composition._runtime_fingerprint_exclude_fields()
+    phase3_fields = {name for name in Settings.model_fields if name.startswith("execution_")} - {
+        "execution_orchestrator_enabled"
+    }
+
+    assert excluded >= phase3_fields | {"execution_phase3_enabled"}
+    assert "execution_orchestrator_enabled" in excluded
+    # A field that really changes Runtime assembly may never join the exclude set.
+    for assembly_field in ("model_name", "model_backend", "history_turns", "max_model_rounds"):
+        assert assembly_field not in excluded
 
 
 def test_shared_composition_registers_fixed_descriptors_without_per_run_execution():
@@ -2009,7 +2065,7 @@ def test_shared_composition_registers_fixed_descriptors_without_per_run_executio
             raise AssertionError("composition must not resolve or run a runtime")
 
     runtime_factory = ExplodingRuntimeFactory()
-    orchestrator = _build_execution_orchestrator(runtime_factory)
+    orchestrator = _build_execution_orchestrator(runtime_factory, settings=Settings(_env_file=None))
 
     assert orchestrator.selector == ("react", "native", "v1")
     engine = orchestrator._registry._engines.get("react")
@@ -2124,7 +2180,9 @@ class ParityMemory:
 
 class _OutcomeRecordingOrchestrator:
     def __init__(self, runtime_factory):
-        self.inner = _build_execution_orchestrator(runtime_factory)
+        self.inner = _build_execution_orchestrator(
+            runtime_factory, settings=Settings(_env_file=None)
+        )
         self.selector = self.inner.selector
         self.outcomes = []
 

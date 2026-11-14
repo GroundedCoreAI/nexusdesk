@@ -1,6 +1,6 @@
 # Contributing
 
-> Chinese version: [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md). This file is the English original; both versions are kept in sync.
+> Chinese version: [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md). This file is the English original. The Chinese version is optional; if it is maintained, both versions must be kept in sync.
 
 Thanks for your interest in building NexusDesk with us. Ways to get involved include bug reports, documentation improvements, test cases and code contributions.
 
@@ -80,8 +80,8 @@ npm run build      # includes the i18n check and the TypeScript build
 
 ### Conventions
 
-- **Documentation defaults to English; UI copy and design documents default to Chinese**: `README.md` is English (the repository home page shows it), with the Chinese version in `README.zh-CN.md`. The changelog follows the same pattern: `CHANGELOG.md` (Chinese) plus `CHANGELOG.en.md` (English). Frontend locale files are maintained in parallel under `frontend/src/i18n/locales/`.
-- **A README change means changing both versions**: editing only one lets the two language versions silently diverge. Both must keep the same section structure.
+- **Documentation is written in English**: new or updated documentation (`docs/`, `README*`, `CHANGELOG*`) only requires an English version. Existing Chinese versions (e.g. `README.zh-CN.md`, `CONTRIBUTING.zh-CN.md`) are optional and may be kept, updated, or retired over time. Frontend locale files are still maintained in parallel under `frontend/src/i18n/locales/`.
+- **If a Chinese version is maintained, keep both versions in sync**: editing only one lets the two language versions silently diverge. Both must keep the same section structure.
 - **Do not reformat unrelated files**, to avoid producing a huge unrelated diff.
 - New features should carry **tests**, especially around transactions, migrations and permissions.
 - **Write operations keep the existing "propose → human confirm" constraint**: an agent must never perform irreversible business actions on its own.
