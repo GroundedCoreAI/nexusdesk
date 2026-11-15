@@ -393,14 +393,17 @@ async def make_bound_ticket(client, services, settings, text="请创建维修工
         ingest,
         make_channel,
     )
-    from test_platform_postgres import create_agent, execute_next
+    from test_platform_postgres import claim_next, create_agent
 
     agent, _ = await create_agent(client, ["propose_ticket"])
     channel = await make_channel(client, agent)
-    incoming = await ingest(client, channel, "m-" + uuid4().hex[:8], "customer1", text)
-    final = await execute_next(services, settings)
+    await ingest(client, channel, "m-" + uuid4().hex[:8], "customer1", text)
+    row = await claim_next(services, settings)
+    assert row is not None
+    await services.worker._execute(row)
+    final = await services.repository.get(row["id"], settings.tenant_id)
     assert final["status"] == "completed", final
-    detail = await conversation_detail(client, incoming["conversation_id"])
+    detail = await conversation_detail(client, row["conversation_id"])
     action = detail["actions"][0]
     response = await client.post(f"/api/v1/actions/{action['id']}/decision", json={"approve": True})
     assert response.status_code == 200, response.text

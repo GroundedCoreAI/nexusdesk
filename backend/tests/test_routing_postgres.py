@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from test_platform_postgres import create_agent
+from test_platform_postgres import create_agent, create_published_application
 from test_platform_postgres import platform as _platform
 
 platform = _platform
@@ -245,12 +245,14 @@ async def test_closed_channel_message_is_processed_without_retry(platform):
     assert services.groups.business.channels.customer is customer
     assert customer.routing_settings.trace_enabled is True
     agent, _ = await create_agent(client)
+    application = await create_published_application(client, agent)
     channel = (
         await client.post(
             "/api/v1/channels",
             json={
                 "name": "Telegram routing 测试",
-                "agent_id": agent["id"],
+                "application_id": application["id"],
+                "application_version": application["published_version"],
                 "provider": "telegram",
                 "config": {},
                 "credentials": {"bot_token": "123:abc", "secret_token": "shh"},

@@ -14,7 +14,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import text
 from test_memory_postgres import RecordingGateway, audit_records, force_claimable, memory_tasks
 from test_open_platform import application, session
-from test_platform_postgres import create_agent, create_published_application, execute_next
+from test_platform_postgres import (
+    claim_next,
+    create_agent,
+    create_published_application,
+    execute_next,
+)
 from test_platform_postgres import platform as _platform
 
 from agent_platform.business_capabilities.channel.service import session_id_hash
@@ -102,7 +107,7 @@ async def conversation_detail(client, cid):
 
 async def claim_and_run(services, settings):
     """Claim the next run and execute it through the wired worker."""
-    row = await services.repository.claim(services.worker.owner, 30, settings.tenant_id)
+    row = await claim_next(services, settings)
     assert row is not None
     await services.worker._execute(row)
     return row

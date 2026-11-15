@@ -2487,14 +2487,16 @@ def _canonical_event(event: dict[str, object], *, parallel: bool, model_round: i
     kind = normalized["type"]
     if kind in {"model.completed", "tool.completed"}:
         # A model round is linked to a gateway ledger call; a tool call is linked
-        # to a tool-operation ledger id. They are different ledgers, so the
-        # canonical form normalises each under its own field name.
-        id_field = "gateway_call_id" if kind == "model.completed" else "operation_id"
-        if id_field not in data:
-            raise ValueError(f"missing {id_field}")
-        if data[id_field] is not None and not isinstance(data[id_field], str):
-            raise TypeError(f"{id_field} must be nullable string")
-        data[id_field] = f"<{id_field}>"
+        # to a tool-operation ledger id. Both ledgers are normalised under
+        # whichever field name the engine wrote for that event kind.
+        id_fields = ("gateway_call_id",) if kind == "model.completed" else ("gateway_call_id", "operation_id")
+        present = [name for name in id_fields if name in data]
+        if not present:
+            raise ValueError(f"missing {id_fields[0]}")
+        for name in present:
+            if data[name] is not None and not isinstance(data[name], str):
+                raise TypeError(f"{name} must be nullable string")
+            data[name] = f"<{name}>"
         _require_duration(data, "duration_ms")
         data["duration_ms"] = 0
     if kind == "model.completed":

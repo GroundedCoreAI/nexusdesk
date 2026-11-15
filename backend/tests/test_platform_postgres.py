@@ -291,8 +291,27 @@ async def conversation(client, agent=None):
     return response.json()
 
 
+async def claim_next(services, settings, *, timeout=10.0):
+    """Claim the next run, driving the channel inbound outbox first.
+
+    Channel ingest is asynchronous by design: the message lands in
+    ``channel_inbound_events`` and a worker turns it into a runtime run. The
+    embedded loop polls on an interval, so a test that asserts on the run right
+    after ingest would race it. Pump the same queue here to stay deterministic.
+    """
+    channels = getattr(services.groups.business, "channels", None)
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        if channels is not None:
+            await channels.run_next_inbound()
+        row = await services.repository.claim(services.worker.owner, 30, settings.tenant_id)
+        if row is not None or asyncio.get_running_loop().time() >= deadline:
+            return row
+        await asyncio.sleep(0.05)
+
+
 async def execute_next(services, settings):
-    row = await services.repository.claim(services.worker.owner, 30, settings.tenant_id)
+    row = await claim_next(services, settings)
     assert row is not None
     await services.worker._execute(row)
     return await services.repository.get(row["id"], settings.tenant_id)
