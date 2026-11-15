@@ -57,6 +57,24 @@ The demo ships 9 industry case packs: 9 knowledge bases, 18 agent drafts and 36 
 - Filter the agent list with **Scope → Cases only**;
 - See [Industry examples](../guides/industry-examples.md) for details.
 
+## Optional execution path and rollback
+
+Run the commands in this section from the repository root. Quickstart has one embedded Worker (`AGENT_EMBEDDED_WORKER=true`) and uses the legacy execution path by default (`AGENT_EXECUTION_ORCHESTRATOR_ENABLED=false`), with no additional UI or service. The `app` service has its own healthcheck, but container status does not replace path-log and Run-terminal checks. For a controlled Orchestrator trial, explicitly opt in and recreate `app`:
+
+```bash
+AGENT_EXECUTION_ORCHESTRATOR_ENABLED=true \
+  docker compose -f deploy/quickstart/compose.yaml up -d --force-recreate app
+```
+
+The switch takes effect at process startup. It is not request-level hot switching and does not automatically fall back to legacy for a failed Run. Restore the default path with:
+
+```bash
+AGENT_EXECUTION_ORCHESTRATOR_ENABLED=false \
+  docker compose -f deploy/quickstart/compose.yaml up -d --force-recreate app
+```
+
+Do not use `docker compose restart` to apply new environment values. See the [rollout and rollback runbook](../operations/agent-execution-orchestrator-rollout.en.md) for mixed Workers, observability, and production rollback.
+
 ## Troubleshooting
 
 **Port already in use** — free `8080` or change the port mapping in the compose file.

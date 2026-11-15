@@ -2,6 +2,7 @@
 
 > Status: Pending implementation (execute after this phase is developed; not currently executed or passed)
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements)
 > Basis: `02-requirements.md` (FR-1–FR-12, AC-1–AC-12), `03-technical-design.md` (Stages A/B, RuntimeHost, Sessions, planned migration 0055)
 
 ## 1. Test Scope and Principles
@@ -17,6 +18,7 @@
 5. **Fault injection is mandatory**: Crash, hang, disconnection, malformed/duplicate/late messages, and missing usage must not become false success or permanent waits.
 6. **Time cases do not wait**: Use a controllable clock or direct state construction for Session expiration, timeout, and grace periods; retain bounded timeouts for real-process tests.
 7. **Record baselines honestly**: Mark unmeasured performance, React behavior, and regression baselines “pending Phase 0”; never record skip as pass.
+8. **Reuse evidence**: A/C acceptance directly references automated UT/IT/CM results and real Codex, Host, PG, and SSE evidence instead of manually repeating the full suite; manual work is limited to key checks that cannot be automated.
 
 ## 2. Test Environments and Data Construction
 
@@ -74,7 +76,7 @@
 | P5-IT-15 | Unsupported version, bad output, and missing-usage fault injection | Reproduce AC-11 with stable errors/unknown, no Secrets, and correlated diagnostics. | AC-11 |
 | P5-IT-16 | Switch-off React/API/SSE/historical-configuration regression | Reproduce AC-12; diff is zero when a Phase 0 baseline exists, otherwise mark blocked pending baseline rather than passed. | AC-12 |
 | P5-IT-17 | Conditional Session migration upgrade/downgrade protection | Upgrade from the implementation-time head succeeds; populated downgrade requires export, and historical migration checksums remain unchanged. | FR-8, G6 |
-| P5-IT-18 | Stage A pre-release stability batch | At least 20 mixed scenarios have no P0/P1, and three consecutive applicable regressions pass before Stage B unlock evidence is signed. | FR-1; G5 |
+| P5-IT-18 | Stage A pre-release stability batch | At least 20 mixed scenarios have no P0/P1, and three consecutive applicable regressions pass before the acceptance owner confirms the Stage B unlock record. | FR-1; G5 |
 
 ## 5. General Checks (Applicable to This Phase)
 
@@ -103,7 +105,7 @@
 |---|---|---|
 | P0 blocker | Secret/cross-tenant disclosure; accidental untrusted-tenant exposure; primary execution-path breakage; data loss; uncontrolled processes. | Disable relevant switches immediately; fix and run full regression before continuing. |
 | P1 critical | Incorrect terminal state/cleanup; ineffective Stage gate; unauthorized Session access; public protocol disclosure; ineffective switch. | No acceptance or Stage B unlock before resolution. |
-| P2 major | Non-core event/usage mapping deviations, bounded diagnostics, or quality deviations. | May proceed with documented issues and product/security sign-off; never conceal security items. |
+| P2 major | Non-core event/usage mapping deviations, bounded diagnostics, or quality deviations. | Only non-hard-gate items may proceed after owner/deadline are recorded and the acceptance owner confirms conditional acceptance in the single acceptance record; never conceal security items. |
 | P3 minor | Wording, non-sensitive logging, and documentation issues. | Schedule fixes and retain traceability. |
 
 **Exit criteria**: Stage B unlocks only after all applicable Stage A UT/IT/CM and AC-1–AC-6, AC-11–AC-12 pass and P5-IT-18 completes. Overall phase exit requires all applicable cases and ACs to pass, no unapproved skips in real-Codex environment items, green regressions, zero switch-off diff, and no open P0/P1 defects. Before Phase 6, “untrusted multi-tenant exposure” is not an acceptable pass scope.

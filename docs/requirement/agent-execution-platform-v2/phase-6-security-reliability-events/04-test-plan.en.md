@@ -2,6 +2,7 @@
 
 > Status: Pending implementation (execute after this phase is developed; not currently executed or passed)
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence while retaining independent approval for untrusted execution)
 > Basis: `02-requirements.md` (FR-1–FR-16, AC-1–AC-16), `03-technical-design.md` (planned migrations 0056/0057, Fencing, Outbox, Vault/Broker, Sandbox)
 
 ## 1. Test Scope and Principles
@@ -17,6 +18,7 @@
 5. **Compatibility and empty states are mandatory**: Existing v1 events, empty new fields, transient deltas, historical Runs, and switch rollback retain defined behavior; unmeasured Phase 0 baselines cannot pass.
 6. **Control time and scale**: Use controllable clocks for expiry/backoff; exercise sequence/dedup/replay with concurrency and more than one page rather than long sleeps.
 7. **Isolate evidence**: All Secrets are dedicated canaries; attacks run in dedicated environments, followed by grant revocation, sandbox cleanup, and residue checks.
+8. **Reuse evidence**: A/C acceptance directly references automated UT/IT/CM results and adversarial, fault-point, DB, Host, network, and Outbox/SSE evidence instead of manually repeating the full suite; manual work is limited to key checks that cannot be automated. Evidence reuse does not remove independent approval for untrusted execution.
 
 ## 2. Test Environments and Data Construction
 
@@ -118,7 +120,7 @@
 |---|---|---|
 | P0 blocker | Secret/cross-tenant disclosure; sandbox/network/file escape; accidental untrusted exposure; data loss; effective stale-Worker commit; duplicate billing. | Stop new executions immediately, revoke/isolate, fix, and rerun full adversarial/fault regressions. |
 | P1 critical | Terminal/final-event inconsistency; cancellation/cleanup/quota errors; silent Outbox loss; silent replay gap; security-switch bypass. | No acceptance or new-tenant exposure before resolution. |
-| P2 major | Non-core diagnostic/metric/compatibility quality deviation without security or correctness impact. | Only non-hard-gate items with owner/deadline may proceed with product, QA, and security sign-off. |
+| P2 major | Non-core diagnostic/metric/compatibility quality deviation without security or correctness impact. | Only for non-hard-gate items: record owner/deadline and have the acceptance owner confirm in the single acceptance record; security, reliability, event, and accounting hard gates cannot be waived. |
 | P3 minor | Wording, non-sensitive logging, and documentation issues. | Schedule fixes and retain traceability. |
 
 **Exit criteria**: All applicable UT/IT/CM and AC pass; real-sandbox, multi-Worker, fault-point, and real SSE/Outbox items have no unapproved skips; successful adversarial attacks=0; stale writes/duplicate usage/silent event gaps=0; regressions are green, Phase 0 diff is zero, and no P0/P1 remains. If any hard gate fails, `execution_untrusted_tenants_enabled` remains false and the phase cannot pass overall.

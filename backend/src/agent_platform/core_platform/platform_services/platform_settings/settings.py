@@ -1,8 +1,9 @@
 import json
+import re
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, StringConstraints, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -86,6 +87,91 @@ class Settings(BaseSettings):
     tenant_capacity: int = Field(default=50, ge=1)
     queue_timeout_seconds: int = Field(default=120, ge=1)
     run_timeout_seconds: int = Field(default=90, ge=1, le=600)
+    # Process-level rollout switch; changing it requires a restart and never
+    # changes the runtime configuration fingerprint used by claimed rows.
+    execution_orchestrator_enabled: bool = False
+    # Phase 3 remains opt-in. Capability and snapshot settings are non-secret
+    # deployment controls; runtime composition and fail-closed semantics are wired
+    # by the execution orchestration tasks that consume them.
+    execution_phase3_enabled: bool = False
+    # R-20: same grammar as the execution contracts' AdapterVersion, inlined so
+    # platform_services keeps importing nothing from agent_execution (v1, v2, ...
+    # never "v0", bare digits, or empty). Consumed for provenance by T7 wiring.
+    execution_capability_policy_version: Annotated[
+        str, StringConstraints(min_length=2, pattern=r"^v[1-9][0-9]*$")
+    ] = "v1"
+    execution_capability_probe_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
+    # R-18: bounded wait for one trusted policy provider round (T7 wiring).
+    execution_capability_policy_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
+    # R-19: cache TTLs must be strictly positive. The old ge=0 allowed a
+    # "disable caching" value the caches themselves reject at construction;
+    # stale-serving degradation is a cache concern, not a zero TTL.
+    execution_capability_probe_cache_seconds: int = Field(default=30, gt=0, le=300)
+    execution_capability_policy_cache_seconds: int = Field(default=30, gt=0, le=300)
+    # R-18: probe fan-out ceiling, sanitized cache capacity and failed-round
+    # retry floor for the capability caches (T7 wiring).
+    execution_capability_probe_max_concurrency: int = Field(default=4, ge=1, le=32)
+    execution_capability_cache_capacity: int = Field(default=512, ge=16, le=100000)
+    execution_capability_cache_retry_seconds: float = Field(default=5.0, gt=0, le=60)
+    # R-18: background warmer cadence. While Phase 3 is enabled this must stay
+    # strictly below the shortest cache TTL so entries refresh before expiry
+    # (validated in validate_execution_capability_window below).
+    execution_capability_warm_refresh_seconds: float = Field(default=10.0, gt=0, le=300)
+    # R-18: deployment identity segment of the capability cache keys. Same
+    # grammar as the execution contracts' Slug, inlined for the same layering
+    # reason as the policy version above.
+    execution_capability_deployment_identity: Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=200, pattern=r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$"),
+    ] = "default"
+    execution_snapshot_max_bytes: int = Field(default=65536, ge=4096, le=262144)
+    # Phase 4 (FR-10) stays opt-in. The whole execution_runtime_host_* /
+    # execution_workdir_* / execution_process_* / execution_resource_* family
+    # plus execution_sandbox_provider is rollout/limit controls excluded from
+    # the runtime fingerprint (08 R-8): re-tuning a limit or flipping the Host
+    # switch must never force already-queued Runs to configuration_changed.
+    execution_runtime_host_enabled: bool = False
+    # Required nonempty while the Host is enabled with the deployment slug
+    # grammar (see validate_execution_runtime_host below); stable per execution
+    # root and unique per deployment (03 §5.1). The off-state default stays the
+    # empty string so operators can stage values before flipping the switch.
+    execution_runtime_host_id: Annotated[str, StringConstraints(max_length=200)] = ""
+    # Platform-owned execution root. The relative default is the development
+    # fallback only; deployments always set an absolute volume path (08 R-7).
+    execution_workdir_root: Path = Path("data/execution")
+    # Phase 4 ships the Local Provider only; a strong-sandbox value cannot be
+    # configured at all (fail closed by type, 02 FR-8).
+    execution_sandbox_provider: Literal["local"] = "local"
+    # True rejects start when a required capability is unsupported. Settings
+    # validate shape here; the support matrix probe lives in the Host
+    # composition (T11/T12), not in this class.
+    execution_resource_enforcement_required: bool = True
+    # Default 5s + 5s fits the existing 45s deployment stop grace; larger
+    # values require a stop-timeout change (03 §4.3).
+    execution_process_cancel_grace_seconds: float = Field(default=5.0, gt=0, le=30)
+    execution_process_kill_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    execution_process_reconcile_interval_seconds: float = Field(default=5.0, gt=0, le=300)
+    # Hard external-process wall ceiling; the earlier of this and the Run
+    # deadline wins. Strictly positive per 03 §5.1 ("不得为 0 或负数").
+    execution_process_wall_timeout_seconds: int = Field(default=900, gt=0, le=86_400)
+    # Per-stream output bound; excess terminates the process group (02 FR-2).
+    execution_process_output_max_bytes: int = Field(default=1_048_576, gt=0, le=268_435_456)
+    # Per-Execution resource ceilings (02 FR-7). Memory/PID ceilings are hard
+    # only where the Sandbox declares support; unsupported required limits
+    # reject start, they are never silently ignored.
+    execution_resource_cpu_seconds: int = Field(default=600, gt=0, le=86_400)
+    execution_resource_memory_bytes: int = Field(default=536_870_912, gt=0, le=68_719_476_736)
+    execution_resource_max_processes: int = Field(default=64, gt=0, le=4096)
+    execution_workdir_max_bytes: int = Field(default=1_073_741_824, gt=0, le=1_099_511_627_776)
+    execution_workdir_max_file_bytes: int = Field(default=134_217_728, gt=0, le=1_099_511_627_776)
+    # Sampling cadence for usage/descendant/disk observation; an operational
+    # reactive bound, not a security-isolation promise (02 FR-10 row).
+    execution_resource_sample_interval_seconds: float = Field(default=1.0, gt=0, le=300)
+    # Workdir retention windows. 0 retention means "clean as soon as the Run
+    # reaches its terminal decision", cleanup_failed records always remain.
+    execution_workdir_retention_seconds: int = Field(default=86_400, ge=0, le=7_776_000)
+    execution_workdir_failed_retention_seconds: int = Field(default=604_800, ge=0, le=31_536_000)
+    execution_workdir_cleanup_interval_seconds: float = Field(default=60.0, gt=0, le=86_400)
     model_timeout_seconds: float = Field(default=30, gt=0)
     # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
     # Enabled by default for the typewriter UI. A deployment can opt out with
@@ -372,6 +458,48 @@ class Settings(BaseSettings):
             raise ValueError(
                 "service_app_connection_timeout_seconds must not exceed "
                 "service_app_connection_timeout_max"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_execution_capability_window(self):
+        # R-18: while Phase 3 runs, the warmer must fire before any capability
+        # cache entry expires, so the cadence must stay strictly below the
+        # shortest of the two TTLs. Off-state deployments are exempt: operators
+        # may stage the values independently before flipping the rollout switch.
+        if not self.execution_phase3_enabled:
+            return self
+        shortest_ttl = min(
+            self.execution_capability_probe_cache_seconds,
+            self.execution_capability_policy_cache_seconds,
+        )
+        if self.execution_capability_warm_refresh_seconds >= shortest_ttl:
+            raise ValueError(
+                "execution_capability_warm_refresh_seconds must stay strictly below "
+                "the shortest capability cache TTL while execution_phase3_enabled is true"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_execution_runtime_host(self):
+        # 03 §5.1 cross-validation while the Host is enabled: the deployment
+        # identity must be present and follow the slug grammar (same shape as
+        # the capability deployment identity). Off-state deployments are exempt
+        # so operators can stage the values before flipping the rollout switch;
+        # root-ownership and support-matrix checks are composition concerns
+        # (T11/T12/T14), not settings validation.
+        if not self.execution_runtime_host_enabled:
+            return self
+        host_id = self.execution_runtime_host_id
+        if not host_id.strip():
+            raise ValueError(
+                "execution_runtime_host_id must be nonempty when "
+                "execution_runtime_host_enabled is true"
+            )
+        if not re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*", host_id):
+            raise ValueError(
+                "execution_runtime_host_id must use the deployment slug grammar "
+                "(lowercase alphanumeric segments separated by . _ or -)"
             )
         return self
 

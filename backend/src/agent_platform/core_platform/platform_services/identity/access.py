@@ -100,6 +100,12 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 workspace_id=workspace_id,
             )
             await _validate_business_scope(request)
+            # R-13: expose the resolved trusted principal to application-level
+            # error handlers (the 422 forged-field audit reads tenant/actor
+            # from here — never from request input). Dependencies have already
+            # run by the time a body-validation error is raised, so any row
+            # written for a rejected request describes an authenticated face.
+            request.state.principal = principal_value
             return principal_value
         except DomainError as exc:
             raise HTTPException(exc.status, exc.code) from None
@@ -136,6 +142,12 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 session_id=str(session["id"]),
             )
             await _validate_business_scope(request)
+            # R-13: expose the resolved trusted principal to application-level
+            # error handlers (the 422 forged-field audit reads tenant/actor
+            # from here — never from request input). Dependencies have already
+            # run by the time a body-validation error is raised, so any row
+            # written for a rejected request describes an authenticated face.
+            request.state.principal = principal_value
             return principal_value
         except DomainError as exc:
             raise HTTPException(exc.status, exc.code) from None
@@ -156,6 +168,12 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 workspace_id=workspace_id,
             )
             await _validate_business_scope(request)
+            # R-13: expose the resolved trusted principal to application-level
+            # error handlers (the 422 forged-field audit reads tenant/actor
+            # from here — never from request input). Dependencies have already
+            # run by the time a body-validation error is raised, so any row
+            # written for a rejected request describes an authenticated face.
+            request.state.principal = principal_value
             return principal_value
     if (authorization or "").startswith("Bearer staff_"):
         digest = hashlib.sha256(authorization[7:].encode()).hexdigest()
@@ -176,6 +194,12 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 workspace_id=workspace_id,
             )
             await _validate_business_scope(request)
+            # R-13: expose the resolved trusted principal to application-level
+            # error handlers (the 422 forged-field audit reads tenant/actor
+            # from here — never from request input). Dependencies have already
+            # run by the time a body-validation error is raised, so any row
+            # written for a rejected request describes an authenticated face.
+            request.state.principal = principal_value
             return principal_value
         raise HTTPException(401, "invalid_api_token")
     if not settings.api_token and settings.environment == "development" and not authorization:
@@ -195,6 +219,12 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 workspace_id=workspace_id,
             )
             await _validate_business_scope(request)
+            # R-13: expose the resolved trusted principal to application-level
+            # error handlers (the 422 forged-field audit reads tenant/actor
+            # from here — never from request input). Dependencies have already
+            # run by the time a body-validation error is raised, so any row
+            # written for a rejected request describes an authenticated face.
+            request.state.principal = principal_value
             return principal_value
     raise HTTPException(401, "invalid_api_token")
 

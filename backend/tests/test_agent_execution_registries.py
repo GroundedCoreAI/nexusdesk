@@ -2,6 +2,7 @@ import ast
 import asyncio
 import functools
 import gc
+import importlib
 import inspect
 import traceback
 import weakref
@@ -9,7 +10,7 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import ConfigDict, ValidationError
 
 import agent_platform.core_platform.agent_execution as execution_package
 import agent_platform.core_platform.agent_execution.registry as registry_package
@@ -197,7 +198,22 @@ DESCRIPTOR_CASES = (
     (
         AdapterDescriptor,
         {"engine_id": "engine-a", "protocol_id": "protocol-a", "adapter_version": "v1"},
-        {"engine_id", "protocol_id", "adapter_version", "enabled"},
+        {
+            "engine_id",
+            "protocol_id",
+            "adapter_version",
+            "enabled",
+            "config_schema",
+            "config_schema_version",
+            "declared",
+            "declared_schema_version",
+            "probe_id",
+            "probe_version",
+            "policy_provider_id",
+            "policy_version",
+            "instruction_provider_id",
+            "provider_version",
+        },
     ),
 )
 
@@ -1150,8 +1166,11 @@ def test_current_t2_and_t3_modules_have_exact_scope_and_one_directional_dependen
         "contracts/result.py",
         "contracts/events.py",
         "contracts/capabilities.py",
+        "contracts/config.py",
         "contracts/errors.py",
         "contracts/adapter.py",
+        "contracts/snapshots.py",
+        "contracts/instructions.py",
     }
     expected_registry_modules = {
         "registry/__init__.py",
@@ -1160,6 +1179,29 @@ def test_current_t2_and_t3_modules_have_exact_scope_and_one_directional_dependen
         "registry/adapter_registry.py",
     }
     expected_modules = expected_contract_modules | expected_registry_modules
+    implementation_packages = {
+        "registry",
+        "adapters",
+        "orchestration",
+        "capability",
+        "instructions",
+    }
+    execution_marker = "agent_platform.core_platform.agent_execution."
+
+    def escapes_into_implementation(name: str, level: int, own_escape_level: int) -> bool:
+        """Whether one import leaves its own package for an implementation package.
+
+        ``.split(".")[0]`` on the path after ``agent_execution.`` is deliberate:
+        the contracts layer owns ``contracts.capabilities`` while
+        ``agent_execution.capability`` is a separate implementation package, and a
+        substring check would conflate the two.
+        """
+        if level:
+            return level >= own_escape_level and name.split(".")[0] in implementation_packages
+        return name.startswith(execution_marker) and (
+            name.removeprefix(execution_marker).split(".")[0] in implementation_packages
+        )
+
     actual_contract_modules = {
         str(path.relative_to(package_root)) for path in (package_root / "contracts").glob("*.py")
     } | {"__init__.py"}
@@ -1196,11 +1238,21 @@ def test_current_t2_and_t3_modules_have_exact_scope_and_one_directional_dependen
             imports,
         )
         if relative_path.startswith("contracts/") or relative_path == "__init__.py":
-            forbidden = (*common_forbidden, ".registry", ".adapters")
+            forbidden = (*common_forbidden, ".registry", ".adapters", ".instructions")
             assert not any(part in name for name in names for part in forbidden), (
                 relative_path,
                 imports,
             )
+            # The contracts layer is a leaf: neither a relative escape
+            # (``from ..capability import ...``) nor an absolute one may reach an
+            # execution implementation package, which now includes the T6
+            # instruction providers.
+            escaping_level = 1 if relative_path == "__init__.py" else 2
+            assert not [
+                (name, level)
+                for name, level in imports
+                if escapes_into_implementation(name, level, escaping_level)
+            ], (relative_path, imports)
         if relative_path in expected_registry_modules - {"registry/__init__.py"}:
             forbidden = (*common_forbidden, ".adapters", ".testing")
             assert not any(part in name for name in names for part in forbidden), (
@@ -1224,3 +1276,148 @@ def test_current_t2_and_t3_modules_have_exact_scope_and_one_directional_dependen
 
     assert not hasattr(execution_package, "LocalTestAdapter")
     assert not hasattr(registry_package, "LocalTestAdapter")
+
+
+def _phase3_config_module():
+    return importlib.import_module("agent_platform.core_platform.agent_execution.contracts.config")
+
+
+def _phase3_react_descriptor():
+    config = _phase3_config_module()
+    return AdapterDescriptor(
+        engine_id="react",
+        protocol_id="native",
+        adapter_version="v1",
+        config_schema=config.ReactConfig,
+        config_schema_version="v1",
+        declared=EngineCapabilities(
+            streaming=True,
+            cancellation=True,
+            tool_calling=True,
+            native_events=True,
+        ),
+        declared_schema_version="v1",
+        probe_id="react-probe",
+        probe_version="v1",
+        policy_provider_id="react-policy",
+        policy_version="v1",
+        instruction_provider_id="react-native",
+        provider_version="v1",
+    )
+
+
+def _phase3_react_registry(factory=StubAdapter):
+    engines = EngineRegistry()
+    engines.register(EngineDescriptor(engine_id="react"))
+    protocols = ProtocolRegistry()
+    protocols.register(ProtocolDescriptor(protocol_id="native"))
+    adapters = AdapterRegistry(engines, protocols)
+    adapters.register(_phase3_react_descriptor(), factory)
+    return adapters
+
+
+def test_p3_ut_21_exact_metadata_is_complete_without_factory_or_capability_probe():
+    created = []
+
+    def factory():
+        raise AssertionError("metadata and registration must not invoke the factory")
+
+    adapters = _phase3_react_registry(factory)
+
+    metadata = adapters.metadata("react", "native", "v1")
+    assert metadata == _phase3_react_descriptor()
+    assert metadata.config_schema is _phase3_config_module().ReactConfig
+    assert metadata.declared.streaming is True
+    assert metadata.probe_id == "react-probe"
+    assert metadata.policy_provider_id == "react-policy"
+    assert metadata.instruction_provider_id == "react-native"
+    assert created == []
+
+
+def test_p3_ut_04_21_registry_validates_canonical_config_without_adapter_resolution():
+    adapters = _phase3_react_registry()
+
+    normalized = adapters.validate_config(
+        {
+            "model_profile_id": "50000000-0000-4000-8000-000000000005",
+            "model_profile_version": 3,
+            "max_model_rounds": 6,
+        }
+    )
+
+    assert normalized.engine.engine_id == "react"
+    assert normalized.react.max_model_rounds == 6
+    with pytest.raises(ConfigurationError) as caught:
+        adapters.validate_config({"react": {"max_model_rounds": 0}})
+    assert_configuration_error(caught, ExecutionErrorCode.INVALID_REQUEST)
+
+
+@pytest.mark.parametrize(
+    "triple,code",
+    [
+        (("missing", "native", "v1"), ExecutionErrorCode.UNKNOWN_ENGINE),
+        (("react", "native", "v2"), ExecutionErrorCode.UNKNOWN_ADAPTER_VERSION),
+    ],
+)
+def test_p3_ut_04_metadata_unknown_triple_fails_closed_without_factory(triple, code):
+    adapters = _phase3_react_registry()
+    with pytest.raises(ConfigurationError) as caught:
+        adapters.metadata(*triple)
+    assert_configuration_error(caught, code)
+
+
+def test_p3_ut_04_metadata_disabled_adapter_fails_closed_without_factory():
+    engines = EngineRegistry()
+    engines.register(EngineDescriptor(engine_id="react"))
+    protocols = ProtocolRegistry()
+    protocols.register(ProtocolDescriptor(protocol_id="native"))
+    adapters = AdapterRegistry(engines, protocols)
+    adapters.register(_phase3_react_descriptor().model_copy(update={"enabled": False}), StubAdapter)
+
+    with pytest.raises(ConfigurationError) as caught:
+        adapters.metadata("react", "native", "v1")
+    assert_configuration_error(caught, ExecutionErrorCode.ADAPTER_DISABLED)
+
+
+@pytest.mark.parametrize("schema", [None, dict, object])
+def test_p3_ut_04_missing_or_free_dict_schema_is_rejected(schema):
+    with pytest.raises(ValidationError):
+        AdapterDescriptor(
+            engine_id="engine-a",
+            protocol_id="protocol-a",
+            adapter_version="v1",
+            config_schema=schema,
+        )
+
+
+def test_p3_ut_04_registration_rejects_non_strict_schema_without_calling_factory():
+    class LooseConfig(ExecutionContractModel):
+        model_config = ConfigDict(strict=False, frozen=False, extra="allow")
+
+    _, _, adapters = simple_registries()
+    descriptor = AdapterDescriptor(
+        engine_id="engine-a",
+        protocol_id="protocol-a",
+        adapter_version="v1",
+        config_schema=LooseConfig,
+    )
+    with pytest.raises(ConfigurationError) as caught:
+        adapters.register(descriptor, StubAdapter)
+    assert_configuration_error(caught, ExecutionErrorCode.ADAPTER_CONTRACT_MISMATCH)
+
+
+def test_legacy_stub_safe_default_metadata_still_requires_exact_typed_validation():
+    _, _, adapters = simple_registries()
+    register_one(adapters)
+    config = _phase3_config_module().ExecutionConfig(
+        engine=_phase3_config_module().EngineIdentity(
+            engine_id="engine-a",
+            protocol_id="protocol-a",
+            adapter_version="v1",
+        ),
+        react=None,
+    )
+
+    assert adapters.validate_config(config) == config
+    with pytest.raises(ConfigurationError):
+        adapters.validate_config(config.model_copy(update={"react": {"max_model_rounds": 6}}))

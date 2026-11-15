@@ -30,7 +30,7 @@
 - `02-requirements.md` — 用户故事、功能需求、验收标准
 - `03-technical-design.md` — 数据模型、代码改动点、接口设计、测试方案概要
 - `04-test-plan.md` — 测试方案：单元/集成用例、通用核对项、出口准则
-- `05-acceptance-plan.md` — 验收方案：AC 逐条验收步骤、业务指标测量、合规核对与签字
+- `05-acceptance-plan.md` — 验收方案：AC 逐条验收、少量关键人工检查、适用硬门槛与单一验收记录（默认不生成多角色 UAT、业务指标大表或签字表）
 - `06-test-report.md` — 测试报告（测试完成后生成）
 - `07-acceptance-report.md` — 验收报告（验收完成后生成）
 - `08-implementation-breakdown.md` — 实施拆解与裁定（可选，大型阶段）

@@ -221,6 +221,57 @@ async def test_ainvoke_stream_emits_deltas_and_returns_full_message(gateway_plat
     assert text == reply.content
 
 
+async def test_p2_t9_a5_stream_not_supported_falls_back_to_real_nonstreaming_invoke(
+    gateway_platform, monkeypatch
+):
+    client, services, settings = gateway_platform
+    _, _, profile = await setup(client, protocol="gateway_http")
+    gateway = services.groups.runtime.gateway
+    model = GatewayChatModel(gateway, settings.tenant_id, profile["id"], 1, [])
+    invoke_modes = []
+    original_invoke = gateway.invoke
+
+    async def observe_invoke(*args, **kwargs):
+        invoke_modes.append(kwargs.get("emit") is not None)
+        return await original_invoke(*args, **kwargs)
+
+    fallback_calls = 0
+    original_ainvoke = model.ainvoke
+
+    async def observe_ainvoke(messages):
+        nonlocal fallback_calls
+        fallback_calls += 1
+        return await original_ainvoke(messages)
+
+    monkeypatch.setattr(gateway, "invoke", observe_invoke)
+    monkeypatch.setattr(model, "ainvoke", observe_ainvoke)
+    deltas = []
+
+    async def on_delta(delta):
+        deltas.append(delta)
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "payload": {
+                    "content": "nonstreaming fallback succeeded",
+                    "tool_calls": [],
+                },
+                "usage": None,
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock:
+        gateway.client = mock
+        reply = await model.ainvoke_stream([HumanMessage(content="hello")], on_delta)
+
+    assert invoke_modes == [True, False]
+    assert fallback_calls == 1
+    assert reply.content == "nonstreaming fallback succeeded"
+    assert deltas == []
+
+
 async def test_http_retry_redaction_and_usage(gateway_platform):
     client, services, _settings = gateway_platform
     _, _, profile = await setup(client, protocol="openai_compatible", profile_extra={"retries": 1})

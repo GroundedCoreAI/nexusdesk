@@ -108,8 +108,24 @@ async def ensure_demo_profile(p, tenant, actor):
 async def ensure_agent(p, tenant, actor, name, description, config: AgentConfig):
     """Ensure a published demo agent with the given config; returns the agent row."""
     profile, version = await ensure_demo_profile(p, tenant, actor)
-    config.model_profile_id = profile["id"]
-    config.model_profile_version = version
+    # D-1 fix (2026-11-14): assigning the legacy model fields AFTER construction
+    # leaves the canonical react alias at its explicit nulls; the draft's JSONB
+    # round-trip then re-validates at publish as react.model_profile_id=None
+    # conflicting with the set legacy alias (execution_configuration_invalid),
+    # crash-looping the fresh-volume quickstart seed. Bind at construction time
+    # with BOTH alias representations carrying the identical value (the Phase 3
+    # normalizer rejects unequal pairs); configs without a canonical react
+    # (non-react engines) keep the historical plain assignment unchanged.
+    if config.react is not None:
+        bound = config.model_dump(mode="json")
+        bound["react"]["model_profile_id"] = str(profile["id"])
+        bound["react"]["model_profile_version"] = version
+        bound["model_profile_id"] = str(profile["id"])
+        bound["model_profile_version"] = version
+        config = AgentConfig.model_validate(bound)
+    else:
+        config.model_profile_id = profile["id"]
+        config.model_profile_version = version
     agents = await p.business.agents.list(tenant)
     agent = next((a for a in agents if a["name"] == name), None)
     if not agent:

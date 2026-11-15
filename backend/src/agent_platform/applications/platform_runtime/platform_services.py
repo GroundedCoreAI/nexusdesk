@@ -30,6 +30,7 @@ from agent_platform.business_capabilities.memory.service import MemoryService
 from agent_platform.business_capabilities.memory.store import TsVectorStore
 from agent_platform.business_capabilities.memory.tools import MemoryToolContribution
 from agent_platform.business_capabilities.open_platform.service import OpenPlatform
+from agent_platform.core_platform.agent_execution.registry import AdapterRegistry
 from agent_platform.core_platform.platform_services.access_control.service import MemberDirectory
 from agent_platform.core_platform.platform_services.events import DurableEventBus
 from agent_platform.core_platform.platform_services.identity.staff import StaffDirectory
@@ -63,6 +64,7 @@ class PlatformServices:
         contributions=None,
         tool_client=None,
         tool_network_policy: ToolEgressPolicy | None = None,
+        adapter_registry: AdapterRegistry | None = None,
     ):
         self.engine, self.repository, self.settings, self.snapshot = (
             engine,
@@ -88,7 +90,12 @@ class PlatformServices:
         self.tool_contributions = (ApprovalToolContribution(self.approval),)
         self.policy = ExecutionPolicy(self.tools, contributions)
         self.gateway = ModelGateway(engine, settings, model_client)
-        self.agents = AgentService(engine, self.tools, self.gateway.catalog)
+        self.agents = AgentService(
+            engine,
+            self.tools,
+            self.gateway.catalog,
+            adapter_registry=adapter_registry,
+        )
         self.application_runtime = ApplicationRuntimeResolver(engine, self.agents, settings)
         self.service_apps = ServiceApplicationService(engine, self.agents)
         self.knowledge = KnowledgeService(engine)

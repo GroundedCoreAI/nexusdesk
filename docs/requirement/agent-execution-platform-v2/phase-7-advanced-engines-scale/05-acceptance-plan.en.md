@@ -3,23 +3,13 @@
 > Status: Deferred (early-stage project; acceptance is not starting, and this document is neither launch approval nor an acceptance result)
 > Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; acceptance runs independently per slice only after the phase is reactivated
 > Created: 2026-11-02
+> Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off; phase remains deferred)
 > Basis: `01-business-goals.en.md` (G1~G11 and success metrics), `02-requirements.en.md` (AC-1~AC-22), `03-technical-design.en.md` (S7-01~S7-09), and `04-test-plan.en.md` (P7-UT/IT/CM)
 > Baseline statement: Business and performance baselines are unmeasured pending Phase 0; comparative metrics without baselines remain pending and cannot pass
 
-## 1. Acceptance Objectives and Organization
+## 1. Acceptance Scope and Responsibility
 
-Confirm that every reviewed slice is **functionally correct** (each applicable AC reproduced), **business-effective** (applicable metrics met), and **safe to launch** (reauthorization, no duplicate side effects, and reversible flags), with signable evidence. Actual launch scope requires slice-by-slice review. Passing one slice approves neither other slices nor any specific vendor Adapter.
-
-| Role | Responsibility |
-|---|---|
-| Product owner | Chairs acceptance; confirms slice business boundaries and Effective/waiting/degradation experience; signs P2 residual disposition |
-| QA | Executes applicable A1~A22, C1~C12, and regressions; records environment, steps, actual results, and evidence; grades defects |
-| Engineering lead | Rechecks Phase dependencies and migration head; provides environments, metric/lock/EXPLAIN data, and fixes |
-| Security owner | Reviews route/Resume/recovery authorization, approval separation of duties, Secrets, sandbox, Workspace/Artifact, and cross-tenant cases; signs security veto items |
-| SRE/Runtime operations | Verifies multi-Worker quota/fairness, Profile health/circuits, alerts, capacity, canary, and rollback rehearsal |
-| Finance/operations representative | Judges Engine/model usage coverage, unknown values, currencies, and estimated-cost reports without treating estimates as invoices |
-| Engine/Adapter reviewer | Reviews common contracts, compatibility matrix, LocalTestAdapter evidence, and Worker decoupling for approved Adapter examples only |
-| Release owner | Confirms per-slice feature flag, canary scope, monitoring, rollback, and re-enablement conditions; rejects Big Bang launch |
+After the phase is reactivated, verify applicable ACs, reauthorization, no duplicate side effects, and flag-rollback evidence independently for each slice. Passing one slice approves neither other slices nor any specific vendor Adapter. For each slice, the acceptance owner confirms scope and records the decision while the executor prepares environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, finance, SRE, or Adapter-reviewer roles. Developer self-verification proves conformance to this document, not real-user acceptance or an independent security audit. Approval separation of duties, tenancy, Secrets, usage, quotas, and rollback remain technical hard gates even when one person holds multiple responsibilities.
 
 ## 2. Acceptance Environments and Prerequisites
 
@@ -37,7 +27,7 @@ Confirm that every reviewed slice is **functionally correct** (each applicable A
 2. All applicable UT/IT/CM cases in `04-test-plan.en.md` pass with no open P0/P1. Skips do not count as passes and have retest plans.
 3. Current migration head is rechecked; statements that 0058+ are planning numbers are replaced by real migration information, with upgrade/old-code compatibility/rollback evidence.
 4. Acceptance uses at least two dedicated tenants and separate business/workspace data, never production customer data. Fake Secrets are identifiable and real credentials remain with authorized staff.
-5. Actual slice launch scope, thresholds, canary tenants, monitoring, capacity, and rollback owner are frozen. Vendor or advanced capabilities outside that scope are not covered by sign-off.
+5. Actual slice launch scope, thresholds, canary tenants, monitoring, capacity, and rollback owner are frozen. Vendor or advanced capabilities outside that scope are not covered by this acceptance.
 6. All new user-visible text passes i18n checks; API/SDK/UI version compatibility for waiting, Effective, and unknown is verified.
 
 ## 3. Functional Acceptance Checklist (AC-1~AC-22)
@@ -69,32 +59,21 @@ Confirm that every reviewed slice is **functionally correct** (each applicable A
 
 Every scenario record includes executor, date, environment/version, applicable slice and flag, prerequisite data, actual result, verdict, test-run link, and screenshot/log/read-only database evidence. Items that cannot execute locally are marked `pending_env` with required environment and proposed reviewer; they cannot be omitted or marked passed.
 
-## 4. UAT Assessment (Business Representatives)
+**Evidence reuse**: A1–A22 directly reference the corresponding UT/IT/CM, CI, multiprocess, capacity, reporting, and storage evidence in the slice's `06-test-report.md` wherever possible instead of manually repeating the full suite. Contract, authorization, recovery, usage, quota, fairness, Skill/Artifact, health, and rollback criteria are assessed directly from their A/C evidence without a second business-metric acceptance round; comparative items without baselines remain `pending` and cannot pass.
 
-- Basic-capability users: Missing advanced capabilities still produce a clear result or rejection, with no unauthorized/unsupported controls; waiting, unknown, and circuit text is understandable.
-- Conversation operators: Resume causes neither wrong-tenant context nor revival of revoked capabilities; failures are actionable without native Engine sensitive details.
-- Human reviewers: Pending items contain sufficient but minimal request context, revision/expiry, and decision result; repeated clicks do not repeat recovery.
-- Agent administrators: Dynamic model reasons, versions, and legacy compatibility are explainable; the UI cannot select an unauthorized Profile.
-- Finance/operations: Reports clearly show “estimated,” coverage, unknown, and currency; informational and additive values are never combined.
-- Operators: Quota rejection, open circuit, half-open recovery, rollback, and re-enablement have traceable events/alerts without exposing Secrets or sensitive host paths.
+## 4. Key Manual Checks
 
-## 5. Business Metric Acceptance
+Perform only checks relevant to the current slice that automation does not fully cover. Record executor, target SHA, result, and evidence for each; do not create business, finance, or operations-representative roles. Mark items unrelated to the slice `not_applicable` with a reason.
 
-| Metric | Baseline | Target | Measurement method |
-|---|---|---|---|
-| Adapter contracts and Worker decoupling | Not measured; pending Phase 0 | 100% applicable contracts pass; new Adapter Worker diff=0 | Contract CI report, dependency checks, and PR diff per approved Adapter |
-| Fallback authorization/side-effect safety | Not measured; pending Phase 0 | Zero unauthorized, cross-tenant, or post-side-effect automatic fallbacks | A3/A4 fault matrix, policy snapshots, and side-effect operation ledger |
-| Basic compatibility and all-off diff | Not measured; pending Phase 0 | 100% basic regressions pass and all-off behavioral diff=0 | Replay and structurally compare Phase 0 request/event/terminal/UI samples |
-| Session resume security | Not measured; pending Phase 0 | 100% reauthorization; 100% blocking of expiry/revocation/binding change/cross-tenant | A7/A8 scenario counts and authorization audit without native Secrets |
-| Human waiting and decisions | Not measured; pending Phase 0 | waiting uses no running resources; duplicate decisions cause zero second recovery/side effect; 100% illegal-decision blocking | A9/A10 concurrency records, Lease/quota snapshots, and approval/Run/Outbox reconciliation |
-| Dynamic-model auditability | Not measured; pending Phase 0 | 100% allowlist/snapshot compliance; legacy selection matches Phase 0 | A11/A12 Profile snapshots, gateway calls, and legacy comparison |
-| Usage/cost correctness | Not measured; pending Phase 0 | 100% source/idempotency coverage; zero duplicate aggregation; unknown not zero; no mixed currencies | Manually calculate A13/A14 fixed datasets and reconcile API/DB |
-| Quota and fairness | Not measured; pending Phase 0 | Zero multi-Worker over-limit; light tenant progresses every batch with P95≤2× idle baseline | A15/A16 agreed two-tenant load with samples, P95, throughput, and lock waits |
-| Skill/Artifact security | Not measured; pending Phase 0 | 100% execution Skill version/hash pinning; 100% blocking of unauthorized/escape/expired access | A17/A18 inventory, mount hashes, and download/cleanup/scan audit |
-| Runtime health governance | Not measured; pending Phase 0 | 100% contract-conformant transitions; zero stale-as-healthy; zero business-side-effect probes | A19/A20 multi-Worker state logs, probe ledgers, and alerts |
-| Independent slice rollback | Not measured; pending Phase 0 | Each slice disables independently, all-off diff=0, and rollback needs no down migration | A21/A22 canary/rollback rehearsal, configuration, and read-only DB evidence |
+| # | Applicable slices | Check and pass criterion |
+|---|---|---|
+| M1 | S7-02, S7-03 | Missing advanced capabilities produce clear results or rejections without unauthorized/unsupported controls; waiting, unknown, and circuit text is understandable; Resume causes no wrong-tenant context or revival of revoked capabilities, and failures expose no native Engine sensitive details |
+| M2 | S7-04 | Pending items contain sufficient but minimal request context, revision/expiry, and decision results; repeated clicks do not repeat recovery |
+| M3 | S7-05 | Dynamic model reasons, versions, and legacy compatibility are explainable, and the UI cannot select an unauthorized Profile |
+| M4 | S7-06 | Reports clearly show “estimated,” coverage, unknown, and currency; informational and additive values are never combined, and estimates are not treated as invoices |
+| M5 | S7-07–S7-09, release governance | Quota rejection, open circuit, half-open recovery, rollback, and re-enablement have traceable events/alerts without exposing Secrets or sensitive host paths |
 
-## 6. Compliance Checks
+## 5. Security, Data, and Release Hard Gates
 
 | # | Check | Verdict requirement | Trace |
 |---|---|---|---|
@@ -109,11 +88,11 @@ Every scenario record includes executor, date, environment/version, applicable s
 | C9 | All nine flags default false; per-slice rollback needs no down migration and authorized history remains readable/cleanable | Must pass | FR-11; AC-21, AC-22 |
 | C10 | New Engines do not change Worker core, new Protocols do not pollute the common Engine contract, and Adapter evidence is complete | Must pass | FR-1; AC-1, AC-2; architecture §19 and §22 decoupling/extensibility |
 | C11 | Phase 0 baselines, applicable tests, performance samples, and CI evidence are complete; skip/pending is not presented as passed | Must pass | G11; AC-21, AC-22; architecture §17 Phase 0 and §19.4 |
-| C12 | Actual launch scope is signed per slice; no vendor delivery is promised and multiple core capabilities are not combined into a Big Bang PR | Must pass | G1, G11; AC-1, AC-22; architecture §17 Phase 7 and §19.4 |
+| C12 | Actual launch scope is confirmed per slice in its single acceptance record; no vendor delivery is promised and multiple core capabilities are not combined into a Big Bang PR | Must pass | G1, G11; AC-1, AC-22; architecture §17 Phase 7 and §19.4 |
 
-## 7. Slice-by-Slice Acceptance Record Requirements
+## 6. Slice-by-Slice Acceptance Evidence Requirements
 
-| Slice | Mandatory A scenarios | Additional sign-off focus |
+| Slice | Mandatory A scenarios | Evidence focus |
 |---|---|---|
 | S7-01 | A1, A2, A21, A22 | Common contracts, LocalTestAdapter fault matrix, and Worker/Protocol decoupling |
 | S7-02 | A3~A6, A21, A22 | Routing policy, side-effect ledger, Effective UI, and basic degradation |
@@ -127,11 +106,15 @@ Every scenario record includes executor, date, environment/version, applicable s
 
 Every slice also executes all applicable C1~C12. A21/A22 are shared release gates for each slice and do not require other slices to launch simultaneously.
 
-## 8. Pass Criteria and Sign-Off
+## 7. Pass Criteria and Acceptance Record
 
-- **Single-slice pass**: All applicable A scenarios pass, applicable hard metrics are met, all C items pass, no P0/P1 remains, and canary/rollback/monitoring/evidence are complete.
-- **Single-slice conditional pass**: Only P2/P3 residuals remain, each with owner, deadline, and impact. Security/tenancy/side-effect/double-charge hard metrics all pass and the release owner explicitly limits canary scope.
-- **Fail**: Any veto triggers, a hard metric fails, Phase dependency/baseline is missing, rollback fails, or pending/skip is recorded as passed. Reverify affected A/C and regressions after fixes.
-- **Phase 7 overall pass**: Every slice in the final approved scope has an independent pass. One slice's sign-off or a vendor Adapter count cannot establish overall success.
+- **Single-slice pass**: All applicable A/C criteria pass; relevant M items are complete, have equivalent automated evidence, or are explicitly `not_applicable`; no P0/P1 remains; canary, rollback, monitoring, and evidence are complete.
+- **Single-slice conditional pass**: only non-hard-gate P2/P3 residuals remain, each with owner, deadline, impact, and an explanation from the acceptance owner in the record below; security, tenancy, side-effect, usage/double-charge, and other hard gates all pass, and canary scope is explicitly limited.
+- **Fail**: any veto or A/C criterion fails, a Phase dependency/baseline is missing, rollback fails, or pending/skip is recorded as passed. Reverify affected A/C and regressions after fixes.
+- **Phase 7 overall pass**: every slice in the final approved scope has an independent pass record. One slice's decision or a vendor Adapter count cannot establish overall success. Lightweight acceptance does not change the current deferred status.
 
-Each slice produces a “Phase 7 / S7-xx Acceptance Report” containing scope and flag, AC execution records, metrics, compliance, migration/CI/canary/rollback evidence, residuals with owners/deadlines, conclusion, and signatures (product / QA / engineering / security / SRE, adding finance or Adapter reviewer as applicable).
+Each slice produces a “Phase 7 / S7-xx Acceptance Report” with scope and flag, A/C evidence links, key manual checks, necessary raw performance/lock/EXPLAIN data, migration/CI/canary/rollback evidence, residuals, and the single record below; multi-role signatures are not required.
+
+| Slice/flag | Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
+|---|---|---|---|---|---|---|
+| To be filled | To be filled | To be filled (may be the acceptance owner) | To be filled | To be filled | Pending acceptance (phase deferred) | To be filled |

@@ -1018,8 +1018,11 @@ def test_current_contract_and_package_dependencies_stay_one_directional():
         "contracts/result.py",
         "contracts/events.py",
         "contracts/capabilities.py",
+        "contracts/config.py",
         "contracts/errors.py",
         "contracts/adapter.py",
+        "contracts/snapshots.py",
+        "contracts/instructions.py",
     }
     actual_t2_modules = {
         str(path.relative_to(package_root))
@@ -1033,6 +1036,8 @@ def test_current_contract_and_package_dependencies_stay_one_directional():
     forbidden_parts = (
         ".registry",
         ".adapters",
+        ".orchestration",
+        ".instructions",
         ".worker",
         ".repository",
         ".factory",
@@ -1043,22 +1048,54 @@ def test_current_contract_and_package_dependencies_stay_one_directional():
         "langchain",
         "openai",
     )
+    implementation_packages = {
+        "registry",
+        "adapters",
+        "orchestration",
+        "capability",
+        "instructions",
+    }
+    execution_marker = "agent_platform.core_platform.agent_execution."
+
+    def escapes_into_implementation(name: str, level: int, own_escape_level: int) -> bool:
+        """Whether one import leaves its own package for an implementation package.
+
+        ``.split(".")[0]`` on the path after ``agent_execution.`` is deliberate:
+        the contracts layer owns ``contracts.capabilities`` while
+        ``agent_execution.capability`` is a separate implementation package, and a
+        substring check would conflate the two.
+        """
+        if level:
+            return level >= own_escape_level and name.split(".")[0] in implementation_packages
+        return name.startswith(execution_marker) and (
+            name.removeprefix(execution_marker).split(".")[0] in implementation_packages
+        )
+
     for relative_path in sorted(expected_modules):
         source_file = package_root / relative_path
         assert source_file.is_file()
         tree = ast.parse(source_file.read_text(encoding="utf-8"), filename=str(source_file))
-        imports = []
+        imports: list[tuple[str, int]] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                imports.extend(alias.name for alias in node.names)
+                imports.extend((alias.name, 0) for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
-                imports.append(node.module)
-        assert not any(part in name for name in imports for part in forbidden_parts), (
+                imports.append((node.module, node.level))
+        names = [name for name, _ in imports]
+        assert not any(part in name for name in names for part in forbidden_parts), (
             relative_path,
             imports,
         )
+        # The contracts layer is a leaf: nothing in it may reach an execution
+        # implementation package, whether the import is absolute or relative.
+        escape_level = 1 if relative_path == "__init__.py" else 2
+        assert not [
+            (name, level)
+            for name, level in imports
+            if escapes_into_implementation(name, level, escape_level)
+        ], (relative_path, imports)
         extension_imports = [
-            name for name in imports if name.startswith("agent_platform.extension_contracts")
+            name for name in names if name.startswith("agent_platform.extension_contracts")
         ]
         assert all(name == "agent_platform.extension_contracts.base" for name in extension_imports)
 

@@ -54,3 +54,12 @@ frontend/.tmp-*
 outputs/
 customer-preview-*.png
 frontend/shot-*.png
+
+# Local dev-server runner logs
+backend/*-run.log
+backend/*-listen.log
+frontend/*-listen.log
+
+# Coverage artifacts produced by local pytest runs
+.coverage
+.coverage.*

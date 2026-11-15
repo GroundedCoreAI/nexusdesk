@@ -176,7 +176,7 @@
 
 | 配置项 | 层级 | 默认值 | 说明 |
 |---|---|---|---|
-| `execution_untrusted_tenants_enabled` | 全局 settings | `false` | 只有全部硬门禁和签字完成才能开启，不能单独绕过子策略。 |
+| `execution_untrusted_tenants_enabled` | 全局 settings | `false` | 只有全部硬门禁通过且独立安全与 SRE/运维批准完成才能开启，不能单独绕过子策略；人员或证据不足时保持关闭。 |
 | `execution_sandbox_required` | 全局 settings | `true` | 不可信执行必须沙箱；禁止用配置降级为宿主执行。 |
 | `execution_network_default_deny` | 部署策略 | `true` | 默认无出口，按 Execution 最小放行。 |
 | `execution_credential_grant_ttl_seconds` | 全局 settings | 有界短默认值，评审冻结 | grant 到期即不可用，不得超过部署硬上限。 |

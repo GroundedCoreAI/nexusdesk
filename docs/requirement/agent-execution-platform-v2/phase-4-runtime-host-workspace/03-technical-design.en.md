@@ -3,7 +3,9 @@
 > Status: Pending review (implementation has not started; all modules, tables, and deployment changes below are planned)
 > Created: 2026-11-02
 > Basis: `01-business-goals.md` (G1–G5), `02-requirements.md` (FR-1–FR-10, AC-1–AC-12), architecture Sections 3, 7–10, 15–17, and 19–22
-> Current-state review: `integration` working tree on 2026-11-02; planned Phase 3 predecessor is `0053_agent_execution_metadata`
+> Current-state review: `integration` working tree on 2026-11-02; re-reviewed on the Phase 4 branch on 2026-11-14
+> Revised: 2026-11-14 (implementation breakdown R-1/R-4/R-5/R-6/R-8: planned migration renumbered `0054`→`0059_execution_runtime_host` because the actual head is `0058_agent_execution_metadata`; the `ExecutionHandle` no-PID clause is scoped to public surfaces with the pre-existing internal `process_id` field staying unset; test-file names follow the repository `test_agent_execution_phase4_*` convention; a `host/process_identity.py` module row was added because no psutil dependency exists; the fingerprint-exclusion discipline for Phase 4 settings was registered in §5.1)
+> Revised: 2026-11-14 (coordination rulings 08 R-11/R-12: §4.2 records the Workdir `prepare` ready-or-refuse barrier contract with self-convergence of concurrent `preparing` rows; §3.2 pins `size_bytes` to the latest **successful** observation — persisted even when over quota, never overwritten by a failed observation, and re-observed once before physical deletion)
 
 ## 1. Current-State Mapping and Design Decisions
 
@@ -22,10 +24,11 @@
 
 | Layer | File | Change |
 |---|---|---|
-| Migration | `backend/migrations/versions/0054_execution_runtime_host.py` | Plan `execution_workdirs` and `runtime_host_processes` tables with necessary indexes; revalidate predecessor before implementation |
+| Migration | `backend/migrations/versions/0059_execution_runtime_host.py` | Add `execution_workdirs` and `runtime_host_processes` tables with necessary indexes (renumbered from the planned `0054`; actual predecessor is `0058_agent_execution_metadata`, per 08 R-1) |
 | Host models | `backend/src/agent_platform/core_platform/agent_execution/host/host_models.py` | Internal ProcessSpec, ResourcePolicy, ManagedProcess, ProcessResult, and HostHealth models |
 | Host interface | `backend/src/agent_platform/core_platform/agent_execution/host/runtime_host.py` | start/cancel/wait/reconcile/health/close contracts and composition entry |
 | Runner | `backend/src/agent_platform/core_platform/agent_execution/host/process_runner.py` | Trusted-target start, new process group, bounded I/O, and start-identity capture |
+| Identity probe | `backend/src/agent_platform/core_platform/agent_execution/host/process_identity.py` | Standard-library start-identity capture (Linux `/proc`, macOS `ps` best-effort; unavailable identity = mismatch = no signal); no psutil dependency (08 R-6) |
 | Supervisor | `backend/src/agent_platform/core_platform/agent_execution/host/process_supervisor.py` | TERM/KILL, timeout, exit collection, idempotent cleanup, and resource release |
 | Registry | `backend/src/agent_platform/core_platform/agent_execution/host/process_registry.py` | Process records, locking, orphan verification, restart recovery, and manual remediation |
 | Resources | `backend/src/agent_platform/core_platform/agent_execution/host/resource_manager.py` | Support probes, per-Execution limits, sampling, and release |
@@ -38,7 +41,7 @@
 | Composition | `backend/src/agent_platform/applications/platform_runtime/runtime_composition.py` | Assemble Host/Supervisor/Workspace/Resource/Sandbox and manage startup/shutdown |
 | Configuration | `backend/src/agent_platform/core_platform/platform_services/platform_settings/settings.py` | FR-10 settings, bounds, and enabled-state cross-validation |
 | Deployment | `deploy/quickstart/compose.yaml`, `deploy/production/compose.yaml`, `deploy/production/.env.example` | Execution volume, stable host_id, non-secret limits, and stop policy |
-| Tests | `backend/tests/test_runtime_host.py`, `test_process_supervisor.py`, `test_execution_workdir.py`, `test_runtime_host_postgres.py`, `test_execution_runtime_host_migrations.py` | Planned real-process, failure, malicious-path, resource, and migration tests; helpers are built-in trusted test targets only |
+| Tests | `backend/tests/test_agent_execution_phase4_workdir.py`, `test_agent_execution_phase4_runner.py`, `test_agent_execution_phase4_supervisor.py`, `test_agent_execution_phase4_registry.py`, `test_agent_execution_phase4_runtime_host.py`, `test_agent_execution_phase4_sandbox.py`, `test_agent_execution_phase4_orchestration.py`, `test_agent_execution_phase4_settings.py`, `test_agent_execution_phase4_migration.py`, `test_agent_execution_phase4_deployment.py` | Real-process, failure, malicious-path, resource, and migration tests using the repository `test_agent_execution_phase4_*` naming convention (08 R-5); helpers are built-in trusted test targets only |
 
 ## 3. Data Model
 
@@ -48,9 +51,9 @@ After a Worker restart, in-memory asyncio Tasks, PIDs, and directory handles are
 
 Do not create a generic RuntimeHost service table: stable `host_id` comes from deployment, boot-scoped `host_instance_id` is generated by the process, and Host health derives from observation timestamps and structured state. Avoid a control-plane entity until multi-Host scheduling is a real requirement.
 
-### 3.2 Migration `0054_execution_runtime_host.py`
+### 3.2 Migration `0059_execution_runtime_host.py`
 
-> Planned identifier: planned predecessor is Phase 3 `0053_agent_execution_metadata`. Revalidate actual head/down_revision before implementation; if intervening migrations exist, use a new linkage and revise this document without editing history.
+> Renumbered from the planned `0054` on 2026-11-14: the Phase 3 migration itself shifted `0053`→`0058_agent_execution_metadata`, and the actual head revalidated on the Phase 4 branch is `0058_agent_execution_metadata` (down_revision `0057_industry_pack_runtime`). This migration therefore carries `down_revision = "0058_agent_execution_metadata"`. Never edit applied migrations; if the head moves again before implementation, apply the same renumber-and-revise procedure (08 R-1).
 
 #### Table `execution_workdirs`
 
@@ -61,7 +64,7 @@ Do not create a generic RuntimeHost service table: stable `host_id` comes from d
 | `tenant_id/business_id/workspace_id` | TEXT NOT NULL | Trusted tenant and logical scope, rechecked before cleanup |
 | `relative_path` | TEXT NOT NULL UNIQUE | Platform-generated path relative to configured execution root; never client-supplied |
 | `status` | TEXT NOT NULL CHECK | `preparing/ready/active/retained/cleaning/deleted/cleanup_failed` |
-| `quota_bytes/size_bytes` | BIGINT NOT NULL | Configured total ceiling and latest observed usage; size defaults to 0 |
+| `quota_bytes/size_bytes` | BIGINT NOT NULL | Configured total ceiling and latest **successful** observed usage (08 R-12): a successful observation is persisted even when over quota, a failed/partial observation never overwrites, and cleanup re-observes once before physical deletion; size defaults to 0 |
 | `file_count` | INTEGER NOT NULL DEFAULT 0 | Observed file count and cleanup diagnostics |
 | `expires_at` | TIMESTAMPTZ NULL | Retention expiry |
 | `last_error_code` | TEXT NULL | Stable prepare/cleanup error, without raw paths or secret exception text |
@@ -105,7 +108,7 @@ Indexes: `(host_id,status)`, `(status,last_observed_at)`, and `(tenant_id,status
 | `reconcile` | Compare durable records with OS facts, recover orphans, and retry cleanup | Never resumes Engine sessions or re-executes side-effecting requests |
 | `health/close` | Report support matrix/active/failures; stop admission and drain | Composition root owns lifecycle; Worker makes no direct OS calls |
 
-Public ExecutionHandle excludes PID/PGID, start tokens, full paths, and environment. Tests must use at least two Adapters to prove Host has no Engine-specific branches.
+Public ExecutionHandle excludes PID/PGID, start tokens, full paths, and environment. Scoping (08 R-4): "public" binds the HTTP/OpenAPI, AgentEvent, Run metadata, and log surfaces; the pre-existing internal `ExecutionHandle.process_id` field (default `None`) stays **unset** for Host-managed executions — OS identity travels only on the internal `ManagedProcess` — and a pin test asserts no nonzero process id or host path appears in serialized public payloads. Tests must use at least two Adapters to prove Host has no Engine-specific branches.
 
 ### 4.2 Normal start and exit
 
@@ -119,6 +122,8 @@ Orchestrator validates Phase 3 Effective and trusted target
 
 - Every failure cleans in reverse order; if a process started before record failure, terminate the group through the same managed handle rather than leaving it unowned after a DB error.
 - Run completion/failure/cancellation and Workdir retained/deleted commit separately; `cleanup_failed` remains visible and retryable.
+- Workdir `prepare` follows the ready-or-refuse contract (08 R-11): a concurrent or retried prepare converges a lingering `preparing` row through the same idempotent handle-based build and the guarded conditional transition, so the Orchestrator barrier starts only against a returned `ready`/`active` record, and any prepare refusal is a fail-closed start-prevention event.
+- Workdir disk bookkeeping follows 08 R-12: `size_bytes` is the latest successful observation — persisted even when over quota (with a structured excess signal in the resource reason-code vocabulary), never overwritten by a failed observation, and re-observed once before physical deletion so the Tombstone carries the final value.
 - Bound stdout/stderr independently; at the limit, stop reading and terminate the group, without logging complete output or environment.
 
 ### 4.3 Cancellation, timeout, and stop
@@ -188,6 +193,7 @@ Every FR-10 number uses bounded Pydantic Fields; when enabled, additionally requ
 - Positive bounded grace, kill, reconcile, sample, and cleanup intervals; nonzero nonnegative wall timeout, CPU/memory/PID/disk/output limits.
 - With `execution_resource_enforcement_required=true`, compute the support matrix before start and admit no process missing any requested capability.
 - `execution_runtime_host_enabled=false` does not stop recovery/cleanup for existing records; only zero active processes permits full Supervisor shutdown.
+- Fingerprint discipline (08 R-8, Phase 3 R-48 precedent): the entire Phase 4 settings family (`execution_runtime_host_*`, `execution_workdir_*`, `execution_process_*`, `execution_resource_*`, `execution_sandbox_provider`) is excluded from the runtime configuration fingerprint, so changing a rollout flag or a limit never forces already-queued Runs to `configuration_changed`.
 
 ### 5.2 Deployment precedents and changes
 
@@ -213,7 +219,7 @@ Phase 4 adds no model-invocation or credential path. React remains in-process th
 | PostgreSQL/migration | Table constraints/indexes, locking/idempotency, legacy React, default-off, application rollback, and disposable downgrade |
 | Regression | Phase 0 React/Worker/Repository/SSE, Phase 3 capabilities/configuration/snapshots, and quickstart/production deployment checks |
 
-See `04-test-plan.md`; unavailable resource environments are `pending_env`, and development approximations must not be reported as full support.
+See `04-test-plan.md`; unavailable resource environments are `pending_env`, and development approximations must not be reported as full support. The normative macOS-development-subset versus `pending_env` mapping for the current darwin execution host is registered in `04` §2.1 and `08` §5 (08 R-3).
 
 ## 8. Rollout and Rollback
 

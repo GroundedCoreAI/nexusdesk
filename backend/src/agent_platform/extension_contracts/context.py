@@ -1,8 +1,18 @@
 """Stable business-scope context shared by applications and platform ports."""
 
+from typing import Final
+
 from pydantic import Field
 
 from .base import ContractModel
+
+# The single business/workspace fallback pair a Run uses when its row carries
+# neither dimension. It is shared deliberately: the Worker binds one scope for
+# the persisted history lookup and the same composition derives deployment-level
+# warm targets from it, so a drift between the two would warm entries no Run ever
+# reads (08 R-46).
+DEFAULT_BUSINESS_ID: Final[str] = "customer-service"
+DEFAULT_WORKSPACE_ID: Final[str] = "default"
 
 
 class BusinessScope(ContractModel):
