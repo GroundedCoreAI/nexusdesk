@@ -11,7 +11,6 @@ import {
     Alert,
     Button,
     Popconfirm,
-    Select,
     Space,
     Spin,
     Table,
@@ -21,16 +20,13 @@ import {
 import { toast } from '../../../shared/components/ui';
 import {
     listApplicationChannels,
-    listVersions,
     setApplicationStatus,
-    switchChannelVersion,
 } from '../api';
 import {
     DEFAULT_PAGE_SIZE,
     type ApplicationChannelBinding,
     type ApplicationDetail,
     type ApplicationReadiness,
-    type ApplicationVersion,
     type ReadinessCheck,
 } from '../contracts';
 import { say } from '../labels';
@@ -49,6 +45,7 @@ export function ChannelsReleaseTab({
     readinessLoading,
     readinessError,
     onSaved,
+    onNavigate,
 }: {
     application: ApplicationDetail;
     readOnly: boolean;
@@ -56,28 +53,12 @@ export function ChannelsReleaseTab({
     readinessLoading: boolean;
     readinessError: string;
     onSaved: (application: ApplicationDetail) => void;
+    onNavigate?: (path: string) => void;
 }) {
     const [channels, setChannels] = useState<ApplicationChannelBinding[]>(application.channels);
-    const [availableVersions, setAvailableVersions] = useState<ApplicationVersion[]>([]);
     const [channelsLoading, setChannelsLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-
-    useEffect(() => {
-        let active = true;
-        listVersions(application.key, 1, 100)
-            .then(result => {
-                if (active) setAvailableVersions(result.items);
-            })
-            .catch(cause => {
-                if (active) {
-                    setError(cause instanceof Error ? cause.message : say('加载失败'));
-                }
-            });
-        return () => {
-            active = false;
-        };
-    }, [application.draft_revision, application.key, application.published_version]);
 
     useEffect(() => {
         let active = true;
@@ -117,18 +98,6 @@ export function ChannelsReleaseTab({
         }
     }
 
-    async function switchVersion(channel: ApplicationChannelBinding, version: number) {
-        try {
-            await switchChannelVersion(channel.id, version);
-            setChannels(current => current.map(item =>
-                item.id === channel.id ? { ...item, application_version: version } : item,
-            ));
-            toast.success(say('已切换发布版本'));
-        } catch (cause) {
-            toast.error(cause instanceof Error ? cause.message : say('操作失败'));
-        }
-    }
-
     const channelColumns: TableColumnsType<ApplicationChannelBinding> = [
         {
             title: say('渠道'),
@@ -147,19 +116,10 @@ export function ChannelsReleaseTab({
             </Tag>,
         },
         {
-            title: say('应用版本'),
+            title: say('钉定版本'),
             dataIndex: 'application_version',
-            width: 190,
-            render: (value, channel) => <Select
-                aria-label={`${say('应用版本')} ${channel.name}`}
-                value={value}
-                disabled={readOnly}
-                options={availableVersions.map(version => ({
-                    value: version.version,
-                    label: `v${version.version}`,
-                }))}
-                onChange={next => void switchVersion(channel, next)}
-            />,
+            width: 120,
+            render: value => <Tag color="blue">v{value}</Tag>,
         },
         {
             title: say('凭据'),
@@ -179,8 +139,8 @@ export function ChannelsReleaseTab({
                 <div className="sa-panel-title">
                     <CloudUploadOutlined/>
                     <div>
-                        <h3>{say('客户渠道与发布')}</h3>
-                        <p>{say('发布不会自动更新渠道；切换版本是显式、可审计操作。')}</p>
+                        <h3>{say('发布')}</h3>
+                        <p>{say('发布不会自动更新渠道；渠道版本在客服渠道中显式切换。')}</p>
                     </div>
                 </div>
                 <div className="sa-release-status">
@@ -262,11 +222,21 @@ export function ChannelsReleaseTab({
         <section className="sa-channels-panel">
             <div className="sa-section-head">
                 <div>
-                    <span className="sa-eyebrow">{say('客户渠道')}</span>
-                    <h3>{say('客户渠道')}</h3>
-                    <p>{say('渠道固定使用一个已发布应用版本，切换后仅影响后续入站消息。')}</p>
+                    <span className="sa-eyebrow">{say('客服渠道')}</span>
+                    <h3>{say('本应用渠道')}</h3>
+                    <p>{say('渠道由客服渠道统一管理，此处只读展示钉定版本；切换版本请前往客服渠道。')}</p>
                 </div>
-                <Tag icon={<LinkOutlined/>}>{channels.length} {say('渠道')}</Tag>
+                <Space wrap>
+                    <Tag icon={<LinkOutlined/>}>{channels.length} {say('渠道')}</Tag>
+                    {onNavigate && <Button
+                        type="link"
+                        onClick={() => onNavigate(
+                            `/open-platform/channels?application_id=${encodeURIComponent(application.id)}`,
+                        )}
+                    >
+                        {say('在客服渠道中管理')} →
+                    </Button>}
+                </Space>
             </div>
             <Table<ApplicationChannelBinding>
                 className="sa-ant-table"
@@ -284,7 +254,7 @@ export function ChannelsReleaseTab({
                 }}
                 locale={{ emptyText: <div className="sa-table-empty">
                     <ApiOutlined/>
-                    <span>{say('尚未接入可用客户渠道')}</span>
+                    <span>{say('尚未接入客服渠道')}</span>
                 </div> }}
             />
         </section>

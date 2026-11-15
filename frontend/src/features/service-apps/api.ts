@@ -12,12 +12,15 @@ import {
     type ApplicationInput,
     type ApplicationOverview,
     type ApplicationPage,
+    type ApplicationPreviewHistoryItem,
+    type ApplicationPreviewHistoryPage,
     type ApplicationPreviewResult,
     type ApplicationReadiness,
     type ApplicationRules,
     type ApplicationSkill,
     type ApplicationSummary,
     type ApplicationTracePage,
+    type ApplicationTurnDiagnostics,
     type ApplicationVersion,
     type ApplicationVersionPage,
     type ConnectionInput,
@@ -754,6 +757,39 @@ export async function getApplicationConversation(
     ));
 }
 
+export async function getApplicationTurnDiagnostics(
+    key: string,
+    conversationId: string,
+    turnId: string,
+): Promise<ApplicationTurnDiagnostics> {
+    const value = record(await api<Raw>(
+        `/service-apps/${encodeURIComponent(key)}/conversations/`
+        + `${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/diagnostics`,
+    ));
+    return {
+        available: boolean(value.available),
+        reason: text(value.reason) || null,
+        degraded: boolean(value.degraded),
+        turn_id: text(value.turn_id),
+        run_id: text(value.run_id) || null,
+        status: text(value.status, 'unknown'),
+        error_code: text(value.error_code) || null,
+        application_version: nullableNumber(value.application_version),
+        agent_version: nullableNumber(value.agent_version),
+        input: text(value.input),
+        reply: text(value.reply),
+        duration_ms: nullableNumber(value.duration_ms),
+        created_at: text(value.created_at) || null,
+        skills: array<Raw>(value.skills).map(item => ({
+            key: text(item.key),
+            status: text(item.status),
+            duration_ms: nullableNumber(item.duration_ms),
+            error: text(item.error) || null,
+        })),
+        trace: record(value.trace),
+    };
+}
+
 export async function previewApplication(
     key: string,
     input: {
@@ -761,6 +797,7 @@ export async function previewApplication(
         skill_key?: string | null;
         version?: number | null;
         allow_write?: boolean;
+        session_key?: string | null;
     },
 ) {
     const raw = record(await post<Raw>(
@@ -779,6 +816,66 @@ export async function previewApplication(
         })),
         trace: record(raw.trace),
     } as ApplicationPreviewResult;
+}
+
+function normalizePreviewHistoryItem(item: Raw): ApplicationPreviewHistoryItem {
+    return {
+        id: text(item.id),
+        run_id: nullableNumber(item.run_id)?.toString() ?? null,
+        status: text(item.status, 'running'),
+        error_code: text(item.error_code, undefined) || null,
+        application_version: nullableNumber(item.application_version),
+        draft: boolean(item.draft, item.application_version == null),
+        input: text(item.input),
+        reply: text(item.reply),
+        duration_ms: nullableNumber(item.duration_ms),
+        created_at: text(item.created_at),
+    };
+}
+
+export async function listApplicationPreviews(
+    key: string,
+    params: { page: number; pageSize: number; sessionKey?: string },
+): Promise<ApplicationPreviewHistoryPage> {
+    const raw = record(await api<Raw>(
+        `/service-apps/${encodeURIComponent(key)}/previews${queryString({
+            page: params.page,
+            page_size: params.pageSize,
+            session_key: params.sessionKey,
+        })}`,
+    ));
+    const items = array<Raw>(raw.items).map(normalizePreviewHistoryItem);
+    return {
+        items,
+        total: number(raw.total, items.length),
+        page: number(raw.page, params.page),
+        page_size: number(raw.page_size, params.pageSize),
+        total_pages: raw.total_pages === undefined
+            ? Math.max(1, Math.ceil(number(raw.total, items.length) / Math.max(1, params.pageSize)))
+            : number(raw.total_pages),
+    };
+}
+
+export async function getApplicationPreview(
+    key: string,
+    turnId: string,
+): Promise<ApplicationPreviewResult & { input: string }> {
+    const raw = record(await api<Raw>(
+        `/service-apps/${encodeURIComponent(key)}/previews/${encodeURIComponent(turnId)}`,
+    ));
+    return {
+        status: text(raw.status, 'completed'),
+        reply: text(raw.reply),
+        application_version: nullableNumber(raw.application_version),
+        draft: boolean(raw.draft, raw.application_version == null),
+        skills: array<Raw>(raw.skills).map(item => ({
+            key: text(item.key),
+            status: text(item.status),
+            duration_ms: nullableNumber(item.duration_ms),
+        })),
+        trace: record(raw.trace),
+        input: text(raw.input),
+    };
 }
 
 export async function listApplicationChannels(applicationId: string) {

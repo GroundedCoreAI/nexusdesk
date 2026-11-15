@@ -142,7 +142,10 @@ class RuntimeEngine:
                     "round": state["rounds"],
                     "ok": result["ok"],
                     "error": result.get("error"),
-                    "gateway_call_id": result.get("call_id"),
+                    # This is the tool-operation ledger id, not a model-gateway
+                    # call id: labelling it "gateway_call_id" made every tool
+                    # look like it had a gateway call that does not exist.
+                    "operation_id": result.get("call_id"),
                     "execution_status": result.get("execution_status"),
                     "tool_version": result.get("tool_version"),
                     "duration_ms": int((time.monotonic() - tool_started) * 1000),

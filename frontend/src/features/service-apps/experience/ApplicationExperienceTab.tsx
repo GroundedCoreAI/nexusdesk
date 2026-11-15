@@ -139,7 +139,7 @@ export function ApplicationExperienceTab({
             })
             .catch(cause => {
                 if (active) {
-                    setError(cause instanceof Error ? cause.message : '客户交互配置加载失败');
+                    setError(cause instanceof Error ? cause.message : '体验与调试配置加载失败');
                 }
             })
             .finally(() => {
@@ -241,9 +241,9 @@ export function ApplicationExperienceTab({
             setDirty(false);
             onDirtyChange(false);
             onChanged();
-            message.success('客户交互配置已保存到应用草稿');
+            message.success('体验与调试配置已保存到应用草稿');
         } catch (cause) {
-            message.error(cause instanceof Error ? cause.message : '客户交互配置保存失败');
+            message.error(cause instanceof Error ? cause.message : '体验与调试配置保存失败');
         } finally {
             setSaving(false);
         }
@@ -256,7 +256,7 @@ export function ApplicationExperienceTab({
         return <Alert
             type="error"
             showIcon
-            message={error || '客户交互配置加载失败'}
+            message={error || '体验与调试配置加载失败'}
             action={<Button onClick={() => window.location.reload()}>重试</Button>}
         />;
     }
@@ -271,8 +271,8 @@ export function ApplicationExperienceTab({
         <section className="sa-experience-banner">
             <div className="sa-experience-banner-icon"><CustomerServiceOutlined/></div>
             <div>
-                <span className="sa-eyebrow">CUSTOMER EXPERIENCE</span>
-                <h3>客户交互</h3>
+                <span className="sa-eyebrow">EXPERIENCE &amp; DEBUG</span>
+                <h3>体验与调试</h3>
                 <p>
                     欢迎语、推荐问题、业务目录和交互组件保存在应用草稿，发布后进入不可变版本快照。
                     右侧真实客户画布直接调用应用预览运行，诊断信息收进运营抽屉，不再维护第二套客户界面。
@@ -369,14 +369,14 @@ export function ApplicationExperienceTab({
                         <InfoCircleOutlined/>
                         <div>
                             <h3>配置边界</h3>
-                            <p>客户交互是服务应用内部能力，不新增顶层场景或能力包。</p>
+                            <p>体验与调试是服务应用内部能力，不新增顶层场景或能力包。</p>
                         </div>
                     </div>
                     <ol>
                         <li>标准案例的初始化数据包含四套差异化目录，用户只能复制后编辑。</li>
                         <li>草稿保存会递增修订号，发布时与技能、连接、规则一起生成版本快照。</li>
                         <li>目录入口通过 `binding` 指向技能 key 或人工队列，不复制技能实现。</li>
-                        <li>客户交互与客户界面调试已合并，真实对话、版本切换和诊断共用同一套画布。</li>
+                        <li>交互配置与客户界面调试合并为同一视图，真实对话、版本切换和诊断共用同一套画布。</li>
                     </ol>
                 </section>
             </div>
@@ -400,7 +400,7 @@ export function ApplicationExperienceTab({
         </div>
 
         <Drawer
-            title="编辑客户交互配置"
+            title="编辑体验与调试配置"
             width={760}
             open={drawerOpen}
             onClose={closeEditor}

@@ -1,6 +1,7 @@
 import { dateTime, t } from '../../i18n/index';
 import { useEffect, useState } from 'react';
 import {
+    api,
     patch,
     post,
     put,
@@ -18,6 +19,7 @@ import {
     useResource,
 } from '../../shared/components/ui';
 import {
+    App,
     Button,
     Modal,
     Select,
@@ -163,7 +165,7 @@ function DeliveryList({ channelId }: { channelId: string }) {
     );
 }
 
-export function ChannelsPage() {
+export function ChannelsPage({ applicationFilter = '' }: { applicationFilter?: string }) {
     const rows = useResource<ChannelV2[]>('/channels');
     const applications = useResource<PublishedApplicationPage>(
         '/service-apps?page=1&page_size=100&status=published',
@@ -171,6 +173,7 @@ export function ChannelsPage() {
     const providers = useResource<ChannelProvider[]>('/channels/providers');
     const action = useAction();
     const { admin } = useAccess();
+    const { modal } = App.useApp();
     const [provider, setProvider] = useState('generic_webhook');
     const [signing, setSigning] = useState('');
     const [name, setName] = useState('');
@@ -183,6 +186,7 @@ export function ChannelsPage() {
     const [editConfig, setEditConfig] = useState<Record<string, string>>({});
     const [editCredentials, setEditCredentials] = useState<Record<string, string>>({});
     const [deliveriesFor, setDeliveriesFor] = useState('');
+    const [appFilter, setAppFilter] = useState(applicationFilter);
     const [switching, setSwitching] = useState<ChannelV2 | null>(null);
     const [targetVersion, setTargetVersion] = useState<number | null>(null);
 
@@ -207,6 +211,18 @@ export function ChannelsPage() {
     useEffect(() => {
         setApplicationVersion(selectedApplication?.published_version ?? null);
     }, [selectedApplication?.id, selectedApplication?.published_version]);
+
+    useEffect(() => {
+        setAppFilter(applicationFilter);
+    }, [applicationFilter]);
+
+    function applyFilter(value: string) {
+        setAppFilter(value);
+        const hash = value
+            ? `#/open-platform/channels?application_id=${encodeURIComponent(value)}`
+            : '#/open-platform/channels';
+        window.history.replaceState({ ...window.history.state }, '', hash);
+    }
 
     function chooseProvider(value: string) {
         const definition = providers.data?.find(item => item.id === value);
@@ -237,6 +253,18 @@ export function ChannelsPage() {
             || channel.application_key
             || channel.application_id;
     }
+
+    const allChannels = rows.data || [];
+    const visibleChannels = appFilter
+        ? allChannels.filter(item => item.application_id === appFilter)
+        : allChannels;
+    const applicationOptions = Array.from(
+        new Map(allChannels.map(item => [item.application_id, applicationName(item)])).entries(),
+    ).map(([value, label]) => ({ value, label }));
+    const disabledCount = visibleChannels.filter(item => !item.enabled).length;
+    const missingCredentialCount = visibleChannels.filter(
+        item => !item.credentials_configured,
+    ).length;
 
     const columns: TableColumnsType<ChannelV2> = [
         {
@@ -344,6 +372,25 @@ export function ChannelsPage() {
                     >
                         {deliveriesFor === channel.id ? t('收起投递记录') : t('查看投递记录')}
                     </Button>
+                    <Button
+                        danger
+                        type="link"
+                        size="small"
+                        disabled={!admin || action.busy}
+                        onClick={() => modal.confirm({
+                            title: t('删除此渠道？'),
+                            content: t('删除后渠道令牌立即失效，入站消息不再接收；历史会话保留。'),
+                            okText: t('删除'),
+                            okButtonProps: { danger: true },
+                            cancelText: t('取消'),
+                            onOk: () => action.run(async () => {
+                                await api<void>(`/channels/${channel.id}`, { method: 'DELETE' });
+                                rows.refresh();
+                            }, t('渠道已删除')),
+                        })}
+                    >
+                        {t('删除')}
+                    </Button>
                 </Space>
             ),
         },
@@ -363,19 +410,40 @@ export function ChannelsPage() {
                 <Panel
                     title={t('接入渠道')}
                     action={(
-                        <Button onClick={rows.refresh} loading={rows.loading}>
-                            {t('刷新')}
-                        </Button>
+                        <Space wrap>
+                            <Select
+                                aria-label={t('按服务应用筛选')}
+                                allowClear
+                                showSearch
+                                optionFilterProp="label"
+                                placeholder={t('全部服务应用')}
+                                style={{ minWidth: 200 }}
+                                value={appFilter || undefined}
+                                options={applicationOptions}
+                                onChange={value => applyFilter(value || '')}
+                            />
+                            <Button onClick={rows.refresh} loading={rows.loading}>
+                                {t('刷新')}
+                            </Button>
+                        </Space>
                     )}
                 >
                     <p className="hint channel-version-note">
                         {t('渠道固定使用一个已发布应用版本，切换后仅影响后续入站消息。')}
                     </p>
+                    <Space size={8} wrap className="channel-health">
+                        <Tag color={visibleChannels.length ? 'blue' : 'default'}>
+                            {t('{{v0}} 个渠道', { v0: visibleChannels.length })}
+                        </Tag>
+                        {disabledCount > 0 && <Tag color="default">{t('{{v0}} 个已停用', { v0: disabledCount })}</Tag>}
+                        {missingCredentialCount > 0 && <Tag color="gold">{t('{{v0}} 个凭据未配置', { v0: missingCredentialCount })}</Tag>}
+                        {appFilter && <Button type="link" size="small" onClick={() => applyFilter('')}>{t('清除筛选')}</Button>}
+                    </Space>
                     <Table<ChannelV2>
                         className="channel-table"
                         rowKey="id"
                         columns={columns}
-                        dataSource={rows.data || []}
+                        dataSource={visibleChannels}
                         loading={rows.loading}
                         pagination={{
                             defaultPageSize: 10,
@@ -386,7 +454,7 @@ export function ChannelsPage() {
                         }}
                         scroll={{ x: 1130 }}
                         locale={{
-                            emptyText: <Empty>{t('创建渠道接入业务系统')}</Empty>,
+                            emptyText: <Empty>{appFilter ? t('该服务应用暂无渠道') : t('创建渠道接入业务系统')}</Empty>,
                         }}
                         expandable={{
                             expandedRowKeys: deliveriesFor ? [deliveriesFor] : [],

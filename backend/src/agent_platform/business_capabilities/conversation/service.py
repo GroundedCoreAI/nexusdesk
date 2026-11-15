@@ -101,6 +101,7 @@ class ConversationService:
                 WHERE tenant_id=:t AND """
                 + scope_sql
                 + """
+                  AND COALESCE(source,'business') <> 'debug'
                 ORDER BY updated_at DESC LIMIT :lim OFFSET :off""",
                 t=tenant,
                 **scope_params,
@@ -121,7 +122,9 @@ class ConversationService:
         scope_sql, scope_params = scope_predicate(resolved)
         page = max(page, 1)
         page_size = max(1, min(page_size, 100))
-        where = "tenant_id=:t AND " + scope_sql
+        # Preview/debug sessions live in the service-app drawer history, never
+        # in the customer conversation workbench or its counts.
+        where = "tenant_id=:t AND " + scope_sql + " AND COALESCE(source,'business') <> 'debug'"
         params = {
             "t": tenant,
             **scope_params,
@@ -161,7 +164,9 @@ class ConversationService:
     ):
         resolved = resolve_scope(tenant, scope)
         scope_sql, scope_params = scope_predicate(resolved)
-        where = "tenant_id=:t AND " + scope_sql
+        where = (
+            "tenant_id=:t AND " + scope_sql + " AND COALESCE(source,'business') <> 'debug'"
+        )
         params = {
             "t": tenant,
             **scope_params,
@@ -187,6 +192,7 @@ class ConversationService:
     async def counts_by_agent(self, tenant, scope: BusinessScope | None = None):
         resolved = resolve_scope(tenant, scope)
         scope_sql, scope_params = scope_predicate(resolved, "r")
+        scope_sql = scope_sql + " AND COALESCE(r.source,'business') <> 'debug'"
         async with self.engine.connect() as c:
             rows = await many(
                 c,
@@ -309,7 +315,7 @@ class ConversationService:
         query_scope = resolve_scope(tenant, scope)
         resolved = persisted_scope(tenant, scope)
         scope_sql, scope_params = scope_predicate(query_scope)
-        if source not in {"business", "playground"}:
+        if source not in {"business", "playground", "debug", "open_platform"}:
             raise DomainError("invalid_conversation_source", 422)
         if source == "playground" and not agent_id:
             raise DomainError("playground_agent_required", 422)

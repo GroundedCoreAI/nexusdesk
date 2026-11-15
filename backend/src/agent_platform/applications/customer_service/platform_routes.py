@@ -1155,6 +1155,11 @@ async def toggle_channel(cid: UUID, body: EnabledInput, request: Request, user: 
     return await business(request).channels.toggle(user.tenant, user.actor, cid, body.enabled)
 
 
+@router.delete("/channels/{cid}", status_code=204)
+async def delete_channel(cid: UUID, request: Request, user: Admin):
+    await business(request).channels.delete(user.tenant, user.actor, cid)
+
+
 @router.post("/channels/{cid}/rotate-token")
 async def rotate_channel(cid: UUID, request: Request, user: Admin):
     return await business(request).channels.rotate(user.tenant, user.actor, cid)

@@ -450,6 +450,61 @@ async function mockConsole(
             });
         }
         if (
+            path.endsWith('/diagnostics')
+            && path.includes('/turns/')
+            && request.method() === 'GET'
+        ) {
+            return route.fulfill({
+                json: {
+                    available: true,
+                    reason: null,
+                    degraded: false,
+                    turn_id: 'turn-1',
+                    run_id: 'run-1',
+                    status: 'completed',
+                    error_code: null,
+                    application_version: 2,
+                    agent_version: 2,
+                    input: '请帮我查询订单',
+                    reply: '已为您查询到订单，当前正在配送中。',
+                    duration_ms: 4628,
+                    created_at: '2026-11-01T01:50:00Z',
+                    skills: [{
+                        key: 'order_lookup',
+                        status: 'completed',
+                        duration_ms: 120,
+                        error: null,
+                    }],
+                    trace: {
+                        application_version: 2,
+                        timing: {
+                            queued_ms: 165,
+                            prepare_ms: 36,
+                            exec_ms: 4400,
+                            total_ms: 4628,
+                        },
+                        rounds: [{
+                            round: 1,
+                            offset_ms: 0,
+                            duration_ms: 900,
+                            first_token_ms: 260,
+                            input_tokens: 812,
+                            output_tokens: 96,
+                            tool_calls: 1,
+                            model: 'gpt-4o-mini',
+                        }],
+                        tool_calls: [{ name: 'knowledge_search', offset_ms: 300 }],
+                        retrieval: [{
+                            query: '订单配送进度',
+                            duration_ms: 240,
+                            offset_ms: 300,
+                            sources: [{ title: '配送说明' }],
+                        }],
+                    },
+                },
+            });
+        }
+        if (
             path.startsWith('/service-apps/consumer-service/conversations/')
             && request.method() === 'GET'
         ) {
@@ -514,13 +569,17 @@ async function mockConsole(
                 skill_key: string | null;
                 version: number | null;
                 allow_write: boolean;
+                session_key: string;
             };
-            expect(body).toEqual({
+            // The debug session key is generated per browser session, so only the
+            // customer-controlled fields are asserted.
+            expect(body).toEqual(expect.objectContaining({
                 message: '查询订单',
                 skill_key: null,
                 version: null,
                 allow_write: false,
-            });
+            }));
+            expect(typeof body.session_key).toBe('string');
             return route.fulfill({
                 json: {
                     status: 'completed',
@@ -535,6 +594,43 @@ async function mockConsole(
                     trace: {
                         route: 'order_lookup',
                         steps: ['receive', 'skill', 'reply'],
+                        timing: { queued_ms: 120, prepare_ms: 36, exec_ms: 880, total_ms: 1036 },
+                        rounds: [{
+                            round: 1,
+                            offset_ms: 156,
+                            duration_ms: 640,
+                            first_token_ms: 260,
+                            input_tokens: 812,
+                            output_tokens: 96,
+                            tool_calls: 1,
+                            model: 'deepseek-flash',
+                        }, {
+                            round: 2,
+                            offset_ms: 1100,
+                            duration_ms: 420,
+                            first_token_ms: 180,
+                            input_tokens: 2100,
+                            output_tokens: 120,
+                            tool_calls: 0,
+                            model: 'deepseek-flash',
+                        }],
+                        tool_calls: [{ name: 'order_lookup', offset_ms: 900 }],
+                        retrieval: [{
+                            query: '订单状态',
+                            offset_ms: 820,
+                            duration_ms: 240,
+                            embedding_ms: 180,
+                            search_ms: 60,
+                            result_chars: 1200,
+                            sources: [{
+                                document_id: 'doc-1',
+                                title: '订单 FAQ',
+                                version: 1,
+                                chunk_id: 'chunk-1',
+                                score: 0.5,
+                                excerpt: '订单状态查询说明',
+                            }],
+                        }],
                     },
                 },
             });
@@ -866,11 +962,11 @@ test('service application detail exposes only the seven v2 tabs', async ({ page 
     await expect(tabs).toHaveCount(7);
     await expect(tabs.nth(0)).toContainText('概览');
     await expect(tabs.nth(1)).toContainText('智能体');
-    await expect(tabs.nth(2)).toContainText('客户交互');
+    await expect(tabs.nth(2)).toContainText('体验与调试');
     await expect(tabs.nth(3)).toContainText('技能');
     await expect(tabs.nth(4)).toContainText('业务规则');
     await expect(tabs.nth(5)).toContainText('对话记录');
-    await expect(tabs.nth(6)).toContainText('客户渠道与发布');
+    await expect(tabs.nth(6)).toContainText('发布');
     await expect(page.getByRole('tab', { name: '客户界面调试' })).toHaveCount(0);
     await expect(page.getByRole('tab', { name: '预览与调试' })).toHaveCount(0);
 
@@ -943,8 +1039,20 @@ test('customer interaction uses real preview replies and keeps diagnostics in th
     await history.getByRole('button', { name: /查看诊断/ }).click();
 
     const diagnostic = page.getByRole('dialog', { name: '诊断详情' });
-    await expect(diagnostic.getByText('order_lookup · completed', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('order_lookup', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('completed', { exact: true }).first()).toBeVisible();
     await expect(diagnostic.getByText(/"route": "order_lookup"/)).toBeVisible();
+    // The timeline reports per-step cost, not just that the step ran.
+    await expect(diagnostic.getByText('总耗时 1036ms', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('排队 120ms · 上下文准备 36ms', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('模型第 1 轮 deepseek-flash', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText(
+        '首字 260ms · 输入 812 tok · 输出 96 tok · 调用 1 个工具',
+        { exact: true },
+    )).toBeVisible();
+    await expect(diagnostic.getByText('嵌入 180ms', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('检索融合 60ms', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('640ms', { exact: true }).first()).toBeVisible();
 });
 
 test('customer conversation records use business conversations with pagination and full detail', async ({ page }) => {
@@ -960,8 +1068,12 @@ test('customer conversation records use business conversations with pagination a
     await expect(records.getByText('订单配送进度咨询', { exact: true })).toBeVisible();
     await expect(records.getByText('客户界面调试会话不应出现', { exact: true })).toHaveCount(0);
     await expect(records.getByText('Playground 会话不应出现', { exact: true })).toHaveCount(0);
-    await expect(records.getByText('暂无反馈', { exact: true }).first()).toBeVisible();
-    await expect(records.getByRole('button', { name: '保存 QA' }).first()).toBeDisabled();
+    // Feedback columns stay out of the ledger until the feature ships; the
+    // action cell keeps a single entry point instead of a disabled pair.
+    await expect(records.getByText('暂无反馈')).toHaveCount(0);
+    await expect(records.getByRole('button', { name: '保存 QA' })).toHaveCount(0);
+    await expect(records.getByRole('button', { name: '查看完整对话' })).toHaveCount(10);
+    await expect(records.getByText('张小明', { exact: true })).toBeVisible();
     expect(requests).toContain(
         'GET /service-apps/consumer-service/conversations?page=1&page_size=10&status=all',
     );
@@ -988,8 +1100,15 @@ test('customer conversation records use business conversations with pagination a
     await expect(detail.getByText('张小明', { exact: true })).toBeVisible();
     await expect(detail.getByText('客户', { exact: true })).toBeVisible();
     await expect(detail.getByText('应用回复', { exact: true })).toBeVisible();
+    // The thread marks turn boundaries and reports per-turn duration.
+    await expect(customerThread.getByText('第 1 轮', { exact: true })).toBeVisible();
+    await expect(customerThread.getByText('耗时 10 min 0 s', { exact: true })).toBeVisible();
     await expect(detail.getByText('Agent 运行诊断', { exact: true })).toBeVisible();
-    await expect(detail.getByText('turn-1', { exact: true })).toBeVisible();
+    // Turn diagnostics collapse runtime ids behind an expandable row.
+    const turnsTable = detail.locator('.sa-conversation-diagnostic-table').nth(0);
+    await expect(turnsTable.getByText('10 min 0 s', { exact: true })).toBeVisible();
+    await turnsTable.locator('.ant-table-row-expand-icon').first().click();
+    await expect(detail.getByText('Runtime run', { exact: true })).toBeVisible();
     await expect(
         detail.locator('.sa-conversation-diagnostic-table').nth(1)
             .getByText('run-1', { exact: true }),
@@ -1005,6 +1124,36 @@ test('customer conversation records use business conversations with pagination a
     await page.getByPlaceholder('搜索问题、回答、渠道或账号').press('Enter');
     await expect(records.locator('.ant-table-row')).toHaveCount(0);
     await expect(records.getByText('暂无真实客户对话记录', { exact: true })).toBeVisible();
+});
+
+test('customer conversation turns reopen the run trace on demand', async ({ page }) => {
+    const requests: string[] = [];
+    await mockConsole(page, requests);
+    await page.goto('/#/service-apps/consumer-service/conversations');
+
+    const records = page.locator('.sa-conversation-records-table');
+    await records.getByRole('button', { name: '查看完整对话' }).first().click();
+    const detail = page.getByRole('dialog', { name: '完整对话' });
+    await detail.getByRole('button', { name: '查看诊断' }).first().click();
+
+    const diagnostic = page.getByRole('dialog', { name: '诊断详情' });
+    await expect(diagnostic.locator('.sa-run-diag')).toBeVisible();
+    // The trace is fetched per turn, not carried by the list or detail payload.
+    await expect.poll(() => requests.some(
+        item => item.includes('/turns/turn-1/diagnostics'),
+    )).toBe(true);
+    await expect(diagnostic.getByText('运行诊断', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('#run-1', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('已完成', { exact: true }).first()).toBeVisible();
+    await expect(diagnostic.getByText('总耗时 4628ms', { exact: true })).toBeVisible();
+    // The round header also carries the model name, so match on the step.
+    await expect(diagnostic.locator('.sa-run-diag-step', { hasText: '模型第 1 轮' })
+        .first()).toBeVisible();
+    // Retrieval and skill chips share the trace section with their own counts.
+    const chips = diagnostic.locator('.sa-run-diag-chips');
+    await expect(chips.getByText('知识检索 · 1 条', { exact: true })).toBeVisible();
+    await expect(chips.getByText('order_lookup · completed', { exact: true })).toBeVisible();
+    await expect(diagnostic.getByText('订单配送进度', { exact: true })).toBeVisible();
 });
 
 test('customer conversation records expose loading and error states without stale rows', async ({ page }) => {
@@ -1100,7 +1249,7 @@ test('service application release publishes and appends a rollback version', asy
         'row',
     );
     await expect(page.getByRole('button', { name: /发布$/ })).toHaveCSS('height', '36px');
-    await expect(page.getByRole('heading', { name: '客户渠道与发布', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '发布', exact: true })).toBeVisible();
     await page.locator('.sa-detail-meta-current').click();
     await expect(page.locator('.sa-version-history')).toBeVisible();
     await expect(page.getByRole('heading', { name: '版本历史', exact: true })).toBeVisible();

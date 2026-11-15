@@ -341,6 +341,36 @@ export interface ApplicationConversationDetail extends ApplicationConversation {
     messages_truncated?: boolean;
 }
 
+/**
+ * One customer turn's run trace, rebuilt on demand from the runtime event log.
+ *
+ * ``available: false`` means the runtime never produced replayable events —
+ * ``reason`` says why, so the drawer can explain it instead of showing an
+ * empty timeline that looks like a broken run.
+ */
+export interface ApplicationTurnDiagnostics {
+    available: boolean;
+    reason: string | null;
+    degraded: boolean;
+    turn_id: string;
+    run_id: string | null;
+    status: string;
+    error_code: string | null;
+    application_version: number | null;
+    agent_version: number | null;
+    input: string;
+    reply: string;
+    duration_ms: number | null;
+    created_at: string | null;
+    skills: Array<{
+        key: string;
+        status: string;
+        duration_ms?: number | null;
+        error?: string | null;
+    }>;
+    trace: Record<string, unknown>;
+}
+
 export interface ApplicationConversationPage {
     items: ApplicationConversation[];
     total: number;
@@ -360,6 +390,27 @@ export interface ApplicationPreviewResult {
         duration_ms?: number | null;
     }>;
     trace?: Record<string, unknown>;
+}
+
+export interface ApplicationPreviewHistoryItem {
+    id: string;
+    run_id: string | null;
+    status: string;
+    error_code: string | null;
+    application_version: number | null;
+    draft: boolean;
+    input: string;
+    reply: string;
+    duration_ms: number | null;
+    created_at: string;
+}
+
+export interface ApplicationPreviewHistoryPage {
+    items: ApplicationPreviewHistoryItem[];
+    total: number;
+    page: number;
+    page_size: number;
+    total_pages?: number;
 }
 
 export interface ApplicationInput {

@@ -56,6 +56,19 @@ def _channel_id(value: UUID | str | None) -> str:
         ) from None
 
 
+def _uuid_or_not_found(value: UUID | str, error: str) -> str:
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        raise DomainError(error, 404) from None
+
+
+def _duration_ms(started: Any, finished: Any) -> int | None:
+    if started is None or finished is None:
+        return None
+    return max(0, int((finished - started).total_seconds() * 1000))
+
+
 def _public_item(row: dict[str, Any]) -> dict[str, Any]:
     question = row.get("question")
     answer = row.get("answer")
@@ -382,3 +395,152 @@ LIMIT 20
             }
         )
         return result
+
+    async def turn_diagnostics(
+        self,
+        tenant: str,
+        key: str,
+        conversation_id: UUID | str,
+        turn_id: UUID | str,
+        *,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, Any]:
+        """Rebuild one customer turn's run trace on demand.
+
+        The conversation detail endpoint stays a light read model; the trace is
+        only paid for when an operator opens it. ``runtime_events`` already
+        records every stage, so no new instrumentation is needed — the same
+        builder the debug preview uses produces an identical payload here.
+
+        Turns that never reached the runtime (queued and then cancelled, or a
+        closed conversation) have no run at all and say so explicitly instead
+        of returning an empty trace that looks like a broken run.
+        """
+
+        selected_conversation = _uuid_or_not_found(
+            conversation_id,
+            "service_application_conversation_not_found",
+        )
+        selected_turn = _uuid_or_not_found(
+            turn_id,
+            "service_application_turn_not_found",
+        )
+        # Imported here because the application service owns the trace builder
+        # and imports this read model lazily in return.
+        from .service import ServiceApplicationService, _preview_status
+        resolved = persisted_scope(tenant, scope)
+        scope_sql, scope_params = scope_predicate(resolved, alias="t")
+        async with self.engine.connect() as connection:
+            application = await self._application(connection, tenant, key, resolved)
+            row = await one(
+                connection,
+                f"""
+SELECT t.id, t.status AS turn_status, t.error_code,
+       t.application_version, t.agent_version, t.created_at,
+       t.runtime_run_id, t.runtime_conversation_id,
+       bc.id AS ledger_conversation_id,
+       m.content AS input,
+       rr.status AS run_status, rr.error_code AS run_error,
+       rr.output AS reply, rr.started_at, rr.finished_at,
+       rr.config AS run_config
+FROM service_application_turns t
+JOIN service_application_conversations bc
+  ON bc.tenant_id=t.tenant_id
+ AND bc.business_id=t.business_id
+ AND bc.workspace_id=t.workspace_id
+ AND bc.id=t.conversation_id
+LEFT JOIN service_application_messages m
+  ON m.tenant_id=t.tenant_id
+ AND m.business_id=t.business_id
+ AND m.workspace_id=t.workspace_id
+ AND m.conversation_id=t.conversation_id
+ AND m.id=t.customer_message_id
+LEFT JOIN runtime_runs rr ON rr.id=t.runtime_run_id
+WHERE t.tenant_id=:tenant
+  AND {scope_sql}
+  AND bc.application_id=CAST(:application AS uuid)
+  AND bc.kind='customer'
+  AND t.conversation_id=CAST(:conversation_id AS uuid)
+  AND t.id=CAST(:turn_id AS uuid)
+""",
+                tenant=tenant,
+                application=str(application["id"]),
+                conversation_id=selected_conversation,
+                turn_id=selected_turn,
+                **scope_params,
+            )
+            row = required(row, "service_application_turn_not_found")
+            run_id = str(row["runtime_run_id"]) if row.get("runtime_run_id") else None
+            events: list[dict[str, Any]] = []
+            gateway: list[dict[str, Any]] = []
+            snapshot: dict[str, Any] | None = None
+            if run_id:
+                events = await many(
+                    connection,
+                    """
+SELECT seq,type,data,created_at FROM runtime_events
+WHERE run_id=CAST(:run_id AS uuid)
+ORDER BY seq
+""",
+                    run_id=run_id,
+                )
+                if events:
+                    gateway = await ServiceApplicationService._gateway_meta(
+                        connection,
+                        tenant,
+                        run_id,
+                        events,
+                    )
+                else:
+                    # Published runs also leave a trace snapshot behind, so a
+                    # pruned event log still degrades to something readable.
+                    stored = await one(
+                        connection,
+                        """
+SELECT trace FROM service_application_traces
+WHERE tenant_id=:tenant AND run_id=CAST(:run_id AS uuid)
+ORDER BY created_at DESC
+LIMIT 1
+""",
+                        tenant=tenant,
+                        run_id=run_id,
+                    )
+                    snapshot = (stored or {}).get("trace")
+
+        trace: dict[str, Any] = {}
+        skills: list[dict[str, Any]] = []
+        available = False
+        reason: str | None = None
+        degraded = False
+        if run_id is None:
+            reason = "not_dispatched"
+        elif events:
+            trace, skills = ServiceApplicationService._preview_history_trace(
+                row,
+                events,
+                gateway,
+            )
+            available = True
+        elif snapshot:
+            trace = snapshot
+            available = True
+            degraded = True
+        else:
+            reason = "run_events_missing"
+        return {
+            "available": available,
+            "reason": reason,
+            "degraded": degraded,
+            "turn_id": str(row["id"]),
+            "run_id": run_id,
+            "status": _preview_status(row),
+            "error_code": row.get("run_error") or row.get("error_code"),
+            "application_version": row.get("application_version"),
+            "agent_version": row.get("agent_version"),
+            "input": str(row.get("input") or ""),
+            "reply": str(row.get("reply") or ""),
+            "duration_ms": _duration_ms(row.get("started_at"), row.get("finished_at")),
+            "created_at": row.get("created_at"),
+            "skills": skills,
+            "trace": trace,
+        }

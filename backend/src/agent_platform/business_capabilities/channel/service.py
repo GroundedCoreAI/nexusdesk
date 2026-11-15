@@ -351,6 +351,44 @@ class ChannelService:
             await audit(c, tenant, actor, "channel.enabled" if enabled else "channel.disabled", cid)
             return row
 
+    async def delete(self, tenant, actor, cid):
+        """Remove a channel permanently. Adapter configs and the inbound outbox
+        cascade; the conversation ledger keeps history with channel_id nulled."""
+        scope_sql, scope_params = resource_scope_clause()
+        async with self.engine.begin() as c:
+            row = required(
+                await one(
+                    c,
+                    "SELECT id,name,provider FROM channels WHERE id=:id AND tenant_id=:t"
+                    + scope_sql
+                    + " FOR UPDATE",
+                    id=cid,
+                    t=tenant,
+                    **scope_params,
+                ),
+                "channel_not_found",
+            )
+            # channel_receipts has no ON DELETE rule; receipts of a deleted
+            # channel are meaningless, so clear them explicitly.
+            await execute(c, "DELETE FROM channel_receipts WHERE channel_id=:id", id=cid)
+            await execute(
+                c,
+                "DELETE FROM channels WHERE id=:id AND tenant_id=:t" + scope_sql,
+                id=cid,
+                t=tenant,
+                **scope_params,
+            )
+            await audit(
+                c,
+                tenant,
+                actor,
+                "channel.deleted",
+                cid,
+                name=row["name"],
+                provider=row["provider"],
+            )
+            return row
+
     async def rotate(self, tenant, actor, cid):
         token = secrets.token_urlsafe(32)
         scope_sql, scope_params = resource_scope_clause()

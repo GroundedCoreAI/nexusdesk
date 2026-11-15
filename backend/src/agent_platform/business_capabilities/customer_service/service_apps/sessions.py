@@ -22,11 +22,11 @@ import hashlib
 from typing import Any
 from uuid import UUID, uuid4
 
+from agent_platform.business_capabilities.conversation.service import ConversationService
+from agent_platform.business_capabilities.customer_service.service import CustomerService
 from agent_platform.business_capabilities.customer_service.service_apps.business_conversations import (
     BusinessConversationService,
 )
-from agent_platform.business_capabilities.conversation.service import ConversationService
-from agent_platform.business_capabilities.customer_service.service import CustomerService
 from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
     ApplicationRuntimeContext,
     ApplicationRuntimeResolver,
@@ -87,12 +87,15 @@ class ApplicationSessionService:
         tenant: str,
         key: str,
         scope: BusinessScope,
+        *,
+        allow_unpublished: bool = False,
+        allow_offline: bool = False,
     ) -> dict[str, Any]:
         scope_sql, scope_params = scope_predicate(scope, alias="a")
         row = await one(
             connection,
             f"""
-            SELECT a.id,a.application_key,a.name,a.published_version
+            SELECT a.id,a.application_key,a.name,a.status,a.published_version
             FROM service_applications a
             WHERE a.tenant_id=:tenant
               AND {scope_sql}
@@ -104,8 +107,14 @@ class ApplicationSessionService:
             **scope_params,
         )
         application = required(row, "service_application_not_found")
-        if application.get("published_version") is None:
+        if application.get("published_version") is None and not allow_unpublished:
             raise DomainError("service_application_not_published", 409)
+        # "Offline" stops new sessions; conversations already opened keep
+        # answering (their version is resolved from the conversation row).
+        # Preview/debug passes ``allow_unpublished`` and deliberately bypasses
+        # this so operators can still inspect an application they took down.
+        if application.get("status") == "offline" and not (allow_unpublished or allow_offline):
+            raise DomainError("service_application_offline", 409)
         return application
 
     async def _runtime_conversation(
@@ -148,20 +157,53 @@ class ApplicationSessionService:
         external_conversation_id: str | None = None,
         external_user_id: str | None = None,
         user_name: str | None = None,
+        kind: str = "customer",
+        source: str = "business",
+        context_override: ApplicationRuntimeContext | None = None,
+        allow_unpublished: bool = False,
+        release_version: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Open (or re-open) a customer session pinned to the published release."""
+        """Open (or re-open) a session pinned to the published release.
+
+        ``context_override`` (preview/debug) supplies the ApplicationRuntimeContext
+        directly — typically built from a draft snapshot — so the session runs the
+        customer path without a release resolve. Ledger rows carry ``kind`` so
+        debug sessions never mix into customer-facing statistics.
+
+        ``release_version`` pins the session to one release instead of the current
+        ``published_version``; the open platform uses it so an authorised caller
+        keeps the contract it was issued for. ``metadata`` is merged into the
+        ledger conversation on creation (external entry marker), never on reopen.
+        """
 
         resolved = persisted_scope(tenant, scope)
         async with transaction(self.engine) as c:
-            application = await self._application(c, tenant, key, resolved)
-            version = int(application["published_version"])
-            context = await self.application_runtime.resolve(
+            application = await self._application(
                 c,
                 tenant,
-                application["id"],
-                version,
-                scope=resolved,
+                key,
+                resolved,
+                allow_unpublished=allow_unpublished,
             )
+            if context_override is not None:
+                context = context_override
+                version = context.application_version or application.get(
+                    "published_version",
+                )
+            else:
+                version = (
+                    _positive_version(release_version)
+                    if release_version is not None
+                    else int(application["published_version"])
+                )
+                context = await self.application_runtime.resolve(
+                    c,
+                    tenant,
+                    application["id"],
+                    version,
+                    scope=resolved,
+                )
             if external_conversation_id:
                 external = (
                     "app:"
@@ -192,7 +234,7 @@ class ApplicationSessionService:
                     external,
                     context.agent_id,
                     c,
-                    source="business",
+                    source=source,
                     scope=resolved,
                     application_id=context.application_id,
                     application_version=context.application_version,
@@ -207,6 +249,7 @@ class ApplicationSessionService:
                     str(application["application_key"]),
                     str(conv["external_id"]),
                 ),
+                kind=kind,
             )
             if business_conversation is None:
                 business_conversation = (
@@ -221,13 +264,14 @@ class ApplicationSessionService:
                             str(application["application_key"]),
                             str(conv["external_id"]),
                         ),
-                        kind="customer",
+                        kind=kind,
                         runtime_conversation_id=conv["id"],
                         external_user_id=external_user_id,
                         user_name=user_name,
                         created_by="application",
                         metadata={
                             "client_external_conversation_id": external_conversation_id,
+                            **(metadata or {}),
                         },
                     )
                 )
@@ -252,6 +296,9 @@ class ApplicationSessionService:
         idempotency_key: str | None = None,
         external_user_id: str | None = None,
         user_name: str | None = None,
+        kind: str = "customer",
+        context_override: ApplicationRuntimeContext | None = None,
+        allow_unpublished: bool = False,
     ) -> dict[str, Any]:
         """Run one customer turn inside an application session."""
 
@@ -260,25 +307,40 @@ class ApplicationSessionService:
             raise DomainError("service_application_session_message_invalid", 422)
         resolved = persisted_scope(tenant, scope)
         async with transaction(self.engine) as c:
-            application = await self._application(c, tenant, key, resolved)
+            application = await self._application(
+                c,
+                tenant,
+                key,
+                resolved,
+                allow_unpublished=allow_unpublished,
+                # A conversation that already exists keeps answering after the
+                # application goes offline; only new sessions are refused.
+                allow_offline=True,
+            )
             conv = await self._runtime_conversation(c, tenant, resolved, conversation_id)
             if conv.get("application_id") is None or UUID(str(conv["application_id"])) != (
                 UUID(str(application["id"]))
             ):
                 raise DomainError("service_application_session_mismatch", 409)
-            # A session stays on the release it was opened with; a fresh session
-            # picks up whatever is published now.
-            version = _positive_version(
-                conv.get("application_version") or application["published_version"],
-            )
-            context: ApplicationRuntimeContext = await self.application_runtime.resolve(
-                c,
-                tenant,
-                application["id"],
-                version,
-                conversation_id=conv["id"],
-                scope=resolved,
-            )
+            if context_override is not None:
+                # A preview/debug turn re-uses the caller-supplied context
+                # verbatim: a draft has no version to resolve against, and a
+                # published debug turn must keep the snapshot it opened with.
+                context: ApplicationRuntimeContext = context_override
+            else:
+                # A session stays on the release it was opened with; a fresh session
+                # picks up whatever is published now.
+                version = _positive_version(
+                    conv.get("application_version") or application["published_version"],
+                )
+                context = await self.application_runtime.resolve(
+                    c,
+                    tenant,
+                    application["id"],
+                    version,
+                    conversation_id=conv["id"],
+                    scope=resolved,
+                )
 
             run_id: UUID | None = None
             duplicate = False
@@ -294,6 +356,7 @@ class ApplicationSessionService:
                     application_id=context.application_id,
                     external_conversation_id=ledger_external,
                     idempotency_key=idempotency_key,
+                    kind=kind,
                 )
                 if prior is not None:
                     return {
@@ -338,6 +401,7 @@ class ApplicationSessionService:
                 resolved,
                 application_id=context.application_id,
                 external_conversation_id=ledger_external,
+                kind=kind,
             )
             if business_conversation is None:
                 business_conversation = (
@@ -349,7 +413,7 @@ class ApplicationSessionService:
                         agent_id=context.agent_id,
                         agent_version=context.agent_version,
                         external_conversation_id=ledger_external,
-                        kind="customer",
+                        kind=kind,
                         runtime_conversation_id=conv["id"],
                         external_user_id=external_user_id,
                         user_name=user_name,
@@ -404,6 +468,7 @@ class ApplicationSessionService:
         *,
         application_id: UUID | str,
         external_conversation_id: str,
+        kind: str = "customer",
     ) -> dict[str, Any] | None:
         scope_sql, scope_params = scope_predicate(scope, alias="bc")
         return await one(
@@ -414,7 +479,7 @@ class ApplicationSessionService:
             WHERE bc.tenant_id=:tenant
               AND {scope_sql}
               AND bc.application_id=CAST(:application_id AS uuid)
-              AND bc.kind='customer'
+              AND bc.kind=:kind
               AND bc.channel_id IS NULL
               AND bc.external_conversation_id=:external_conversation_id
             ORDER BY bc.created_at,bc.id
@@ -423,6 +488,7 @@ class ApplicationSessionService:
             tenant=tenant,
             application_id=str(application_id),
             external_conversation_id=external_conversation_id,
+            kind=kind,
             **scope_params,
         )
 
@@ -435,6 +501,7 @@ class ApplicationSessionService:
         application_id: UUID | str,
         external_conversation_id: str,
         idempotency_key: str,
+        kind: str = "customer",
     ) -> dict[str, Any] | None:
         # Plain read: locking the ledger here would invert the Runtime-first
         # lock order against CustomerService.send below. The ledger
@@ -461,7 +528,7 @@ class ApplicationSessionService:
             WHERE m.tenant_id=:tenant
               AND {scope_sql}
               AND bc.application_id=CAST(:application_id AS uuid)
-              AND bc.kind='customer'
+              AND bc.kind=:kind
               AND bc.channel_id IS NULL
               AND bc.external_conversation_id=:external_conversation_id
               AND m.idempotency_key=:idempotency_key
@@ -472,6 +539,7 @@ class ApplicationSessionService:
             application_id=str(application_id),
             external_conversation_id=external_conversation_id,
             idempotency_key=f"app:{idempotency_key}",
+            kind=kind,
             **scope_params,
         )
 
@@ -486,4 +554,4 @@ def _positive_version(value: object) -> int:
     return parsed
 
 
-__all__ = ["ApplicationSessionService", "MAX_TEXT_LENGTH"]
+__all__ = ["MAX_TEXT_LENGTH", "ApplicationSessionService"]

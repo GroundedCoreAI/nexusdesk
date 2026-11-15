@@ -461,3 +461,205 @@ async def test_handoff_cancels_queued_business_turn(platform):
             run=accepted["run_id"],
         )
     assert turn["status"] == "cancelled"
+
+
+async def _seed_turn_events(engine, run_id, application_id):
+    """Write the minimum event log a customer run leaves behind."""
+
+    events = [
+        ("run.queued", {}, 0.0),
+        ("run.started", {}, 0.20),
+        ("model.started", {"round": 1}, 0.25),
+        (
+            "tool.started",
+            {"call_id": "call-1", "name": "knowledge_search", "round": 1},
+            0.40,
+        ),
+        (
+            "knowledge.retrieved",
+            {"query": "更改账户", "sources": [{"title": "账户变更说明"}]},
+            0.55,
+        ),
+        (
+            "tool.completed",
+            {
+                "call_id": "call-1",
+                "name": "knowledge_search",
+                "ok": True,
+                "duration_ms": 120,
+                "result_chars": 42,
+            },
+            0.60,
+        ),
+        (
+            "model.completed",
+            {
+                "round": 1,
+                "duration_ms": 300,
+                "first_token_ms": 80,
+                "usage": {"input_tokens": 12, "output_tokens": 34},
+                "tool_calls": 1,
+            },
+            0.90,
+        ),
+        ("run.completed", {}, 1.0),
+    ]
+    async with engine.begin() as connection:
+        # A queued run already records its own opening events.
+        existing = await connection.execute(
+            text("SELECT COALESCE(max(seq),0) FROM runtime_events WHERE run_id=:run"),
+            {"run": run_id},
+        )
+        base = int(existing.scalar_one())
+        for step, (kind, data, offset) in enumerate(events, start=1):
+            seq = base + step
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO runtime_events(run_id,seq,type,data,created_at)
+                    VALUES (
+                        :run, :seq, :type, CAST(:data AS jsonb),
+                        now() - make_interval(secs => :offset)
+                    )
+                    """
+                ),
+                {
+                    "run": run_id,
+                    "seq": seq,
+                    "type": kind,
+                    "data": __import__("json").dumps(data),
+                    "offset": round(1.0 - offset, 2),
+                },
+            )
+
+
+@pytest.mark.asyncio
+async def test_turn_diagnostics_rebuilds_trace_and_reports_missing_run(platform):
+    client, services, settings = platform
+    agent, _ = await create_agent(client)
+    application, channel_response = await _create_channel(client, agent)
+
+    async with services.groups.runtime.engine.connect() as connection:
+        channel = await one(
+            connection,
+            "SELECT * FROM channels WHERE id=:id",
+            id=channel_response["id"],
+        )
+    scope = BusinessScope(
+        tenant_id=settings.tenant_id,
+        business_id=channel["business_id"],
+        workspace_id=channel["workspace_id"],
+    )
+
+    envelope = IncomingEnvelope(
+        external_message_id="ledger-diagnostics-1",
+        external_conversation_id="ledger-diagnostics-session-1",
+        external_user_id="customer-1",
+        external_thread_id=None,
+        text="怎么更改账户信息",
+        target={},
+    )
+    accepted = await services.groups.business.channels._accept_envelope(
+        channel,
+        envelope,
+        application_id=application["id"],
+        application_version=application["published_version"],
+        scope=scope,
+    )
+    await _seed_turn_events(
+        services.groups.runtime.engine,
+        accepted["run_id"],
+        application["id"],
+    )
+
+    async with services.groups.runtime.engine.connect() as connection:
+        turn = await one(
+            connection,
+            "SELECT id,conversation_id FROM service_application_turns"
+            " WHERE runtime_run_id=:run",
+            run=accepted["run_id"],
+        )
+
+    response = await client.get(
+        f"/api/v1/service-apps/{application['key']}/conversations/"
+        f"{turn['conversation_id']}/turns/{turn['id']}/diagnostics"
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["degraded"] is False
+    assert payload["reason"] is None
+    assert payload["run_id"] == str(accepted["run_id"])
+    assert payload["input"] == envelope.text
+    assert payload["status"] in {"queued", "running"}
+    trace = payload["trace"]
+    assert trace["timing"]["total_ms"] is not None
+    assert len(trace["rounds"]) == 1
+    assert trace["rounds"][0]["first_token_ms"] == 80
+    assert trace["rounds"][0]["output_tokens"] == 34
+    assert [call["name"] for call in trace["tool_calls"]] == ["knowledge_search"]
+    assert trace["retrieval"][0]["query"] == "更改账户"
+    # Retrieval always has its own section; whether the same call is also
+    # listed as a skill depends on the run snapshot's builtin_tools.
+    assert {skill["key"] for skill in payload["skills"]} <= {"knowledge_search"}
+
+    # A turn that never reached the runtime must say so instead of looking empty.
+    async with services.groups.runtime.engine.begin() as connection:
+        message = await connection.execute(
+            text(
+                """
+                INSERT INTO service_application_messages(
+                    tenant_id,business_id,workspace_id,conversation_id,seq,role,content
+                )
+                SELECT tenant_id,business_id,workspace_id,conversation_id,
+                       COALESCE(max(seq),0)+1,'customer','排队后转人工'
+                FROM service_application_messages
+                WHERE conversation_id=:conversation
+                GROUP BY tenant_id,business_id,workspace_id,conversation_id
+                RETURNING id
+                """
+            ),
+            {"conversation": turn["conversation_id"]},
+        )
+        message_id = message.scalar_one()
+        orphan = await connection.execute(
+            text(
+                """
+                INSERT INTO service_application_turns(
+                    tenant_id,business_id,workspace_id,conversation_id,
+                    customer_message_id,application_version,agent_id,
+                    agent_version,status
+                )
+                VALUES (
+                    :tenant,:business,:workspace,:conversation,:message,
+                    :version,CAST(:agent AS uuid),1,'cancelled'
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "tenant": settings.tenant_id,
+                "business": scope.business_id,
+                "workspace": scope.workspace_id,
+                "conversation": turn["conversation_id"],
+                "message": message_id,
+                "version": application["published_version"],
+                "agent": agent["id"],
+            },
+        )
+        orphan_id = orphan.scalar_one()
+
+    orphaned = await client.get(
+        f"/api/v1/service-apps/{application['key']}/conversations/"
+        f"{turn['conversation_id']}/turns/{orphan_id}/diagnostics"
+    )
+    assert orphaned.status_code == 200, orphaned.text
+    assert orphaned.json()["available"] is False
+    assert orphaned.json()["reason"] == "not_dispatched"
+    assert orphaned.json()["run_id"] is None
+
+    missing = await client.get(
+        f"/api/v1/service-apps/{application['key']}/conversations/"
+        f"{turn['conversation_id']}/turns/{uuid4()}/diagnostics"
+    )
+    assert missing.status_code == 404, missing.text

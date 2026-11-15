@@ -164,6 +164,15 @@ export interface RunKnowledgeSource {
 export interface RunKnowledgeRetrieval {
     query?: string;
     sources?: RunKnowledgeSource[];
+    /** Wall time of the enclosing knowledge_search tool call. */
+    duration_ms?: number | null;
+    /** Share of that time spent in the embedding call. */
+    embedding_ms?: number | null;
+    /** Vector query + fusion, i.e. the remainder after embedding. */
+    search_ms?: number | null;
+    result_chars?: number | null;
+    /** Milliseconds from run start, so the caller can order steps by time. */
+    offset_ms?: number | null;
 }
 /**
  * Subscribe to a run's event stream. Durable events come from the log and carry a

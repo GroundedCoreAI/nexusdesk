@@ -36,11 +36,11 @@ import { VersionHistoryPanel } from '../release/VersionHistoryPanel';
 const tabs: Array<{ key: ApplicationTabKey; label: string }> = [
     { key: 'overview', label: '概览' },
     { key: 'agent', label: '智能体' },
-    { key: 'experience', label: '客户交互' },
+    { key: 'experience', label: '体验与调试' },
     { key: 'skills', label: '技能' },
     { key: 'rules', label: '业务规则' },
     { key: 'conversations', label: '对话记录' },
-    { key: 'release', label: '客户渠道与发布' },
+    { key: 'release', label: '发布' },
 ];
 
 function routeParts(route: string) {
@@ -205,9 +205,9 @@ export function ApplicationDetail({
                                 reason: firstBlockingCheck.detail || firstBlockingCheck.title,
                             })
                             : !releaseReadiness
-                                ? say('发布检查不可用，请打开客户渠道与发布页重试。')
+                                ? say('发布检查不可用，请打开发布页重试。')
                                 : !releaseReadiness.can_publish
-                                    ? say('发布检查未通过，请打开客户渠道与发布页查看详情。')
+                                    ? say('发布检查未通过，请打开发布页查看详情。')
                                     : '');
     const backPath = application.origin === 'example'
         ? '/service-apps/standards'
@@ -425,6 +425,7 @@ export function ApplicationDetail({
                                         readinessLoading={releaseReadinessLoading}
                                         readinessError={releaseReadinessError}
                                         onSaved={saved}
+                                        onNavigate={onNavigate}
                                     />,
             }))}
             onChange={key => onNavigate(

@@ -95,7 +95,7 @@ function ApplicationCard({
 }) {
     const menuItems: MenuProps['items'] = [
         { key: 'open', label: say('打开应用'), icon: <ArrowRightOutlined/> },
-        { key: 'experience', label: say('打开客户交互'), icon: <EyeOutlined/> },
+        { key: 'experience', label: say('打开体验与调试'), icon: <EyeOutlined/> },
         { type: 'divider' },
         {
             key: 'archive',
@@ -576,7 +576,7 @@ export function ApplicationCatalog({ onNavigate }: Props) {
                 showIcon
                 message={archiveBlocked ? say('需要先下线生产版本') : say('归档后仍可恢复')}
                 description={archiveBlocked
-                    ? say('该应用已有生产版本，请先在客户渠道与发布中下线，再归档。')
+                    ? say('该应用已有生产版本，请先在发布页下线，再归档。')
                     : say('归档会从我的应用列表隐藏，但保留发布版本、连接和审计记录。')}
             />
             {archiveTarget && <div className="sa-archive-target">

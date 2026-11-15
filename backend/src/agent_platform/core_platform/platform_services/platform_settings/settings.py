@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # Draft previews are side-effect free by default. Enabling writes is an
     # explicit deployment decision and must still pass skill safety rules.
     service_app_preview_write_enabled: bool = False
+    # Application debug previews run through the real queue path and then wait
+    # for the run to finish so the drawer can show the actual reply. 0 disables
+    # the wait and returns the queued run id (used by tests that drive the
+    # worker manually).
+    service_app_preview_wait_seconds: int = Field(default=60, ge=0, le=300)
     # ``None`` deliberately reuses the installation-wide credential vault.
     service_app_credential_key_file: Path | None = None
     # Language of the seeded memory demo datasets, matching the console's i18n

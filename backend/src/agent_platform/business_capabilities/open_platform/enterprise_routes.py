@@ -4,7 +4,7 @@ import secrets
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Query, Request
+from fastapi import APIRouter, Header, Path, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,6 +27,14 @@ from .service import digest
 management = APIRouter(prefix="/open-platform", tags=["enterprise-identity"])
 public = APIRouter(prefix="/sso", tags=["enterprise-sso"])
 tokens = APIRouter(tags=["enterprise-chat"], route_class=PublicRoute)
+hosted = APIRouter(prefix="/hosted", tags=["hosted-web"])
+
+# One public page load mints one visitor session and then reuses it for the
+# whole conversation, so this ceiling is about link floods, not traffic.
+HOSTED_SESSIONS_PER_MINUTE = 120
+HOSTED_SESSION_TTL_MINUTES = 720
+
+HostedKey = Annotated[str, Path(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
 
 
 def ent(request):
@@ -106,6 +114,13 @@ async def embed_config(app_id: UUID, request: Request, user: Admin):
 @management.put("/applications/{app_id}/embed")
 async def save_embed(app_id: UUID, body: EmbedInput, request: Request, user: Admin):
     return await ent(request).save_embed(user.actor, app_id, body)
+
+
+@management.post("/applications/{app_id}/embed/hosted-key")
+async def rotate_hosted_key(app_id: UUID, request: Request, user: Admin):
+    """Regenerate the public link of a hosted page and revoke open sessions."""
+
+    return await ent(request).rotate_hosted_key(user.actor, app_id)
 
 
 @public.get("/providers")
@@ -356,3 +371,64 @@ async def chat_token(body: ChatTokenInput, request: Request, identity: Identity)
             ip=client_ip(request.scope),
             user_agent=request.headers.get("user-agent", ""),
         )
+
+
+class HostedVisitorInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    # The page keeps this identifier in local storage, so a reload lands in the
+    # same visitor namespace instead of creating a second anonymous customer.
+    visitor_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+
+
+@hosted.get("/{key}")
+async def hosted_page(key: HostedKey, request: Request):
+    """Public metadata of a hosted page. Unknown and disabled links look alike."""
+
+    async with ent(request).engine.connect() as c:
+        cfg = await ent(request).hosted(c, key)
+        return {
+            "title": cfg["title"],
+            "color": cfg["color"],
+            "welcome": cfg["welcome"],
+            "application": cfg["app_name"],
+        }
+
+
+@hosted.post("/{key}/sessions", status_code=201)
+async def hosted_session(key: HostedKey, request: Request, body: HostedVisitorInput | None = None):
+    """Mint a short-lived chat credential for an anonymous page visitor.
+
+    The visitor gets the same token shape an enterprise SSO session produces, so
+    the open API, quota accounting and conversation isolation stay unchanged.
+    Nothing about the application's API keys reaches the browser.
+    """
+
+    e = ent(request)
+    async with e.engine.begin() as c:
+        cfg = await e.hosted(c, key, lock=True)
+        recent = await one(
+            c,
+            """SELECT count(*) AS n FROM enterprise_sessions WHERE tenant_id=:t AND app_id=:a
+            AND provider_id IS NULL AND embed_revision IS NULL
+            AND created_at > now() - interval '1 minute'""",
+            t=e.tenant,
+            a=cfg["app_id"],
+        )
+        if recent["n"] >= HOSTED_SESSIONS_PER_MINUTE:
+            raise DomainError("hosted_session_rate_limit", 429)
+        visitor = (body.visitor_id if body else "") or secrets.token_hex(8)
+        user = await e.resolve(
+            c,
+            "hosted:" + str(cfg["app_id"]),
+            visitor,
+            "网页访客-" + visitor[-6:],
+        )
+        session = await e.issue(
+            c,
+            user,
+            cfg["app_id"],
+            ttl_minutes=HOSTED_SESSION_TTL_MINUTES,
+            ip=client_ip(request.scope),
+            user_agent=request.headers.get("user-agent", ""),
+        )
+        return {**session, "visitor_id": visitor}

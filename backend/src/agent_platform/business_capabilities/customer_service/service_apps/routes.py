@@ -116,6 +116,9 @@ class ApplicationPreviewInput(Input):
     skill_key: str | None = Field(default=None, max_length=64)
     version: int | None = Field(default=None, ge=1)
     allow_write: bool = False
+    # Stable client-side debug-session id. Turns sent with the same key land on
+    # the same persisted preview conversation; omit for a one-off session.
+    session_key: str | None = Field(default=None, max_length=128)
 
 
 class ConnectionInput(Input):
@@ -477,6 +480,25 @@ async def application_conversation(
     )
 
 
+@router.get("/{key}/conversations/{conversation_id}/turns/{turn_id}/diagnostics")
+async def application_conversation_turn_diagnostics(
+    key: str,
+    conversation_id: UUID,
+    turn_id: UUID,
+    request: Request,
+    user: Operator,
+):
+    """Run trace for one customer turn, rebuilt from the runtime event log."""
+
+    return await _applications(request).conversation_turn_diagnostics(
+        user.tenant,
+        key,
+        conversation_id,
+        turn_id,
+        scope=request.state.business_scope,
+    )
+
+
 @router.post("/{key}/sessions", status_code=201)
 async def open_application_session(
     key: str,
@@ -638,6 +660,40 @@ async def preview_application(
         user.actor,
         key,
         body,
+        scope=request.state.business_scope,
+    )
+
+
+@router.get("/{key}/previews")
+async def list_application_previews(
+    key: str,
+    request: Request,
+    user: Operator,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    session_key: str | None = Query(default=None, max_length=128),
+):
+    return await _applications(request).list_previews(
+        user.tenant,
+        key,
+        page=page,
+        page_size=page_size,
+        scope=request.state.business_scope,
+        session_key=session_key,
+    )
+
+
+@router.get("/{key}/previews/{turn_id}")
+async def get_application_preview(
+    key: str,
+    turn_id: str,
+    request: Request,
+    user: Operator,
+):
+    return await _applications(request).get_preview(
+        user.tenant,
+        key,
+        turn_id,
         scope=request.state.business_scope,
     )
 

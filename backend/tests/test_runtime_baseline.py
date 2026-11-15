@@ -139,10 +139,20 @@ async def test_engine_emits_tool_event_payload_essentials():
 
     tool_events = [(kind, data) for kind, data in events if kind.startswith("tool.")]
     assert [kind for kind, _ in tool_events] == ["tool.started", "tool.completed"]
-    assert tool_events[0][1] == {"name": "lookup", "call_id": "call_1"}
+    # start carries the round and arguments too: the trace needs to say what the
+    # model asked for, not just that a tool ran.
+    started = tool_events[0][1]
+    assert started["name"] == "lookup"
+    assert started["call_id"] == "call_1"
+    assert started["round"] == 1
+    assert started["args"] == '{"order_id": "A"}'
     completed = tool_events[1][1]
     assert completed["name"] == "lookup"
     assert completed["call_id"] == "call_1"
+    # The operation ledger id is not a gateway call id; it must not be labelled
+    # as one, or every tool looks like it made an upstream model call.
+    assert "operation_id" in completed
+    assert "gateway_call_id" not in completed
     assert completed["ok"] is True
     assert completed["error"] is None
     assert "execution_status" in completed

@@ -2,9 +2,6 @@
 
 import json
 from collections import OrderedDict
-from uuid import uuid4
-
-from pydantic import ValidationError
 
 from agent_platform.applications.platform_runtime.tool_defaults import BUILTIN_SCHEMAS
 from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
@@ -24,55 +21,7 @@ from agent_platform.core_platform.platform_services.model_gateway.gateway import
 from agent_platform.core_platform.platform_services.model_gateway.service import build_model
 from agent_platform.core_platform.tool_gateway.egress import ToolEgressPolicy
 from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolGateway
-from agent_platform.extension_contracts import (
-    RuntimeBindings,
-    ToolExecutionContext,
-    ToolExecutionRequest,
-)
-
-
-class PreviewTools:
-    """Run read-only contributed tools for real; mock everything that writes.
-
-    The preview used to mock every tool, so retrieval answered ``{"preview": true}``
-    and the diagnosis drawer had nothing to show. The boundary that protects a
-    preview is a tool's declared ``risk``, not its name: reads touch published data
-    only, while writes and irreversible effects must never leave the process.
-
-    The handlers come from ``bindings.tool_contributions`` — the same contributions
-    a customer-facing run receives — so a read-only capability shows up here without
-    another edit. Hard-coding one tool name would leave the next capability missing
-    from previews, which is exactly the drift this path was built to avoid.
-    """
-
-    def __init__(self, live, mocks: MockTools, context: ToolExecutionContext) -> None:
-        self.live = live
-        self.mocks = mocks
-        self.context = context
-        self.schemas = mocks.schemas
-        # Both paths report into the same list so the caller can show every call.
-        self.calls = mocks.calls
-        self.violations = mocks.violations
-
-    async def execute(self, name, args):
-        handler = self.live.get(name)
-        if handler is None:
-            return await self.mocks.execute(name, args)
-        self.calls.append(name)
-        request = ToolExecutionRequest(
-            definition=handler.definition,
-            context=self.context,
-            arguments=args,
-        )
-        try:
-            result = await handler.execute(request)
-        except ValidationError:
-            return {"ok": False, "error": "invalid_arguments"}
-        except Exception as exc:  # noqa: BLE001 - a broken capability must not fail the preview
-            return {"ok": False, "error": getattr(exc, "code", "tool_failed")}
-        if result.status != "succeeded":
-            return {"ok": False, "error": result.error_code or "tool_failed"}
-        return {"ok": True, "data": result.data, "simulated": False}
+from agent_platform.extension_contracts import RuntimeBindings
 
 
 class RuntimeFactory:
@@ -267,109 +216,3 @@ class RuntimeFactory:
             RuntimeEngine(self.bound_model(snapshot, schemas), mocks, self.effective(snapshot)),
             mocks,
         )
-
-    def preview_row(self, context: ApplicationRuntimeContext) -> dict:
-        """Build the run-shaped row contributions read their config from.
-
-        Contributions resolve ``row["config"]["agent"]`` plus the tenant and
-        business scope. A preview has no persisted run, so the identifiers are
-        synthetic; the context stays read-only.
-        """
-
-        return {
-            "id": uuid4(),
-            "tenant_id": self.settings.tenant_id,
-            "conversation_id": uuid4(),
-            "business_id": context.business_id,
-            "workspace_id": context.workspace_id,
-            "config": {
-                "agent": self._scoped_snapshot(
-                    context.agent_snapshot,
-                    application_knowledge_base_ids(
-                        context.skills,
-                        context.agent_snapshot["config"].get("knowledge_base_ids") or (),
-                    ),
-                ),
-            },
-        }
-
-    def preview_handlers(self, context: ApplicationRuntimeContext, row: dict, emit) -> dict:
-        """Return the read-only contributed handlers a preview may execute for real."""
-
-        handlers = {}
-        for contribution in self.bindings.tool_contributions or ():
-            visible = getattr(contribution, "visible", None)
-            if visible is not None and not visible(row):
-                continue
-            for handler in contribution.handlers(row, emit):
-                definition = handler.definition
-                if definition.risk != "read" or definition.name not in context.builtin_tools:
-                    continue
-                handlers[definition.name] = handler
-        return handlers
-
-    async def preview_application(
-        self,
-        context: ApplicationRuntimeContext,
-        message: str,
-        *,
-        allow_write: bool,
-    ):
-        """Run an isolated preview on the contributions a real run receives.
-
-        Application skills and side-effecting built-ins are mocked; read-only
-        built-ins execute for real. Retrieval is why: a mocked knowledge search
-        answers ``{"preview": true}``, so the model invents an answer and the
-        diagnosis drawer can only report that no capability ran.
-
-        The live handlers are taken from ``bindings.tool_contributions`` — the
-        composition root's own list — so the preview cannot drift from the paths
-        customers hit. The draft/published snapshot and Agent version still go
-        through the same authorization and runtime loop.
-        """
-
-        del allow_write  # The caller filters write skills before this boundary.
-        application = context.snapshot()
-        specs = [HttpTool.model_validate(spec) for spec in application_http_tool_specs(application)]
-        events = []
-
-        async def emit(kind, data):
-            events.append({"type": kind, **data})
-
-        live = self.preview_handlers(context, self.preview_row(context), emit)
-        schemas = [spec.model_schema() for spec in specs]
-        schemas.extend(
-            live[name].definition.model_schema() if name in live else BUILTIN_SCHEMAS[name]
-            for name in context.builtin_tools
-            if name in live or name in BUILTIN_SCHEMAS
-        )
-        responses = {
-            schema["function"]["name"]: {
-                "ok": True,
-                "data": {"preview": True},
-                "simulation": True,
-                "upstream_called": False,
-            }
-            for schema in schemas
-        }
-        mocks = MockTools(schemas, responses)
-        execution = ToolExecutionContext(
-            tenant_id=self.settings.tenant_id,
-            actor_id="preview",
-            source="application",
-            business_id=context.business_id,
-            workspace_id=context.workspace_id,
-        )
-        runtime = RuntimeEngine(
-            self.bound_model(context.agent_snapshot, schemas),
-            PreviewTools(live, mocks, execution),
-            self.effective(context.agent_snapshot),
-        )
-        output, _, _ = await runtime.run(message, [], emit)
-        return {
-            "reply": output,
-            "tools": list(mocks.calls),
-            "violations": list(mocks.violations),
-            "events": events,
-            "retrieval": [event for event in events if event.get("type") == "knowledge.retrieved"],
-        }

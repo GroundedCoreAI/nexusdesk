@@ -369,6 +369,22 @@ async def test_rotate_token_only_for_generic_webhook(platform):
 
 
 @pytest.mark.asyncio
+async def test_delete_channel_removes_row_and_keeps_history(platform):
+    client, _services, _settings = platform
+    agent, _ = await create_agent(client)
+    generic = await _create_channel(client, agent, name="待删除")
+
+    deleted = await client.delete(f"/api/v1/channels/{generic['id']}")
+    assert deleted.status_code == 204, deleted.text
+
+    listing = await client.get("/api/v1/channels")
+    assert all(item["id"] != generic["id"] for item in listing.json())
+
+    missing = await client.delete(f"/api/v1/channels/{generic['id']}")
+    assert missing.status_code in (404, 409), missing.text
+
+
+@pytest.mark.asyncio
 async def test_wecom_kf_sync_persists_cursor_and_multiple_messages(platform, monkeypatch):
     client, services, _settings = platform
     agent, _ = await create_agent(client)

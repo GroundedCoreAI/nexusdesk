@@ -42,6 +42,9 @@ def register_customer_service_routes(
     app.include_router(open_public, prefix=openapi_prefix)
 
     from agent_platform.business_capabilities.open_platform.enterprise_routes import (
+        hosted as hosted_public,
+    )
+    from agent_platform.business_capabilities.open_platform.enterprise_routes import (
         management as enterprise_management,
     )
     from agent_platform.business_capabilities.open_platform.enterprise_routes import (
@@ -54,6 +57,7 @@ def register_customer_service_routes(
     app.include_router(enterprise_management, prefix=api_prefix)
     app.include_router(sso_public, prefix=api_prefix)
     app.include_router(chat_tokens, prefix=openapi_prefix)
+    app.include_router(hosted_public, prefix=api_prefix)
 
 
 def customer_service_application(route_prefix: str = "") -> BusinessApplication:

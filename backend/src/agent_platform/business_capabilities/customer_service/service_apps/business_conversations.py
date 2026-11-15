@@ -407,7 +407,7 @@ class BusinessConversationService:
         if (
             customer_id is None
             or selected_agent is None
-            or application_version < 1
+            or application_version < 0
             or agent_version < 1
         ):
             raise DomainError("service_application_turn_invalid", 422)

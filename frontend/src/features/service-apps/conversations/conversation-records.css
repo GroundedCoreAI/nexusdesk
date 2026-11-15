@@ -236,15 +236,15 @@
 .module-service-apps .sa-conversation-section-note {
   margin: 8px 0 0;
   color: #8b91a1;
-  font-size: 9.5px;
+  font-size: 10px;
   line-height: 1.65;
 }
 
 .module-service-apps .sa-conversation-thread {
   display: grid;
-  gap: 10px;
-  max-height: 500px;
-  padding: 12px 2px 2px;
+  gap: 14px;
+  max-height: 560px;
+  padding: 14px 2px 2px;
   overflow: auto;
   scrollbar-width: thin;
 }
@@ -252,7 +252,7 @@
 .module-service-apps .sa-conversation-message {
   display: grid;
   max-width: min(78%, 660px);
-  gap: 5px;
+  gap: 6px;
 }
 
 .module-service-apps .sa-conversation-message.user {
@@ -268,8 +268,8 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #8e94a2;
-  font-size: 9px;
+  color: #868c9b;
+  font-size: 10px;
 }
 
 .module-service-apps .sa-conversation-message.user .sa-conversation-message-meta {
@@ -277,27 +277,29 @@
 }
 
 .module-service-apps .sa-conversation-message-meta small {
-  color: #b0b4be;
-  font-size: 8px;
+  color: #aab0bc;
+  font-size: 9.5px;
 }
 
 .module-service-apps .sa-conversation-message p {
   margin: 0;
-  padding: 10px 12px;
-  color: #414757;
-  font-size: 10.5px;
+  padding: 11px 14px;
+  color: #3d4353;
+  font-size: 11.5px;
   line-height: 1.7;
   white-space: pre-wrap;
-  background: #f7f8fb;
-  border: 1px solid #e9ebf1;
-  border-radius: 3px 11px 11px 11px;
+  background: #f5f6fa;
+  border: 1px solid #e7e9f0;
+  border-radius: 4px 12px 12px 12px;
+  box-shadow: 0 1px 2px rgba(32, 36, 49, .04);
 }
 
 .module-service-apps .sa-conversation-message.user p {
   color: #fff;
   background: linear-gradient(135deg, #6f74df, #5c62cf);
   border-color: transparent;
-  border-radius: 11px 3px 11px 11px;
+  border-radius: 12px 4px 12px 12px;
+  box-shadow: 0 2px 6px rgba(92, 98, 207, .22);
 }
 
 .module-service-apps .sa-conversation-message.human p {
@@ -356,24 +358,64 @@
   font-size: 9.5px;
 }
 
-.module-service-apps .sa-conversation-diagnostic-ids {
-  display: grid;
-  gap: 4px;
+.module-service-apps .sa-conversation-turn-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 -4px;
+  color: #8b91a1;
+  font-size: 10px;
+  font-weight: 600;
 }
 
-.module-service-apps .sa-conversation-diagnostic-ids > span {
+.module-service-apps .sa-conversation-turn-divider span {
+  padding: 2px 10px;
+  background: #f1f2f8;
+  border: 1px solid #e7e9f0;
+  border-radius: 999px;
+}
+
+.module-service-apps .sa-conversation-turn-divider::before,
+.module-service-apps .sa-conversation-turn-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: #eceef4;
+}
+
+.module-service-apps .sa-conversation-turn-ids {
+  display: grid;
+  gap: 6px;
+}
+
+.module-service-apps .sa-conversation-turn-ids-row {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: #5d6475;
   font-size: 9px;
 }
 
-.module-service-apps .sa-conversation-diagnostic-ids small {
-  min-width: 72px;
+.module-service-apps .sa-conversation-turn-ids-row small {
+  min-width: 110px;
   color: #9ca2b0;
   font-size: 8px;
+}
+
+.module-service-apps .sa-conversation-turn-ids-row .ant-typography {
+  color: #5d6475;
+  font-size: 9px;
+}
+
+.module-service-apps .sa-conversation-message-meta .ant-typography {
+  color: inherit;
+  font-size: inherit;
+}
+
+.module-service-apps .sa-conversation-diagnostic-table .ant-table-tbody .ant-typography {
+  color: #5d6475;
+  font-size: 9.5px;
 }
 
 @media (max-width: 900px) {

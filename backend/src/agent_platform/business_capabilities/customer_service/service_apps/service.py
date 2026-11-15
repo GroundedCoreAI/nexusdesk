@@ -7,14 +7,16 @@ API and runtime share one immutable-snapshot implementation.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
+from agent_platform.core_platform.agent_runtime.schemas import TERMINAL
 from agent_platform.core_platform.platform_services.persistence.store import (
     DomainError,
     audit,
@@ -151,6 +153,15 @@ def _key(value: object, code: str) -> str:
     if not _KEY_PATTERN.fullmatch(key):
         raise DomainError(code, 422)
     return key
+
+
+def _preview_status(row: dict[str, Any]) -> str:
+    """Run status first, ledger turn status as fallback, queued/running → running."""
+
+    status = str(row.get("run_status") or row.get("turn_status") or "queued")
+    if status in {"queued", "running"}:
+        return "running"
+    return status
 
 
 def _page_args(page: int, page_size: int) -> tuple[int, int]:
@@ -1809,6 +1820,23 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
             scope=scope,
         )
 
+    async def conversation_turn_diagnostics(
+        self,
+        tenant: str,
+        key: str,
+        conversation_id: UUID | str,
+        turn_id: UUID | str,
+        *,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, Any]:
+        return await self._conversation_service().turn_diagnostics(
+            tenant,
+            key,
+            conversation_id,
+            turn_id,
+            scope=scope,
+        )
+
     async def open_session(
         self,
         tenant: str,
@@ -2896,12 +2924,20 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
         *,
         scope: BusinessScope | None = None,
     ) -> dict[str, Any]:
-        """Run a side-effect-free preview of the draft or a frozen release."""
+        """Run a debug turn through the real customer chain.
 
-        del actor
-        runner = self.preview_runner
-        if runner is None or not hasattr(runner, "preview_application"):
-            raise DomainError("service_application_preview_unavailable", 503)
+        The preview opens a ``kind='preview'`` application session and submits
+        the message via ``CustomerService.send`` — the same routing, admission,
+        queue, worker and ledger path a customer message takes — then waits for
+        the run to reach a terminal state and reports what was persisted. No
+        mock executor sits in between: a passing preview is evidence that the
+        draft (or frozen release) configuration actually serves customers.
+        Ledger rows carry ``kind='preview'`` and the Runtime conversation
+        ``source='preview'`` so debug traffic never mixes into customer
+        statistics, while the trace stays 100% aligned with production.
+        """
+
+        session_service = self._session_service()
         message = str(_field(body, "message", "")).strip()
         if not message:
             raise DomainError("service_application_preview_message_required", 422)
@@ -2910,6 +2946,13 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
         requested_version = _provided(body, "version", None)
         requested_skill = _provided(body, "skill_key", None)
         allow_write = bool(_provided(body, "allow_write", False))
+        session_key = str(_provided(body, "session_key", "") or "").strip()
+        if len(session_key) > 128:
+            raise DomainError("service_application_preview_session_key_invalid", 422)
+        if not session_key:
+            # A caller that does not track its debug session still gets a real
+            # session — just a fresh one per call instead of a continuing one.
+            session_key = uuid4().hex
         resolved = persisted_scope(tenant, scope)
         async with self.engine.connect() as connection:
             application = await self._row(connection, tenant, resolved, key=key)
@@ -2943,9 +2986,10 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
             )
 
         rule_write_enabled = release.rules.preview_write_enabled
+        preview_settings = getattr(self.preview_runner, "settings", None)
         setting_write_enabled = bool(
             getattr(
-                getattr(runner, "settings", None),
+                preview_settings,
                 "service_app_preview_write_enabled",
                 False,
             )
@@ -2991,13 +3035,34 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
             # would never get.
             builtin_tools=declared_builtin_tools(skill_payloads),
         )
+        session = await session_service.open_session(
+            tenant,
+            key,
+            actor=actor,
+            scope=scope,
+            external_conversation_id=f"debug:{session_key}",
+            kind="debug",
+            source="debug",
+            context_override=context,
+            allow_unpublished=True,
+        )
         try:
-            result = await runner.preview_application(
-                context,
+            sent = await session_service.send_message(
+                tenant,
+                key,
+                session["conversation_id"],
                 message,
-                allow_write=allow_write,
+                actor=actor,
+                scope=scope,
+                kind="debug",
+                context_override=context,
+                allow_unpublished=True,
+                external_user_id="preview",
+                user_name=actor,
             )
-        except Exception as exc:  # noqa: BLE001 - preview must not leak provider errors
+        except DomainError as exc:
+            # Routing rejections (blacklist, unconfigured model, ...) surface as
+            # DomainError at the send boundary; report them like a failed run.
             return {
                 "status": "failed",
                 "reply": "",
@@ -3006,42 +3071,701 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
                 "skills": [],
                 "trace": {
                     **context.trace_payload(),
-                    "simulation": True,
-                    "upstream_called": False,
-                    "error_code": getattr(exc, "code", "preview_execution_error"),
+                    "conversation_id": session["conversation_id"],
+                    "ledger_conversation_id": session["ledger_conversation_id"],
+                    "run_id": None,
+                    "error_code": str(exc.code),
                 },
             }
 
-        calls = result.get("tools", [])
-        skill_keys = {
-            re.sub(r"[^a-zA-Z0-9_]", "_", skill.key): skill.key
-            for skill in skills
-            if skill.type in {"query", "action"}
-        }
+        run_id = sent.get("run_id")
+        run_status = str(sent.get("status") or "")
+        if not run_id:
+            # Non-run routing outcomes (handoff request / defer) already
+            # persisted their ledger message; there is nothing to wait for.
+            return {
+                "status": run_status or "deferred",
+                "reply": "",
+                "application_version": preview_version,
+                "draft": preview_version is None,
+                "skills": [],
+                "trace": {
+                    **context.trace_payload(),
+                    "conversation_id": session["conversation_id"],
+                    "ledger_conversation_id": session["ledger_conversation_id"],
+                    "run_id": None,
+                },
+            }
+
+        wait_seconds = int(
+            getattr(preview_settings, "service_app_preview_wait_seconds", 60) or 0,
+        )
+        run_row, events, gateway = await self._await_preview_run(
+            str(run_id),
+            tenant,
+            wait_seconds,
+        )
+        return self._preview_result_payload(
+            context,
+            session,
+            str(run_id),
+            run_row,
+            events,
+            application_version=preview_version,
+            gateway=gateway,
+        )
+
+    async def _await_preview_run(
+        self,
+        run_id: str,
+        tenant: str,
+        wait_seconds: int,
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[dict[str, Any]]]:
+        """Poll the queued run until a terminal state or the wait budget ends."""
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(wait_seconds, 0)
+        async with self.engine.connect() as connection:
+            while True:
+                row = await one(
+                    connection,
+                    """
+                    SELECT status,output,error_code,started_at,finished_at
+                    FROM runtime_runs
+                    WHERE id=CAST(:run_id AS uuid) AND tenant_id=:tenant
+                    """,
+                    run_id=run_id,
+                    tenant=tenant,
+                )
+                if row is None or str(row["status"]) in TERMINAL:
+                    break
+                if loop.time() >= deadline:
+                    break
+                await asyncio.sleep(0.25)
+            events = await many(
+                connection,
+                """
+                SELECT seq,type,data,created_at FROM runtime_events
+                WHERE run_id=CAST(:run_id AS uuid)
+                ORDER BY seq
+                """,
+                run_id=run_id,
+            )
+            gateway = await self._gateway_meta(connection, tenant, run_id, events)
+        return row, events, gateway
+
+    @staticmethod
+    def _event_origin(events: list[dict[str, Any]]) -> Any:
+        """First timestamp in the run, used as the zero mark for step offsets."""
+
+        for event in events:
+            if event.get("created_at") is not None:
+                return event["created_at"]
+        return None
+
+    @staticmethod
+    def _ms_since(later: Any, origin: Any) -> int | None:
+        if later is None or origin is None:
+            return None
+        return max(int((later - origin).total_seconds() * 1000), 0)
+
+    @staticmethod
+    def _first_time(events: list[dict[str, Any]], kind: str) -> Any:
+        for event in events:
+            if event.get("type") == kind and event.get("created_at") is not None:
+                return event["created_at"]
+        return None
+
+    @classmethod
+    def _preview_timing(cls, events: list[dict[str, Any]]) -> dict[str, int | None]:
+        """How long each fixed stage took: queue, context prep, execution.
+
+        The runtime already stamps every event, so the split needs no extra
+        instrumentation — only the subtraction that the console was missing.
+        """
+
+        queued = cls._first_time(events, "run.queued")
+        started = cls._first_time(events, "run.started")
+        prepared = cls._first_time(events, "model.started")
+        finished = cls._first_time(events, "run.completed")
+        if finished is None:
+            finished = next(
+                (
+                    event["created_at"]
+                    for event in reversed(events)
+                    if event.get("created_at") is not None
+                ),
+                None,
+            )
         return {
-            "status": "completed",
-            "reply": str(result.get("reply", "")),
-            "application_version": preview_version,
-            "draft": preview_version is None,
-            "skills": [
+            "queued_ms": cls._ms_since(started, queued),
+            "prepare_ms": cls._ms_since(prepared, started),
+            "exec_ms": cls._ms_since(finished, started),
+            "total_ms": cls._ms_since(finished, queued),
+        }
+
+    @classmethod
+    def _preview_rounds(cls, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """One entry per model round, with the timings the trace already recorded."""
+
+        origin = cls._event_origin(events)
+        rounds: list[dict[str, Any]] = []
+        for index, event in enumerate(events):
+            if event.get("type") != "model.completed":
+                continue
+            data = event.get("data") or {}
+            usage = data.get("usage") or {}
+            begin = next(
+                (
+                    earlier["created_at"]
+                    for earlier in reversed(events[:index])
+                    if earlier.get("type") == "model.started"
+                    and earlier.get("created_at") is not None
+                ),
+                None,
+            )
+            rounds.append(
                 {
-                    "key": skill_keys.get(str(name), str(name)),
-                    "status": "completed",
-                    "duration_ms": None,
+                    "round": data.get("round"),
+                    "offset_ms": cls._ms_since(begin, origin),
+                    "duration_ms": data.get("duration_ms"),
+                    "first_token_ms": data.get("first_token_ms"),
+                    "input_tokens": usage.get("input_tokens"),
+                    "output_tokens": usage.get("output_tokens"),
+                    "tool_calls": data.get("tool_calls"),
+                    "gateway_call_id": data.get("gateway_call_id"),
+                },
+            )
+        return rounds
+
+    @staticmethod
+    def _preview_tool_calls(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        origin = ServiceApplicationService._event_origin(events)
+        started: dict[str, dict[str, Any]] = {}
+        calls: list[dict[str, Any]] = []
+        for event in events:
+            data = event.get("data") or {}
+            if event.get("type") == "tool.started":
+                started[str(data.get("call_id"))] = {
+                    "name": str(data.get("name") or ""),
+                    "args": data.get("args"),
+                    "round": data.get("round"),
+                    "offset_ms": ServiceApplicationService._ms_since(
+                        event.get("created_at"), origin
+                    ),
+                    "started_at": event.get("created_at"),
                 }
-                for name in calls
-                # Built-in capabilities are not application skills; retrieval has
-                # its own section in the trace.
-                if str(name) not in context.builtin_tools
-            ],
+            elif event.get("type") == "tool.completed":
+                call = dict(started.get(str(data.get("call_id")), {}))
+                call.update(
+                    {
+                        "name": str(data.get("name") or call.get("name") or ""),
+                        "ok": bool(data.get("ok")),
+                        "error": data.get("error"),
+                        "duration_ms": data.get("duration_ms"),
+                        "result_chars": data.get("result_chars"),
+                        "execution_status": data.get("execution_status"),
+                    },
+                )
+                call.pop("started_at", None)
+                calls.append(call)
+        return calls
+
+    @classmethod
+    def _preview_retrieval(
+        cls,
+        events: list[dict[str, Any]],
+        tool_calls: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Retrieval evidence, timed with the tool call that produced it.
+
+        ``knowledge.retrieved`` itself carries no duration: the enclosing
+        ``tool.completed`` owns the measurement. The events carry no shared call
+        id, so a retrieval is matched to the earliest still-open knowledge
+        search; parallel searches resolve in start order, which is the best the
+        log can say without extra plumbing.
+        """
+
+        origin = cls._event_origin(events)
+        open_searches: list[int] = []
+        seen = 0
+        retrieval: list[dict[str, Any]] = []
+        for event in events:
+            kind = event.get("type")
+            if kind == "tool.started":
+                if str((event.get("data") or {}).get("name") or "") == "knowledge_search":
+                    open_searches.append(seen)
+                seen += 1
+                continue
+            if kind != "knowledge.retrieved":
+                continue
+            data = dict(event.get("data") or {})
+            call: dict[str, Any] | None = None
+            if open_searches:
+                index = open_searches.pop(0)
+                call = tool_calls[index] if index < len(tool_calls) else None
+            data["offset_ms"] = (
+                call.get("offset_ms")
+                if call and call.get("offset_ms") is not None
+                else cls._ms_since(event.get("created_at"), origin)
+            )
+            if call:
+                data["duration_ms"] = call.get("duration_ms")
+                data["result_chars"] = call.get("result_chars")
+                data["embedding_ms"] = call.get("embedding_ms")
+                search = call.get("duration_ms")
+                embedding = call.get("embedding_ms")
+                if isinstance(search, int) and isinstance(embedding, int):
+                    data["search_ms"] = max(search - embedding, 0)
+            retrieval.append(data)
+        return retrieval
+
+    @staticmethod
+    def _apply_gateway_meta(
+        rounds: list[dict[str, Any]],
+        tool_calls: list[dict[str, Any]],
+        gateway: list[dict[str, Any]],
+    ) -> None:
+        """Name the model per round and split embedding out of a search.
+
+        Chat calls are linked by ``gateway_call_id``. Embedding calls carry no
+        run id, so they are matched to the tool window they fall inside; the
+        split is approximate by nature but sums back to the tool's duration.
+        """
+
+        by_call = {
+            str(row["call_id"]): row
+            for row in gateway
+            if row.get("operation") == "chat" and row.get("call_id")
+        }
+        for item in rounds:
+            meta = by_call.get(str(item.get("gateway_call_id") or ""))
+            if meta:
+                item["model"] = meta.get("model")
+                item["upstream_ms"] = meta.get("attempt_ms")
+                item["gateway_ms"] = meta.get("call_ms")
+        embeddings = [
+            row
+            for row in gateway
+            if row.get("operation") in {"embed", "embedding"}
+            and row.get("offset_ms") is not None
+        ]
+        used: set[int] = set()
+        for call in tool_calls:
+            begin = call.get("offset_ms")
+            span = call.get("duration_ms")
+            if begin is None or not isinstance(span, int):
+                continue
+            for position, embed in enumerate(embeddings):
+                if position in used:
+                    continue
+                if begin <= embed["offset_ms"] <= begin + span:
+                    call["embedding_ms"] = embed.get("call_ms")
+                    call["embedding_model"] = embed.get("model")
+                    used.add(position)
+                    break
+
+    @classmethod
+    async def _gateway_meta(
+        cls,
+        connection: object,
+        tenant: str,
+        run_id: str,
+        events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Gateway calls belonging to a run, timed against the run origin.
+
+        A classmethod because it only reads the event log and the gateway
+        ledger: the customer-conversation read model rebuilds the same trace
+        without holding an application service instance.
+        """
+
+        if not events:
+            return []
+        origin = cls._event_origin(events)
+        stamps = [event["created_at"] for event in events if event.get("created_at") is not None]
+        if origin is None or not stamps:
+            return []
+        rows = await many(
+            connection,
+            """
+            SELECT g.id AS call_id,g.operation,g.duration_ms AS call_ms,g.created_at,
+                   a.model_name,a.duration_ms AS attempt_ms
+            FROM gateway_calls g
+            LEFT JOIN gateway_attempts a ON a.call_id=g.id
+            WHERE g.tenant_id=:tenant
+              AND (
+                g.run_id=CAST(:run_id AS uuid)
+                OR (
+                  g.operation IN ('embed','embedding')
+                  AND g.created_at>=:since AND g.created_at<=:until
+                )
+              )
+            ORDER BY g.created_at
+            """,
+            tenant=tenant,
+            run_id=run_id,
+            since=stamps[0],
+            until=stamps[-1],
+        )
+        return [
+            {
+                "call_id": str(row["call_id"]),
+                "operation": row.get("operation"),
+                "model": row.get("model_name"),
+                "call_ms": row.get("call_ms"),
+                "attempt_ms": row.get("attempt_ms"),
+                "offset_ms": cls._ms_since(row.get("created_at"), origin),
+            }
+            for row in rows
+        ]
+
+    @classmethod
+    def _preview_result_payload(
+        cls,
+        context: Any,
+        session: dict[str, Any],
+        run_id: str,
+        row: dict[str, Any] | None,
+        events: list[dict[str, Any]],
+        *,
+        application_version: int | None,
+        gateway: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        rounds = cls._preview_rounds(events)
+        tool_calls = cls._preview_tool_calls(events)
+        cls._apply_gateway_meta(rounds, tool_calls, gateway or [])
+        retrieval = cls._preview_retrieval(events, tool_calls)
+        builtin = set(getattr(context, "builtin_tools", None) or ())
+        skills = [
+            {
+                "key": call["name"],
+                "status": "completed" if call.get("ok") else "failed",
+                "duration_ms": call.get("duration_ms"),
+                "error": call.get("error"),
+            }
+            for call in tool_calls
+            # Built-in capabilities are not application skills; retrieval has
+            # its own section in the trace.
+            if call["name"] and call["name"] not in builtin
+        ]
+        raw_status = str((row or {}).get("status") or "failed")
+        if raw_status in {"queued", "running"}:
+            status = "timeout"
+        elif raw_status == "completed":
+            status = "completed"
+        else:
+            status = raw_status
+        return {
+            "status": status,
+            "reply": str((row or {}).get("output") or ""),
+            "application_version": application_version,
+            "draft": application_version is None,
+            "skills": skills,
             "trace": {
                 **context.trace_payload(),
-                "simulation": True,
-                "upstream_called": False,
-                "tool_calls": calls,
-                "tool_violations": result.get("violations", []),
-                "retrieval": result.get("retrieval", []),
+                "conversation_id": session["conversation_id"],
+                "ledger_conversation_id": session["ledger_conversation_id"],
+                "run_id": run_id,
+                "simulation": False,
+                "upstream_called": bool(tool_calls or retrieval),
+                "timing": cls._preview_timing(events),
+                "rounds": rounds,
+                "tool_calls": tool_calls,
+                "tool_violations": [
+                    call
+                    for call in tool_calls
+                    if call.get("execution_status") not in (None, "succeeded")
+                ],
+                "retrieval": retrieval,
+                "error_code": (row or {}).get("error_code"),
             },
+        }
+
+    async def list_previews(
+        self,
+        tenant: str,
+        key: str,
+        *,
+        page: int = 1,
+        page_size: int = DEFAULT_PAGE_SIZE,
+        scope: BusinessScope | None = None,
+        session_key: str | None = None,
+    ) -> dict[str, Any]:
+        """List persisted debug turns (ledger conversations ``kind='debug'``).
+
+        ``session_key`` narrows the list to one client debug session by
+        re-deriving the deterministic ledger external id that ``open_session``
+        computed for it, so a refreshed browser can restore its own history.
+        """
+
+        if page < 1 or page_size < 1 or page_size > MAX_PAGE_SIZE:
+            raise DomainError("service_application_conversations_page_invalid", 422)
+        resolved = persisted_scope(tenant, scope)
+        async with self.engine.connect() as connection:
+            application = await self._row(connection, tenant, resolved, key=key)
+            scope_sql, scope_params = scope_predicate(resolved, alias="t")
+            joins = self._preview_history_joins()
+            predicate = """
+                WHERE t.tenant_id=:tenant
+                  AND {scope_sql}
+                  AND bc.application_id=CAST(:application AS uuid)
+                  AND bc.kind='debug'
+            """.format(scope_sql=scope_sql)
+            extra_params: dict[str, Any] = {}
+            if session_key:
+                from .sessions import _ledger_external_id, _session_digest
+
+                # preview() opens the session with external id "debug:{key}",
+                # so the digest must be derived from the same string.
+                client_external = f"debug:{session_key}"
+                runtime_external = (
+                    "app:" + str(application["application_key"])
+                    + ":" + _session_digest(
+                        str(application["application_key"]),
+                        client_external,
+                    )
+                )
+                predicate += """
+                  AND bc.external_conversation_id=:ledger_external
+                """
+                extra_params["ledger_external"] = _ledger_external_id(
+                    str(application["application_key"]),
+                    runtime_external,
+                )
+            total = await one(
+                connection,
+                f"""
+                SELECT count(*)::int AS total
+                FROM service_application_turns t
+                {joins}
+                {predicate}
+                """,
+                tenant=tenant,
+                application=str(application["id"]),
+                **scope_params,
+                **extra_params,
+            )
+            rows = await many(
+                connection,
+                f"""
+                SELECT t.id, t.status AS turn_status, t.error_code,
+                       t.application_version, t.created_at, t.runtime_run_id,
+                       m.content AS input,
+                       rr.status AS run_status, rr.error_code AS run_error,
+                       rr.output AS reply, rr.started_at, rr.finished_at
+                FROM service_application_turns t
+                {joins}
+                {predicate}
+                ORDER BY t.created_at DESC, t.id DESC
+                LIMIT :limit OFFSET :offset
+                """,
+                tenant=tenant,
+                application=str(application["id"]),
+                limit=page_size,
+                offset=(page - 1) * page_size,
+                **scope_params,
+                **extra_params,
+            )
+        total_count = int((total or {}).get("total", 0))
+        return {
+            "items": [self._preview_history_item(row) for row in rows],
+            "total": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total_count + page_size - 1) // page_size,
+        }
+
+    @staticmethod
+    def _preview_history_joins() -> str:
+        return """
+                JOIN service_application_conversations bc
+                  ON bc.tenant_id=t.tenant_id
+                 AND bc.business_id=t.business_id
+                 AND bc.workspace_id=t.workspace_id
+                 AND bc.id=t.conversation_id
+                LEFT JOIN service_application_messages m
+                  ON m.tenant_id=t.tenant_id
+                 AND m.business_id=t.business_id
+                 AND m.workspace_id=t.workspace_id
+                 AND m.conversation_id=t.conversation_id
+                 AND m.id=t.customer_message_id
+                LEFT JOIN runtime_runs rr ON rr.id=t.runtime_run_id
+        """
+
+    @staticmethod
+    def _preview_history_item(row: dict[str, Any]) -> dict[str, Any]:
+        started = row.get("started_at")
+        finished = row.get("finished_at")
+        duration_ms = None
+        if started is not None and finished is not None:
+            duration_ms = max(0, int((finished - started).total_seconds() * 1000))
+        version = row.get("application_version")
+        return {
+            "id": str(row["id"]),
+            "run_id": str(row["runtime_run_id"]) if row.get("runtime_run_id") else None,
+            "status": _preview_status(row),
+            "error_code": row.get("run_error") or row.get("error_code"),
+            "application_version": version,
+            "draft": version in (None, 0),
+            "input": str(row.get("input") or ""),
+            "reply": str(row.get("reply") or ""),
+            "duration_ms": duration_ms,
+            "created_at": row.get("created_at"),
+        }
+
+    @classmethod
+    def _preview_history_trace(
+        cls,
+        row: dict[str, Any],
+        events: list[dict[str, Any]],
+        gateway: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Rebuild a persisted run's trace in the shape the live preview returns.
+
+        The run row carries the release snapshot it executed with, so a debug
+        turn opened later can still report which application/agent version ran,
+        which skills were available and what retrieval returned. Without it the
+        diagnostic drawer only sees summary columns and renders every trace
+        section as empty.
+        """
+
+        config = row.get("run_config") or {}
+        snapshot = config.get("application") or {}
+        agent = config.get("agent") or {}
+        builtin = set(snapshot.get("builtin_tools") or ())
+        rounds = cls._preview_rounds(events)
+        tool_calls = cls._preview_tool_calls(events)
+        cls._apply_gateway_meta(rounds, tool_calls, gateway or [])
+        retrieval = cls._preview_retrieval(events, tool_calls)
+        # Built-in capabilities are not application skills; retrieval has its
+        # own section, exactly like the live preview payload.
+        skills = [
+            {
+                "key": call["name"],
+                "status": "completed" if call.get("ok") else "failed",
+                "duration_ms": call.get("duration_ms"),
+                "error": call.get("error"),
+            }
+            for call in tool_calls
+            if call["name"] and call["name"] not in builtin
+        ]
+        trace = {
+            "application_key": snapshot.get("key"),
+            "application_version": snapshot.get(
+                "version", row.get("application_version")
+            ),
+            "agent_id": str(agent["id"]) if agent.get("id") else None,
+            "agent_version": agent.get("version"),
+            "skills": [
+                {
+                    "key": skill.get("key"),
+                    "type": skill.get("type"),
+                    "connection_key": skill.get("connection_key"),
+                }
+                for skill in snapshot.get("skills") or ()
+            ],
+            "connections": [
+                {
+                    "key": connection.get("key"),
+                    "executor_kind": connection.get("executor_kind"),
+                }
+                for connection in snapshot.get("connections") or ()
+            ],
+            "status": "submitted",
+            "conversation_id": (
+                str(row["runtime_conversation_id"])
+                if row.get("runtime_conversation_id")
+                else None
+            ),
+            "ledger_conversation_id": (
+                str(row["ledger_conversation_id"])
+                if row.get("ledger_conversation_id")
+                else None
+            ),
+            "run_id": str(row["runtime_run_id"]) if row.get("runtime_run_id") else None,
+            "simulation": False,
+            "upstream_called": bool(tool_calls or retrieval),
+            "timing": cls._preview_timing(events),
+            "rounds": rounds,
+            "tool_calls": tool_calls,
+            "tool_violations": [
+                call
+                for call in tool_calls
+                if call.get("execution_status") not in (None, "succeeded")
+            ],
+            "retrieval": retrieval,
+            "error_code": row.get("run_error") or row.get("error_code"),
+        }
+        return trace, skills
+
+    async def get_preview(
+        self,
+        tenant: str,
+        key: str,
+        turn_id: str,
+        *,
+        scope: BusinessScope | None = None,
+    ) -> dict[str, Any]:
+        """Full debug-trace detail for one persisted preview turn."""
+
+        resolved = persisted_scope(tenant, scope)
+        async with self.engine.connect() as connection:
+            application = await self._row(connection, tenant, resolved, key=key)
+            scope_sql, scope_params = scope_predicate(resolved, alias="t")
+            row = await one(
+                connection,
+                f"""
+                SELECT t.id, t.status AS turn_status, t.error_code,
+                       t.application_version, t.created_at,
+                       t.runtime_run_id, t.runtime_conversation_id,
+                       bc.id AS ledger_conversation_id,
+                       m.content AS input,
+                       rr.status AS run_status, rr.error_code AS run_error,
+                       rr.output AS reply, rr.started_at, rr.finished_at,
+                       rr.config AS run_config
+                FROM service_application_turns t
+                {self._preview_history_joins()}
+                WHERE t.tenant_id=:tenant
+                  AND {scope_sql}
+                  AND bc.application_id=CAST(:application AS uuid)
+                  AND bc.kind='debug'
+                  AND t.id=CAST(:turn_id AS uuid)
+                """,
+                tenant=tenant,
+                application=str(application["id"]),
+                turn_id=str(turn_id),
+                **scope_params,
+            )
+            row = required(row, "service_application_preview_not_found")
+            events: list[dict[str, Any]] = []
+            gateway: list[dict[str, Any]] = []
+            if row.get("runtime_run_id"):
+                events = await many(
+                    connection,
+                    """
+                    SELECT seq,type,data,created_at FROM runtime_events
+                    WHERE run_id=CAST(:run_id AS uuid)
+                    ORDER BY seq
+                    """,
+                    run_id=str(row["runtime_run_id"]),
+                )
+                gateway = await self._gateway_meta(
+                    connection,
+                    tenant,
+                    str(row["runtime_run_id"]),
+                    events,
+                )
+        trace, skills = self._preview_history_trace(row, events, gateway)
+        return {
+            "status": _preview_status(row),
+            "reply": str(row.get("reply") or ""),
+            "application_version": row.get("application_version"),
+            "draft": row.get("application_version") in (None, 0),
+            "skills": skills,
+            "trace": trace,
+            "input": str(row.get("input") or ""),
+            "created_at": row.get("created_at"),
         }
 
     async def test_skill(

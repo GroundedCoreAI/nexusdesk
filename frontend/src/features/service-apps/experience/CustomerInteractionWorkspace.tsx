@@ -26,19 +26,25 @@ import {
     Switch,
     Table,
     Tag,
-    Timeline,
 } from 'antd';
 import type { TableProps } from 'antd';
 import { dateTime } from '../../../i18n/index';
-import { KnowledgeRecall, useAccess, type RunKnowledgeRetrieval } from '../../../shared/components/ui';
-import { getApplicationExperience, previewApplication } from '../api';
+import { useAccess } from '../../../shared/components/ui';
+import {
+    getApplicationExperience,
+    getApplicationPreview,
+    listApplicationPreviews,
+    previewApplication,
+} from '../api';
 import type {
     ApplicationDetail,
+    ApplicationPreviewHistoryItem,
     ApplicationPreviewResult,
     ExperienceCategory,
     ExperienceEntry,
     ServiceExperienceConfig,
 } from '../contracts';
+import { RunDiagnostics, type RunTrace } from '../components/RunDiagnostics';
 import { say, skillTypeLabel } from '../labels';
 import './customer-interaction.css';
 
@@ -55,6 +61,9 @@ interface PreviewRun {
     durationMs: number | null;
     result?: ApplicationPreviewResult;
     error?: string;
+    /** Persisted turn id; set for runs restored from server history, whose
+     *  summary row carries no trace until the detail endpoint is fetched. */
+    turnId?: string;
 }
 
 type ChatMessage =
@@ -123,6 +132,51 @@ function resultStatus(status: string): RunStatus {
     return 'other';
 }
 
+function serverItemStatus(status: string): RunStatus {
+    if (status === 'completed') return 'completed';
+    if (status === 'failed' || status === 'cancelled') return 'failed';
+    if (status === 'running') return 'running';
+    return 'other';
+}
+
+const SESSION_STORAGE_PREFIX = 'nexusdesk.debug-session.';
+
+function loadSessionId(applicationKey: string): string {
+    try {
+        const stored = window.localStorage.getItem(SESSION_STORAGE_PREFIX + applicationKey);
+        if (stored) return stored;
+    } catch {
+        // Storage unavailable (privacy mode) — fall through to a fresh id.
+    }
+    return crypto.randomUUID();
+}
+
+function storeSessionId(applicationKey: string, sessionId: string) {
+    try {
+        window.localStorage.setItem(SESSION_STORAGE_PREFIX + applicationKey, sessionId);
+    } catch {
+        // Quota or privacy errors only cost session continuity, not function.
+    }
+}
+
+function serverItemToRun(
+    item: ApplicationPreviewHistoryItem,
+    application: ApplicationDetail,
+): PreviewRun {
+    return {
+        id: item.id,
+        createdAt: item.created_at,
+        mode: item.draft ? 'draft' : 'published',
+        versionLabel: item.draft
+            ? `r${application.draft_revision}`
+            : `v${item.application_version || 0}`,
+        input: item.input,
+        status: serverItemStatus(item.status),
+        durationMs: item.duration_ms,
+        turnId: item.id,
+    };
+}
+
 export function CustomerInteractionWorkspace({
     application,
     draftExperience,
@@ -154,6 +208,16 @@ export function CustomerInteractionWorkspace({
     const [historyOpen, setHistoryOpen] = useState(false);
     const [diagnosticOpen, setDiagnosticOpen] = useState(false);
     const [selectedRun, setSelectedRun] = useState<PreviewRun | null>(null);
+    // Stable id for the persisted debug session: turns sent with the same key
+    // land on one server-side conversation, so the drawer keeps full history.
+    // The key survives page refreshes via localStorage, letting the workspace
+    // restore prior turns instead of starting from zero.
+    const [sessionId, setSessionId] = useState(() => loadSessionId(application.key));
+    const [historyScope, setHistoryScope] = useState<'session' | 'server'>('session');
+    const [serverHistory, setServerHistory] = useState<ApplicationPreviewHistoryItem[]>([]);
+    const [serverHistoryTotal, setServerHistoryTotal] = useState(0);
+    const [serverHistoryPage, setServerHistoryPage] = useState(1);
+    const [serverHistoryLoading, setServerHistoryLoading] = useState(false);
 
     useEffect(() => {
         if (scope !== 'published') {
@@ -201,13 +265,90 @@ export function CustomerInteractionWorkspace({
     }, [application.key, experience.welcome_text, scope]);
 
     useEffect(() => {
+        storeSessionId(application.key, sessionId);
+    }, [application.key, sessionId]);
+
+    useEffect(() => {
         setRuns([]);
         setHistoryOpen(false);
         setDiagnosticOpen(false);
         setSelectedRun(null);
         setAllowWrite(false);
         setScope('draft');
+        setSessionId(loadSessionId(application.key));
     }, [application.key]);
+
+    // Restore the persisted debug session (after refresh, scope switch or
+    // welcome-text edit): rebuild the chat transcript and the run list from
+    // this session's turns on the server. Replacement, not append — the
+    // server is the source of truth once a turn is persisted. Best-effort.
+    useEffect(() => {
+        let active = true;
+        listApplicationPreviews(application.key, { page: 1, pageSize: 20, sessionKey: sessionId })
+            .then(value => {
+                if (!active || value.items.length === 0) return;
+                const restored = value.items.map(item => serverItemToRun(item, application));
+                setRuns(current => [
+                    ...current.filter(run => run.status === 'running'
+                        || !restored.some(item => item.id === run.id)),
+                    ...restored,
+                ]);
+                setMessages([{
+                    id: ++nextMessageId.current,
+                    role: 'assistant',
+                    kind: 'welcome',
+                }, ...[...value.items].reverse().flatMap(item => {
+                    const transcript: ChatMessage[] = [{
+                        id: ++nextMessageId.current,
+                        role: 'user',
+                        kind: 'text',
+                        text: item.input,
+                    }];
+                    if (item.reply) {
+                        transcript.push({
+                            id: ++nextMessageId.current,
+                            role: 'assistant',
+                            kind: 'text',
+                            text: item.reply,
+                        });
+                    }
+                    return transcript;
+                })]);
+            })
+            .catch(() => {
+                // History restore is optional; the session keeps working.
+            });
+        return () => {
+            active = false;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [application.key, sessionId, experience.welcome_text, scope]);
+
+    useEffect(() => {
+        if (!historyOpen) {
+            setHistoryScope('session');
+            setServerHistoryPage(1);
+            return;
+        }
+        if (historyScope !== 'server') return;
+        let active = true;
+        setServerHistoryLoading(true);
+        listApplicationPreviews(application.key, { page: serverHistoryPage, pageSize: 10 })
+            .then(value => {
+                if (!active) return;
+                setServerHistory(value.items);
+                setServerHistoryTotal(value.total);
+            })
+            .catch(() => {
+                if (active) setServerHistory([]);
+            })
+            .finally(() => {
+                if (active) setServerHistoryLoading(false);
+            });
+        return () => {
+            active = false;
+        };
+    }, [application.key, historyOpen, historyScope, serverHistoryPage]);
 
     useEffect(() => {
         if (!application.published_version && scope === 'published') {
@@ -250,6 +391,7 @@ export function CustomerInteractionWorkspace({
         setInput('');
         setSuggestionRound(0);
         setBusy(false);
+        setSessionId(crypto.randomUUID());
     }
 
     function openCategory(category: ExperienceCategory) {
@@ -294,6 +436,7 @@ export function CustomerInteractionWorkspace({
                 allow_write: scope === 'draft'
                     && allowWrite
                     && application.rules.preview_write_enabled,
+                session_key: sessionId,
             });
             const durationMs = Math.max(1, Math.round(performance.now() - startedAt));
             updateRun(runId, {
@@ -318,9 +461,37 @@ export function CustomerInteractionWorkspace({
         }
     }
 
+    // Open the diagnostic drawer for any run. Live runs already hold their
+    // preview payload; runs restored from server history only carry the list
+    // summary, so the persisted trace (skills, tool calls, knowledge recall) is
+    // fetched once and written back to both the drawer and the run list.
     function showDiagnostic(run: PreviewRun) {
         setSelectedRun(run);
         setDiagnosticOpen(true);
+        if (run.result || !run.turnId) return;
+        const turnId = run.turnId;
+        getApplicationPreview(application.key, turnId)
+            .then(detail => {
+                updateRun(run.id, {
+                    result: detail,
+                    input: detail.input || run.input,
+                });
+                setSelectedRun(current => current && current.id === run.id
+                    ? {
+                        ...current,
+                        result: detail,
+                        input: detail.input || current.input,
+                    }
+                    : current);
+            })
+            .catch(() => {
+                // The timeline already shows the persisted summary; a failed
+                // trace fetch leaves the summary in place.
+            });
+    }
+
+    function openServerHistory(item: ApplicationPreviewHistoryItem) {
+        showDiagnostic(serverItemToRun(item, application));
     }
 
     const runColumns: TableProps<PreviewRun>['columns'] = [
@@ -388,60 +559,61 @@ export function CustomerInteractionWorkspace({
         },
     ];
 
-    // Preview retrieval is real — the runtime executes read-only contributions —
-    // and its evidence arrives inside the trace, so the drawer can show what was
-    // recalled. Retrieval is a platform capability rather than an application
-    // skill, so it is read from the trace and reported on its own line.
-    const retrievals = ((selectedRun?.result?.trace || {}) as {
-        retrieval?: RunKnowledgeRetrieval[];
-    }).retrieval || [];
-    const recalledSources = retrievals.reduce(
-        (total, item) => total + (item.sources?.length || 0),
-        0,
-    );
-
-    const timelineItems = selectedRun
-        ? [
-            {
-                color: 'blue',
-                children: <div className="sa-cp-timeline-item">
-                    <strong>{say('收到客户消息')}</strong>
-                    <p>{selectedRun.input}</p>
-                    <small>{dateTime(selectedRun.createdAt)}</small>
-                </div>,
-            },
-            ...retrievals.map(item => ({
-                color: 'green',
-                children: <div className="sa-cp-timeline-item">
-                    <strong>{say('知识检索')}</strong>
-                    <p>
-                        {item.query}
-                        {' · '}
-                        {say('{{v0}} 条', { v0: item.sources?.length || 0 })}
-                    </p>
-                </div>,
-            })),
-            ...(selectedRun.result?.skills || []).map(skill => ({
-                color: skill.status === 'completed' ? 'green' : 'orange',
-                children: <div className="sa-cp-timeline-item">
-                    <strong>{skill.key}</strong>
-                    <p>
-                        {skill.status}
-                        {skill.duration_ms == null ? '' : ` · ${skill.duration_ms}ms`}
-                    </p>
-                </div>,
-            })),
-            {
-                color: selectedRun.status === 'failed' ? 'red' : 'green',
-                children: <div className="sa-cp-timeline-item">
-                    <strong>{selectedRun.status === 'failed'
-                        ? say('失败')
-                        : say('应用返回回复')}</strong>
-                    <p>{selectedRun.result?.reply || selectedRun.error || say('暂无回复')}</p>
-                </div>,
-            },
-        ]
-        : [];
+    const serverColumns: TableProps<ApplicationPreviewHistoryItem>['columns'] = [
+        {
+            title: say('时间'),
+            dataIndex: 'created_at',
+            width: 174,
+            render: value => <span className="sa-cp-run-time">{dateTime(String(value))}</span>,
+        },
+        {
+            title: say('模式'),
+            dataIndex: 'draft',
+            width: 94,
+            render: value => <Tag color={value ? 'purple' : 'green'}>
+                {value ? say('草稿预览') : say('已发布版本')}
+            </Tag>,
+        },
+        {
+            title: say('应用版本'),
+            dataIndex: 'application_version',
+            width: 94,
+            render: value => <span className="mono">{value ? `v${value}` : '—'}</span>,
+        },
+        {
+            title: say('输入摘要'),
+            dataIndex: 'input',
+            ellipsis: true,
+            render: value => <span title={String(value)}>{String(value)}</span>,
+        },
+        {
+            title: say('状态'),
+            dataIndex: 'status',
+            width: 100,
+            render: value => <Tag color={runStatusColor(serverItemStatus(String(value)))}>
+                {runStatusLabel(serverItemStatus(String(value)))}
+            </Tag>,
+        },
+        {
+            title: say('耗时'),
+            dataIndex: 'duration_ms',
+            width: 86,
+            render: value => value == null ? '—' : `${value}ms`,
+        },
+        {
+            title: say('诊断'),
+            key: 'actions',
+            width: 110,
+            render: (_, item) => <Button
+                type="link"
+                size="small"
+                icon={<BugOutlined/>}
+                onClick={() => openServerHistory(item)}
+            >
+                {say('查看诊断')}
+            </Button>,
+        },
+    ];
 
     return <div className="sa-cp-tab sa-cp-embedded">
         <section className="sa-cp-embedded-toolbar">
@@ -752,22 +924,46 @@ export function CustomerInteractionWorkspace({
             onClose={() => setHistoryOpen(false)}
             title={say('运行记录')}
             width={1040}
-            extra={<Tag>{say('共 {{v0}} 条', { v0: runs.length })}</Tag>}
+            extra={<Segmented
+                value={historyScope}
+                onChange={value => setHistoryScope(value as 'session' | 'server')}
+                options={[
+                    { value: 'session', label: say('本次会话') },
+                    { value: 'server', label: say('服务端历史') },
+                ]}
+            />}
             destroyOnHidden
         >
-            <Table<PreviewRun>
-                rowKey="id"
-                size="small"
-                columns={runColumns}
-                dataSource={runs}
-                pagination={{
-                    pageSize: 10,
-                    showSizeChanger: false,
-                    hideOnSinglePage: runs.length <= 10,
-                    showTotal: total => say('共 {{v0}} 条', { v0: total }),
-                }}
-                locale={{ emptyText: say('暂无运行记录') }}
-            />
+            {historyScope === 'session'
+                ? <Table<PreviewRun>
+                    rowKey="id"
+                    size="small"
+                    columns={runColumns}
+                    dataSource={runs}
+                    pagination={{
+                        pageSize: 10,
+                        showSizeChanger: false,
+                        hideOnSinglePage: runs.length <= 10,
+                        showTotal: total => say('共 {{v0}} 条', { v0: total }),
+                    }}
+                    locale={{ emptyText: say('暂无运行记录') }}
+                />
+                : <Table<ApplicationPreviewHistoryItem>
+                    rowKey="id"
+                    size="small"
+                    columns={serverColumns}
+                    dataSource={serverHistory}
+                    loading={serverHistoryLoading}
+                    pagination={{
+                        current: serverHistoryPage,
+                        pageSize: 10,
+                        total: serverHistoryTotal,
+                        showSizeChanger: false,
+                        onChange: page => setServerHistoryPage(page),
+                        showTotal: total => say('共 {{v0}} 条', { v0: total }),
+                    }}
+                    locale={{ emptyText: say('暂无历史记录') }}
+                />}
         </Drawer>
 
         <Drawer
@@ -778,77 +974,16 @@ export function CustomerInteractionWorkspace({
             destroyOnHidden
         >
             {selectedRun
-                ? <div className="sa-cp-diagnostic">
-                    <div className="sa-cp-diagnostic-head">
-                        <div>
-                            <span>{say('运行诊断')}</span>
-                            <strong className="mono">#{selectedRun.id}</strong>
-                        </div>
-                        <Tag color={runStatusColor(selectedRun.status)}>
-                            {runStatusLabel(selectedRun.status)}
-                        </Tag>
-                    </div>
-                    {selectedRun.error && <Alert
-                        type="error"
-                        showIcon
-                        message={selectedRun.error}
-                    />}
-                    <section className="sa-cp-diagnostic-section">
-                        <h4>{say('对话记录')}</h4>
-                        <div className="sa-cp-diagnostic-dialogue">
-                            <div>
-                                <span>{say('客户消息')}</span>
-                                <p>{selectedRun.input}</p>
-                            </div>
-                            <div>
-                                <span>{say('应用回复')}</span>
-                                <p>{selectedRun.result?.reply || selectedRun.error || say('暂无回复')}</p>
-                            </div>
-                        </div>
-                    </section>
-                    <section className="sa-cp-diagnostic-section">
-                        <h4>{say('运行时间线')}</h4>
-                        <Timeline items={timelineItems}/>
-                    </section>
-                    <section className="sa-cp-diagnostic-section">
-                        <div className="sa-cp-diagnostic-section-title">
-                            <h4>{say('技能与 Trace')}</h4>
-                            {(selectedRun.result?.skills.length || retrievals.length)
-                                ? <Tag>{(selectedRun.result?.skills.length || 0) + retrievals.length}</Tag>
-                                : <span>{say('暂无技能调用')}</span>}
-                        </div>
-                        <div className="sa-cp-skill-chips">
-                            {retrievals.map((item, index) => <Tag
-                                key={`knowledge-${index}`}
-                                color="green"
-                            >
-                                {say('知识检索')} · {say('{{v0}} 条', { v0: item.sources?.length || 0 })}
-                            </Tag>)}
-                            {(selectedRun.result?.skills || []).map(skill => <Tag
-                                key={skill.key}
-                                color={skill.status === 'completed' ? 'green' : 'orange'}
-                            >
-                                {skill.key} · {skill.status}
-                            </Tag>)}
-                        </div>
-                    </section>
-                    <section className="sa-cp-diagnostic-section">
-                        <div className="sa-cp-diagnostic-section-title">
-                            <h4>{say('知识召回')}</h4>
-                            {recalledSources
-                                ? <Tag>{recalledSources}</Tag>
-                                : <span>{say('本次预览没有调用知识检索')}</span>}
-                        </div>
-                        <KnowledgeRecall items={retrievals}/>
-                    </section>
-                    <section className="sa-cp-diagnostic-section">
-                        <h4>{say('原始 JSON')}</h4>
-                        <pre className="sa-cp-raw">{JSON.stringify({
-                            skills: selectedRun.result?.skills || [],
-                            trace: selectedRun.result?.trace || {},
-                        }, null, 2)}</pre>
-                    </section>
-                </div>
+                ? <RunDiagnostics
+                    status={selectedRun.status}
+                    runId={selectedRun.turnId || selectedRun.id}
+                    input={selectedRun.input}
+                    reply={selectedRun.result?.reply || ''}
+                    error={selectedRun.error}
+                    skills={selectedRun.result?.skills || []}
+                    trace={(selectedRun.result?.trace || {}) as RunTrace}
+                    createdAt={selectedRun.createdAt}
+                />
                 : <Empty/>}
         </Drawer>
     </div>;
