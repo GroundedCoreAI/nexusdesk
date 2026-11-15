@@ -11,7 +11,6 @@ from pydantic import ValidationError
 
 from agent_platform.applications.platform_runtime.tool_defaults import BUILTIN_SCHEMAS
 from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
-    ApplicationRuntimeContext,
     ApplicationRuntimeResolver,
     application_http_tool_specs,
     application_knowledge_base_ids,

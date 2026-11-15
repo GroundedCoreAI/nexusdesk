@@ -3506,12 +3506,12 @@ WHERE tenant_id=:tenant AND business_id=:scope_business
             application = await self._row(connection, tenant, resolved, key=key)
             scope_sql, scope_params = scope_predicate(resolved, alias="t")
             joins = self._preview_history_joins()
-            predicate = """
+            predicate = f"""
                 WHERE t.tenant_id=:tenant
                   AND {scope_sql}
                   AND bc.application_id=CAST(:application AS uuid)
                   AND bc.kind='debug'
-            """.format(scope_sql=scope_sql)
+            """
             extra_params: dict[str, Any] = {}
             if session_key:
                 from .sessions import _ledger_external_id, _session_digest

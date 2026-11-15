@@ -132,7 +132,7 @@ async def _drive_worker(runtime, settings, run_id):
     row = await runtime.repository.claim(runtime.worker.owner, 30, settings.tenant_id)
     assert row is not None, "run was not queued"
     assert str(row["id"]) == str(run_id)
-    await runtime.worker._execute(row)  # noqa: SLF001 - tests drive the worker directly
+    await runtime.worker._execute(row)
     return row
 
 
@@ -356,7 +356,7 @@ async def test_frozen_release_preview_pins_release_agent_and_version(platform):
 
 
 async def test_preview_excludes_write_skills_unless_both_gates_allow_them(platform):
-    client, runtime, settings = platform
+    client, _runtime, settings = platform
     settings.service_app_preview_wait_seconds = 0
     agent, _ = await create_agent(client)
     application = await _create_application(client, agent)
@@ -405,14 +405,13 @@ async def test_preview_excludes_write_skills_unless_both_gates_allow_them(platfo
 
 
 async def test_preview_history_requires_the_application_scope(platform):
-    client, runtime, settings = platform
+    client, _runtime, settings = platform
     settings.service_app_preview_wait_seconds = 0
     agent, _ = await create_agent(client)
     application = await _create_application(client, agent)
 
+    missing_id = uuid4()
     missing = await client.get(
-        f"/api/v1/service-apps/{application['key']}/previews/{
-            uuid4()
-        }",
+        f"/api/v1/service-apps/{application['key']}/previews/{missing_id}",
     )
     assert missing.status_code == 404, missing.text

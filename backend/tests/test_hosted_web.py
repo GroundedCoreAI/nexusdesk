@@ -6,6 +6,8 @@ provider and no API key in the browser — while still being gated by an explici
 switch, revocable by rotating the link, and confined to the chat surface.
 """
 
+# ruff: noqa: F811 - `platform` is a pytest fixture re-exported from another module.
+
 from uuid import uuid4
 
 import pytest
