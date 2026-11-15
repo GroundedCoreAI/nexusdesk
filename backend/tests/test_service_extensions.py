@@ -488,7 +488,15 @@ async def test_milvus_contract_and_postfilter(platform):
         index = VectorIndex(
             services.groups.runtime.engine,
             services.groups.runtime.gateway,
-            settings.model_copy(update={"milvus_url": "http://localhost:19530"}),
+            # This case pins the Milvus REST contract, so the backend must be
+            # Milvus even though ``knowledge_vector_backend`` defaults to pgvector
+            # and the CI database ships no ``vector`` extension.
+            settings.model_copy(
+                update={
+                    "milvus_url": "http://localhost:19530",
+                    "knowledge_vector_backend": "milvus",
+                }
+            ),
             mock,
         )
         result = await index.build(

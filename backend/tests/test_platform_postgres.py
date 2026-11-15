@@ -242,15 +242,22 @@ async def create_agent(client, tools=None, bases=None, publish=True):
     return agent, body
 
 
-async def create_published_application(client, agent, *, key=None, name="测试服务应用"):
+async def create_published_application(client, agent, *, key=None, name="测试服务应用", agent_version=None):
     """Create the minimal publishable v2 application for channel/run tests.
 
     A published application is the only legal route to create a customer
     channel. A handoff skill keeps the fixture small while satisfying release
     readiness without an external connection or credential.
+
+    The release pins one Agent version, and a channel pins one application
+    version, so ``agent_version`` defaults to whatever the Agent has published:
+    hardcoding 1 silently froze every test at the Agent's first config.
     """
 
     application_key = key or "test-app-" + uuid4().hex[:12]
+    if agent_version is None:
+        detail = (await client.get(f"/api/v1/agents/{agent['id']}")).json()
+        agent_version = detail.get("published_version") or 1
     response = await client.post(
         "/api/v1/service-apps",
         json={
@@ -258,7 +265,7 @@ async def create_published_application(client, agent, *, key=None, name="测试�
             "name": name,
             "description": "渠道与运行时集成测试",
             "agent_id": agent["id"],
-            "agent_version": 1,
+            "agent_version": agent_version,
         },
     )
     assert response.status_code == 201, response.text
