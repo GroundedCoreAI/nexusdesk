@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from test_platform_postgres import create_agent
+from test_platform_postgres import create_agent, create_published_application
 from test_platform_postgres import platform as _platform
 
 from agent_platform.core_platform.platform_services.persistence.store import DomainError
@@ -108,7 +108,8 @@ async def test_delete_permissions_archive_revision_and_tenant(platform):
 
 
 @pytest.mark.parametrize(
-    "kind", ["channel", "evaluation_case", "evaluation_report", "handoff", "pending_action"]
+    "kind",
+    ["service_application", "evaluation_case", "evaluation_report", "handoff", "pending_action"],
 )
 async def test_delete_blocks_references_without_partial_changes(platform, kind):
     client, runtime, settings = platform
@@ -118,19 +119,19 @@ async def test_delete_blocks_references_without_partial_changes(platform, kind):
     )
     conv = response.json()
     expected = {
-        "channel": "agent_referenced_by_channels",
+        "service_application": "agent_referenced_by_service_applications",
         "evaluation_case": "agent_referenced_by_evaluations",
         "evaluation_report": "agent_referenced_by_evaluations",
         "handoff": "agent_has_open_handoffs",
         "pending_action": "agent_has_pending_actions",
     }[kind]
-    if kind == "channel":
-        row = (
-            await client.post(
-                "/api/v1/channels", json={"name": "仍被引用的渠道", "agent_id": agent["id"]}
-            )
-        ).json()
-        await client.patch(f"/api/v1/channels/{row['id']}", json={"enabled": False})
+    if kind == "service_application":
+        await create_published_application(
+            client,
+            agent,
+            key="deletion-ref-" + uuid4().hex[:10],
+            name="仍被引用的服务应用",
+        )
     elif kind == "handoff":
         assert (
             await client.post(

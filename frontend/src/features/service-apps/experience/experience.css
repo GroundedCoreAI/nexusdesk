@@ -1,0 +1,1381 @@
+.module-service-apps .sa-experience-tab {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+.module-service-apps .sa-experience-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 20px 22px;
+  background:
+    radial-gradient(circle at 90% 10%, rgba(195, 193, 255, .32), transparent 34%),
+    linear-gradient(135deg, #faf9ff 0%, #ffffff 62%, #f5f9ff 100%);
+  border: 1px solid #e8e5f8;
+  border-radius: 14px;
+}
+
+.module-service-apps .sa-experience-banner-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  place-items: center;
+  color: #5f59d8;
+  font-size: 23px;
+  background: #eeecff;
+  border-radius: 12px;
+}
+
+.module-service-apps .sa-experience-banner > div:nth-child(2) { flex: 1; }
+
+.module-service-apps .sa-experience-banner h3 {
+  margin: 2px 0 6px;
+  color: #292648;
+  font-size: 18px;
+  letter-spacing: -.3px;
+}
+
+.module-service-apps .sa-experience-banner p {
+  max-width: 860px;
+  margin: 0;
+  color: #777b8b;
+  font-size: 11px;
+  line-height: 1.75;
+}
+
+.module-service-apps .sa-experience-banner-tags {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 3px;
+}
+
+.module-service-apps .sa-experience-banner-tags .ant-tag { margin-inline-end: 0; }
+
+.module-service-apps .sa-experience-layout {
+  display: grid;
+  grid-template-columns: minmax(400px, .72fr) minmax(620px, 1.28fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.module-service-apps .sa-experience-controls {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.module-service-apps .sa-experience-panel {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--sa-line);
+  border-radius: 13px;
+}
+
+.module-service-apps .sa-experience-panel .sa-panel-title {
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.module-service-apps .sa-experience-panel .sa-panel-title > .anticon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  color: #625ee8;
+  background: #f1f0ff;
+  border-radius: 9px;
+}
+
+.module-service-apps .sa-experience-panel .sa-panel-title > div { flex: 1; }
+.module-service-apps .sa-experience-panel .sa-panel-title .ant-btn { margin-top: -4px; }
+
+.module-service-apps .sa-experience-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 14px;
+  overflow: hidden;
+  background: #f8f8fc;
+  border: 1px solid #ececf3;
+  border-radius: 10px;
+}
+
+.module-service-apps .sa-experience-stats > div {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 8px;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid #ececf3;
+}
+
+.module-service-apps .sa-experience-stats > div:last-child { border-right: 0; }
+
+.module-service-apps .sa-experience-stats strong {
+  color: #383456;
+  font-size: 17px;
+}
+
+.module-service-apps .sa-experience-stats span {
+  color: #8b8d9d;
+  font-size: 10px;
+}
+
+.module-service-apps .sa-directory-list {
+  display: grid;
+  gap: 8px;
+}
+
+.module-service-apps .sa-directory-category {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px;
+  background: #fbfbfd;
+  border: 1px solid #eeedf4;
+  border-radius: 10px;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.module-service-apps .sa-directory-category:hover {
+  background: #faf9ff;
+  border-color: #dedaf8;
+}
+
+.module-service-apps .sa-directory-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.module-service-apps .sa-directory-icon.violet,
+.module-service-apps .sa-phone-category-icon.violet {
+  color: #716adf;
+  background: #efedff;
+}
+
+.module-service-apps .sa-directory-icon.blue,
+.module-service-apps .sa-phone-category-icon.blue {
+  color: #397dcc;
+  background: #eaf3ff;
+}
+
+.module-service-apps .sa-directory-icon.green,
+.module-service-apps .sa-phone-category-icon.green {
+  color: #278267;
+  background: #e9f6f0;
+}
+
+.module-service-apps .sa-directory-icon.amber,
+.module-service-apps .sa-phone-category-icon.amber {
+  color: #bd741b;
+  background: #fff2df;
+}
+
+.module-service-apps .sa-directory-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.module-service-apps .sa-directory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.module-service-apps .sa-directory-head strong {
+  color: #383b4a;
+  font-size: 11px;
+}
+
+.module-service-apps .sa-directory-head span {
+  color: #999ba8;
+  font-size: 10px;
+}
+
+.module-service-apps .sa-directory-entries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  margin-top: 6px;
+}
+
+.module-service-apps .sa-directory-entries > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #777a88;
+  font-size: 10px;
+}
+
+.module-service-apps .sa-directory-entries .ant-tag {
+  margin-inline-end: 0;
+  padding-inline: 5px;
+  font-size: 8px;
+  line-height: 16px;
+}
+
+.module-service-apps .sa-directory-arrow {
+  margin-top: 9px;
+  color: #b6b5c4;
+  font-size: 11px;
+}
+
+.module-service-apps .sa-component-list {
+  display: grid;
+  gap: 4px;
+}
+
+.module-service-apps .sa-component-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 7px 9px;
+  border-bottom: 1px solid #f0eff5;
+}
+
+.module-service-apps .sa-component-row:last-child { border-bottom: 0; }
+
+.module-service-apps .sa-component-check {
+  color: #2a946c;
+  font-size: 13px;
+}
+
+.module-service-apps .sa-component-check.muted {
+  color: #b3b5bf;
+}
+
+.module-service-apps .sa-component-row > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.module-service-apps .sa-component-row strong {
+  color: #404352;
+  font-size: 11px;
+}
+
+.module-service-apps .sa-component-row small {
+  overflow: hidden;
+  color: #9295a3;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-component-row .ant-tag {
+  margin-inline-end: 0;
+  font-size: 8px;
+}
+
+.module-service-apps .sa-experience-guide ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  color: #666a78;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.module-service-apps .sa-experience-guide li::marker {
+  color: #625ee8;
+  font-weight: 700;
+}
+
+.module-service-apps .sa-experience-preview {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  align-self: start;
+  align-content: start;
+  height: fit-content;
+  gap: 12px;
+  min-width: 0;
+  padding: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 88% 4%, rgba(195, 193, 255, .3), transparent 32%),
+    linear-gradient(145deg, #f6f5fd 0%, #f9fbff 100%);
+  border: 1px solid #e6e4f1;
+  border-radius: 14px;
+}
+
+.module-service-apps .sa-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 1px 4px 0;
+}
+
+.module-service-apps .sa-preview-heading > .anticon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  color: #5d59d1;
+  background: #ebe9ff;
+  border-radius: 9px;
+}
+
+.module-service-apps .sa-preview-heading h3 {
+  margin: 0 0 3px;
+  color: #373452;
+  font-size: 13px;
+}
+
+.module-service-apps .sa-preview-heading p {
+  margin: 0;
+  color: #888a98;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.module-service-apps .sa-experience-loading {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+}
+
+.sa-experience-drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sa-experience-editor {
+  display: grid;
+  gap: 16px;
+}
+
+.sa-experience-editor .sa-editor-section {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #ececf3;
+  border-radius: 12px;
+}
+
+.sa-experience-editor .sa-editor-section > h3,
+.sa-experience-editor .sa-editor-section-head h3 {
+  margin: 0;
+  color: #33364a;
+  font-size: 13px;
+}
+
+.sa-experience-editor .sa-editor-section > p,
+.sa-experience-editor .sa-editor-section-head p {
+  margin: -6px 0 0;
+  color: #9295a3;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.sa-experience-editor .sa-editor-section-head,
+.sa-experience-editor .sa-editor-category-head,
+.sa-experience-editor .sa-editor-entry-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sa-experience-editor .sa-editor-section-head > div {
+  display: grid;
+  gap: 5px;
+}
+
+.sa-experience-editor label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.sa-experience-editor label > span {
+  color: #6f7280;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sa-experience-editor .sa-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sa-experience-editor .sa-editor-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.sa-experience-editor .sa-editor-suggestion .ant-input {
+  flex: 1;
+}
+
+.sa-experience-editor .sa-editor-category {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background: #fafafe;
+  border: 1px solid #e9e7f5;
+  border-radius: 10px;
+}
+
+.sa-experience-editor .sa-editor-category-head strong,
+.sa-experience-editor .sa-editor-entry-head strong {
+  color: #595c70;
+  font-size: 11px;
+}
+
+.sa-experience-editor .sa-editor-entries {
+  display: grid;
+  gap: 8px;
+}
+
+.sa-experience-editor .sa-editor-entry {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #eeedf4;
+  border-radius: 9px;
+}
+
+.sa-experience-editor .sa-editor-components {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sa-experience-editor .sa-editor-components > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  background: #fafafd;
+  border: 1px solid #eeedf4;
+  border-radius: 9px;
+}
+
+.sa-experience-editor .sa-editor-components > div > div {
+  display: grid;
+  gap: 2px;
+}
+
+.sa-experience-editor .sa-editor-components strong {
+  color: #454858;
+  font-size: 11px;
+}
+
+.sa-experience-editor .sa-editor-components small {
+  color: #9295a3;
+  font-size: 10px;
+}
+
+.module-service-apps .sa-phone-shell {
+  display: grid;
+  justify-items: center;
+  gap: 11px;
+}
+
+.module-service-apps .sa-phone-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, 390px);
+  padding: 0 24px;
+  color: #34333c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.module-service-apps .sa-phone-status-icons {
+  display: flex;
+  gap: 8px;
+  color: #62616c;
+  font-size: 10px;
+}
+
+.module-service-apps .sa-phone-frame {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  width: min(100%, 390px);
+  height: 720px;
+  overflow: hidden;
+  background: #f5f5fa;
+  border: 6px solid #22222c;
+  border-radius: 30px;
+  box-shadow:
+    0 22px 48px rgba(43, 38, 98, .18),
+    inset 0 0 0 1px rgba(255, 255, 255, .14);
+}
+
+.module-service-apps .sa-phone-frame::before {
+  position: absolute;
+  z-index: 40;
+  top: 6px;
+  left: 50%;
+  width: 86px;
+  height: 19px;
+  background: #22222c;
+  border-radius: 0 0 12px 12px;
+  content: "";
+  transform: translateX(-50%);
+}
+
+.module-service-apps .sa-phone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 61px;
+  padding: 22px 13px 9px;
+  background: rgba(255, 255, 255, .96);
+  border-bottom: 1px solid #ececf2;
+}
+
+.module-service-apps .sa-phone-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.module-service-apps .sa-phone-brand-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  color: #fff;
+  font-size: 16px;
+  background: linear-gradient(135deg, #579ceb, #5b63e8);
+  border-radius: 9px;
+}
+
+.module-service-apps .sa-phone-brand > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.module-service-apps .sa-phone-brand strong {
+  overflow: hidden;
+  color: #282934;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-phone-brand small {
+  color: #87919f;
+  font-size: 9.5px;
+}
+
+.module-service-apps .sa-phone-brand small .anticon { color: #2dbb85; }
+
+.module-service-apps .sa-phone-header-link {
+  flex: 0 0 auto;
+  color: #276bdd;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.module-service-apps .sa-phone-conversation {
+  min-height: 0;
+  padding: 9px 10px 12px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.module-service-apps .sa-phone-time-divider {
+  margin: 0 0 10px;
+  color: #b1b3bd;
+  font-size: 10px;
+  text-align: center;
+}
+
+.module-service-apps .sa-phone-message-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.module-service-apps .sa-phone-message-row.user {
+  justify-content: flex-end;
+}
+
+.module-service-apps .sa-phone-avatar {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
+  place-items: center;
+  color: #fff;
+  font-size: 12px;
+  background: linear-gradient(145deg, #8ab8f5, #646be4);
+  border-radius: 50%;
+}
+
+.module-service-apps .sa-phone-message {
+  max-width: calc(100% - 33px);
+  padding: 9px 10px;
+  color: #454753;
+  font-size: 12px;
+  line-height: 1.6;
+  background: #fff;
+  border: 1px solid #ededf2;
+  border-radius: 3px 10px 10px 10px;
+  box-shadow: 0 2px 8px rgba(52, 51, 76, .035);
+}
+
+.module-service-apps .sa-phone-message.user {
+  max-width: 79%;
+  background: #367fe8;
+  border-color: #367fe8;
+  border-radius: 10px 3px 10px 10px;
+  color: #fff;
+}
+
+.module-service-apps .sa-phone-message.assistant:has(.sa-phone-card-title) {
+  width: calc(100% - 33px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.module-service-apps .sa-phone-welcome-copy {
+  color: #4e505d;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.module-service-apps .sa-phone-welcome-copy strong {
+  color: #276bd4;
+  font-weight: 600;
+}
+
+.module-service-apps .sa-phone-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 38px;
+  padding: 10px 12px;
+  background: #fff;
+  border-bottom: 1px solid #f0eff4;
+}
+
+.module-service-apps .sa-phone-card-title > span {
+  color: #3c3d48;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.module-service-apps .sa-phone-card-title > small {
+  color: #9c9faa;
+  font-size: 9.5px;
+}
+
+.module-service-apps .sa-phone-card-title > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  color: #9b9da9;
+  font: inherit;
+  font-size: 9.5px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.module-service-apps .sa-phone-suggestion-card,
+.module-service-apps .sa-phone-form-card,
+.module-service-apps .sa-phone-confirm-card,
+.module-service-apps .sa-phone-result-card,
+.module-service-apps .sa-phone-knowledge-card,
+.module-service-apps .sa-phone-handoff-card,
+.module-service-apps .sa-phone-order-card {
+  margin-top: 8px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #ececf2;
+  border-radius: 10px;
+}
+
+.module-service-apps .sa-phone-suggestion-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  color: #4d4f5b;
+  font-size: 11px;
+  text-align: left;
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #f2f1f5;
+  cursor: pointer;
+}
+
+.module-service-apps .sa-phone-suggestion-row:last-child { border-bottom: 0; }
+.module-service-apps .sa-phone-suggestion-row:hover { background: #faf9ff; }
+.module-service-apps .sa-phone-suggestion-row .anticon { color: #b4b3bf; font-size: 8px; }
+
+.module-service-apps .sa-phone-category-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.module-service-apps .sa-phone-category-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 3px;
+  flex-direction: column;
+  color: #5d606c;
+  font: inherit;
+  font-size: 9.5px;
+  background: #fff;
+  border: 1px solid #ededf3;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.module-service-apps .sa-phone-category-chip:hover {
+  border-color: #dcd9f5;
+  box-shadow: 0 3px 9px rgba(69, 64, 137, .06);
+}
+
+.module-service-apps .sa-phone-category-chip > span:last-child {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-phone-category-chip.is-all {
+  color: #6863d4;
+}
+
+.module-service-apps .sa-phone-category-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.module-service-apps .sa-phone-order-options,
+.module-service-apps .sa-phone-entry-list {
+  display: grid;
+}
+
+.module-service-apps .sa-phone-order-option,
+.module-service-apps .sa-phone-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 9px 11px;
+  color: #4e505d;
+  font: inherit;
+  text-align: left;
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #f1f0f4;
+  cursor: pointer;
+}
+
+.module-service-apps .sa-phone-order-option:last-child,
+.module-service-apps .sa-phone-entry-row:last-child {
+  border-bottom: 0;
+}
+
+.module-service-apps .sa-phone-order-option:hover,
+.module-service-apps .sa-phone-entry-row:hover {
+  background: #faf9ff;
+}
+
+.module-service-apps .sa-phone-order-option > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.module-service-apps .sa-phone-order-option strong,
+.module-service-apps .sa-phone-entry-row strong {
+  color: #444652;
+  font-size: 10.5px;
+}
+
+.module-service-apps .sa-phone-order-option small,
+.module-service-apps .sa-phone-entry-row small {
+  overflow: hidden;
+  color: #999ca7;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-phone-order-option > span {
+  color: #d16e39;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.module-service-apps .sa-phone-order-option > .anticon,
+.module-service-apps .sa-phone-entry-row > .anticon {
+  color: #bbb9c7;
+  font-size: 8px;
+}
+
+.module-service-apps .sa-phone-entry-row > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.module-service-apps .sa-phone-entry-row em {
+  padding: 2px 5px;
+  color: #7771ca;
+  font-size: 8.5px;
+  font-style: normal;
+  background: #f0efff;
+  border-radius: 5px;
+}
+
+.module-service-apps .sa-phone-text-action {
+  width: 100%;
+  padding: 9px;
+  color: #6965c7;
+  font: inherit;
+  font-size: 9.5px;
+  background: #fff;
+  border: 0;
+  cursor: pointer;
+}
+
+.module-service-apps .sa-phone-order-card {
+  width: calc(100% - 33px);
+  padding: 0;
+}
+
+.module-service-apps .sa-phone-order-card > h4 {
+  margin: 0;
+  padding: 10px 12px 0;
+  color: #343643;
+  font-size: 13px;
+}
+
+.module-service-apps .sa-phone-status {
+  padding: 2px 6px;
+  font-size: 8.5px;
+  font-style: normal;
+  border-radius: 5px;
+}
+
+.module-service-apps .sa-phone-status.green { color: #18815e; background: #e9f7f0; }
+.module-service-apps .sa-phone-status.blue { color: #2775cc; background: #eaf3ff; }
+.module-service-apps .sa-phone-status.amber { color: #bd741b; background: #fff2df; }
+
+.module-service-apps .sa-phone-summary-list {
+  display: grid;
+  gap: 7px;
+  padding: 10px 12px;
+}
+
+.module-service-apps .sa-phone-summary-list > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+}
+
+.module-service-apps .sa-phone-summary-list span {
+  flex: 0 0 auto;
+  color: #9699a5;
+}
+
+.module-service-apps .sa-phone-summary-list strong {
+  min-width: 0;
+  color: #4a4c58;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: right;
+  word-break: break-all;
+}
+
+.module-service-apps .sa-phone-summary-list strong.amount { color: #d16e39; }
+.module-service-apps .sa-phone-summary-list strong.success { color: #18815e; }
+
+.module-service-apps .sa-phone-timeline {
+  display: flex;
+  align-items: center;
+  padding: 2px 12px 11px;
+}
+
+.module-service-apps .sa-phone-timeline span {
+  position: relative;
+  display: grid;
+  flex: 1;
+  justify-items: center;
+  gap: 3px;
+}
+
+.module-service-apps .sa-phone-timeline span:not(:last-child)::after {
+  position: absolute;
+  top: 3px;
+  left: calc(50% + 5px);
+  width: calc(100% - 10px);
+  height: 1px;
+  background: #e5e4eb;
+  content: "";
+}
+
+.module-service-apps .sa-phone-timeline i {
+  position: relative;
+  z-index: 1;
+  width: 6px;
+  height: 6px;
+  background: #d8d6e0;
+  border-radius: 50%;
+}
+
+.module-service-apps .sa-phone-timeline span.active i { background: #605ce1; box-shadow: 0 0 0 3px #ecebff; }
+.module-service-apps .sa-phone-timeline b { color: #8f919c; font-size: 8.5px; font-weight: 500; white-space: nowrap; }
+.module-service-apps .sa-phone-timeline span.active b { color: #5b57c8; }
+
+.module-service-apps .sa-phone-button-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 10px 12px;
+  border-top: 1px solid #f0eff4;
+}
+
+.module-service-apps .sa-phone-button-row .ant-btn {
+  height: 28px;
+  padding-inline: 12px;
+  font-size: 10.5px;
+}
+
+.module-service-apps .sa-phone-button-row .ant-btn-primary {
+  background: #367fe8;
+  box-shadow: none;
+}
+
+.module-service-apps .sa-phone-form-card,
+.module-service-apps .sa-phone-confirm-card,
+.module-service-apps .sa-phone-knowledge-card,
+.module-service-apps .sa-phone-result-card,
+.module-service-apps .sa-phone-handoff-card {
+  width: calc(100% - 33px);
+  padding: 0 12px 12px;
+}
+
+.module-service-apps .sa-phone-form-card .sa-phone-card-title,
+.module-service-apps .sa-phone-confirm-card .sa-phone-card-title,
+.module-service-apps .sa-phone-knowledge-card .sa-phone-card-title {
+  margin: 0 -12px 10px;
+}
+
+.module-service-apps .sa-phone-field {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 9px;
+}
+
+.module-service-apps .sa-phone-field label {
+  color: #676975;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.module-service-apps .sa-phone-field label span {
+  color: #a5a7b1;
+  font-weight: 400;
+}
+
+.module-service-apps .sa-phone-field .ant-input,
+.module-service-apps .sa-phone-field .ant-input-affix-wrapper,
+.module-service-apps .sa-phone-field .ant-select-selector,
+.module-service-apps .sa-phone-field textarea {
+  font-size: 10.5px !important;
+}
+
+.module-service-apps .sa-phone-field .ant-select { width: 100%; }
+
+.module-service-apps .sa-phone-form-note,
+.module-service-apps .sa-phone-warning,
+.module-service-apps .sa-phone-result-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 7px 8px;
+  color: #898b96;
+  font-size: 9.5px;
+  line-height: 1.5;
+  background: #f8f8fb;
+  border-radius: 7px;
+}
+
+.module-service-apps .sa-phone-form-note .anticon,
+.module-service-apps .sa-phone-warning .anticon,
+.module-service-apps .sa-phone-result-foot .anticon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #6a65d5;
+}
+
+.module-service-apps .sa-phone-warning {
+  color: #94631f;
+  background: #fff8ec;
+}
+
+.module-service-apps .sa-phone-warning .anticon { color: #d28b26; }
+
+.module-service-apps .sa-phone-confirm-card .sa-phone-summary-list {
+  margin: 0 -12px;
+  border-top: 1px solid #f2f1f5;
+  border-bottom: 1px solid #f2f1f5;
+}
+
+.module-service-apps .sa-phone-result-card {
+  position: relative;
+  padding-top: 12px;
+}
+
+.module-service-apps .sa-phone-result-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 8px;
+  place-items: center;
+  color: #1f9a70;
+  font-size: 19px;
+  background: #eaf8f2;
+  border-radius: 50%;
+}
+
+.module-service-apps .sa-phone-result-card h4,
+.module-service-apps .sa-phone-handoff-card h4 {
+  margin: 0 0 3px;
+  color: #333541;
+  font-size: 13px;
+}
+
+.module-service-apps .sa-phone-result-card > div:nth-child(2) p,
+.module-service-apps .sa-phone-handoff-card p {
+  margin: 0;
+  color: #8f919c;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.module-service-apps .sa-phone-result-card .sa-phone-summary-list {
+  margin: 10px -12px 0;
+  background: #fafafd;
+}
+
+.module-service-apps .sa-phone-result-card .sa-phone-result-foot { margin: 10px 0; }
+
+.module-service-apps .sa-phone-handoff-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  padding-top: 12px;
+}
+
+.module-service-apps .sa-phone-handoff-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: #2c76d8;
+  font-size: 16px;
+  background: #eaf3ff;
+  border-radius: 9px;
+}
+
+.module-service-apps .sa-phone-handoff-meta {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding-top: 3px;
+}
+
+.module-service-apps .sa-phone-handoff-meta span {
+  flex: 1;
+  padding: 7px;
+  color: #8c8e99;
+  font-size: 9.5px;
+  text-align: center;
+  background: #f8f8fb;
+  border-radius: 7px;
+}
+
+.module-service-apps .sa-phone-handoff-meta strong {
+  color: #4d62c8;
+}
+
+.module-service-apps .sa-phone-handoff-card .sa-phone-result-foot {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.module-service-apps .sa-phone-knowledge-card p {
+  margin: 0 0 10px;
+  color: #5b5e69;
+  font-size: 10.5px;
+  line-height: 1.65;
+}
+
+.module-service-apps .sa-phone-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6c6f7b;
+  font-size: 10.5px;
+}
+
+.module-service-apps .sa-phone-loading .anticon { color: #5c58d4; }
+
+.module-service-apps .sa-phone-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 10px;
+  color: #8d909b;
+  font-size: 10px;
+  background: #f5f5fa;
+  border-top: 1px solid #ededf2;
+}
+
+.module-service-apps .sa-phone-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 5px;
+  padding: 7px 8px;
+  background: #fff;
+  border-top: 1px solid #ececf1;
+}
+
+.module-service-apps .sa-phone-composer .ant-input {
+  min-height: 30px;
+  padding: 7px 9px;
+  font-size: 11px;
+  background: #f5f5f8;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.module-service-apps .sa-phone-composer .ant-btn-text {
+  width: 29px;
+  height: 29px;
+  color: #7d7f8a;
+}
+
+.module-service-apps .sa-phone-composer .ant-btn-primary {
+  width: 30px;
+  height: 30px;
+  background: #367fe8;
+  box-shadow: none;
+}
+
+.module-service-apps .sa-phone-home-indicator {
+  width: 108px;
+  height: 4px;
+  margin: 2px auto 6px;
+  background: #c7c7cf;
+  border-radius: 2px;
+}
+
+.module-service-apps .sa-phone-sheet-backdrop {
+  position: absolute;
+  z-index: 50;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(31, 31, 42, .3);
+  backdrop-filter: blur(2px);
+}
+
+.module-service-apps .sa-phone-sheet {
+  width: 100%;
+  max-height: 83%;
+  overflow: hidden;
+  background: #f7f7fb;
+  border-radius: 22px 22px 0 0;
+  animation: sa-phone-sheet-up .22s ease-out;
+}
+
+@keyframes sa-phone-sheet-up {
+  from { transform: translateY(20px); opacity: .6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.module-service-apps .sa-phone-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 17px 14px 12px;
+  background: #fff;
+  border-bottom: 1px solid #efeff4;
+}
+
+.module-service-apps .sa-phone-sheet-head h3 {
+  margin: 0 0 3px;
+  color: #31333e;
+  font-size: 15px;
+}
+
+.module-service-apps .sa-phone-sheet-head span {
+  color: #9698a3;
+  font-size: 9.5px;
+}
+
+.module-service-apps .sa-phone-sheet-head .ant-btn { margin-top: -5px; }
+
+.module-service-apps .sa-phone-sheet-list {
+  display: grid;
+  gap: 8px;
+  max-height: 570px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.module-service-apps .sa-phone-sheet-category {
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr);
+  min-height: 80px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #ececf2;
+  border-radius: 12px;
+}
+
+.module-service-apps .sa-phone-sheet-category-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px;
+  flex-direction: column;
+  color: #555763;
+  font: inherit;
+  background: #fbfbfd;
+  border: 0;
+  border-right: 1px solid #f0eff4;
+  cursor: pointer;
+}
+
+.module-service-apps .sa-phone-sheet-category-title strong {
+  font-size: 10.5px;
+}
+
+.module-service-apps .sa-phone-sheet-items {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 5px 0;
+}
+
+.module-service-apps .sa-phone-sheet-items button {
+  min-width: 0;
+  padding: 8px 10px;
+  overflow: hidden;
+  color: #666974;
+  font: inherit;
+  font-size: 9.5px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.module-service-apps .sa-phone-sheet-items button:hover { color: #4c48bf; }
+
+.module-service-apps .sa-phone-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  color: #6e70a2;
+  font: inherit;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid #e4e2f0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.module-service-apps .sa-phone-caption {
+  color: #9b9ca7;
+  font-size: 8px;
+}
+
+@media (max-width: 1200px) {
+  .module-service-apps .sa-experience-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .module-service-apps .sa-experience-preview { position: static; }
+}
+
+@media (max-width: 680px) {
+  .module-service-apps .sa-experience-banner {
+    flex-wrap: wrap;
+  }
+
+  .module-service-apps .sa-experience-banner-tags {
+    width: 100%;
+    flex-direction: row;
+  }
+
+  .module-service-apps .sa-experience-panel { padding: 14px; }
+  .module-service-apps .sa-experience-preview { padding: 12px; }
+  .module-service-apps .sa-phone-frame { height: 670px; }
+  .module-service-apps .sa-directory-category { flex-wrap: wrap; }
+}
+
+@media (max-width: 760px) {
+  .sa-experience-editor .sa-editor-grid,
+  .sa-experience-editor .sa-editor-components {
+    grid-template-columns: 1fr;
+  }
+}

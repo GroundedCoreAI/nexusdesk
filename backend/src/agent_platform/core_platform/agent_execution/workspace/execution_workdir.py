@@ -38,7 +38,17 @@ WORKDIR_UNSUPPORTED_OBJECT = "workdir_unsupported_object"
 WORKDIR_SCOPE_MISMATCH = "workdir_scope_mismatch"
 WORKDIR_FS_FAILED = "workdir_fs_failed"
 
-_DIR_OPEN = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+# POSIX directory-fd primitives. The Windows development host has neither
+# ``O_DIRECTORY``/``O_NOFOLLOW`` nor ``dir_fd`` support, so the guarded entry
+# points below fail closed there instead of opening a path without the symlink
+# check -- an unchecked open would be a silent limit, which this module forbids.
+_DIR_FD_SUPPORTED = hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
+_DIR_OPEN = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _require_dir_fd_support(name: str) -> None:
+    if not _DIR_FD_SUPPORTED:
+        raise WorkdirOperationError(WORKDIR_UNSUPPORTED_OBJECT, name)
 
 
 class WorkdirOperationError(RuntimeError):
@@ -86,6 +96,7 @@ def _open_dir_no_follow(parent_fd: int, name: str, *, missing_code: str = WORKDI
     ``O_DIRECTORY|O_NOFOLLOW``, so the classification consults ``lstat`` of
     the name itself instead of trusting one errno convention.
     """
+    _require_dir_fd_support(name)
     try:
         fd = os.open(name, _DIR_OPEN, dir_fd=parent_fd)
     except FileNotFoundError:
@@ -127,6 +138,7 @@ def ensure_execution_root(root: Path) -> int:
     Startup verification (03 §4.5): a symlinked root is rejected, the owner
     must be the effective platform user, and the mode must be exactly 0700.
     """
+    _require_dir_fd_support("root")
     try:
         os.mkdir(root, policy.DIR_MODE)
     except FileExistsError:
@@ -219,10 +231,11 @@ def create_platform_file(dir_fd: int, name: str) -> int:
     No-follow: a pre-planted symlink under the name is denied rather than
     written through (rule 2/4). The caller owns the returned fd.
     """
+    _require_dir_fd_support(name)
     try:
         fd = os.open(
             name,
-            os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
+            os.O_RDWR | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0),
             policy.FILE_MODE,
             dir_fd=dir_fd,
         )

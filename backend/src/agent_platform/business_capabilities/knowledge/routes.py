@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agent_platform.core_platform.platform_services.identity.access import Admin, Reader
 from agent_platform.core_platform.platform_services.persistence.store import (
@@ -35,7 +35,18 @@ class FolderInput(BaseModel):
 
 
 class LinkInput(BaseModel):
-    document_id: UUID
+    document_id: UUID | None = None
+    document_ids: list[UUID] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def _merge(self):
+        ids = list(self.document_ids)
+        if self.document_id is not None and self.document_id not in ids:
+            ids.insert(0, self.document_id)
+        if not ids:
+            raise ValueError("document_ids_required")
+        self.document_ids = ids
+        return self
 
 
 class SettingsInput(BaseModel):
@@ -51,6 +62,7 @@ class MoveInput(BaseModel):
 @router.get("/capabilities")
 async def capabilities(request: Request, user: Reader):
     s = settings(request)
+    backend = services(request).vector_index.backend
     return {
         "local_formats": sorted(LOCAL_FORMATS),
         "external_parser": bool(s.knowledge_parser_url),
@@ -58,6 +70,8 @@ async def capabilities(request: Request, user: Reader):
         "max_extracted_chars": s.knowledge_extracted_chars,
         "max_document_chunks": 10000,
         "max_files": 10,
+        "vector_backend": backend.name,
+        "vector_ready": await backend.available(),
         "milvus": bool(s.milvus_url),
         "object_storage": bool(s.knowledge_s3_bucket),
     }
@@ -82,11 +96,12 @@ async def documents(
     q: str = "",
     folder: UUID | None = None,
     offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=200),
     kind: str | None = None,
     status: str | None = None,
 ):
     return await services(request).knowledge_workspace.list_documents(
-        user.tenant, q, folder, offset, kind, status
+        user.tenant, q, folder, offset, kind, status, limit
     )
 
 
@@ -208,7 +223,7 @@ async def library(kid: UUID, request: Request, user: Reader):
 @router.post("/libraries/{kid}/documents")
 async def link(kid: UUID, body: LinkInput, request: Request, user: Admin):
     return await services(request).knowledge_workspace.link(
-        user.tenant, user.actor, kid, body.document_id
+        user.tenant, user.actor, kid, body.document_ids
     )
 
 

@@ -10,6 +10,12 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from agent_platform.applications.platform_runtime.tool_defaults import BUILTIN_SCHEMAS
+from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
+    ApplicationRuntimeResolver,
+    application_http_tool_specs,
+    application_knowledge_base_ids,
+    authorized_tool_names,
+)
 from agent_platform.business_capabilities.evaluation.service import MockTools
 from agent_platform.core_platform.agent_execution.contracts.config import EngineIdentity
 from agent_platform.core_platform.agent_execution.contracts.instructions import (
@@ -94,13 +100,27 @@ def _instruction_engine(config: Mapping[str, object]) -> EngineIdentity:
 class RuntimeFactory:
     """Build one Runtime instance from a run snapshot and explicit bindings."""
 
-    def __init__(self, base_runtime, bindings, client, settings, shared_limit, network_policy=None):
+    def __init__(
+        self,
+        base_runtime,
+        bindings,
+        client,
+        settings,
+        shared_limit,
+        network_policy=None,
+        application_runtime=None,
+    ):
         if not isinstance(bindings, RuntimeBindings):
             raise TypeError("RuntimeFactory requires RuntimeBindings")
         self.base_runtime, self.client, self.settings = base_runtime, client, settings
         self.bindings = bindings
         self.limit = shared_limit
         self.network_policy: ToolEgressPolicy | None = network_policy
+        self.application_runtime = application_runtime or ApplicationRuntimeResolver(
+            bindings.engine,
+            None,
+            settings,
+        )
         self.models = OrderedDict()
 
     @property
@@ -218,28 +238,98 @@ class RuntimeFactory:
         snapshot = row["config"].get("agent")
         if not snapshot:
             return self.base_runtime
+        application = row["config"].get("application")
+        if application:
+            specs = [
+                HttpTool.model_validate(spec) for spec in application_http_tool_specs(application)
+            ]
+            allowed = authorized_tool_names(application)
+            # Application skill tools are authorised by the snapshot itself; they
+            # have no registered_tools row for the policy registry to find.
+            skill_tools = frozenset(spec.name for spec in specs)
+
+            async def credential_resolver(spec):
+                return await self.application_runtime.credential_headers(
+                    row["tenant_id"],
+                    spec,
+                    application_id=application.get("id"),
+                    business_id=application.get("business_id"),
+                    workspace_id=application.get("workspace_id"),
+                )
+
+        else:
+            # Platform diagnostics may still use a direct Agent run. Customer
+            # channels never reach this branch because their run snapshot is
+            # application-scoped.
+            specs = [HttpTool.model_validate(s["spec"]) for s in snapshot["tools"]]
+            allowed = snapshot["config"]["tool_names"]
+            skill_tools = frozenset()
+
+            async def credential_resolver(spec):
+                return await self.bindings.tools.credential_headers(
+                    row["tenant_id"],
+                    spec,
+                )
+
         http = ToolGateway(
             self.client,
-            [HttpTool.model_validate(s["spec"]) for s in snapshot["tools"]],
-            credential_resolver=lambda spec: self.bindings.tools.credential_headers(
-                row["tenant_id"], spec
-            ),
+            specs,
+            credential_resolver=credential_resolver,
             network_policy=self.network_policy,
         )
         http.limit = self.limit
+        # Retrieval reads its scope from the snapshot it is handed, and that
+        # snapshot is the Agent version's. A release may narrow the scope through
+        # its own knowledge skill, so the run row carries the effective list.
+        knowledge_base_ids = application_knowledge_base_ids(
+            (application or {}).get("skills") or (),
+            snapshot["config"].get("knowledge_base_ids") or (),
+        )
         tools = PlatformTools(
             http,
             self.bindings,
-            row,
-            snapshot["config"]["tool_names"],
-            snapshot["config"]["knowledge_base_ids"],
+            self._scoped_row(row, knowledge_base_ids),
+            allowed,
+            knowledge_base_ids,
             emit,
+            skill_tools=skill_tools,
         )
         return RuntimeEngine(
             self.bound_model(snapshot, tools.schemas, row["id"]),
             tools,
             self.effective(snapshot),
         )
+
+    @staticmethod
+    def _scoped_snapshot(snapshot: dict, knowledge_base_ids: tuple[str, ...]) -> dict:
+        """Return the snapshot with the knowledge scope this release actually uses.
+
+        Retrieval reads its scope from the snapshot it is handed, and that snapshot
+        is the Agent version's. A release may narrow the scope through its own
+        knowledge skill, so the copy the tool container sees carries the effective
+        list. The caller's snapshot keeps the Agent's own list, so the model, the
+        trace and the audit still report what the Agent version declares.
+
+        A copy is cheaper than teaching the knowledge capability about application
+        skills: it must stay usable by a plain Agent run that has none.
+        """
+
+        if not knowledge_base_ids:
+            return snapshot
+        return {
+            **snapshot,
+            "config": {**snapshot["config"], "knowledge_base_ids": list(knowledge_base_ids)},
+        }
+
+    @classmethod
+    def _scoped_row(cls, row: dict, knowledge_base_ids: tuple[str, ...]) -> dict:
+        snapshot = row["config"].get("agent")
+        if not snapshot:
+            return row
+        scoped = cls._scoped_snapshot(snapshot, knowledge_base_ids)
+        if scoped is snapshot:
+            return row
+        return {**row, "config": {**row["config"], "agent": scoped}}
 
     def bound_model(self, snapshot, schemas, run_id=None):
         config = snapshot["config"]

@@ -1,6 +1,7 @@
 import pytest
 from test_platform_postgres import platform as _platform_fixture
 
+from agent_platform.business_capabilities.knowledge.vector_backends import MilvusBackend
 from agent_platform.core_platform.platform_services.persistence.store import DomainError
 
 platform = _platform_fixture
@@ -34,8 +35,16 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
         return (await client.get(ROOT + f"/libraries/{kid}")).json()["documents"][0]
 
     assert (await document())["embedded_chunk_count"] == 0
-    original = services.groups.business.vector_index.request
-    original_milvus_url = services.groups.business.vector_index.settings.milvus_url
+    # The batch counter is a Milvus-side contract: one REST upsert per 16 chunks.
+    # The wired index may be backed by pgvector, so swap in a Milvus backend and
+    # stub its transport. The dummy URL satisfies the backend's "configured?" guard.
+    index = services.groups.business.vector_index
+    original_backend = index.backend
+    backend = MilvusBackend(
+        index.client,
+        index.settings.model_copy(update={"milvus_url": "http://milvus.invalid"}),
+    )
+    original_request = backend.request
     batches = 0
     fail = False
 
@@ -50,10 +59,8 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
             batches += 1
         return {}
 
-    services.groups.business.vector_index.request = milvus
-    # VectorIndex.build guards on milvus_url before issuing any request, so the
-    # fully mocked adapter still needs a dummy URL to reach the upsert path.
-    services.groups.business.vector_index.settings.milvus_url = "http://milvus.invalid"
+    backend.request = milvus
+    index.backend = backend
     try:
         await client.post(ROOT + f"/libraries/{kid}/publish")
         assert (await document())["embedded_chunk_count"] == 0
@@ -75,5 +82,5 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
         assert doc["embedded_chunk_count"] == 0
         assert doc["published_version"] == 1
     finally:
-        services.groups.business.vector_index.request = original
-        services.groups.business.vector_index.settings.milvus_url = original_milvus_url
+        index.backend = original_backend
+        backend.request = original_request

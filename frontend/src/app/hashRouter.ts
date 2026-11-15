@@ -6,7 +6,11 @@ const pages = ['overview', 'conversations', 'service-apps', 'agents', 'knowledge
 export function normalizeRoute(value: string) {
   const [base, query] = value.split('?');
   const path = normalizePath(base);
-  return (path.startsWith('/agents') || path.startsWith('/conversations') || path.startsWith('/memory')) && query ? `${path}?${new URLSearchParams(query)}` : path;
+  const keepsQuery = path.startsWith('/agents')
+    || path.startsWith('/conversations')
+    || path.startsWith('/memory')
+    || path === '/open-platform/channels';
+  return keepsQuery && query ? `${path}?${new URLSearchParams(query)}` : path;
 }
 function normalizePath(value: string) {
   const path = value.replace(/^#/, '').replace(/\/+$/, '') || '/overview';
@@ -17,9 +21,12 @@ function normalizePath(value: string) {
   if (/^\/conversations\/[0-9a-zA-Z_-]+$/.test(path)) return path;
   if (path === '/memory/pending') return path;
   if (/^\/memory\/customers\/[0-9a-zA-Z_-]+$/.test(path)) return path;
-  if (/^\/service-apps(?:\/[a-z0-9-]+(?:\/experience(?:\/[a-z][a-z0-9_-]{0,63})?|\/scenarios\/[a-z][a-z0-9_-]{0,63}(?:\/(?:simulator|customer))?)?)?$/.test(path)) return path;
+  // Service application detail tabs are the only supported shape. Keep other
+  // service-app paths in the router so the page can render an explicit
+  // not-found state instead of silently redirecting or adding a compatibility layer.
+  if (path === '/service-apps' || path.startsWith('/service-apps/')) return path;
   if (/^\/tools\/[0-9a-f-]+\/(apis|versions|calls)$/.test(path)) return path;
-  if (/^\/open-platform\/[0-9a-f-]+\/(settings|integrations|embed|webhook|keys|docs|debug|logs)$/.test(path)) return path;
+  if (/^\/open-platform\/[0-9a-f-]+\/(settings|integrations|channels|embed|webhook|keys|docs|debug|logs)$/.test(path)) return path;
   if (path === '/open-platform/identity') return path;
   if (path === '/models') return '/models/models';
   if (path === '/agents/new') return '/agents/new/config';

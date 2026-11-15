@@ -12,7 +12,6 @@ import { ExecutionConfigSection, executionIssues } from './ExecutionConfigSectio
 import { AgentChat, AgentRecords } from './Conversations';
 import { AgentEvaluationPanel } from '../evaluation/AgentEvaluationPanel';
 import { AgentFilters, INDUSTRIES, PURPOSES, industryLabel, purposeLabel, readFilters, filterSuffix, type Filters } from './AgentFilters';
-import { AgentSceneUsage } from '../service-scenarios/AgentSceneUsage';
 import './agents.css';
 import './workspace.css';
 export interface PageResult<T> {
@@ -46,6 +45,95 @@ interface Props {
     onConfigureModels: () => void;
     onWorkspaceChange: (active: boolean) => void;
     onGuardChange: (guard: ((destination?: string) => boolean) | null) => void;
+}
+interface AgentApplicationReference {
+    id: string;
+    key: string;
+    name: string;
+    status: string;
+    origin: 'user' | 'example';
+    published_version: number | null;
+    agent_id?: string | null;
+    agent?: {
+        id?: string;
+    } | null;
+}
+function applicationStatusLabel(status: string) {
+    if (status === 'draft') return t("草稿");
+    if (status === 'review') return t("待发布");
+    if (status === 'published') return t("已发布");
+    if (status === 'offline') return t("已下线");
+    return status;
+}
+function AgentApplicationReferences({
+    agentId,
+    onOpenApplication,
+    onConfigure,
+}: {
+    agentId: string;
+    onOpenApplication: (path: string) => void;
+    onConfigure: () => void;
+}) {
+    const references = useResource<PageResult<AgentApplicationReference>>(
+        agentId ? '/service-apps?page=1&page_size=100' : null,
+    );
+    const items = (references.data?.items || []).filter(application =>
+        (application.agent?.id || application.agent_id) === agentId,
+    );
+    return <div className="agent-evaluation-view">
+        <div className="agent-setting-card">
+            <div className="agent-section-heading">
+                <div>
+                    <span className="agent-nav-eyebrow">{t("服务应用")}</span>
+                    <h2>{t("被服务应用引用")}</h2>
+                    <p className="agent-section-description">
+                        {t("查看引用当前智能体的服务应用，并可进入应用详情。")}
+                    </p>
+                </div>
+                <Space>
+                    <Button disabled={references.loading} onClick={references.refresh}>
+                        {t("刷新")}
+                    </Button>
+                    <Button onClick={onConfigure}>{t("Agent 配置")}</Button>
+                </Space>
+            </div>
+            <Alert error={references.error}/>
+            {references.data && references.data.total > references.data.items.length && <p className="agent-muted">
+                {t("仅展示最近 100 个服务应用；如需确认全部引用，请到服务应用目录查看。")}
+            </p>}
+            <Spin spinning={references.loading}>
+                {items.length
+                    ? <div style={{ display: 'grid', gap: 12, marginTop: 18 }}>
+                        {items.map(application => <Card
+                            key={application.id || application.key}
+                            size="small"
+                            title={<span>{application.name}</span>}
+                            extra={<Tag color={application.origin === 'example' ? 'purple' : 'blue'}>
+                                {application.origin === 'example' ? t("标准案例") : t("我的应用")}
+                            </Tag>}
+                        >
+                            <Space direction="vertical" size={8}>
+                                <span className="mono muted">{application.key}</span>
+                                <Space wrap>
+                                    <Tag color={application.status === 'published' ? 'green' : 'gold'}>
+                                        {applicationStatusLabel(application.status)}
+                                    </Tag>
+                                    <span>{application.published_version ? `v${application.published_version}` : t("未发布")}</span>
+                                </Space>
+                                <Button
+                                    type="link"
+                                    style={{ paddingInline: 0 }}
+                                    onClick={() => onOpenApplication(`/service-apps/${application.key}`)}
+                                >
+                                    {t("打开应用")}
+                                </Button>
+                            </Space>
+                        </Card>)}
+                    </div>
+                    : <Empty description={t("该智能体尚未被服务应用引用。")}/>}
+            </Spin>
+        </div>
+    </div>;
 }
 export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels, route, onNavigate }: Props) {
     const { admin } = useAccess();
@@ -88,6 +176,7 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
     const [mobileTab, setMobileTab] = useState('config');
     const [preset, setPreset] = useState<string | null>(null);
     const form = useRef<HTMLFormElement>(null);
+    const nameInput = useRef<HTMLInputElement>(null);
     const models = useCatalogOptions('profiles', editor);
     const tools = useResource<Tool[]>(editor ? '/tools' : null);
     const bases = useResource<KnowledgeBase[]>(editor ? '/knowledge-bases' : null);
@@ -220,6 +309,18 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
     }, [targetId, loadRevision]);
     function open(agent: Agent | null, records = false) { onNavigate(`/agents/${agent?.id || 'new'}/${records ? 'conversations' : 'config'}${suffix}`); }
     function back() { onNavigate('/agents' + listFilters.current); }
+    function editName() {
+        if (formDisabled)
+            return;
+        if (view !== 'config')
+            setView('config');
+        setMobileTab('config');
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            document.getElementById('agent-basic')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            nameInput.current?.focus();
+            nameInput.current?.select();
+        }));
+    }
     async function save() {
         const body = { name: name.trim(), description: description.trim(), config, industry, tags, is_example: isExample };
         const agent = selected ? await put<Agent>(`/agents/${selected.id}`, { ...body, revision: selected.draft_revision }) : await post<Agent>('/agents', body);
@@ -300,7 +401,9 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
             catch (error) {
                 const detail = error instanceof Error ? error.message : t("删除失败，请重试。");
                 const reasons: Record<string, string> = {
-                    agent_referenced_by_channels: t("该智能体仍被渠道引用，暂不能删除。停用渠道不会解除绑定。"),
+                    agent_referenced_by_application: t("该智能体仍被服务应用引用，暂不能删除。请先解除应用绑定。"),
+                    agent_referenced_by_applications: t("该智能体仍被服务应用引用，暂不能删除。请先解除应用绑定。"),
+                    agent_referenced_by_service_applications: t("该智能体仍被服务应用引用，暂不能删除。请先解除应用绑定。"),
                     agent_referenced_by_evaluations: t("该智能体仍有关联的评测用例或报告，暂不能删除，以保留评测追溯关系。"),
                     agent_has_active_runs: t("该智能体还有排队或运行中的任务，请等待结束或取消任务后重试。"),
                     agent_has_open_handoffs: t("该智能体还有未完成的人工接管，请先结束人工协同。"),
@@ -345,19 +448,19 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         } }} onOk={deleteAgent} okText={t("确认永久删除")} cancelText={t("取消")} confirmLoading={action.busy} okButtonProps={{ danger: true, disabled: !admin }} cancelButtonProps={{ disabled: action.busy }} closable={!action.busy} maskClosable={!action.busy} keyboard={!action.busy}>
       <p>{t("确定永久删除「")}<strong>{deleteTarget?.name}</strong>{t("」吗？此操作无法恢复。")}</p>
       <p>{t("智能体配置和发布版本将被删除。历史对话与运行记录会保留，相关会话将转为只读，可在「会话工作台」查看。")}</p>
-      <p className="agent-muted">{t("存在渠道、评测引用或未完成的任务时，系统会阻止删除。")}</p>
+      <p className="agent-muted">{t("存在服务应用、评测引用或未完成的任务时，系统会阻止删除。")}</p>
       <Alert error={action.error}/>
     </Modal>
     <Pagination className="agent-pagination" current={page} pageSize={pageSize} total={rows.data?.total || 0} showSizeChanger pageSizeOptions={[12, 24, 48]} showTotal={total => t("总共 {{v0}} 条", { v0: total })} onChange={(p, size) => { changeFilters({ page: size === pageSize ? p : 1, pageSize: size }); }}/>
   </div>;
     return <ConfigProvider theme={consoleTheme}><div className="agent-workspace">
-    <header className="agent-topbar"><Space><Button type="text" icon={<ArrowLeftOutlined aria-hidden/>} onClick={back} disabled={action.busy}>{t("返回列表")}</Button><strong>{name || t("新建 Agent")}</strong><Tag color={selected?.published_version ? 'green' : 'default'}>{selected?.archived ? t("已归档") : selected?.published_version ? t("已发布 v{{v0}}", { v0: selected.published_version }) : t("未发布")}</Tag><span className={`agent-save-state ${dirty ? 'is-dirty' : ''}`}>{dirty ? t("有未保存修改") : savedAt ? t("已保存 {{v0}}", { v0: time(savedAt) }) : t("尚未保存")}</span></Space><Space><LanguageSelector /><Button icon={<HistoryOutlined aria-hidden/>} disabled={!selected} onClick={() => setHistory(true)}>{t("版本历史")}</Button><Button icon={<SaveOutlined aria-hidden/>} disabled={!admin || selected?.archived} loading={action.busy} onClick={() => submit()}>{t("保存草稿")}</Button><Button type="primary" icon={<SendOutlined aria-hidden/>} disabled={!admin || selected?.archived} loading={action.busy} onClick={() => submit(true)}>{t("发布")}</Button></Space></header>
+    <header className="agent-topbar"><Space><Button type="text" icon={<ArrowLeftOutlined aria-hidden/>} onClick={back} disabled={action.busy}>{t("返回列表")}</Button><Tooltip title={t("修改名称")}><strong title={name || t("新建 Agent")}>{name || t("新建 Agent")}</strong></Tooltip><Button className="agent-name-edit" type="text" size="small" aria-label={t("修改名称")} disabled={formDisabled} icon={<EditOutlined aria-hidden/>} onClick={editName}/><Tag color={selected?.published_version ? 'green' : 'default'}>{selected?.archived ? t("已归档") : selected?.published_version ? t("已发布 v{{v0}}", { v0: selected.published_version }) : t("未发布")}</Tag><span className={`agent-save-state ${dirty ? 'is-dirty' : ''}`}>{dirty ? t("有未保存修改") : savedAt ? t("已保存 {{v0}}", { v0: time(savedAt) }) : t("尚未保存")}</span></Space><Space><LanguageSelector /><Button icon={<HistoryOutlined aria-hidden/>} disabled={!selected} onClick={() => setHistory(true)}>{t("版本历史")}</Button><Button icon={<SaveOutlined aria-hidden/>} disabled={!admin || selected?.archived} loading={action.busy} onClick={() => submit()}>{t("保存草稿")}</Button><Button type="primary" icon={<SendOutlined aria-hidden/>} disabled={!admin || selected?.archived} loading={action.busy} onClick={() => submit(true)}>{t("发布")}</Button></Space></header>
     <Alert error={action.error || evaluationReports.error} notice={action.notice}/>
-    <div className="agent-workspace-body"><aside className="agent-local-nav"><span className="agent-nav-eyebrow">AGENT WORKSPACE</span><Avatar size={46} shape="square" icon={<RobotOutlined aria-hidden/>}/><h3 title={name}>{name || t("新建 Agent")}</h3><Button block type={view === 'config' ? 'primary' : 'text'} icon={<EditOutlined aria-hidden/>} onClick={() => setView('config')}>{t("Agent 配置")}</Button>{view === 'config' && <div className="agent-section-links">{groups().map(([id, label]) => <Button type="text" block key={id} className={activeSection === id ? 'section-active' : ''} aria-current={activeSection === id ? 'location' : undefined} onClick={() => { setActiveSection(id); setMobileTab('config'); requestAnimationFrame(() => document.getElementById(`agent-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }}>{label}</Button>)}</div>}<Button block type={view === 'usage' ? 'primary' : 'text'} icon={<ApartmentOutlined aria-hidden/>} disabled={!selected} onClick={() => setView('usage')}>{t("使用场景")}</Button><Button block type={view === 'records' ? 'primary' : 'text'} icon={<CommentOutlined aria-hidden/>} disabled={!selected} onClick={() => setView('records')}>{t("对话记录")}</Button><Button block type={view === 'evaluation' ? 'primary' : 'text'} icon={<ExperimentOutlined aria-hidden/>} disabled={!selected} onClick={() => setView('evaluation')}>{t("评测")}</Button><div className="agent-nav-footer"><span className="agent-nav-dot"/>{t("独立配置 \u00B7 即时验证")}</div></aside>
+    <div className="agent-workspace-body"><aside className="agent-local-nav"><span className="agent-nav-eyebrow">AGENT WORKSPACE</span><Avatar size={46} shape="square" icon={<RobotOutlined aria-hidden/>}/><h3 title={name}>{name || t("新建 Agent")}</h3><Button block type={view === 'config' ? 'primary' : 'text'} icon={<EditOutlined aria-hidden/>} onClick={() => setView('config')}>{t("Agent 配置")}</Button>{view === 'config' && <div className="agent-section-links">{groups().map(([id, label]) => <Button type="text" block key={id} className={activeSection === id ? 'section-active' : ''} aria-current={activeSection === id ? 'location' : undefined} onClick={() => { setActiveSection(id); setMobileTab('config'); requestAnimationFrame(() => document.getElementById(`agent-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }}>{label}</Button>)}</div>}<Button block type={view === 'usage' ? 'primary' : 'text'} icon={<ApartmentOutlined aria-hidden/>} disabled={!selected} onClick={() => setView('usage')}>{t("服务应用")}</Button><Button block type={view === 'records' ? 'primary' : 'text'} icon={<CommentOutlined aria-hidden/>} disabled={!selected} onClick={() => setView('records')}>{t("对话记录")}</Button><Button block type={view === 'evaluation' ? 'primary' : 'text'} icon={<ExperimentOutlined aria-hidden/>} disabled={!selected} onClick={() => setView('evaluation')}>{t("评测")}</Button><div className="agent-nav-footer"><span className="agent-nav-dot"/>{t("独立配置 \u00B7 即时验证")}</div></aside>
     <main className="agent-work-area"><div className="agent-config-view" style={{ display: view === 'config' ? undefined : 'none' }}><div className="agent-mobile-tabs"><Button type={mobileTab === 'config' ? 'primary' : 'default'} onClick={() => setMobileTab('config')}>{t("配置")}</Button><Button type={mobileTab === 'chat' ? 'primary' : 'default'} onClick={() => setMobileTab('chat')}>{t("试聊")}</Button></div>
     {selected && <div className="agent-evaluation-banner"><div><span className="agent-nav-eyebrow">{t("评测概览")}</span><strong>{latestEvaluation ? t("最近评测：v{{v0}} · {{v1}}/{{v2}} 通过", { v0: latestEvaluation.agent_version, v1: latestEvaluationPassed, v2: latestEvaluationTotal }) : t("尚未运行评测")}</strong><small>{latestEvaluation ? time(latestEvaluation.created_at) : t("运行评测后查看发布版本的质量结果")}</small>{dirty && <small>{t("评测运行于已发布版本 v{{v0}}，不包含当前草稿修改。", { v0: selected.published_version ?? '—' })}</small>}{latestEvaluation && selected.published_version && latestEvaluation.agent_version !== selected.published_version && <small>{t("评测结果对应 v{{v0}}，与当前发布版本不一致，建议重新评测。", { v0: latestEvaluation.agent_version })}</small>}</div><Button onClick={() => setView('evaluation')}>{t("查看评测")}</Button></div>}
     <Splitter className={`agent-splitter mobile-${mobileTab}`}><Splitter.Panel defaultSize="55%" min="30%" className="agent-config-panel"><form ref={form} onSubmit={e => { e.preventDefault(); submit(); }} className="agent-config-form"><div className="agent-form-intro"><span>{t("配置工作台")}</span><h2>{t("定义你的 Agent")}</h2><p>{t("设置角色、连接能力，让每一次回答更符合预期。")}</p></div><Alert error={models.error || tools.error || bases.error}/>{!admin && <p className="agent-muted">{t("当前为只读角色")}</p>}{selected?.archived && <p className="agent-muted">{t("此 Agent 已归档，请返回列表恢复后编辑。")}</p>}<fieldset disabled={!admin || action.busy || selected?.archived}>
-    <section id="agent-basic"><h2>{t("基本信息")}</h2><div className="agent-setting-card"><Field label={t("名称")}><input aria-label={t("Agent 名称")} required maxLength={100} value={name} onChange={e => setName(e.target.value)}/></Field><Field label={t("简介")}><textarea aria-label={t("Agent 简介")} rows={2} maxLength={1000} value={description} onChange={e => setDescription(e.target.value)} placeholder={t("介绍这个 Agent 的职责和擅长的工作")}/></Field></div><div className="agent-setting-card"><Field label={t("所属行业")}><select aria-label={t("所属行业")} value={industry} onChange={e => setIndustry(e.target.value)}><option value="">{t("未分类")}</option>{INDUSTRIES.map(v => <option key={v} value={v}>{industryLabel(v)}</option>)}</select></Field><Field label={t("用途标签")}><Select mode="multiple" virtual={false} aria-label={t("用途标签")} value={tags} onChange={setTags} options={PURPOSES.map(v => ({ value: v, label: purposeLabel(v) }))} disabled={!admin || action.busy || selected?.archived} style={{ width: '100%' }} placeholder={t("选择用途标签")}/></Field><Checkbox checked={isExample} disabled={!admin || action.busy || selected?.archived} onChange={e => setIsExample(e.target.checked)}>{t("案例数据")}</Checkbox></div></section>
+    <section id="agent-basic"><h2>{t("基本信息")}</h2><div className="agent-setting-card"><Field label={t("名称")}><input ref={nameInput} aria-label={t("Agent 名称")} required maxLength={100} value={name} onChange={e => setName(e.target.value)}/></Field><Field label={t("简介")}><textarea aria-label={t("Agent 简介")} rows={2} maxLength={1000} value={description} onChange={e => setDescription(e.target.value)} placeholder={t("介绍这个 Agent 的职责和擅长的工作")}/></Field></div><div className="agent-setting-card"><Field label={t("所属行业")}><select aria-label={t("所属行业")} value={industry} onChange={e => setIndustry(e.target.value)}><option value="">{t("未分类")}</option>{INDUSTRIES.map(v => <option key={v} value={v}>{industryLabel(v)}</option>)}</select></Field><Field label={t("用途标签")}><Select mode="multiple" virtual={false} aria-label={t("用途标签")} value={tags} onChange={setTags} options={PURPOSES.map(v => ({ value: v, label: purposeLabel(v) }))} disabled={!admin || action.busy || selected?.archived} style={{ width: '100%' }} placeholder={t("选择用途标签")}/></Field><Checkbox checked={isExample} disabled={!admin || action.busy || selected?.archived} onChange={e => setIsExample(e.target.checked)}>{t("案例数据")}</Checkbox></div></section>
     <section id="agent-model"><h2>{t("模型配置")}</h2><AgentModelPicker key={selected?.id || 'new'} config={config} onChange={setConfig} profiles={models.data} refresh={models.refresh} onConfigure={onConfigureModels} disabled={!admin || action.busy || !!selected?.archived}/></section>
     <section id="agent-prompt"><h2>{t("行为指令")}</h2><p className="agent-section-description">{t("告诉 Agent 应该扮演什么角色、如何思考和回答。")}</p><div className="agent-setting-card agent-prompt-card"><textarea aria-label={t("行为指令")} required maxLength={16000} rows={6} value={config.system_prompt} onChange={e => setConfig({ ...config, system_prompt: e.target.value })} placeholder={t("描述角色、任务目标与回答要求\u2026")}/><div className="agent-input-footer"><span>{t("清晰的指令有助于获得稳定的回答")}</span><span>{number(config.system_prompt.length)} / 16,000</span></div></div></section>
     {(['tools', 'knowledge'] as const).map(kind => <section id={`agent-${kind}`} key={kind}><div className="agent-section-heading"><h2>{kind === 'tools' ? t("工具") : t("知识库")}</h2><Button type="text" icon={<PlusOutlined aria-hidden/>} disabled={!admin || action.busy || selected?.archived} onClick={() => { setPickQuery(''); setPicker(kind); }}>{t("添加")}</Button></div><div className="agent-setting-card">{(kind === 'tools' ? config.tool_names : config.knowledge_base_ids).length ? (kind === 'tools' ? config.tool_names : config.knowledge_base_ids).map(id => <div className="agent-binding" key={id}><span>{kind === 'tools' ? id : bases.data?.find(b => b.id === id)?.name || id}</span><Button type="text" disabled={!admin || action.busy || selected?.archived} onClick={() => toggle(kind === 'tools' ? 'tool_names' : 'knowledge_base_ids', id)}>{t("移除")}</Button></div>) : <div className="agent-binding-empty">{t("点击「添加」选择")}{kind === 'tools' ? t("可调用的工具") : t("可访问的知识库")}</div>}</div></section>)}
@@ -391,7 +494,7 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
     </form></Splitter.Panel><Splitter.Panel min="25%" className="agent-chat-panel"><AgentChat key={selected?.id || 'new'} agent={selected}/></Splitter.Panel></Splitter></div>
     {view === 'records' && selected && <AgentRecords agentId={selected.id}/>}
     {view === 'evaluation' && selected && <div className="agent-evaluation-view"><AgentEvaluationPanel key={selected.id} agentId={selected.id} publishedVersion={selected.published_version} disabled={!!selected.archived}/></div>}
-    {view === 'usage' && selected && <AgentSceneUsage agentId={selected.id} agentName={name || selected.name} agentVersion={selected.published_version} agentConfig={config} onOpenScene={path => onNavigate(path)} onOpenAgentConfig={() => setView('config')}/>}
+    {view === 'usage' && selected && <AgentApplicationReferences agentId={selected.id} onOpenApplication={path => onNavigate(path)} onConfigure={() => setView('config')}/>}
     </main></div>
     <Drawer title={picker === 'tools' ? t("选择工具") : t("选择知识库")} open={!!picker} onClose={() => setPicker(null)} size={460} footer={<Button type="primary" onClick={() => setPicker(null)}>{t("完成选择")}</Button>}><Input.Search placeholder={t("搜索名称")} value={pickQuery} onChange={e => setPickQuery(e.target.value)}/><p className="agent-muted">{t("选择后点击顶部「保存草稿」保存绑定。")}</p><Spin spinning={tools.loading || bases.loading}>{picker === 'tools' ? tools.data?.filter(t => t.enabled && t.name.toLowerCase().includes(pickQuery.toLowerCase())).map(t => <div className="agent-picker-row" key={t.name}><Checkbox checked={config.tool_names.includes(t.name)} disabled={!config.tool_names.includes(t.name) && config.tool_names.length >= 30} onChange={() => toggle('tool_names', t.name)}>{t.name}</Checkbox><Tag>{t.source}</Tag></div>) : bases.data?.filter(b => b.enabled && b.name.toLowerCase().includes(pickQuery.toLowerCase())).map(b => <div className="agent-picker-row" key={b.id}><Checkbox checked={config.knowledge_base_ids.includes(b.id)} disabled={!config.knowledge_base_ids.includes(b.id) && config.knowledge_base_ids.length >= 30} onChange={() => toggle('knowledge_base_ids', b.id)}>{b.name}</Checkbox></div>)}</Spin></Drawer>
     <Drawer title={t("版本历史与差异")} open={history} onClose={() => setHistory(false)} size={640}><Alert error={versions.error || differences.error || action.error} notice={action.notice}/><Spin spinning={versions.loading}><h3>{t("发布历史")}</h3>{!versions.data?.length && <Empty description={t("尚无发布版本")}/>}{versions.data?.map(v => <div className="agent-version" key={v.version}><div><strong>{t("版本 ")}{v.version}</strong>{v.version === selected?.published_version && <Tag color="green">{t("当前发布")}</Tag>}<p className="agent-muted">{time(v.created_at)}</p></div><Button disabled={!admin || action.busy || selected?.archived || v.version === selected?.published_version} onClick={() => void action.run(async () => { await post(`/agents/${selected!.id}/rollback`, { version: v.version }); setSelected(previous => previous ? { ...previous, published_version: v.version } : previous); versions.refresh(); differences.refresh(); rows.refresh(); }, t("已切换发布版本，草稿保持不变"))}>{t("切换到此版本")}</Button></div>)}</Spin>{selected?.published_version && <><h3>{t("已保存草稿与当前发布版本")}</h3>{dirty && <p className="agent-muted">{t("下方比较不包含尚未保存的修改。")}</p>}{differences.data?.changes.length === 0 && <Empty description={t("配置一致")}/>}{differences.data?.changes.map(c => <div className="agent-diff" key={c.field}><strong>{labels()[c.field] || c.field}</strong><div><span>{t("发布版本")}</span><p>{showValue(c.field, c.published)}</p></div><div><span>{t("已保存草稿")}</span><p>{showValue(c.field, c.draft)}</p></div></div>)}</>}</Drawer>

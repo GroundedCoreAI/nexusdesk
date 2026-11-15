@@ -1,0 +1,75 @@
+.channel-v2-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.8fr);
+    gap: 24px;
+    align-items: start;
+}
+
+.channel-v2-side {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    min-width: 0;
+}
+
+.channel-version-note {
+    margin: -8px 0 18px;
+}
+
+.channel-primary-cell,
+.channel-application-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    min-width: 0;
+}
+
+.channel-primary-cell strong,
+.channel-application-cell strong {
+    color: #262830;
+    overflow-wrap: anywhere;
+}
+
+.channel-primary-cell span {
+    color: #747987;
+    font-size: 12px;
+}
+
+.channel-primary-cell code {
+    color: #9296a4;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.channel-application-cell .ant-tag {
+    margin-inline-end: 0;
+}
+
+.channel-actions .ant-btn {
+    margin: 0;
+    padding-inline: 6px;
+}
+
+.channel-v2 .ant-select {
+    width: 100%;
+}
+
+.channel-v2 .channel-table .ant-table-pagination.ant-pagination {
+    justify-content: flex-end;
+    margin: 16px 0 0;
+}
+
+.channel-no-application {
+    margin: -6px 0 16px;
+}
+
+.channel-delivery-list {
+    padding: 4px 16px 12px;
+}
+
+@media (max-width: 1180px) {
+    .channel-v2-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

@@ -14,6 +14,7 @@ import asyncio
 import logging
 
 from agent_platform.applications.customer_service.runtime_composition import runtime_services
+from agent_platform.applications.platform_runtime.worker_heartbeat import start_heartbeat
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,9 @@ async def main(settings=None):
     settings = settings or Settings()
     async with runtime_services(settings) as services:
         channels = services.groups.business.channels
+        beat = start_heartbeat(
+            services.groups.runtime.engine, "channel_delivery", "channel_inbound"
+        )
         inbound = asyncio.create_task(channels.serve_inbound())
         delivery = asyncio.create_task(channels.serve_deliveries())
         try:
@@ -30,7 +34,8 @@ async def main(settings=None):
         finally:
             channels.inbound_stopping.set()
             channels.delivery_stopping.set()
-            await asyncio.gather(inbound, delivery, return_exceptions=True)
+            beat.cancel()
+            await asyncio.gather(inbound, delivery, beat, return_exceptions=True)
 
 
 if __name__ == "__main__":

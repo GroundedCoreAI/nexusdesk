@@ -1,0 +1,81 @@
+.notification-button.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .65);
+  color: #737887;
+  box-shadow: none;
+  transition: background .18s, border-color .18s, color .18s;
+}
+
+.notification-button.ant-btn:hover,
+.notification-button.ant-btn.is-open {
+  border-color: #e4e0f5;
+  background: #eeecfa !important;
+  color: #6356d9 !important;
+}
+
+.notification-button.ant-btn:focus-visible {
+  outline: 2px solid #958bea;
+  outline-offset: 3px;
+}
+
+.notification-button.ant-btn .anticon {
+  font-size: 17px;
+}
+
+.notification-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.notification-anchor .ant-badge-count {
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* Alert state unknown (API unreachable): a neutral marker, never a silent zero. */
+.notification-unreachable {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c2c7d2;
+  box-shadow: 0 0 0 2px #fff;
+  pointer-events: none;
+}
+
+.notification-panel {
+  width: 344px;
+  max-width: calc(100vw - 24px);
+}
+
+.notification-panel-heading {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid #f0f1f5;
+  color: #252936;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.notification-panel .ant-empty {
+  margin: 30px 0 28px;
+}
+
+.notification-empty-text {
+  color: #8f94a2;
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-button.ant-btn {
+    transition: none;
+  }
+}

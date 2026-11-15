@@ -18,12 +18,16 @@ enforcement experiments remain pending_env on this darwin host (08 §5).
 import hashlib
 import logging
 import os
-import resource
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 from uuid import UUID
+
+try:  # POSIX rlimits. The Windows development host has no ``resource`` module.
+    import resource
+except ModuleNotFoundError:  # pragma: no cover - Windows dev hosts only
+    resource = None  # type: ignore[assignment]
 
 from .host_models import (
     REASON_SUPPORT_UNSUPPORTED,
@@ -185,18 +189,17 @@ def probe_descendant_count() -> SupportDeclaration:
     return "approximate"  # supervisor-side reactive counting, not isolation
 
 
-def _rlimit_available(which: int) -> SupportDeclaration:
+def _rlimit_available(name: str) -> SupportDeclaration:
     try:
-        import resource
-
+        which = _resource_constant(name)
         resource.getrlimit(which)
-    except (ImportError, ValueError, OSError):  # pragma: no cover - POSIX has all three
+    except (ImportError, ValueError, OSError, AttributeError):  # pragma: no cover
         return "unsupported"
     return "approximate"
 
 
 def probe_cpu_rlimit() -> SupportDeclaration:
-    return _rlimit_available(_resource_constant("RLIMIT_CPU"))
+    return _rlimit_available("RLIMIT_CPU")
 
 
 def probe_address_space_rlimit() -> SupportDeclaration:
@@ -210,8 +213,8 @@ def probe_address_space_rlimit() -> SupportDeclaration:
     ladder then refuses under enforcement_required or records unenforced
     with a warning under false - never a silent limit).
     """
-    which = _resource_constant("RLIMIT_AS")
     try:
+        which = _resource_constant("RLIMIT_AS")
         current = resource.getrlimit(which)
     except (ImportError, ValueError, OSError):  # pragma: no cover - non-POSIX
         return "unsupported"
@@ -238,12 +241,12 @@ def probe_address_space_rlimit() -> SupportDeclaration:
 
 
 def probe_file_size_rlimit() -> SupportDeclaration:
-    return _rlimit_available(_resource_constant("RLIMIT_FSIZE"))
+    return _rlimit_available("RLIMIT_FSIZE")
 
 
 def _resource_constant(name: str) -> int:
-    import resource
-
+    if resource is None:
+        raise ValueError(f"resource.{name} is unavailable on this platform")
     return getattr(resource, name)
 
 

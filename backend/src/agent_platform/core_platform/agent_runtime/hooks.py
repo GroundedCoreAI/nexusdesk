@@ -21,6 +21,9 @@ class RuntimePersistenceHooks(Protocol):
     async def add_message(self, conn, conversation_id, role, content, run_id=None) -> None:
         """Append one conversation message inside the caller's transaction."""
 
+    async def on_finished(self, conn, run, status, error) -> None:
+        """Persist side effects for every terminal Runtime status."""
+
     async def on_completed(
         self, conn, run, conversation_id, output, history, completion
     ) -> list[tuple[str, dict]]:

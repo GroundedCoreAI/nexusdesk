@@ -7,7 +7,7 @@ Documentation is grouped by purpose. The code and section 1 of each module READM
 ## Quick links
 
 - [Project home](../README.md)
-- [Onboarding guide](onboarding/README.en.md)
+- [Quickstart guide](getting-started/quickstart.en.md)
 - [Platform guide](guides/platform.en.md)
 - [Local development](development/local-development.en.md)
 
@@ -57,5 +57,5 @@ Documentation is grouped by purpose. The code and section 1 of each module READM
 
 ## Requirements and historical records
 
-- Requirement lifecycle documentation: [Agent Memory](requirement/agent-memory/README.md), [Architecture Refactor](requirement/architecture-refactor/README.en.md), [Agent Execution Platform v2](requirement/agent-execution-platform-v2/README.en.md), [Agent Evaluation](requirement/agent-evaluation/01-p2-roadmap.md), [P0 Production Readiness](requirement/p0-production-readiness/README.md) (some documents are Chinese only)
+- Requirement lifecycle documentation: [Agent Memory](requirement/agent-memory/README.md), [Architecture Refactor](requirement/architecture-refactor/README.en.md), [Agent Execution Platform v2](requirement/agent-execution-platform-v2/README.en.md), [Agent Evaluation](requirement/agent-evaluation/01-p2-roadmap.md), [P0 Production Readiness](requirement/p0-production-readiness/README.md), [Service Application Platform v2](requirement/service-application-platform-v2/README.en.md) (some documents are Chinese only)
 - [Historical archive](archive/README.en.md): superseded implementation progress, early validation, and environment-specific records; these are not sources of current status

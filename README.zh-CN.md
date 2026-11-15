@@ -49,10 +49,7 @@ NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
   docker compose -f deploy/quickstart/compose.yaml up -d
 ```
 
-启动后打开 **https://localhost:8080**，进入 `sample-support` 会话：
-
-- 输入「发货需要多久？」体验知识问答。
-- 输入「帮我创建工单」体验工单拟定、人工确认和创建流程。
+启动后打开 **https://localhost:8080**，进入「服务应用」。体验模式会安装游戏、购物、创作者和出行四个不可变服务应用示例；先打开示例预览，再复制到自己的工作区，之后才可配置应用连接或编辑技能。
 
 体验模式自带自签证书，首次访问会提示证书不受信任。证书配置和局域网访问说明见[部署手册](deploy/README.md#体验模式的-https)。
 
@@ -88,7 +85,7 @@ Copy-Item deploy/production/.env.example deploy/production/.env
 
 生产拓扑包含 API、Runtime Worker、Channel Worker、Knowledge Worker、Memory Worker、Web 六个常驻服务和一次性的迁移任务。
 
-两套 Compose 都自带演示业务接口（`mock-business`，默认随栈启动，无需额外参数），用于打通行业能力的数据执行器：25 个业务端点、统一 `{code,message,data}` 包体、支持 5xx 故障注入，容器内地址为 `http://mock-business:8010`，宿主机调试用 `http://127.0.0.1:8010`。
+两套 Compose 都自带演示业务接口（`mock-business`，默认随栈启动，无需额外参数），用于打通服务应用的连接：25 个业务端点、统一 `{code,message,data}` 包体、支持 5xx 故障注入，容器内地址为 `http://mock-business:8010`，宿主机调试用 `http://127.0.0.1:8010`。
 
 只需要应用和数据库时，显式指定服务名即可跳过它：
 

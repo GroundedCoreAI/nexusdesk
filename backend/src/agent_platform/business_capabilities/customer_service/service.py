@@ -22,6 +22,13 @@ from agent_platform.business_capabilities.customer_service.routing.settings impo
     CustomerServiceRoutingSettings,
     load_customer_service_routing_settings,
 )
+from agent_platform.business_capabilities.customer_service.service_apps.business_conversations import (
+    BusinessConversationService,
+)
+from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
+    ApplicationRuntimeContext,
+    ApplicationRuntimeResolver,
+)
 from agent_platform.business_capabilities.memory.events import enqueue_event_task
 from agent_platform.core_platform.agent_runtime.schemas import RunRequest
 from agent_platform.core_platform.platform_services.persistence.store import (
@@ -77,6 +84,7 @@ class CustomerService:
         memory=None,
         events: EventPublisher | None = None,
         routing_settings: CustomerServiceRoutingSettings | None = None,
+        application_runtime: ApplicationRuntimeResolver | None = None,
     ):
         self.engine, self.repository, self.agents, self.handoffs = (
             engine,
@@ -90,6 +98,7 @@ class CustomerService:
         self.memory = memory
         self.events = events
         self.routing_settings = routing_settings or load_customer_service_routing_settings()
+        self.application_runtime = application_runtime
         # Process-local diagnostics. The durable routing table remains the source
         # of truth; this counter makes isolated insert failures visible without
         # turning observability into a second persistence system.
@@ -130,6 +139,7 @@ class CustomerService:
         message,
         connection=None,
         scope: BusinessScope | None = None,
+        application_context: ApplicationRuntimeContext | None = None,
     ):
         resolved = resolve_scope(tenant, scope)
         scope_sql, scope_params = scope_predicate(resolved)
@@ -148,9 +158,63 @@ class CustomerService:
                     **scope_params,
                 )
             )
+            conversation_application_id = conv.get("application_id")
+            conversation_application_version = conv.get("application_version")
+            if application_context is None and (
+                conversation_application_id or conversation_application_version
+            ):
+                if not conversation_application_id or not conversation_application_version:
+                    raise DomainError("conversation_application_context_incomplete", 409)
+                if self.application_runtime is None:
+                    raise DomainError("application_runtime_unavailable", 503)
+                application_context = await self.application_runtime.resolve_conversation(
+                    c,
+                    tenant,
+                    conv,
+                )
+            if application_context is not None:
+                if (
+                    conversation_application_id is not None
+                    and UUID(str(conversation_application_id)) != application_context.application_id
+                ):
+                    raise DomainError("conversation_application_mismatch", 409)
+                if (
+                    conversation_application_id != application_context.application_id
+                    or conv.get("application_version") != application_context.application_version
+                    or conv.get("agent_id") != application_context.agent_id
+                    or conv.get("agent_version") != application_context.agent_version
+                ):
+                    await execute(
+                        c,
+                        """UPDATE runtime_conversations
+                        SET application_id=:application_id,
+                            application_version=:application_version,
+                            agent_id=:agent_id,
+                            agent_version=:agent_version
+                        WHERE id=:id""",
+                        id=conv["id"],
+                        application_id=application_context.application_id,
+                        application_version=application_context.application_version,
+                        agent_id=application_context.agent_id,
+                        agent_version=application_context.agent_version,
+                    )
+                    conv = {
+                        **conv,
+                        "application_id": application_context.application_id,
+                        "application_version": application_context.application_version,
+                        "agent_id": application_context.agent_id,
+                        "agent_version": application_context.agent_version,
+                    }
+            routed_conv = conv
+            if application_context is not None:
+                routed_conv = {
+                    **conv,
+                    "agent_id": application_context.agent_id,
+                    "agent_version": application_context.agent_version,
+                }
             ingress = await decide_ingress(
                 conn=c,
-                conv=conv,
+                conv=routed_conv,
                 message=message,
                 request_id=uuid4(),
                 agents=self.agents,
@@ -163,11 +227,14 @@ class CustomerService:
                 c,
                 conv,
                 ingress.decision,
-                ingress.agent_snapshot,
+                application_context.agent_snapshot
+                if application_context is not None
+                else ingress.agent_snapshot,
                 message,
                 tenant,
                 actor,
                 resolved,
+                application_context,
             )
 
     async def _record_decision(self, conn, decision: RoutingDecision) -> bool:
@@ -188,6 +255,7 @@ class CustomerService:
         tenant: str,
         actor: str,
         resolved: BusinessScope,
+        application_context: ApplicationRuntimeContext | None,
     ) -> dict[str, object]:
         cid = conv["id"]
         if decision.action == "reject":
@@ -237,6 +305,7 @@ class CustomerService:
                 message,
                 tenant,
                 actor,
+                application_context,
             )
         raise DomainError("routing_action_unhandled", 500)
 
@@ -248,9 +317,13 @@ class CustomerService:
         message: str,
         tenant: str,
         actor: str,
+        application_context: ApplicationRuntimeContext | None,
     ) -> dict[str, object]:
         snapshot = dict(self.snapshot)
-        if agent_snapshot is not None:
+        if application_context is not None:
+            snapshot["agent"] = application_context.agent_snapshot
+            snapshot["application"] = application_context.snapshot()
+        elif agent_snapshot is not None:
             snapshot["agent"] = agent_snapshot
         elif self.settings.model_backend == "unconfigured":
             # Defensive only: decide_ingress turns this path into a persisted reject.
@@ -269,6 +342,14 @@ class CustomerService:
             ),
             connection=conn,
         )
+        if application_context is not None and self.application_runtime is not None:
+            await self.application_runtime.record_trace(
+                conn,
+                tenant,
+                application_context,
+                conversation_id=UUID(str(conv["id"])),
+                run_id=UUID(str(row["id"])),
+            )
         await audit(conn, tenant, actor, "run.submitted", row["id"])
         return {
             "conversation_id": conv["id"],
@@ -635,7 +716,16 @@ class CustomerService:
                     **scope_params,
                 )
                 content = f"工单 {row['id']} 已创建：{body.title}"
-                await add_message(c, conv["id"], "system", content)
+                runtime_message_id = await add_message(c, conv["id"], "system", content)
+                await BusinessConversationService.append_runtime_message(
+                    c,
+                    tenant_id=tenant,
+                    runtime_conversation_id=conv["id"],
+                    role="system",
+                    content=content,
+                    runtime_message_id=runtime_message_id,
+                    scope=resolved,
+                )
                 history = (
                     (
                         [*conv["history"], {"role": "assistant", "content": content}][

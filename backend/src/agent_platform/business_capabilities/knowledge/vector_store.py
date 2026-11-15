@@ -1,10 +1,8 @@
-"""Milvus REST v2 adapter. PG remains the authority for document visibility."""
+"""Knowledge vector snapshots. PG remains the authority for document visibility."""
 
 import json
 import logging
 from uuid import uuid4
-
-import httpx
 
 from agent_platform.core_platform.platform_services.model_gateway.contracts import EmbedRequest
 from agent_platform.core_platform.platform_services.persistence.store import (
@@ -20,33 +18,17 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
     resource_scope_values,
 )
 
+from .vector_backends import build_backend
+
 
 class VectorIndex:
     def __init__(self, engine, gateway, settings, client):
         self.engine, self.gateway, self.settings, self.client = engine, gateway, settings, client
+        self.backend = build_backend(settings, engine, client)
 
-    async def request(self, path, body):
-        if not self.settings.milvus_url:
-            raise DomainError("milvus_not_configured", 503)
-        headers = (
-            {"Authorization": "Bearer " + self.settings.milvus_token.get_secret_value()}
-            if self.settings.milvus_token
-            else {}
-        )
-        try:
-            response = await self.client.post(
-                self.settings.milvus_url.rstrip("/") + "/v2/vectordb/" + path,
-                json=body,
-                headers=headers,
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise DomainError("milvus_unavailable", 502) from exc
-        if data.get("code") != 0:
-            raise DomainError("milvus_operation_failed", 502)
-        return data.get("data")
+    async def ensure_backend(self):
+        if not await self.backend.available():
+            raise DomainError(self.backend.unavailable_code, 503)
 
     async def build(
         self,
@@ -62,8 +44,7 @@ class VectorIndex:
         snapshot = await self.gateway.catalog.resolve(tenant, profile.id, profile.version)
         if snapshot["spec"]["operation"] != "embed":
             raise DomainError("embedding_profile_required")
-        if not self.settings.milvus_url:
-            raise DomainError("milvus_not_configured", 503)
+        await self.ensure_backend()
         base_scope_sql, base_scope_params = resource_scope_clause()
         document_scope_sql, document_scope_params = resource_scope_clause(alias="d")
         scope_params = {**base_scope_params, **document_scope_params}
@@ -80,10 +61,12 @@ class VectorIndex:
             )
             rows = await many(
                 c,
-                "SELECT ch.id,ch.content,ch.version,d.id document_id FROM knowledge_chunks ch "
-                "JOIN knowledge_documents d ON d.id=ch.document_id WHERE d.kb_id=:kid"
+                "SELECT ch.id,ch.content,ch.version,d.id document_id FROM knowledge_links l "
+                "JOIN knowledge_documents d ON d.id=l.document_id "
+                "JOIN knowledge_chunks ch ON ch.document_id=d.id AND ch.version=l.published_version "
+                "WHERE l.kb_id=:kid AND l.enabled AND d.enabled AND ch.enabled"
                 + document_scope_sql
-                + " AND d.enabled AND ch.version=d.current_version ORDER BY ch.id LIMIT 10001",
+                + " ORDER BY ch.id LIMIT 10001",
                 kid=kid,
                 **scope_params,
             )
@@ -93,37 +76,7 @@ class VectorIndex:
             raise DomainError("index_requires_1_to_10000_chunks")
         collection = collection_name or "knowledge_" + uuid4().hex
         dimension = snapshot["routes"][0]["model"]["embedding_dimension"]
-        await self.request(
-            "collections/create",
-            {
-                "collectionName": collection,
-                "schema": {
-                    "autoID": False,
-                    "enableDynamicField": True,
-                    "fields": [
-                        {
-                            "fieldName": "id",
-                            "dataType": "VarChar",
-                            "isPrimary": True,
-                            "elementTypeParams": {"max_length": "64"},
-                        },
-                        {
-                            "fieldName": "vector",
-                            "dataType": "FloatVector",
-                            "elementTypeParams": {"dim": str(dimension)},
-                        },
-                    ],
-                },
-                "indexParams": [
-                    {
-                        "fieldName": "vector",
-                        "indexName": "vector_index",
-                        "metricType": "COSINE",
-                        "params": {"index_type": "AUTOINDEX"},
-                    }
-                ],
-            },
-        )
+        await self.backend.create(collection, dimension)
         for start in range(0, len(rows), 16):
             if progress:
                 await progress([])
@@ -139,24 +92,16 @@ class VectorIndex:
                 str(r["id"]) for r in batch
             }:
                 raise DomainError("embedding_result_mismatch", 502)
-            await self.request(
-                "entities/upsert",
-                {
-                    "collectionName": collection,
-                    "data": [
-                        {
-                            "id": v["id"],
-                            "vector": v["vector"],
-                            "tenant_id": tenant,
-                            "kb_id": str(kid),
-                        }
-                        for v in vectors
-                    ],
-                },
+            await self.backend.upsert(
+                collection,
+                tenant,
+                kid,
+                dimension,
+                [{"id": v["id"], "vector": v["vector"]} for v in vectors],
             )
             if progress:
                 await progress(batch)
-        await self.request("collections/load", {"collectionName": collection})
+        await self.backend.load(collection)
         if not publish:
             return {"collection": collection, "chunks": len(rows), "dimension": dimension}
         async with self.engine.begin() as c:
@@ -171,13 +116,18 @@ class VectorIndex:
                     **scope_params,
                 )
             )
+            previous = await one(
+                c,
+                "SELECT collection_name,backend FROM knowledge_vector_indexes WHERE kb_id=:kid",
+                kid=kid,
+            )
             await execute(
                 c,
                 """INSERT INTO knowledge_vector_indexes(
                     tenant_id,business_id,workspace_id,kb_id,collection_name,
-                    profile_id,profile_version,dimension
+                    profile_id,profile_version,dimension,backend
                 ) VALUES(
-                    :t,:business_id,:workspace_id,:kid,:name,:p,:v,:dim
+                    :t,:business_id,:workspace_id,:kid,:name,:p,:v,:dim,:backend
                 ) ON CONFLICT(kb_id) DO UPDATE SET
                     business_id=EXCLUDED.business_id,
                     workspace_id=EXCLUDED.workspace_id,
@@ -185,6 +135,7 @@ class VectorIndex:
                     profile_id=EXCLUDED.profile_id,
                     profile_version=EXCLUDED.profile_version,
                     dimension=EXCLUDED.dimension,
+                    backend=EXCLUDED.backend,
                     created_at=now()""",
                 t=tenant,
                 **resource_scope_values(),
@@ -193,13 +144,32 @@ class VectorIndex:
                 p=profile.id,
                 v=profile.version,
                 dim=dimension,
+                backend=self.backend.name,
             )
+            if (
+                previous
+                and previous["backend"] == self.backend.name
+                and previous["collection_name"] != collection
+            ):
+                # Snapshots are immutable, so the one this publication replaced is
+                # garbage. Queueing it here keeps repeated builds from accumulating.
+                await execute(
+                    c,
+                    """INSERT INTO knowledge_collection_cleanup(
+                        collection_name,tenant_id,business_id,workspace_id,delete_after
+                    ) VALUES(:n,:t,:business_id,:workspace_id,now()+interval '5 minutes')
+                    ON CONFLICT(tenant_id,business_id,workspace_id,collection_name) DO NOTHING""",
+                    n=previous["collection_name"],
+                    t=tenant,
+                    **resource_scope_values(),
+                )
             await audit(c, tenant, actor, "knowledge.vector_index_published", kid)
         return {
             "collection": collection,
             "chunks": len(rows),
             "profile_id": profile.id,
             "profile_version": profile.version,
+            "dimension": dimension,
         }
 
     async def search(self, tenant, kid, query, limit=5):
@@ -217,29 +187,24 @@ class VectorIndex:
             )
             if index is None:
                 raise DomainError("knowledge_index_not_ready", 409)
+            if index["backend"] != self.backend.name:
+                raise DomainError("knowledge_index_backend_mismatch", 409)
+        await self.ensure_backend()
         response = await self.gateway.invoke(
             tenant,
             index["profile_id"],
             index["profile_version"],
             EmbedRequest(inputs=[{"id": "query", "text": query}]),
         )
-        hits = await self.request(
-            "entities/search",
-            {
-                "collectionName": index["collection_name"],
-                "data": [response["payload"]["vectors"][0]["vector"]],
-                "annsField": "vector",
-                "filter": "tenant_id == "
-                + json.dumps(tenant)
-                + " and kb_id == "
-                + json.dumps(str(kid)),
-                "limit": min(100, limit * 5),
-                "outputFields": ["id"],
-                "consistencyLevel": "Strong",
-            },
+        query_vector = response["payload"]["vectors"][0]["vector"]
+        hits = await self.backend.search(
+            index["collection_name"],
+            tenant,
+            kid,
+            index["dimension"] or len(query_vector),
+            query_vector,
+            min(100, limit * 5),
         )
-        if not isinstance(hits, list):
-            raise DomainError("invalid_milvus_response", 502)
         ids = [h["id"] for h in hits]
         document_scope_sql, document_scope_params = resource_scope_clause(alias="d")
         scope_params = {**base_scope_params, **document_scope_params}
@@ -263,7 +228,7 @@ class VectorIndex:
             )
         found = {str(r["chunk_id"]): r for r in rows}
         return [
-            {**found[h["id"]], "score": h.get("distance"), "retrieval": "vector"}
+            {**found[h["id"]], "score": h.get("score"), "retrieval": "vector"}
             for h in hits
             if h["id"] in found
         ][:limit]
@@ -349,9 +314,11 @@ class VectorIndex:
                 if current["revision"] != revision:
                     raise DomainError("knowledge_publication_conflict", 409)
                 old = await one(
-                    c, "SELECT collection_name FROM knowledge_vector_indexes WHERE kb_id=:k", k=kid
+                    c,
+                    "SELECT collection_name,backend FROM knowledge_vector_indexes WHERE kb_id=:k",
+                    k=kid,
                 )
-                if old:
+                if old and old["backend"] == self.backend.name:
                     await execute(
                         c,
                         """INSERT INTO knowledge_collection_cleanup(
@@ -386,13 +353,14 @@ class VectorIndex:
                         c,
                         """INSERT INTO knowledge_vector_indexes(
                             tenant_id,business_id,workspace_id,kb_id,collection_name,
-                            profile_id,profile_version,dimension
+                            profile_id,profile_version,dimension,backend
                         ) VALUES(
-                            :t,:business_id,:workspace_id,:k,:n,:p,:v,:dim
+                            :t,:business_id,:workspace_id,:k,:n,:p,:v,:dim,:backend
                         ) ON CONFLICT(kb_id) DO UPDATE SET
                             business_id=:business_id,workspace_id=:workspace_id,
                             collection_name=:n,profile_id=:p,
-                            profile_version=:v,dimension=:dim,created_at=now()""",
+                            profile_version=:v,dimension=:dim,
+                            backend=:backend,created_at=now()""",
                         t=tenant,
                         **resource_scope_values(),
                         k=kid,
@@ -400,6 +368,7 @@ class VectorIndex:
                         p=profile.id,
                         v=profile.version,
                         dim=result["dimension"],
+                        backend=self.backend.name,
                     )
                 else:
                     await execute(c, "DELETE FROM knowledge_vector_indexes WHERE kb_id=:k", k=kid)
@@ -421,7 +390,7 @@ class VectorIndex:
         except BaseException:
             if collection:
                 try:
-                    await self.request("collections/drop", {"collectionName": collection})
+                    await self.backend.drop(collection)
                 except DomainError:
                     logging.getLogger(__name__).warning(
                         "knowledge collection cleanup pending: %s", collection
@@ -458,7 +427,7 @@ class VectorIndex:
             )
         for row in rows:
             try:
-                await self.request("collections/drop", {"collectionName": row["collection_name"]})
+                await self.backend.drop(row["collection_name"])
             except DomainError:
                 async with self.engine.begin() as c:
                     await execute(

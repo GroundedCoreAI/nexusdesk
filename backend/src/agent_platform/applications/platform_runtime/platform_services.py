@@ -6,22 +6,13 @@ from agent_platform.business_capabilities.conversation.service import Conversati
 from agent_platform.business_capabilities.customer_service.confirmation import (
     CustomerConfirmationAdapter,
 )
-from agent_platform.business_capabilities.customer_service.industry_packs.installations import (
-    IndustryPackService,
-)
-from agent_platform.business_capabilities.customer_service.providers.service import (
-    ServiceProviderRegistry,
-)
 from agent_platform.business_capabilities.customer_service.routing.settings import (
     load_customer_service_routing_settings,
 )
-from agent_platform.business_capabilities.customer_service.scenarios.service import (
-    ScenarioService,
-)
-from agent_platform.business_capabilities.customer_service.scenarios.tool_bridge import (
-    ScenarioToolBridge,
-)
 from agent_platform.business_capabilities.customer_service.service import CustomerService
+from agent_platform.business_capabilities.customer_service.service_apps.runtime import (
+    ApplicationRuntimeResolver,
+)
 from agent_platform.business_capabilities.customer_service.service_apps.service import (
     ServiceApplicationService,
 )
@@ -44,6 +35,7 @@ from agent_platform.core_platform.platform_services.access_control.service impor
 from agent_platform.core_platform.platform_services.events import DurableEventBus
 from agent_platform.core_platform.platform_services.identity.staff import StaffDirectory
 from agent_platform.core_platform.platform_services.model_gateway.gateway import ModelGateway
+from agent_platform.core_platform.platform_services.monitoring.service import MonitoringService
 from agent_platform.core_platform.platform_services.observability.service import (
     ObservabilityService,
 )
@@ -56,6 +48,8 @@ from agent_platform.core_platform.tool_gateway.ledger import ToolOperationLedger
 from agent_platform.core_platform.tool_gateway.registry import ToolRegistry
 from agent_platform.core_platform.tool_gateway.replay import DurableToolReplayCache
 from agent_platform.core_platform.tool_gateway.workspace import ToolWorkspace
+
+from .monitoring_checks import BUSINESS_REGISTRATIONS
 
 
 class PlatformServices:
@@ -102,21 +96,8 @@ class PlatformServices:
             self.gateway.catalog,
             adapter_registry=adapter_registry,
         )
-        self.providers = ServiceProviderRegistry(engine)
-        # Scenarios may declare provider executors; the bridge is the only path
-        # from a scenario handler to a real gateway call.
-        self.scenarios = ScenarioService(
-            engine,
-            self.agents,
-            ScenarioToolBridge(self.tools, self.providers, self.tool_workspace),
-        )
-        self.industry_packs = IndustryPackService(engine, self.providers)
-        self.service_apps = ServiceApplicationService(
-            engine,
-            self.agents,
-            self.scenarios,
-            self.providers,
-        )
+        self.application_runtime = ApplicationRuntimeResolver(engine, self.agents, settings)
+        self.service_apps = ServiceApplicationService(engine, self.agents)
         self.knowledge = KnowledgeService(engine)
         self.ingestion = IngestionService(engine, self.knowledge, settings, model_client)
         self.vector_index = VectorIndex(engine, self.gateway, settings, model_client)
@@ -142,15 +123,32 @@ class PlatformServices:
             self.memory,
             events=self.event_bus,
             routing_settings=self.customer_routing_settings,
+            application_runtime=self.application_runtime,
         )
         self.confirmation = CustomerConfirmationAdapter(self.customer)
+        # B1: the application-scoped customer-session entry needs the Runtime
+        # conversation service and CustomerService, both constructed above.
+        self.service_apps.bind_sessions(
+            conversations=self.conversations,
+            customer=self.customer,
+            application_runtime=self.application_runtime,
+        )
         self.channels = ChannelService(
-            engine, self.conversations, self.customer, self.agents, settings
+            engine,
+            self.conversations,
+            self.customer,
+            settings,
+            application_runtime=self.application_runtime,
         )
         self.tool_contributions = ()
         # Phase 7: settings feed the maintenance-overdue cadence of rule_scan
         # (2x the configured scan interval) in the memory health sections.
         self.observability = ObservabilityService(engine, settings)
+        # Health checklist and notification centre. Platform checks ship with the
+        # core module; capability-level backlog probes are registered here so
+        # core_platform never imports business_capabilities.
+        self.monitoring = MonitoringService(engine, settings)
+        self.monitoring.register(BUSINESS_REGISTRATIONS)
         self.scope = TenantScopeService(engine)
         self.open_platform = OpenPlatform(self)
         self.evaluation = None

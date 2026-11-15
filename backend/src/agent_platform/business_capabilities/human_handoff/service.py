@@ -1,6 +1,9 @@
 from uuid import uuid4
 
 from agent_platform.business_capabilities.conversation.service import add_message
+from agent_platform.business_capabilities.customer_service.service_apps.business_conversations import (
+    BusinessConversationService,
+)
 from agent_platform.core_platform.platform_services.persistence.store import (
     DomainError,
     audit,
@@ -139,6 +142,15 @@ class HandoffService:
                         "UPDATE runtime_runs SET cancel_requested=true,status='cancelled',finished_at=now() WHERE id=:id",
                         id=run["id"],
                     )
+                    await BusinessConversationService.finish_turn_from_runtime(
+                        c,
+                        runtime_run_id=run["id"],
+                        tenant_id=tenant,
+                        business_id=conv["business_id"],
+                        workspace_id=conv["workspace_id"],
+                        status="cancelled",
+                        error_code=None,
+                    )
                     await self.repository._event(
                         c, run["id"], "run.cancelled", {"reason": "human_handoff"}
                     )
@@ -151,7 +163,30 @@ class HandoffService:
                     await self.repository._event(
                         c, run["id"], "run.cancel_requested", {"reason": "human_handoff"}
                     )
-            await add_message(c, cid, "system", "已申请人工服务，自动回复暂停。")
+            system_content = "已申请人工服务，自动回复暂停。"
+            runtime_message_id = await add_message(c, cid, "system", system_content)
+            handoff_scope = BusinessScope(
+                tenant_id=tenant,
+                business_id=conv["business_id"],
+                workspace_id=conv["workspace_id"],
+            )
+            await BusinessConversationService.set_status_for_runtime(
+                c,
+                tenant=tenant,
+                runtime_conversation_id=cid,
+                status="waiting",
+                assigned_to=conv.get("assigned_to"),
+                scope=handoff_scope,
+            )
+            await BusinessConversationService.append_runtime_message(
+                c,
+                tenant_id=tenant,
+                runtime_conversation_id=cid,
+                role="system",
+                content=system_content,
+                runtime_message_id=runtime_message_id,
+                scope=handoff_scope,
+            )
             await audit(c, tenant, actor, "handoff.requested", row["id"])
             return row
 
@@ -226,6 +261,18 @@ class HandoffService:
                     id=ref["conversation_id"],
                     who=assignee or actor,
                 )
+                await BusinessConversationService.set_status_for_runtime(
+                    c,
+                    tenant=tenant,
+                    runtime_conversation_id=ref["conversation_id"],
+                    status="human",
+                    assigned_to=assignee or actor,
+                    scope=BusinessScope(
+                        tenant_id=tenant,
+                        business_id=handoff["business_id"],
+                        workspace_id=handoff["workspace_id"],
+                    ),
+                )
             else:
                 if handoff["status"] != "active":
                     raise DomainError("handoff_not_active", 409)
@@ -240,11 +287,36 @@ class HandoffService:
                     id=ref["conversation_id"],
                     mode="bot" if operation == "resume" else "closed",
                 )
-                await add_message(
+                system_content = (
+                    "人工服务结束，已恢复自动服务。" if operation == "resume" else "会话已结束。"
+                )
+                runtime_message_id = await add_message(
                     c,
                     ref["conversation_id"],
                     "system",
-                    "人工服务结束，已恢复自动服务。" if operation == "resume" else "会话已结束。",
+                    system_content,
+                )
+                handoff_scope = BusinessScope(
+                    tenant_id=tenant,
+                    business_id=handoff["business_id"],
+                    workspace_id=handoff["workspace_id"],
+                )
+                await BusinessConversationService.set_status_for_runtime(
+                    c,
+                    tenant=tenant,
+                    runtime_conversation_id=ref["conversation_id"],
+                    status="open" if operation == "resume" else "closed",
+                    assigned_to=None,
+                    scope=handoff_scope,
+                )
+                await BusinessConversationService.append_runtime_message(
+                    c,
+                    tenant_id=tenant,
+                    runtime_conversation_id=ref["conversation_id"],
+                    role="system",
+                    content=system_content,
+                    runtime_message_id=runtime_message_id,
+                    scope=handoff_scope,
                 )
             await audit(c, tenant, actor, "handoff." + operation, hid)
             return row

@@ -146,7 +146,24 @@ async def applications(
             q="%" + q + "%",
             enabled=enabled,
         )
-        return {"items": rows, "total": total["n"]}
+        # One target row per application is enough for list cards; resolve the
+        # readable identity of bound Service Applications in a single query.
+        targets = await many(
+            c,
+            """SELECT DISTINCT ON (x.app_id) x.app_id,x.target_kind,x.target_id,x.version_pin,
+                a.application_key AS key,a.name,a.status,a.published_version
+            FROM open_application_targets x
+            JOIN open_applications o ON o.id=x.app_id
+            LEFT JOIN service_applications a ON a.id=x.target_id AND a.tenant_id=o.tenant_id
+            WHERE x.app_id = ANY(:ids)
+            ORDER BY x.app_id,(x.target_kind='service_application') DESC,x.created_at,x.target_id""",
+            ids=[row["id"] for row in rows],
+        )
+        by_app = {row.pop("app_id"): row for row in targets}
+        return {
+            "items": [{**row, "target": by_app.get(row["id"])} for row in rows],
+            "total": total["n"],
+        }
 
 
 @management.get("/agents")
@@ -167,7 +184,40 @@ async def create_application(body: ApplicationInput, request: Request, user: Adm
 @management.get("/applications/{app_id}")
 async def application(app_id: UUID, request: Request, user: Reader):
     async with engine(request).connect() as c:
-        return await service(request).application(c, user.tenant, app_id)
+        row = await service(request).application(c, user.tenant, app_id)
+        return {**row, "target": await service(request).target(c, row)}
+
+
+@management.get("/service-applications")
+async def eligible_service_applications(request: Request, user: Reader):
+    """Published Service Applications that can be bound as a delivery subject."""
+
+    async with engine(request).connect() as c:
+        return await many(
+            c,
+            """SELECT a.id,a.application_key,a.name,a.status,a.published_version,
+            a.business_id,a.workspace_id,ag.id AS agent_id,ag.name AS agent_name
+            FROM service_applications a LEFT JOIN agents ag ON ag.id=a.agent_id
+            WHERE a.tenant_id=:t AND NOT a.archived AND a.status<>'offline' AND a.published_version IS NOT NULL
+            ORDER BY a.name,a.id""",
+            t=user.tenant,
+        )
+
+
+@management.get("/service-applications/{application_id}/versions")
+async def service_application_releases(application_id: UUID, request: Request, user: Reader):
+    async with engine(request).connect() as c:
+        return await many(
+            c,
+            """SELECT v.version,v.created_at FROM service_application_versions v
+            JOIN service_applications a
+              ON a.tenant_id=v.tenant_id AND a.business_id=v.business_id
+             AND a.workspace_id=v.workspace_id AND a.id=v.application_id
+            WHERE v.application_id=:id AND a.tenant_id=:t
+            ORDER BY v.version DESC""",
+            id=application_id,
+            t=user.tenant,
+        )
 
 
 @management.put("/applications/{app_id}")
@@ -249,7 +299,9 @@ ExternalUser = Annotated[str, Depends(external_user)]
 
 class SessionInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    agent_id: UUID
+    # Required for a legacy agent application; must be omitted when the
+    # application delivers a Service Application (the binding decides).
+    agent_id: UUID | None = None
     external_session_id: str = Field(min_length=1, max_length=128)
 
 
@@ -280,6 +332,15 @@ async def authorized_agents(request: Request, identity: Identity):
             }
             for row in rows
         ]
+
+
+@public.get("/targets")
+async def delivery_target(request: Request, identity: Identity):
+    """What this key delivers: one Service Application, or the authorised agents."""
+
+    async with engine(request).connect() as c:
+        app = await service(request).check(c, identity)
+        return await service(request).describe(c, identity, app)
 
 
 @public.post("/conversations", status_code=201)

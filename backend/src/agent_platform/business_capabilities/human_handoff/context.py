@@ -1,9 +1,9 @@
 """Business context aggregation for the human workbench.
 
-The aggregator only reads, trims and projects.  It never re-derives business
+The aggregator only reads, trims and projects. It never re-derives business
 facts and never branches on industry: everything it returns already exists in
-the conversation, the routing decisions, the scenario traces or the pending
-actions written by the service runtime.
+the conversation, the routing decisions, the service application traces or the
+pending actions written by the v2 runtime.
 """
 
 from __future__ import annotations
@@ -88,14 +88,20 @@ def _safe_object_ref(object_ref: Any) -> dict[str, Any] | None:
     }
 
 
-def _safe_application(application: Any) -> dict[str, Any] | None:
-    if not isinstance(application, dict) or not application.get("key"):
+def _application_projection(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    trace = row.get("trace")
+    if not isinstance(trace, dict):
+        trace = {}
+    key = trace.get("application_key") or row.get("application_key")
+    if not key:
         return None
     return {
-        "key": application.get("key"),
-        "name": application.get("name"),
-        "version": application.get("version"),
-        "source": application.get("source"),
+        "key": key,
+        "name": row.get("application_name") or key,
+        "version": trace.get("application_version") or row.get("application_version"),
+        "source": row.get("application_source"),
     }
 
 
@@ -112,17 +118,36 @@ def _action_summary(payload: Any) -> str:
 
 
 def _trace_projection(row: dict[str, Any]) -> dict[str, Any]:
+    trace = row.get("trace")
+    if not isinstance(trace, dict):
+        trace = {}
+    skills = trace.get("skills")
+    connections = trace.get("connections")
     return {
         "id": str(row["id"]),
-        "scenario_key": row["scenario_key"],
-        "scenario_version": row.get("scenario_version"),
-        "simulation": row.get("simulation"),
-        "entry": row.get("entry"),
-        "handler_type": row.get("handler_type"),
-        "outcome": row.get("outcome"),
-        "reason_code": row.get("reason_code"),
-        "result_summary": row.get("result_summary") or "",
-        "message_excerpt": row.get("message_excerpt") or "",
+        "run_id": str(row["run_id"]) if row.get("run_id") else None,
+        "application_key": trace.get("application_key") or row.get("application_key"),
+        "application_version": trace.get("application_version") or row.get("application_version"),
+        "agent_id": trace.get("agent_id") or str(row["agent_id"]),
+        "agent_version": trace.get("agent_version") or row.get("agent_version"),
+        "status": trace.get("status") or "unknown",
+        "skills": [
+            {
+                "key": skill.get("key"),
+                "type": skill.get("type"),
+                "connection_key": skill.get("connection_key"),
+            }
+            for skill in (skills if isinstance(skills, list) else [])
+            if isinstance(skill, dict)
+        ],
+        "connections": [
+            {
+                "key": connection.get("key"),
+                "executor_kind": connection.get("executor_kind"),
+            }
+            for connection in (connections if isinstance(connections, list) else [])
+            if isinstance(connection, dict)
+        ],
         "created_at": row.get("created_at"),
     }
 
@@ -136,11 +161,14 @@ async def build_handoff_context(
     """Return the operator-facing context for one handoff.
 
     ``handoff`` must already have been loaded with tenant/scope filtering by the
-    caller, so a missing conversation here means the row was tampered with.
+    caller, so a missing conversation here means the row was tampered with. The
+    auto-service section is projected from the newest v2 service application
+    trace bound to the conversation.
     """
 
     conversation_id: UUID = handoff["conversation_id"]
     scope_sql, scope_params = scope_predicate(scope)
+    trace_scope_sql, trace_scope_params = scope_predicate(scope, alias="t")
 
     conversation = await one(
         connection,
@@ -155,17 +183,25 @@ async def build_handoff_context(
 
     traces = await many(
         connection,
-        f"""SELECT id,conversation_id,scenario_key,scenario_version,simulation,entry,
-                   message_length,message_excerpt,object_ref,facts,decisions,
-                   handler_type,outcome,reason_code,result_summary,trace,created_at
-        FROM service_scenario_traces
-        WHERE conversation_id=:cid AND tenant_id=:tenant AND {scope_sql}
-        ORDER BY created_at DESC,id DESC
+        f"""SELECT t.id,t.application_version,t.conversation_id,t.run_id,
+                   t.agent_id,t.agent_version,t.trace,t.created_at,
+                   a.application_key,a.name AS application_name,
+                   a.origin AS application_source
+        FROM service_application_traces t
+        LEFT JOIN service_applications a
+          ON a.id=t.application_id
+         AND a.tenant_id=t.tenant_id
+         AND a.business_id=t.business_id
+         AND a.workspace_id=t.workspace_id
+        WHERE t.conversation_id=:cid
+          AND t.tenant_id=:tenant
+          AND {trace_scope_sql}
+        ORDER BY t.created_at DESC,t.id DESC
         LIMIT :limit""",
         cid=conversation_id,
         tenant=tenant,
         limit=TRACE_LIMIT,
-        **scope_params,
+        **trace_scope_params,
     )
 
     routing = await many(
@@ -209,25 +245,9 @@ async def build_handoff_context(
         **scope_params,
     )
 
-    latest = next(
-        (row for row in traces if not row.get("simulation")),
-        traces[0] if traces else None,
-    )
+    latest = traces[0] if traces else None
     trace_body = (latest or {}).get("trace") or {}
-    application = _safe_application((trace_body or {}).get("application"))
-
-    scenario = None
-    if latest is not None:
-        scenario = {
-            "key": latest["scenario_key"],
-            "name": (trace_body or {}).get("scenario_name") or latest["scenario_key"],
-            "version": latest.get("scenario_version"),
-            "status": (trace_body or {}).get("scenario_status"),
-            "resolved_by": (trace_body or {}).get("resolved_by"),
-            "handler_type": latest.get("handler_type"),
-            "outcome": latest.get("outcome"),
-            "reason_code": latest.get("reason_code"),
-        }
+    application = _application_projection(latest)
 
     return {
         "handoff": {
@@ -256,10 +276,10 @@ async def build_handoff_context(
             if conversation
             else None
         ),
-        # Everything below is only meaningful once a trace is bound to the
-        # conversation; empty lists are the honest answer before that.
+        # Everything below is only meaningful once a v2 application trace is
+        # bound to the conversation; empty lists are the honest answer before
+        # that.
         "application": application,
-        "scenario": scenario,
         "object": _safe_object_ref((trace_body or {}).get("object_ref")),
         "facts": _operator_facts((trace_body or {}).get("facts")),
         "decisions": _operator_decisions((trace_body or {}).get("decisions")),

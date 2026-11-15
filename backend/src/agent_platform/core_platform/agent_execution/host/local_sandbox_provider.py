@@ -15,9 +15,13 @@ plus deny-by-absence, defense in depth over the Runner/Registry gates).
 """
 
 import logging
-import resource
 from collections.abc import Callable, Mapping
 from uuid import UUID, uuid4
+
+try:  # POSIX rlimits. The Windows development host has no ``resource`` module.
+    import resource
+except ModuleNotFoundError:  # pragma: no cover - Windows dev hosts only
+    resource = None  # type: ignore[assignment]
 
 from .host_models import REASON_UNTRUSTED_TARGET, ProcessSpec
 from .sandbox_provider import (
@@ -44,11 +48,15 @@ logger = logging.getLogger(__name__)
 # The RLIMIT triples the Local Provider can apply in the child, keyed by the
 # capability id; soft==hard is deliberate: the escalation machine is the
 # Supervisor's job, a rlimit soft warning would only double-signal semantics.
-_RLIMIT_BY_CAPABILITY: dict[str, int] = {
-    CAP_CPU_RLIMIT: resource.RLIMIT_CPU,
-    CAP_MEMORY_RLIMIT: resource.RLIMIT_AS,
-    CAP_FILE_SIZE_RLIMIT: resource.RLIMIT_FSIZE,
-}
+_RLIMIT_BY_CAPABILITY: dict[str, int] = (
+    {
+        CAP_CPU_RLIMIT: resource.RLIMIT_CPU,
+        CAP_MEMORY_RLIMIT: resource.RLIMIT_AS,
+        CAP_FILE_SIZE_RLIMIT: resource.RLIMIT_FSIZE,
+    }
+    if resource is not None
+    else {}
+)
 
 _POLICY_FIELD_BY_CAPABILITY: dict[str, str] = {
     CAP_CPU_RLIMIT: "cpu_seconds",
@@ -220,6 +228,7 @@ class LocalSandboxProvider:
             return None
 
         def hook() -> None:  # runs in the forked child before exec
+            assert resource is not None  # unreachable when no rlimit was applied
             for which, value in applied:
                 resource.setrlimit(which, (value, value))
 

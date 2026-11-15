@@ -8,3 +8,30 @@ html:has(.embed-chat),body:has(.embed-chat),#root:has(.embed-chat){height:100%;m
 .embed-message.user{align-self:flex-end;background:var(--chat-color);color:white}.embed-thinking{font-size:13px;color:#868197}
 .embed-composer{margin:12px 16px 0;padding:8px;display:flex;gap:8px;border:1px solid #eae7f2;border-radius:18px;align-items:flex-end}.embed-composer textarea{border:0;box-shadow:none!important;resize:none}.embed-composer button{background:var(--chat-color)}
 .embed-chat footer{text-align:center;padding:10px;font-size:11px;color:#9794a3}.embed-empty{color:#a39daa;text-align:center;padding:45px 20px}.embed-empty>span{font-size:30px}.embed-login{margin:auto;padding:28px;width:100%;max-width:400px;text-align:center}.embed-login h2{font-size:20px}.embed-login p{color:#868197;font-size:13px;margin-bottom:28px}.embed-chat>.ant-alert{flex-shrink:0}.embed-chat .ant-alert-message{overflow-wrap:anywhere}
+
+/* An iframe host owns the outer size, so the page must not claim the viewport:
+   a 100dvh column inside a fixed-height iframe scrolls twice. The message list
+   carries a pixel cap instead of a vh cap, because a viewport-relative cap
+   would move whenever the host resizes the iframe and the height would oscillate. */
+html[data-hosted-framed],html[data-hosted-framed] body,html[data-hosted-framed] #root{height:auto}
+html[data-hosted-framed] .embed-chat{height:auto;min-height:320px}
+html[data-hosted-framed] .embed-messages{max-height:var(--hosted-messages-max,560px)}
+
+.embed-skeleton{flex:1;display:flex;flex-direction:column;gap:14px;padding:20px 16px}
+.embed-skeleton span{height:13px;border-radius:9px;background:linear-gradient(90deg,#f3f2f8 25%,#faf9fd 37%,#f3f2f8 63%);background-size:400% 100%;animation:embed-shimmer 1.4s ease-in-out infinite}
+.embed-skeleton span.embed-skeleton-reply{height:52px;border-radius:14px}
+@keyframes embed-shimmer{0%{background-position:100% 0}100%{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){.embed-skeleton span{animation:none}}
+
+@media (max-width:640px){
+  .embed-chat header{padding:14px 16px}
+  .embed-chat header h1{font-size:16px}
+  .embed-avatar{width:38px;height:38px;border-radius:12px;font-size:20px}
+  .embed-messages{padding:14px 12px;gap:12px}
+  .embed-message{max-width:90%;font-size:14.5px;padding:11px 14px}
+  .embed-composer{margin:10px 12px 0}
+  .embed-chat footer{padding:8px 12px calc(8px + env(safe-area-inset-bottom));font-size:10.5px}
+  /* Touch targets stay tappable without changing the desktop density. */
+  .embed-chat header>button,.embed-composer button{min-width:44px;min-height:44px}
+  .embed-chat .ant-alert{padding:8px 12px}
+}

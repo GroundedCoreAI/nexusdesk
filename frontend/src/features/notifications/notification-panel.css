@@ -1,0 +1,268 @@
+.notification-panel-body {
+  /* Tall enough that the unread preview shows whole rows instead of clipping
+     one in half; still capped so the popover never swallows the screen. */
+  max-height: min(70vh, 540px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.notification-panel-loading {
+  display: flex;
+  justify-content: center;
+  padding: 36px 0;
+}
+
+.notification-panel-error {
+  margin: 0;
+  padding: 10px 18px;
+  background: #fdf2f2;
+  color: #b23b3b;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.notification-panel-warn {
+  margin: 0;
+  padding: 8px 18px;
+  background: #fff8e8;
+  color: #9a6712;
+  font-size: 12px;
+}
+
+/* Every group is healthy: one quiet line, no green wall. */
+.notification-panel-ok {
+  margin: 0;
+  padding: 12px 18px 14px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.notification-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.monitor-overall {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.monitor-overall.is-healthy { background: #e9f7ef; color: #24804f; }
+.monitor-overall.is-degraded { background: #fff4e3; color: #9a6712; }
+.monitor-overall.is-down { background: #fdecec; color: #b23b3b; }
+.monitor-overall.is-unknown { background: #f2f0fb; color: #6356d9; }
+
+.notification-section + .notification-section {
+  border-top: 1px solid #f0f1f5;
+}
+
+.notification-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 18px 7px;
+  color: #8f94a2;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.monitor-counts {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.monitor-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #c7cad3;
+}
+
+.monitor-dot.is-pass { background: #34a06a; }
+.monitor-dot.is-warn { background: #dd8c25; }
+.monitor-dot.is-fail { background: #d64545; }
+.monitor-dot.is-not_configured { background: #c7cad3; }
+.monitor-dot.is-unknown { background: #958bea; }
+.monitor-dot.is-stale { background: #d9b23c; }
+
+.monitor-severity {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+}
+
+.monitor-severity.is-P0 { background: #fdecec; color: #b23b3b; }
+.monitor-severity.is-P1 { background: #fff4e3; color: #9a6712; }
+.monitor-severity.is-P2 { background: #eef2fb; color: #47628f; }
+.monitor-severity.is-P3 { background: #f4f5f8; color: #737887; }
+
+.monitor-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 18px;
+  border: 0;
+  background: none;
+  color: #252936;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.monitor-group-heading:hover {
+  background: #f8f8fc;
+}
+
+.monitor-group-count {
+  margin-left: auto;
+  color: #9ca1ae;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.monitor-group-muted {
+  margin-left: 6px;
+  color: #b9bcc6;
+  font-size: 10px;
+}
+
+.monitor-check-note {
+  margin-left: 5px;
+  color: #b9bcc6;
+  font-size: 10px;
+}
+
+.monitor-check-list,
+.monitor-notice-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.monitor-check {
+  display: flex;
+  gap: 9px;
+  padding: 6px 18px 6px 30px;
+}
+
+.monitor-check-body {
+  min-width: 0;
+}
+
+.monitor-check-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #4b5060;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.monitor-check.is-attention .monitor-check-title {
+  color: #252936;
+  font-weight: 600;
+}
+
+.monitor-check-summary {
+  margin: 2px 0 0;
+  color: #7b8090;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.monitor-check-value {
+  margin-left: 6px;
+  color: #4b5162;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.monitor-stale {
+  color: #b8860b;
+  font-size: 10px;
+}
+
+.monitor-notice + .monitor-notice {
+  border-top: 1px solid #f5f6fa;
+}
+
+.monitor-notice-link {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.monitor-notice-link:hover {
+  background: #f8f8fc;
+}
+
+.monitor-notice-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px 0;
+}
+
+.monitor-notice-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #252936;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monitor-notice-time {
+  flex: none;
+  margin-left: auto;
+  color: #a3a8b4;
+  font-size: 10px;
+}
+
+.monitor-notice-impact {
+  margin: 3px 18px 9px;
+  color: #7b8090;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.notification-panel .ant-empty {
+  margin: 22px 0 20px;
+}
+
+/* The popover previews; history lives in the modal. Pinned below the scroll
+   area so a long checklist can never hide it. */
+.notification-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 12px;
+  border-top: 1px solid #f0f1f5;
+  background: #fff;
+}
+
+.notification-panel-footer .ant-btn {
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+}
