@@ -29,8 +29,14 @@ class RecoveryCoordinator:
             return 0
         confirmed: list[dict[str, object]] = []
         for row in rows:
+            # R-19: fence/take over the expired claim FIRST (new epoch + new
+            # owner), then run cleanup under the new ownership. Cleanup that
+            # ran before the fence would execute under a stale claim.
+            fenced = await self._repository.fence_expired(row["id"], new_owner=new_owner)
+            if fenced is None:
+                continue  # another worker already recovered this row
             try:
-                cleanup_ok = await self._cleanup(row)
+                cleanup_ok = await self._cleanup(fenced)
             except Exception:  # noqa: BLE001 - unconfirmed cleanup is a failure.
                 cleanup_ok = False
             confirmed.append({"id": row["id"], "cleanup_confirmed": cleanup_ok})

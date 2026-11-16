@@ -53,6 +53,7 @@ class RuntimeWorker:
         # any cancellation reports ``cancelled``. Unset keeps pre-0069 behavior
         # for legacy tests; composition wires the real confirmation in T-10.
         self.cleanup_confirmation = cleanup_confirmation
+        self._recovery_coordinator = None
 
     def _log_orchestrator_terminal(self, row, status, started_at):
         selector = getattr(self.orchestrator, "selector", None)
@@ -337,6 +338,22 @@ class RuntimeWorker:
         if not task.cancelled() and task.exception():
             logger.error("Worker could not persist final state; lease reaper will recover it")
 
+    async def _reap_expired(self, tenant: str, cleanup) -> None:
+        """Confirmed recovery for the live reaper (R-19).
+
+        Uses RecoveryCoordinator so unconfirmed cancellation never reports
+        cancelled, instead of the legacy terminal-cancel/fail reaper.
+        """
+        if self._recovery_coordinator is None:
+            from agent_platform.core_platform.agent_execution.reliability.recovery import (
+                RecoveryCoordinator,
+            )
+
+            self._recovery_coordinator = RecoveryCoordinator(self.repository, cleanup)
+        else:
+            self._recovery_coordinator._cleanup = cleanup
+        await self._recovery_coordinator.recover_expired(tenant)
+
     async def serve(self):
         # A submitted run is claimed as soon as it is queued rather than at the next
         # poll, which removes most of the queue wait a customer sits through. The
@@ -354,7 +371,12 @@ class RuntimeWorker:
                 # wakes the wait below.
                 wake.clear()
                 try:
-                    await self.repository.reap(self.settings.tenant_id)
+                    if self.cleanup_confirmation is not None:
+                        await self._reap_expired(
+                            self.settings.tenant_id, self.cleanup_confirmation
+                        )
+                    else:
+                        await self.repository.reap(self.settings.tenant_id)
                     while len(self.tasks) < self.settings.worker_concurrency:
                         row = await self.repository.claim(
                             self.owner, self.settings.lease_seconds, self.settings.tenant_id

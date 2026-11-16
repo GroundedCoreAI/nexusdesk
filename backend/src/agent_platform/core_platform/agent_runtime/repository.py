@@ -888,10 +888,44 @@ class RunRepository:
                             result = EventWriteResult(
                                 seq=seq, event_id=event.event_id, duplicate=False
                             )
+                            # R-18(c): native usage events also feed the
+                            # source-unique ledger in the same transaction,
+                            # using stable producer identity for dedup.
+                            usage_payload = event.payload.get("usage")
+                            if usage_payload is not None and event.producer_id is not None:
+                                await self._insert_native_usage(
+                                    conn, row=current, event=event, usage=usage_payload
+                                )
         if reason is not None or result is None:
             await self._audit_denial(run_id, "append", current, owner, lease_epoch)
             raise OwnershipDenied(reason or "run_missing", "append")
         return result
+
+    async def _insert_native_usage(self, conn, row, event, usage: dict) -> None:
+        """Insert one native usage row by stable producer identity (same txn).
+
+        Source = producer_id, source_event_id = producer_event_id. Duplicate
+        native delivery is a no-op via the source-unique constraint. Unknown
+        stays explicit, never zero-filled.
+        """
+        if not isinstance(usage, dict):
+            return
+        await conn.execute(
+            text("""INSERT INTO runtime_usage_ledger
+            (id,run_id,tenant_id,lease_epoch,source,source_event_id,usage)
+            VALUES (:id,:run_id,:tenant_id,:lease_epoch,:source,:source_event_id,
+            CAST(:usage AS jsonb))
+            ON CONFLICT (run_id,source,source_event_id) DO NOTHING"""),
+            {
+                "id": uuid4(),
+                "run_id": row["id"],
+                "tenant_id": row["tenant_id"],
+                "lease_epoch": row["lease_epoch"],
+                "source": event.producer_id,
+                "source_event_id": event.producer_event_id,
+                "usage": json.dumps(normalize_usage(usage)),
+            },
+        )
 
     async def _insert_terminal_usage(self, conn, row, usage: dict) -> None:
         """Insert one terminal usage row by source uniqueness (same transaction).
@@ -1103,6 +1137,30 @@ class RunRepository:
                 .all()
             )
         return [dict(row) for row in rows]
+
+    async def fence_expired(self, run_id, *, new_owner) -> dict | None:
+        """Fence/take over one expired claim: new epoch + new owner, no terminal.
+
+        Returns the freshly-fenced row, or None if the row is no longer an
+        expired running claim (another worker recovered it). Cleanup runs only
+        after this returns, under the new ownership (R-19).
+        """
+        async with self.engine.begin() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text("""UPDATE runtime_runs SET owner=:owner,
+                        lease_epoch=lease_epoch+1
+                        WHERE id=:id AND status='running'
+                          AND (lease_until IS NULL OR lease_until<=now())
+                        RETURNING *"""),
+                        {"id": run_id, "owner": new_owner},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return None if row is None else dict(row)
 
     async def apply_recovery(self, items, *, new_owner) -> int:
         """Fence each expired row and commit one confirmed terminal state."""
