@@ -54,6 +54,8 @@
 | P5-UT-16 | Session 过期清理重入 | 重复过期/关闭不重复释放或报错，过期后不可恢复。 | FR-8、FR-10 |
 | P5-UT-17 | 日志/事件诊断边界 | 超长 stderr、JSON-RPC payload 和 Secret canary 被截断/脱敏，公共响应无宿主细节。 | FR-11、FR-6 |
 | P5-UT-18 | Codex 开关与 React 默认 | 默认解析 React；各 Codex 开关默认 false，关闭时不可构造执行。 | FR-12 |
+| P5-UT-19 | stdin payload 校验与表示 | `stdin_payload` 接受 1..800_000 字节，拒绝空、超限与非字节值；payload 不出现在 `repr()`、`model_dump()`、事件和日志中，也不改变 `command_digest`。 | FR-2、FR-11；`08` R18 |
+| P5-UT-20 | stdin 投递失败语义 | 子进程提前关闭或不读取时，在投递截止时间内以 `runtime_host_pipe_setup_failed` 失败关闭，无残留进程组，且日志不含 payload；子进程消费 prompt 时报告精确字节数与摘要。 | FR-2、FR-3；`08` R18 |
 
 ## 4. 集成测试
 
@@ -77,6 +79,7 @@
 | P5-IT-16 | 开关关闭 React/API/SSE/历史配置回归 | 复现 AC-12；Phase 0 基线存在时 diff 为零，否则标阻断待补而非通过。 | AC-12 |
 | P5-IT-17 | 条件性 Session 迁移升级/降级保护 | 从实施时 head 升级成功；有数据降级要求导出，历史迁移校验和不变。 | FR-8、G6 |
 | P5-IT-18 | Stage A 预发布稳定性批次 | 至少 20 个混合场景无 P0/P1，且连续 3 次适用回归通过后，由验收负责人确认 Stage B 解锁记录。 | FR-1；G5 |
+| P5-IT-19 | prompt 经 Host 端到端投递 | Stage A CLI 通道把请求 input 投递到 Host stdin；目标消费并回显精确字节，持久记录到达终态且无残留进程；环境存在真实 Codex 时由其完成该 Turn。CI 覆盖确定性 fixture，缺二进制处真实半段为 `pending_env`。 | FR-2、FR-4；AC-1、AC-3；`08` R18 |
 
 ## 5. 通用核对项（本阶段适用）
 

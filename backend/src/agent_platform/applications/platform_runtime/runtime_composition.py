@@ -29,6 +29,17 @@ from agent_platform.business_capabilities.knowledge.capability import KnowledgeC
 from agent_platform.business_capabilities.memory.capability import MemoryCapability
 from agent_platform.business_capabilities.memory.injection import MemoryInjection
 from agent_platform.business_capabilities.memory.store import build_memory_store
+from agent_platform.core_platform.agent_execution.adapters.codex.adapter import (
+    CodexCliAdapter,
+)
+from agent_platform.core_platform.agent_execution.adapters.codex.adapter import (
+    declared_capabilities as codex_declared_capabilities,
+)
+from agent_platform.core_platform.agent_execution.adapters.codex.config import (
+    CodexConfig,
+    CodexProtocol,
+    CodexStageGate,
+)
 from agent_platform.core_platform.agent_execution.capability.cache import CapabilityCache
 from agent_platform.core_platform.agent_execution.capability.ports import (
     TrustedDeploymentProbe,
@@ -45,6 +56,7 @@ from agent_platform.core_platform.agent_execution.capability.resolver import (
     CapabilityResolver,
 )
 from agent_platform.core_platform.agent_execution.capability.warmer import CapabilityWarmer
+from agent_platform.core_platform.agent_execution.contracts.adapter import AgentEngineAdapter
 from agent_platform.core_platform.agent_execution.contracts.capabilities import (
     NO_EXECUTION_RESTRICTIONS,
     EngineCapabilities,
@@ -55,6 +67,7 @@ from agent_platform.core_platform.agent_execution.contracts.instructions import 
     REACT_INSTRUCTION_PROVIDER_VERSION,
 )
 from agent_platform.core_platform.agent_execution.contracts.snapshots import SNAPSHOT_COLUMNS
+from agent_platform.core_platform.agent_execution.host.host_models import ResourcePolicy
 from agent_platform.core_platform.agent_execution.host.local_sandbox_provider import (
     LocalSandboxProvider,
 )
@@ -75,6 +88,7 @@ from agent_platform.core_platform.agent_execution.host.resource_manager import R
 from agent_platform.core_platform.agent_execution.host.runtime_host import RuntimeHost
 from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
     ExecutionSnapshotBarrier,
+    capture_execution_context,
 )
 from agent_platform.core_platform.agent_execution.orchestration.orchestrator import (
     ExecutionOrchestrator,
@@ -352,6 +366,12 @@ def _runtime_fingerprint_exclude_fields() -> set[str]:
     ``execution_resource_*`` and ``execution_sandbox_provider`` are rollout flags
     and tuning limits, none of them a Runtime assembly input, so changing one
     must never force queued Runs to ``configuration_changed``.
+
+    Phase 5 adds the whole ``codex_*`` family for the same reason: the Codex
+    switches, version allowlist and trusted-tenant allowlist select an Adapter
+    for *new* claims, never the Runtime assembly of an already queued one. The
+    exclusion is prefix-based so a future ``codex_*`` knob cannot silently start
+    hashing and turn a rollout flip into ``configuration_changed``.
     """
     return {
         "knowledge_s3_access_key",
@@ -382,6 +402,7 @@ def _runtime_fingerprint_exclude_fields() -> set[str]:
             )
             or name == "execution_sandbox_provider"
         ),
+        *(name for name in Settings.model_fields if name.startswith("codex_")),
     }
 
 
@@ -392,17 +413,26 @@ def _runtime_fingerprint(settings: Settings, specs: list[HttpTool]) -> str:
 
 
 def _execution_adapter_registry() -> AdapterRegistry:
-    """Fresh Registry with the React engine/protocol registrations only.
+    """Fresh Registry with the React and Codex engine/protocol registrations.
 
     Adapter registration itself happens in ``_build_execution_orchestrator``,
     which owns the single ``AdapterDescriptor`` instance the warm targets are
     derived from, so no second listing API is needed here (R-46).
+
+    Phase 5 registers one Codex *engine* with two independent *protocols*
+    (``cli_exec`` and ``app_server``). Both protocols are registered so the
+    Engine/Protocol pairing is real and enumerable; their Adapter descriptors are
+    registered below with ``enabled`` driven by the deployment gate, and the
+    App-Server one is never enabled in this phase (Stage B is locked).
     """
 
     engines = EngineRegistry()
     engines.register(EngineDescriptor(engine_id="react"))
+    engines.register(EngineDescriptor(engine_id="codex"))
     protocols = ProtocolRegistry()
     protocols.register(ProtocolDescriptor(protocol_id="native"))
+    protocols.register(ProtocolDescriptor(protocol_id="cli_exec"))
+    protocols.register(ProtocolDescriptor(protocol_id="app_server"))
     return AdapterRegistry(engines, protocols)
 
 
@@ -434,6 +464,131 @@ def _react_adapter_descriptor(settings: Settings) -> AdapterDescriptor:
         policy_version=settings.execution_capability_policy_version,
         instruction_provider_id=REACT_INSTRUCTION_PROVIDER_ID,
         provider_version=REACT_INSTRUCTION_PROVIDER_VERSION,
+    )
+
+
+def _codex_stage_gate(settings: Settings) -> CodexStageGate:
+    """The deployment gate snapshot both Codex protocols consult (FR-1/FR-12).
+
+    One derivation, so the descriptor's ``enabled`` flag and the adapter's
+    per-execution gate can never disagree about the same deployment.
+    """
+    return CodexStageGate(
+        cli_enabled=settings.codex_cli_enabled,
+        app_server_enabled=settings.codex_app_server_enabled,
+        allowed_versions=tuple(settings.codex_allowed_versions),
+        trusted_tenants=tuple(settings.codex_trusted_tenants),
+        stage_a_verified=settings.codex_stage_a_verified,
+    )
+
+
+def _codex_config(settings: Settings, protocol: CodexProtocol) -> CodexConfig:
+    """Deployment-level Codex options; never part of ``ExecutionConfig`` (C4).
+
+    The pinned version is the first entry of the allowlist so one settings value
+    drives both the gate and the adapter's own version. An empty allowlist keeps
+    the placeholder version: the descriptor stays disabled in that state, so the
+    factory is never reached, and construction must not raise while merely
+    registering metadata.
+    """
+    version = settings.codex_allowed_versions[0] if settings.codex_allowed_versions else "unset"
+    return CodexConfig(
+        protocol=protocol,
+        version=version,
+        path_env=settings.codex_path_env,
+    )
+
+
+def _codex_adapters(
+    settings: Settings,
+    runtime_host: RuntimeHost | None,
+) -> tuple[
+    tuple[AdapterDescriptor, Callable[[], AgentEngineAdapter]],
+    tuple[AdapterDescriptor, Callable[[], AgentEngineAdapter]],
+]:
+    """Build the two Codex registrations plus their factories.
+
+    React remains the only *enabled* registration in the default deployment: the
+    gate reports ``deployment_enabled=False`` for both protocols, so
+    ``metadata("codex", ...)`` raises ``ADAPTER_DISABLED`` and the publish path
+    stays fail-closed. ``codex_app_server_enabled`` is additionally hardwired
+    off here because Stage B has no implementation in this phase (C3).
+    """
+    gate = _codex_stage_gate(settings)
+    cli_descriptor = AdapterDescriptor(
+        engine_id="codex",
+        protocol_id="cli_exec",
+        adapter_version="v1",
+        enabled=gate.deployment_enabled(CodexProtocol.CLI_EXEC) and runtime_host is not None,
+        config_schema=CodexConfig,
+        config_schema_version="v1",
+        declared=codex_declared_capabilities(),
+        declared_schema_version="v1",
+        probe_id="codex-cli-probe",
+        probe_version="v1",
+        policy_provider_id="codex-policy",
+        policy_version=settings.execution_capability_policy_version,
+        instruction_provider_id="unavailable",
+        provider_version="v1",
+    )
+    # Stage B is locked: the descriptor is registered for honest enumeration and
+    # is always disabled, regardless of the settings value.
+    app_server_descriptor = AdapterDescriptor(
+        engine_id="codex",
+        protocol_id="app_server",
+        adapter_version="v1",
+        enabled=False,
+        config_schema=CodexConfig,
+        config_schema_version="v1",
+        declared=codex_declared_capabilities(),
+        declared_schema_version="v1",
+        probe_id="codex-app-server-probe",
+        probe_version="v1",
+        policy_provider_id="codex-policy",
+        policy_version=settings.execution_capability_policy_version,
+        instruction_provider_id="unavailable",
+        provider_version="v1",
+    )
+
+    def cli_factory() -> AgentEngineAdapter:
+        if runtime_host is None:
+            # Unreachable through the registry (the descriptor is disabled), but
+            # composition must never construct an adapter without its Host.
+            raise RuntimeError("codex cli_exec requires a runtime host")
+        # The frozen ``ExecutionRequest`` has no history field, so the claimed
+        # row's retained window comes from the captured per-run context, exactly
+        # like ReactAdapterFactory reads it.
+        context = capture_execution_context()
+        return CodexCliAdapter(
+            runtime_host,
+            config=_codex_config(settings, CodexProtocol.CLI_EXEC),
+            gate=gate,
+            workdir_root=settings.execution_workdir_root,
+            resource_policy=_codex_resource_policy(settings),
+            history=context.history,
+        )
+
+    def app_server_factory() -> AgentEngineAdapter:
+        raise RuntimeError("codex app_server is locked until Stage B is implemented")
+
+    return (cli_descriptor, cli_factory), (app_server_descriptor, app_server_factory)
+
+
+def _codex_resource_policy(settings: Settings) -> ResourcePolicy:
+    """Project the FR-10 process/resource settings onto one ProcessSpec policy.
+
+    The Codex lane uses the same deployment ceilings as every other Host-managed
+    target: there is no Codex-specific limit that could drift from the Host's
+    own numbers.
+    """
+    return ResourcePolicy(
+        cpu_seconds=settings.execution_resource_cpu_seconds,
+        memory_bytes=settings.execution_resource_memory_bytes,
+        max_processes=settings.execution_resource_max_processes,
+        workdir_total_bytes=settings.execution_workdir_max_bytes,
+        workdir_file_bytes=settings.execution_workdir_max_file_bytes,
+        wall_seconds=settings.execution_process_wall_timeout_seconds,
+        output_max_bytes_per_stream=settings.execution_process_output_max_bytes,
     )
 
 
@@ -470,6 +625,19 @@ def _build_execution_orchestrator(
     settings = settings or Settings(_env_file=None)
     adapters = adapters or _execution_adapter_registry()
     adapters.register(_react_adapter_descriptor(settings), ReactAdapterFactory(runtime_factory))
+    # Phase 5: both Codex protocols share the ``codex`` engine. Registration is
+    # unconditional so the pairing is enumerable, but ``enabled`` follows the
+    # deployment gate, and the App-Server descriptor is always disabled while
+    # Stage B is locked. In the default deployment neither is enabled, so the
+    # warm targets below stay exactly one React entry (R-46).
+    codex_runtime_host = execution_runtime.host if execution_runtime is not None else None
+    for descriptor, factory in _codex_adapters(settings, codex_runtime_host):
+        # Registering a disabled descriptor is legal and is what keeps the
+        # Engine/Protocol pairing enumerable; resolution still fails closed with
+        # ``ADAPTER_DISABLED``. A registry that already carries one of these
+        # triples is a caller error the Registry reports as a duplicate, exactly
+        # like the React registration above.
+        adapters.register(descriptor, factory)
     subsystem = subsystem or _build_execution_capability_subsystem(
         settings,
         adapters,

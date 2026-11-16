@@ -172,6 +172,30 @@ class Settings(BaseSettings):
     execution_workdir_retention_seconds: int = Field(default=86_400, ge=0, le=7_776_000)
     execution_workdir_failed_retention_seconds: int = Field(default=604_800, ge=0, le=31_536_000)
     execution_workdir_cleanup_interval_seconds: float = Field(default=60.0, gt=0, le=86_400)
+    # Phase 5 (FR-12) stays opt-in and fail-closed. Every Codex switch defaults to
+    # false and both allowlists default to empty, so an unconfigured deployment
+    # denies every Codex execution at the stage gate instead of starting one. The
+    # whole ``codex_*`` family is rollout control, not a Runtime assembly input,
+    # and is excluded from the runtime fingerprint for the same reason as the
+    # Phase 3/4 families (changing a switch must not fail queued Runs).
+    codex_cli_enabled: bool = False
+    codex_app_server_enabled: bool = False
+    # Stage A evidence gate: Stage B (App-Server/Session) cannot be enabled until
+    # the acceptance owner has recorded the Stage A unlock decision.
+    codex_stage_a_verified: bool = False
+    # Pinned provider versions and trusted tenants. Empty means "nothing is
+    # trusted"; there is no wildcard value.
+    codex_allowed_versions: tuple[str, ...] = ()
+    codex_trusted_tenants: tuple[str, ...] = ()
+    # Stage B Session persistence is not implemented in this phase; the switch
+    # exists so a deployment can never half-enable it.
+    codex_session_persistence_enabled: bool = False
+    # The only environment value the Codex lane contributes (Phase 5 08 R17).
+    # The Host starts targets with an empty environment and the installed CLI is
+    # a ``#!/usr/bin/env node`` launcher, so without PATH the exec itself fails
+    # (measured exit 127). Deployment-specific because the interpreter lives in
+    # different places per image; it is never derived from the host process.
+    codex_path_env: str = "/usr/local/bin:/usr/bin:/bin"
     model_timeout_seconds: float = Field(default=30, gt=0)
     # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
     # Enabled by default for the typewriter UI. A deployment can opt out with
@@ -501,6 +525,22 @@ class Settings(BaseSettings):
                 "execution_runtime_host_id must use the deployment slug grammar "
                 "(lowercase alphanumeric segments separated by . _ or -)"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_codex_stage_gate(self):
+        # FR-1/FR-12 fail-closed matrix: Stage B (App-Server) may only be
+        # configured when Stage A is both enabled and verified. Rejecting the
+        # configuration outright is stronger than silently denying the Protocol
+        # at run time, and it keeps "Stage B locked" a deployment fact rather
+        # than an operator expectation. Off-state deployments are exempt; the
+        # empty allowlists already deny everything.
+        if not self.codex_app_server_enabled:
+            return self
+        if not self.codex_cli_enabled:
+            raise ValueError("codex_app_server_enabled requires codex_cli_enabled")
+        if not self.codex_stage_a_verified:
+            raise ValueError("codex_app_server_enabled requires codex_stage_a_verified")
         return self
 
     @property

@@ -149,6 +149,16 @@ CommandDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$
 # workspace/workspace_policy.py (T5), the single validation authority (FR-6).
 RelativeWorkdirPath = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
+# One bounded prompt payload for the opt-in stdin channel (08 R18).
+#
+# The ceiling is a *byte* count because this DTO carries bytes; the public
+# request bound it must never contradict is ``ExecutionRequest.input``'s
+# 200_000 **characters**. One UTF-8 code point can take 4 bytes, so
+# 4 * 200_000 is the worst case any accepted request can produce: a smaller
+# byte cap would reject legitimate prompts (a Chinese character is 3 bytes).
+MAX_STDIN_PAYLOAD_BYTES = 800_000
+StdinPayload = Annotated[bytes, Field(min_length=1, max_length=MAX_STDIN_PAYLOAD_BYTES)]
+
 
 class ResourcePolicy(ExecutionContractModel):
     """Per-Execution resource ceilings resolved from the FR-10 settings.
@@ -175,11 +185,23 @@ class ProcessSpec(ExecutionContractModel):
     registry membership before spawn (T7/T10); the argv list is fixed by the
     platform, never a client command line. ``environment`` is minimal and stays
     internal: it is never persisted to DB rows nor logged (FR-2, FR-9).
+
+    ``stdin_payload`` is the opt-in bounded prompt channel (08 R18). ``None``
+    keeps the historical ``DEVNULL`` start, which is the default for every
+    target that predates it. A payload is written once and followed by EOF by
+    :class:`~.process_runner.ProcessRunner`; it is **never** persisted, never
+    logged, and never part of ``command_digest`` (which stays
+    executable id + argv). It is excluded from ``repr()`` and ``model_dump()``
+    because it carries user prompt text.
     """
 
     executable_id: TrustedExecutableId
     argv: tuple[ArgvValue, ...] = ()
     environment: dict[EnvironmentKey, EnvironmentValue] = Field(default_factory=dict)
+    # 08 R18: ``None`` = no payload (child gets ``DEVNULL``). Bounded in bytes;
+    # ``repr=False``/``exclude=True`` keep the prompt out of every serialized or
+    # logged representation of this DTO.
+    stdin_payload: StdinPayload | None = Field(default=None, repr=False, exclude=True)
     workdir_relative_path: RelativeWorkdirPath
     resource_policy: ResourcePolicy
 

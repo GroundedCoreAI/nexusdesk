@@ -14,6 +14,12 @@ per-stream backpressure: the stream that breaches its limit stops consuming
 failure after spawn cleans up in reverse through the same managed handle and
 fails closed (P4-UT-20). Secret values in the environment map never reach
 logs or error text (P4-UT-21).
+
+A spec may carry one bounded stdin payload (08 R18). Only that spec gets a
+stdin pipe - every other target keeps the historical ``DEVNULL`` start - and
+the write plus its EOF-close run inside a single bounded deadline, so a child
+that never reads or one that exits early fails the start closed instead of
+hanging the Worker.
 """
 
 import asyncio
@@ -43,6 +49,11 @@ logger = logging.getLogger(__name__)
 # Parameters are bounded lowercase tokens (case names, sizes); "/" and "\" are
 # deliberately excluded so a parameter can never smuggle a path.
 _PARAMETER_TOKEN = re.compile(r"^[a-z0-9][a-z0-9:._=-]{0,63}$")
+
+# One bounded deadline for the opt-in stdin channel (08 R18): it covers the
+# single write plus its drain. A child that never reads (deadlock) or exits
+# early must fail the start within a known window rather than hang the Worker.
+STDIN_DELIVERY_TIMEOUT_SECONDS = 10.0
 
 
 class UntrustedTargetError(ValueError):
@@ -243,11 +254,15 @@ class ProcessRunner:
         identity_capture: Callable[[int], Awaitable[str | None]] | None = None,
         clock: Callable[[], float] | None = None,
         preexec_factory: PreexecFactory | None = None,
+        stdin_delivery_timeout_seconds: float = STDIN_DELIVERY_TIMEOUT_SECONDS,
     ) -> None:
+        if stdin_delivery_timeout_seconds <= 0:
+            raise ValueError("stdin delivery timeout must be positive")
         self._registry = registry
         self._identity_capture = identity_capture or capture_start_token_async
         self._clock = clock or time.time
         self._preexec_factory = preexec_factory
+        self._stdin_timeout = stdin_delivery_timeout_seconds
 
     def resolve_trusted(self, spec: ProcessSpec) -> tuple[str, ...]:
         """Allowlist gate exposed to the Host for pre-record validation."""
@@ -269,18 +284,35 @@ class ProcessRunner:
 
         ``run_id``/``managed_id``/identity fields are caller (Host) supplied;
         the Runner never derives durable identities.
+
+        Ordering for the opt-in stdin channel (08 R18) is deliberate: the pumps
+        start before the payload is written, so a child whose stdout fills a
+        pipe cannot deadlock against the Host writing stdin; the handle is
+        assigned before delivery, so a failed delivery still runs the existing
+        ``hard_cleanup`` (which closes the pumps only through the handle).
         """
         argv = self._registry.resolve(spec)  # raises before any side effect
         if not working_dir.is_dir():
             raise ProcessSpawnError(REASON_PIPE_SETUP_FAILED, "workdir missing at spawn")
 
+        # The stdin channel must also fit the process wall budget (D22). The
+        # configured delivery timeout is only an upper bound: a tighter wall
+        # ceiling wins, including time already spent spawning and capturing
+        # identity. This uses the same monotonic clock as the delivery drain.
+        start_monotonic = asyncio.get_running_loop().time()
         preexec_fn = preexec or (
             self._preexec_factory(spec.resource_policy) if self._preexec_factory else None
         )
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
-                stdin=asyncio.subprocess.DEVNULL,
+                # 08 R18: only a spec that carries a payload gets a pipe; every
+                # other target keeps the historical DEVNULL start.
+                stdin=(
+                    asyncio.subprocess.PIPE
+                    if spec.stdin_payload is not None
+                    else asyncio.subprocess.DEVNULL
+                ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(working_dir),
@@ -318,6 +350,8 @@ class ProcessRunner:
             pump = StreamPump(process, spec.resource_policy.output_max_bytes_per_stream)
             pump.start()
             started = StartedProcess(managed=managed, process=process, pump=pump, spec=spec)
+            if spec.stdin_payload is not None:
+                await self._deliver_stdin(started, spec.stdin_payload, start_monotonic)
             return started
         except BaseException:
             # Reverse-order cleanup through the same handle: kill the group,
@@ -325,6 +359,54 @@ class ProcessRunner:
             # surfaced too - never an orphan left "unowned" (P4-UT-20).
             await self.hard_cleanup(started, process=process)
             raise
+
+    async def _deliver_stdin(
+        self, started: StartedProcess, payload: bytes, start_monotonic: float
+    ) -> None:
+        """Write one bounded payload then EOF, inside one deadline (08 R18).
+
+        Both failure modes are the same fail-closed outcome: a child that closes
+        its end early (``EPIPE``/``ECONNRESET`` -> ``OSError``) and a child that
+        never reads (deadline -> ``TimeoutError``) raise the existing
+        ``REASON_PIPE_SETUP_FAILED``. ``close()`` is mandatory because
+        ``codex exec … -`` starts its turn only after reading EOF; waiting on
+        ``wait_closed()`` is deliberately skipped (it logs asyncio noise after
+        the child exits and buys nothing). Only stable facts are logged - never
+        the payload.
+
+        D22: the deadline is the smaller of the configured delivery timeout and
+        the process wall budget left at this point. A 1-second wall therefore
+        cannot turn into a 10-second stdin wait.
+        """
+        stdin = started.process.stdin
+        if stdin is None:  # pragma: no cover - PIPE is configured for a payload
+            raise ProcessSpawnError(REASON_PIPE_SETUP_FAILED, "stdin pipe unavailable")
+        loop = asyncio.get_running_loop()
+        wall_remaining = max(
+            0.0,
+            float(started.spec.resource_policy.wall_seconds) - (loop.time() - start_monotonic),
+        )
+        deadline = loop.time() + min(self._stdin_timeout, wall_remaining)
+        reason: str | None = None
+        try:
+            stdin.write(payload)
+            await asyncio.wait_for(stdin.drain(), timeout=max(0.0, deadline - loop.time()))
+        except TimeoutError:
+            reason = "timeout"
+        except OSError:
+            reason = "closed_early"
+        try:
+            stdin.close()
+        except OSError:  # pragma: no cover - close rarely fails after a write error
+            reason = reason or "closed_early"
+        if reason is not None:
+            logger.warning(
+                "runtime host stdin delivery failed reason=%s executable_id=%s run_id=%s",
+                reason,
+                started.spec.executable_id,
+                started.managed.run_id,
+            )
+            raise ProcessSpawnError(REASON_PIPE_SETUP_FAILED, "stdin delivery failed")
 
     async def hard_cleanup(
         self, started: StartedProcess | None, *, process: asyncio.subprocess.Process | None = None
