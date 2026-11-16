@@ -403,6 +403,24 @@ def _runtime_fingerprint_exclude_fields() -> set[str]:
             or name == "execution_sandbox_provider"
         ),
         *(name for name in Settings.model_fields if name.startswith("codex_")),
+        # Phase 6 rollout/event/credential family: publisher switches, retention,
+        # parser limits, grant TTL, key path and the untrusted master gate are
+        # rollout controls, never Runtime assembly inputs (02 FR-16).
+        "execution_untrusted_tenants_enabled",
+        "execution_sandbox_required",
+        "execution_network_default_deny",
+        *(
+            name
+            for name in Settings.model_fields
+            if name.startswith(
+                (
+                    "execution_outbox_",
+                    "execution_event_",
+                    "execution_parser_",
+                    "execution_credential_",
+                )
+            )
+        ),
     }
 
 

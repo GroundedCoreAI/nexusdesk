@@ -172,6 +172,31 @@ class Settings(BaseSettings):
     execution_workdir_retention_seconds: int = Field(default=86_400, ge=0, le=7_776_000)
     execution_workdir_failed_retention_seconds: int = Field(default=604_800, ge=0, le=31_536_000)
     execution_workdir_cleanup_interval_seconds: float = Field(default=60.0, gt=0, le=86_400)
+    # Phase 6 reliability/event governance (02 FR-16, 03 §7). Every default is
+    # fail closed: untrusted execution off, sandbox required, egress denied,
+    # raw parser samples off, historical event cleanup off. The whole family is
+    # rollout/limit control and never enters the runtime configuration
+    # fingerprint, so flipping a switch cannot invalidate queued Runs.
+    execution_untrusted_tenants_enabled: bool = False
+    execution_sandbox_required: bool = True
+    execution_network_default_deny: bool = True
+    # Short-lived grant TTL with the deployment hard ceiling of 3600 seconds.
+    execution_credential_grant_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    # Installation-key path only; the key itself never lives in the repository
+    # and a missing/unreadable key fails closed (no auto-creation).
+    execution_credential_key_file: Path = Path("data/credentials/execution.key")
+    # Outbox controls only the publisher. Event identity, the trigger,
+    # Fencing, and redaction stay on in every state.
+    execution_outbox_enabled: bool = False
+    execution_outbox_batch_size: int = Field(default=100, ge=1, le=1000)
+    execution_outbox_poll_seconds: float = Field(default=1.0, gt=0, le=300)
+    # Eligible-data retention policy; cleanup stays off during rollout and can
+    # only advance the floor atomically with deletion when explicitly enabled.
+    execution_event_retention_days: int = Field(default=30, ge=1, le=3650)
+    execution_event_cleanup_enabled: bool = False
+    execution_parser_raw_sample_enabled: bool = False
+    execution_parser_sample_max_bytes: int = Field(default=1024, ge=64, le=4096)
+    execution_parser_max_diagnostics_per_minute: int = Field(default=10, ge=1, le=600)
     # Phase 5 (FR-12) stays opt-in and fail-closed. Every Codex switch defaults to
     # false and both allowlists default to empty, so an unconfigured deployment
     # denies every Codex execution at the stage gate instead of starting one. The
@@ -524,6 +549,24 @@ class Settings(BaseSettings):
             raise ValueError(
                 "execution_runtime_host_id must use the deployment slug grammar "
                 "(lowercase alphanumeric segments separated by . _ or -)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_execution_untrusted_gate(self):
+        # FR-4/FR-16: untrusted execution has no host fallback and no
+        # configuration-only strong sandbox. While the only shipped provider is
+        # Local, enabling exposure is rejected outright rather than silently
+        # degrading; T-08 adds the real Docker provider and its support probe.
+        if not self.execution_untrusted_tenants_enabled:
+            return self
+        if not self.execution_sandbox_required:
+            raise ValueError(
+                "execution_untrusted_tenants_enabled requires execution_sandbox_required"
+            )
+        if self.execution_sandbox_provider != "docker":
+            raise ValueError(
+                "execution_untrusted_tenants_enabled requires a strong sandbox provider"
             )
         return self
 
