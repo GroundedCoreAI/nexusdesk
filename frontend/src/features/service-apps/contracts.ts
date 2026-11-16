@@ -232,6 +232,52 @@ export interface ApplicationVersionPage {
     page_size: number;
 }
 
+export interface DeliveryOpenApplication {
+    id: string;
+    name: string;
+    enabled: boolean;
+    version_pin: number | null;
+    embed_enabled: boolean;
+    hosted: boolean;
+    hosted_key: string | null;
+    origins: string[];
+    active_keys: number;
+}
+
+export interface DeliveryChannel {
+    id: string;
+    name: string;
+    provider: string;
+    enabled: boolean;
+    application_version: number;
+    credentials_configured: boolean;
+}
+
+export interface DeliveryVersion {
+    version: number;
+    created_at: string;
+    channel_references: number;
+    open_application_references: number;
+    follows_latest_references: number;
+}
+
+export interface ApplicationDelivery {
+    id: string;
+    key: string;
+    name: string;
+    status: ApplicationStatus;
+    published_version: number | null;
+    published_at: string | null;
+    draft_revision: number;
+    has_unpublished_changes: boolean;
+    open_applications: DeliveryOpenApplication[];
+    channels: DeliveryChannel[];
+    versions: DeliveryVersion[];
+    version_total: number;
+    version_page: number;
+    version_page_size: number;
+}
+
 export interface ReadinessCheck {
     key: string;
     title: string;

@@ -1496,3 +1496,378 @@
   .module-service-apps .sa-pagination-bar { justify-content: flex-start; overflow-x: auto; }
   .console-layout.service-apps-shell .console-header { padding: 10px 16px; }
 }
+
+/* Delivery tab */
+
+.module-service-apps .sa-delivery-loading {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+}
+
+.module-service-apps .sa-delivery-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: #fff;
+  border: 1px solid var(--sa-line);
+  border-radius: 13px;
+}
+
+.module-service-apps .sa-delivery-status.offline {
+  background: #fbfbfd;
+}
+
+.module-service-apps .sa-delivery-status-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  min-width: 0;
+}
+
+.module-service-apps .sa-delivery-status-label {
+  color: var(--sa-muted);
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-status-main strong {
+  color: #363b4b;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.module-service-apps .sa-delivery-status-hint {
+  color: var(--sa-subtle);
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-status-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--sa-line);
+}
+
+.module-service-apps .sa-delivery-status-warn {
+  color: var(--sa-warning);
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-offline {
+  height: 32px;
+  color: var(--sa-danger);
+  border-color: #f0c2c7;
+  background: #fff;
+}
+
+.module-service-apps .sa-delivery-offline:hover {
+  color: var(--sa-danger) !important;
+  border-color: var(--sa-danger) !important;
+  background: #fdf3f4;
+}
+
+.module-service-apps .sa-delivery-checks-meta {
+  margin: -4px 0 12px;
+  color: var(--sa-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.module-service-apps .sa-delivery-checks .sa-readiness-list {
+  gap: 8px;
+}
+
+.module-service-apps .sa-delivery-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.module-service-apps .sa-delivery-card {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid var(--sa-line);
+  border-radius: 13px;
+}
+
+.module-service-apps .sa-delivery-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.module-service-apps .sa-delivery-card-head h3 {
+  margin: 0;
+  color: var(--sa-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.module-service-apps .sa-delivery-card-icon {
+  color: var(--sa-subtle);
+  font-size: 14px;
+}
+
+.module-service-apps .sa-delivery-app-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.module-service-apps .sa-delivery-app-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-delivery-app-name .anticon { color: var(--sa-accent); }
+
+.module-service-apps .sa-delivery-app-pin {
+  color: var(--sa-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-delivery-modes {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.module-service-apps .sa-delivery-mode {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  background: #fbfbfd;
+  border: 1px solid #eff0f4;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-mode > span:not(.sa-delivery-dot) { flex: 1; color: #4a5060; }
+
+.module-service-apps .sa-delivery-mode em {
+  color: var(--sa-muted);
+  font-size: 10px;
+  font-style: normal;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-delivery-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid #c6cad6;
+  box-sizing: border-box;
+}
+
+.module-service-apps .sa-delivery-dot.on {
+  background: var(--sa-success);
+  border-color: var(--sa-success);
+  box-shadow: 0 0 0 3px rgba(23, 135, 95, 0.13);
+}
+
+.module-service-apps .sa-delivery-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.module-service-apps .sa-delivery-card-foot .ant-btn-link {
+  padding-inline: 4px;
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-muted {
+  color: var(--sa-muted);
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-empty {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.module-service-apps .sa-delivery-empty .sa-delivery-mode {
+  background: #fafafc;
+  border: 1px dashed #e2e4ec;
+  color: var(--sa-muted);
+}
+
+.module-service-apps .sa-delivery-empty .sa-delivery-mode > span:not(.sa-delivery-dot) {
+  color: var(--sa-muted);
+}
+
+.module-service-apps .sa-delivery-empty .sa-delivery-mode em { color: var(--sa-subtle); }
+
+.module-service-apps .sa-delivery-empty-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.module-service-apps .sa-delivery-empty .ant-alert {
+  margin-top: auto;
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-empty .ant-btn-primary {
+  justify-self: flex-start;
+  height: 32px;
+  background: var(--sa-accent);
+  border-color: var(--sa-accent);
+}
+
+.module-service-apps .sa-delivery-versions,
+.module-service-apps .sa-delivery-channels {
+  display: grid;
+  gap: 6px;
+}
+
+.module-service-apps .sa-delivery-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px dashed #eef0f4;
+}
+
+.module-service-apps .sa-delivery-pager .ant-btn-link {
+  padding-inline: 4px;
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-version-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  background: #fbfbfd;
+  border: 1px solid #eff0f4;
+  border-radius: 8px;
+}
+
+.module-service-apps .sa-delivery-version-row.current {
+  background: var(--sa-accent-soft);
+  border-color: #e2e0ff;
+}
+
+.module-service-apps .sa-delivery-version-meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.module-service-apps .sa-delivery-version-meta span {
+  font-size: 11px;
+  color: #4a5060;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-delivery-version-meta em {
+  color: var(--sa-subtle);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.module-service-apps .sa-delivery-current-tag {
+  color: var(--sa-accent-deep);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-delivery-channel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  background: #fbfbfd;
+  border: 1px solid #eff0f4;
+  border-radius: 8px;
+}
+
+.module-service-apps .sa-delivery-channel-avatar {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  background: #eaf0fb;
+  border-radius: 50%;
+  color: #3d63a8;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.module-service-apps .sa-delivery-channel-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.module-service-apps .sa-delivery-channel-main strong {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-service-apps .sa-delivery-channel-main span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--sa-muted);
+  font-size: 10px;
+}
+
+.module-service-apps .sa-delivery-channel-main .ant-tag {
+  margin-inline-end: 2px;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.module-service-apps .sa-delivery-footnote {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  color: var(--sa-subtle);
+  font-size: 11px;
+}
+
+.module-service-apps .sa-delivery-footnote .anticon { color: var(--sa-subtle); }
+
+@media (max-width: 960px) {
+  .module-service-apps .sa-delivery-grid { grid-template-columns: 1fr; }
+  .module-service-apps .sa-delivery-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .module-service-apps .sa-delivery-status-actions { align-self: flex-end; }
+}

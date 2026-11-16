@@ -1513,6 +1513,161 @@ FOR UPDATE
         result["total_pages"] = (total + page_size - 1) // page_size
         return result
 
+    async def delivery(
+        self,
+        tenant: str,
+        key: str,
+        *,
+        scope: BusinessScope | None = None,
+        version_page: int = 1,
+        version_page_size: int = 5,
+    ) -> dict[str, Any]:
+        """Aggregate every outbound exit of one service application.
+
+        A release only mints an internal version; what the application exposes
+        to real users lives in three other places: open-platform applications
+        bound through ``open_application_targets`` (with the embed switches in
+        ``open_embed_configs``) and channels pinned to a specific version.
+        Reading them behind one endpoint keeps the delivery tab from paging a
+        tenant-wide catalog just to find its own bindings, and it keeps the
+        "which version is each exit running" answer in one consistent snapshot.
+        """
+        resolved = persisted_scope(tenant, scope)
+        async with self.engine.connect() as connection:
+            row = await self._row(connection, tenant, resolved, key=key)
+            open_applications = await many(
+                connection,
+                """
+SELECT o.id,o.name,o.enabled,x.version_pin,
+       COALESCE(e.enabled,false) AS embed_enabled,
+       COALESCE(e.hosted,false) AS hosted,
+       e.hosted_key,
+       COALESCE(e.origins,'{}'::text[]) AS origins,
+       (SELECT count(*) FROM open_api_keys k
+         WHERE k.app_id=o.id AND k.revoked_at IS NULL
+           AND (k.expires_at IS NULL OR k.expires_at>now())) AS active_keys
+FROM open_application_targets x
+JOIN open_applications o ON o.id=x.app_id AND o.tenant_id=:tenant
+LEFT JOIN open_embed_configs e ON e.app_id=o.id
+WHERE x.target_kind='service_application' AND x.target_id=:application
+ORDER BY o.created_at DESC,o.id
+""",
+                tenant=tenant,
+                application=row["id"],
+            )
+            channel_rows = await many(
+                connection,
+                """
+SELECT id,name,provider,enabled,application_version,
+       encrypted_credentials IS NOT NULL AS credentials_configured
+FROM channels
+WHERE tenant_id=:tenant AND business_id=:scope_business
+  AND workspace_id=:scope_workspace AND application_id=:application
+ORDER BY created_at DESC,id
+""",
+                tenant=tenant,
+                application=row["id"],
+                scope_business=resolved.business_id,
+                scope_workspace=resolved.workspace_id,
+            )
+            version_rows = await many(
+                connection,
+                """
+SELECT version,created_at FROM service_application_versions
+WHERE tenant_id=:tenant AND business_id=:scope_business
+  AND workspace_id=:scope_workspace AND application_id=:application
+ORDER BY version DESC LIMIT :limit OFFSET :offset
+""",
+                tenant=tenant,
+                application=row["id"],
+                scope_business=resolved.business_id,
+                scope_workspace=resolved.workspace_id,
+                limit=version_page_size,
+                offset=(version_page - 1) * version_page_size,
+            )
+            # The tab only renders the newest few versions; the total lets the
+            # UI say "showing 8 of N" instead of silently truncating history.
+            version_total = (await one(
+                connection,
+                """
+SELECT count(*) AS total FROM service_application_versions
+WHERE tenant_id=:tenant AND business_id=:scope_business
+  AND workspace_id=:scope_workspace AND application_id=:application
+""",
+                tenant=tenant,
+                application=row["id"],
+                scope_business=resolved.business_id,
+                scope_workspace=resolved.workspace_id,
+            ))["total"]
+        published_version = row.get("published_version")
+        # ``version_pin`` empty means "follow the newest release", so those
+        # bindings count against the published version rather than as unpinned
+        # references that belong to no version at all.
+        pinned_counts: dict[int, int] = {}
+        following = 0
+        for item in open_applications:
+            pin = item.get("version_pin")
+            if pin is None:
+                if published_version is not None:
+                    following += 1
+                continue
+            pinned_counts[pin] = pinned_counts.get(pin, 0) + 1
+        channel_counts: dict[int, int] = {}
+        for item in channel_rows:
+            version = item["application_version"]
+            channel_counts[version] = channel_counts.get(version, 0) + 1
+        versions = [
+            {
+                "version": item["version"],
+                "created_at": item["created_at"],
+                "channel_references": channel_counts.get(item["version"], 0),
+                "open_application_references": pinned_counts.get(item["version"], 0),
+                "follows_latest_references": following
+                if item["version"] == published_version
+                else 0,
+            }
+            for item in version_rows
+        ]
+        return {
+            "id": str(row["id"]),
+            "key": row["application_key"],
+            "name": row["name"],
+            "status": row["status"],
+            "published_version": published_version,
+            "published_at": row.get("published_at"),
+            "draft_revision": row["draft_revision"],
+            "has_unpublished_changes": self._summary(row)["has_unpublished_changes"],
+            "open_applications": [
+                {
+                    "id": str(item["id"]),
+                    "name": item["name"],
+                    "enabled": bool(item["enabled"]),
+                    "version_pin": item.get("version_pin"),
+                    "embed_enabled": bool(item["embed_enabled"]),
+                    "hosted": bool(item["hosted"]),
+                    "hosted_key": item.get("hosted_key"),
+                    "origins": list(item.get("origins") or []),
+                    "active_keys": int(item["active_keys"]),
+                }
+                for item in open_applications
+            ],
+            "channels": [
+                {
+                    "id": str(item["id"]),
+                    "name": item["name"],
+                    "provider": item["provider"],
+                    "enabled": bool(item["enabled"]),
+                    "application_version": item["application_version"],
+                    "credentials_configured": bool(item["credentials_configured"]),
+                }
+                for item in channel_rows
+            ],
+            "versions": versions,
+            "version_total": int(version_total),
+            "version_page": version_page,
+            "version_page_size": version_page_size,
+        }
+
     async def rollback(
         self,
         tenant: str,
