@@ -23,7 +23,9 @@
   margin-right: 8px;
   border-right: 1px solid var(--workspace-line);
 }
-.agent-topbar strong { font-size: 15px; font-weight: 600; max-width: 220px; }
+.agent-topbar strong { font-size: 15px; font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-topbar .agent-name-edit { height: 26px; min-width: 26px; padding-inline: 4px; color: #9298a4; }
+.agent-topbar .agent-name-edit:not(:disabled):hover { color: var(--ui-accent); }
 .agent-topbar .ant-btn { height: 36px; padding-inline: 14px; font-size: 13px; box-shadow: none; }
 .agent-topbar .ant-btn-text { color: #737988; padding-inline: 4px; }
 .agent-topbar .ant-btn-primary { padding-inline: 22px; box-shadow: 0 3px 8px var(--ui-accent)1c; }

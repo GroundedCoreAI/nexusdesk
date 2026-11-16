@@ -14,9 +14,13 @@ export function resolveLocale(value: string): Locale | null {
   if (/^hi($|-)/i.test(value)) return 'hi';
   return null;
 }
+export function detectBrowserLocale(): Locale {
+  const browserLanguages = [...(navigator.languages ?? []), navigator.language].filter(Boolean);
+  return browserLanguages.map(resolveLocale).find((value): value is Locale => value !== null) ?? 'zh-CN';
+}
 function initialLocale(): Locale {
   try { const saved=localStorage.getItem(LOCALE_KEY); if(saved && ['zh-CN','zh-TW','en','hi'].includes(saved)) return saved as Locale; } catch { /* Storage can be disabled. */ }
-  return navigator.languages.map(resolveLocale).find(Boolean) || 'zh-CN';
+  return detectBrowserLocale();
 }
 void i18n.use(initReactI18next).init({
   lng:initialLocale(), fallbackLng:'zh-CN', supportedLngs:['zh-CN','zh-TW','en','hi'],

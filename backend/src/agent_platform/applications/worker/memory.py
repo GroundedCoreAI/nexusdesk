@@ -12,6 +12,7 @@ import asyncio
 import logging
 
 from agent_platform.applications.customer_service.runtime_composition import runtime_services
+from agent_platform.applications.platform_runtime.worker_heartbeat import start_heartbeat
 from agent_platform.business_capabilities.memory.bootstrap import build_memory_worker
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
@@ -22,10 +23,13 @@ async def main(settings=None):
     settings = settings or Settings()
     async with runtime_services(settings) as services:
         worker = build_memory_worker(services.groups, settings)
+        beat = start_heartbeat(services.groups.runtime.engine, "memory")
         try:
             await worker.serve()
         finally:
             worker.stop()
+            beat.cancel()
+            await asyncio.gather(beat, return_exceptions=True)
 
 
 if __name__ == "__main__":

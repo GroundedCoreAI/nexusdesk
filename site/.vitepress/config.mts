@@ -25,13 +25,19 @@ function nav(locale: 'zh' | 'en') {
 }
 
 function sidebar(locale: 'zh' | 'en') {
+  // Pages are an explicit allowlist in `nav.mjs`; a page may nest child pages
+  // (for example 业务场景 → 智能客服 → 推荐问题设计取舍) and the sidebar
+  // mirrors that shape.
+  const pageItem = (page: any): any => ({
+    text: locale === 'en' ? page.en : page.zh,
+    link: prefix(locale, page.slug),
+    ...(page.children?.length ? { items: page.children.map((child: any) => pageItem(child)) } : {}),
+  })
+
   const items = groups.map((group) => ({
     text: locale === 'en' ? group.en : group.zh,
     collapsed: false,
-    items: group.pages.map((page) => ({
-      text: locale === 'en' ? page.en : page.zh,
-      link: prefix(locale, page.slug),
-    })),
+    items: group.pages.map((page) => pageItem(page)),
   }))
   // Keyed by section so the landing page (outside these prefixes) stays clean.
   const keyed: Record<string, typeof items> = {}

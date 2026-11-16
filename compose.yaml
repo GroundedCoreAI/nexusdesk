@@ -1,6 +1,9 @@
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    # 允许直接复用 Windows 原生 PG 的数据目录（其中 dynamic_shared_memory_type=windows
+    # 在 Linux 容器里无效，这里覆盖为 posix）。
+    command: ["postgres", "-c", "dynamic_shared_memory_type=posix"]
     environment:
       POSTGRES_DB: agent_platform
       POSTGRES_USER: agent

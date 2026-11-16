@@ -197,8 +197,26 @@ def test_0059_revision_chain_is_a_single_head_on_0058():
     assert migration.down_revision == PREVIOUS_REVISION
     assert migration.branch_labels is None
     assert migration.depends_on is None
-    # 08 R-1: 0059 must be the only head; a divergent chain is a planning defect.
-    assert scripts.get_heads() == [REVISION]
+    # 08 R-1: 0059 must stay on the single linear chain; a divergent chain is a
+    # planning defect. A later feature branch may merge two heads on top of it
+    # (0067_merge_heads does), so the invariant is "exactly one head, and 0059
+    # is an ancestor of that head".
+    heads = scripts.get_heads()
+    assert len(heads) == 1, heads
+    # Walk every down_revision edge: the head may be a merge revision, so a
+    # single-parent walk would only ever see one side of the graph.
+    lineage: set[str] = set()
+    pending = [heads[0]]
+    while pending:
+        revision_id = pending.pop()
+        if revision_id in lineage:
+            continue
+        lineage.add(revision_id)
+        down = scripts.get_revision(revision_id).down_revision
+        if down is None:
+            continue
+        pending.extend(down if isinstance(down, tuple) else (down,))
+    assert REVISION in lineage, sorted(lineage)
 
 
 def test_0059_upgrade_sql_contract_is_two_tables_and_five_indexes(monkeypatch):
@@ -273,7 +291,8 @@ def test_0059_chain_fk_semantics_and_reacts_across_upgrade(migration_database):
     # Idempotent chain: a second upgrade to head is a no-op, not an error.
     assert migrate(url, "head").returncode == 0
 
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == REVISION
+    head = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads()[0]
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == head
     assert _tables(url) >= {"execution_workdirs", "runtime_host_processes"}
     assert _runtime_columns(url) == columns_before
 

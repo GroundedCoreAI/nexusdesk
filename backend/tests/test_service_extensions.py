@@ -8,7 +8,7 @@ import httpx
 import pytest
 from sqlalchemy import text
 from test_model_gateway import setup as setup_model
-from test_platform_postgres import conversation, create_agent
+from test_platform_postgres import conversation, create_agent, create_published_application
 from test_platform_postgres import platform as _platform_fixture
 
 from agent_platform.business_capabilities.evaluation.scoring import (
@@ -388,12 +388,14 @@ async def test_channel_signature_and_token_rotation(platform, monkeypatch):
     client, _, _ = platform
     agent, _ = await create_agent(client)
     monkeypatch.setenv("AGENT_CHANNEL_SECRET_TEST", "test-secret")
+    application = await create_published_application(client, agent)
     channel = (
         await client.post(
             "/api/v1/channels",
             json={
                 "name": "signed",
-                "agent_id": agent["id"],
+                "application_id": application["id"],
+                "application_version": application["published_version"],
                 "signing_secret_ref": "AGENT_CHANNEL_SECRET_TEST",
             },
         )
@@ -486,7 +488,15 @@ async def test_milvus_contract_and_postfilter(platform):
         index = VectorIndex(
             services.groups.runtime.engine,
             services.groups.runtime.gateway,
-            settings.model_copy(update={"milvus_url": "http://localhost:19530"}),
+            # This case pins the Milvus REST contract, so the backend must be
+            # Milvus even though ``knowledge_vector_backend`` defaults to pgvector
+            # and the CI database ships no ``vector`` extension.
+            settings.model_copy(
+                update={
+                    "milvus_url": "http://localhost:19530",
+                    "knowledge_vector_backend": "milvus",
+                }
+            ),
             mock,
         )
         result = await index.build(

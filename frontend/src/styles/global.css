@@ -9,5 +9,17 @@
 .trace-verdict .ant-tag{margin-inline-end:0}
 .trace-raw>summary{font-size:12px;font-weight:600;color:#697b73;cursor:pointer;padding:6px 0}
 .trace-raw>details>summary{font-size:12px}
+.trace-recall{border:1px solid #e2ece4;border-radius:8px;padding:10px 12px;margin:4px 0 10px;background:#fbfdfb}
+.trace-recall-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;padding-bottom:8px;border-bottom:1px dashed #e4ebe3}
+.trace-recall-head strong{font-size:12px;color:#31564a}
+.trace-recall-head .mono{color:#4d665a;overflow-wrap:anywhere}
+.trace-recall-hit{padding:9px 0;border-bottom:1px solid #f0f4ef}
+.trace-recall-hit:last-child{border-bottom:0;padding-bottom:0}
+.trace-recall-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.trace-recall-rank{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:5px;background:#e6efe6;color:#4a6b55;font-size:10px;font-weight:600}
+.trace-recall-scores{font-size:11px;margin-top:3px}
+.trace-recall-text{white-space:pre-wrap;overflow-wrap:anywhere;font-family:"Cascadia Code",Consolas,monospace;font-size:11px;line-height:1.7;color:#4a5c52;background:#f5f8f4;border-radius:6px;padding:8px 10px;margin:6px 0 0}
+/* Trace is a debugging surface: show the whole recall instead of a 380px peephole. */
+.trace{max-height:min(70vh,760px)}
 
 }

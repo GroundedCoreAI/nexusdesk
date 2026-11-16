@@ -63,11 +63,10 @@ NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
   docker compose -f deploy/quickstart/compose.yaml up -d
 ```
 
-Once it is running, open **https://localhost:8080** and enter the `sample-support` conversation:
-
-- Enter `发货需要多久？` ("How long does shipping take?") to try knowledge Q&A.
-- Enter `帮我创建工单` ("Create a ticket for me") to try ticket drafting, human confirmation, and
-  creation.
+Once it is running, open **https://localhost:8080** and go to **Service applications**. Quickstart
+installs four immutable service-application examples (game, shopping, creator, and mobility).
+Open an example preview, then copy it into your workspace before configuring connections or
+editing skills.
 
 Quickstart mode ships with a self-signed certificate, so the first visit warns that the certificate
 is untrusted. See the [deployment guide](deploy/README.md#体验模式的-https) for certificate
@@ -114,7 +113,7 @@ The production topology includes six long-running services — API, Runtime Work
 Knowledge Worker, Memory Worker, and Web — plus a one-shot migration job.
 
 Both Compose files ship a demo business upstream (`mock-business`, started with the stack by
-default) for wiring up the industry packs' data executors: 25 business endpoints, a uniform
+default) for wiring up service-application connections: 25 business endpoints, a uniform
 `{code,message,data}` envelope, and on-demand 5xx injection. Inside the Compose network it answers
 at `http://mock-business:8010`; from the host use `http://127.0.0.1:8010`.
 

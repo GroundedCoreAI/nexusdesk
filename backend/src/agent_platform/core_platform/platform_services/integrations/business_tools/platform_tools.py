@@ -24,10 +24,13 @@ __all__ = ["PlatformTools"]
 
 
 class PlatformTools:
-    def __init__(self, http, bindings: RuntimeBindings, row, allowed, kb_ids, emit):
+    def __init__(self, http, bindings: RuntimeBindings, row, allowed, kb_ids, emit, skill_tools=frozenset()):
         self.http, self.row = http, row
         self.bindings = bindings
         self.allowed, self.kb_ids, self.emit = allowed, [UUID(k) for k in kb_ids], emit
+        # Tool names an application snapshot authorises directly (its skills);
+        # they are not registered tools, so policy must not demand a registry row.
+        self.skill_tools = frozenset(skill_tools)
         self.extensions = bindings.extensions
         self.harness = ToolExecutionHarness()
         # Contributions arrive from the composition root; Core has no default that
@@ -77,7 +80,13 @@ class PlatformTools:
         handler = self.handlers.resolve(name)
         if handler is None or self.extensions is None:
             return True
-        return self.extensions.is_enabled(handler.definition.capability)
+        capability = handler.definition.capability
+        # Only a registered capability gates execution. Plain HTTP skills report
+        # "external-tool", which no business capability owns; gating it would
+        # disable every application skill that is not a contributed handler.
+        if self.extensions.get(capability) is None:
+            return True
+        return self.extensions.is_enabled(capability)
 
     def _execution_context(self):
         return ToolExecutionContext(
@@ -200,8 +209,15 @@ class PlatformTools:
                 raise DomainError("capability_disabled", 409)
             policy = self.bindings.policy
             if hasattr(policy, "evaluate_tool"):
+                # Only application runs carry skill tools; an empty exemption
+                # set keeps duck-typed policies on their existing signature.
+                exempt = {"registry_exempt": self.skill_tools} if self.skill_tools else {}
                 decision = await policy.evaluate_tool(
-                    self._execution_context(), name, self.allowed, self._risk(name)
+                    self._execution_context(),
+                    name,
+                    self.allowed,
+                    self._risk(name),
+                    **exempt,
                 )
                 if not decision.allowed:
                     raise DomainError("tool_not_allowed", 403)

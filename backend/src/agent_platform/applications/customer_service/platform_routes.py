@@ -163,7 +163,8 @@ class TicketUpdate(Input):
 
 
 class ChannelInput(NameInput):
-    agent_id: UUID
+    application_id: UUID
+    application_version: int = Field(ge=1)
     signing_secret_ref: str | None = Field(
         default=None, pattern=r"^AGENT_CHANNEL_SECRET_[A-Z0-9_]+$"
     )
@@ -175,6 +176,10 @@ class ChannelInput(NameInput):
 class ChannelUpdateInput(Input):
     config: dict[str, object] | None = None
     credentials: dict[str, str] | None = None
+
+
+class ChannelApplicationVersionInput(Input):
+    application_version: int = Field(ge=1)
 
 
 class ExecutionConfigFlagsOutput(BaseModel):
@@ -1374,11 +1379,27 @@ async def channel(body: ChannelInput, request: Request, user: Admin):
         user.tenant,
         user.actor,
         body.name,
-        body.agent_id,
+        body.application_id,
+        body.application_version,
         body.signing_secret_ref,
         provider=body.provider,
         config=body.config,
         credentials=body.credentials,
+    )
+
+
+@router.put("/channels/{cid}/application-version")
+async def switch_channel_application_version(
+    cid: UUID,
+    body: ChannelApplicationVersionInput,
+    request: Request,
+    user: Admin,
+):
+    return await business(request).channels.switch_application_version(
+        user.tenant,
+        user.actor,
+        cid,
+        body.application_version,
     )
 
 
@@ -1396,6 +1417,11 @@ async def configure_channel(cid: UUID, body: ChannelUpdateInput, request: Reques
 @router.patch("/channels/{cid}")
 async def toggle_channel(cid: UUID, body: EnabledInput, request: Request, user: Admin):
     return await business(request).channels.toggle(user.tenant, user.actor, cid, body.enabled)
+
+
+@router.delete("/channels/{cid}", status_code=204)
+async def delete_channel(cid: UUID, request: Request, user: Admin):
+    await business(request).channels.delete(user.tenant, user.actor, cid)
 
 
 @router.post("/channels/{cid}/rotate-token")

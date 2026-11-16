@@ -70,6 +70,11 @@ class ProviderInput(BaseModel):
 class EmbedInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     enabled: bool = False
+    # ``hosted`` opens a public page that visitors can use without signing in,
+    # so it is deliberately independent of ``enabled`` (the iframe switch) and
+    # does not need ``origins``: nobody embeds it.
+    hosted: bool = False
+    welcome: str = Field(default="", max_length=500)
     origins: list[str] = Field(default_factory=list, max_length=30)
     provider_ids: list[UUID] = Field(default_factory=list, max_length=20)
     title: str = Field(default="企业助手", min_length=1, max_length=80)
@@ -170,14 +175,23 @@ class Enterprise:
                 await self.provider(c, pid)
             if body.enabled and not body.origins:
                 raise DomainError("embed_origin_required", 422)
+            # The public link is minted once and kept stable, so enabling the
+            # page twice does not break links already handed out.
+            hosted_key = (old or {}).get("hosted_key") or (
+                secrets.token_urlsafe(12) if body.hosted else None
+            )
             row = await one(
                 c,
-                """INSERT INTO open_embed_configs(app_id,enabled,origins,provider_ids,title,color)
-                VALUES(:a,:enabled,:origins,:providers,:title,:color) ON CONFLICT(app_id) DO UPDATE SET
-                enabled=:enabled,origins=:origins,provider_ids=:providers,title=:title,color=:color,
+                """INSERT INTO open_embed_configs(app_id,enabled,hosted,hosted_key,welcome,origins,provider_ids,title,color)
+                VALUES(:a,:enabled,:hosted,:key,:welcome,:origins,:providers,:title,:color) ON CONFLICT(app_id) DO UPDATE SET
+                enabled=:enabled,hosted=:hosted,hosted_key=:key,welcome=:welcome,origins=:origins,
+                provider_ids=:providers,title=:title,color=:color,
                 revision=open_embed_configs.revision+1 RETURNING *""",
                 a=app_id,
                 enabled=body.enabled,
+                hosted=body.hosted,
+                key=hosted_key,
+                welcome=body.welcome,
                 origins=body.origins,
                 providers=body.provider_ids,
                 title=body.title,
@@ -185,6 +199,49 @@ class Enterprise:
             )
             await audit(c, self.tenant, actor, "open_embed.saved", app_id)
             return row
+
+    async def rotate_hosted_key(self, actor, app_id):
+        """Replace the public link segment; existing hosted visitors lose access."""
+
+        async with self.engine.begin() as c:
+            await self.s.application(c, self.tenant, app_id, True)
+            row = await one(
+                c,
+                """UPDATE open_embed_configs SET hosted_key=:key,revision=revision+1
+                WHERE app_id=:a RETURNING *""",
+                a=app_id,
+                key=secrets.token_urlsafe(12),
+            )
+            if not row:
+                raise DomainError("embed_config_not_found", 404)
+            await execute(
+                c,
+                """UPDATE enterprise_sessions SET revoked=true WHERE app_id=:a
+                AND provider_id IS NULL AND embed_revision IS NULL""",
+                a=app_id,
+            )
+            await audit(c, self.tenant, actor, "open_embed.hosted_key_rotated", app_id)
+            return row
+
+    async def hosted(self, c, key, lock=False):
+        """Resolve a public page by its link segment, or fail as not found.
+
+        An unknown key, a disabled page and a disabled application are reported
+        identically so the public endpoint cannot be used to probe which links
+        exist.
+        """
+
+        row = await one(
+            c,
+            """SELECT e.*,a.name AS app_name,a.enabled AS app_enabled
+            FROM open_embed_configs e JOIN open_applications a ON a.id=e.app_id
+            WHERE e.hosted_key=:k AND a.tenant_id=:t""" + (" FOR UPDATE OF e" if lock else ""),
+            k=key,
+            t=self.tenant,
+        )
+        if not row or not row["hosted"] or not row["app_enabled"]:
+            raise DomainError("hosted_page_not_found", 404)
+        return row
 
     async def embed(self, c, app_id, parent_origin):
         app = await self.s.application(c, self.tenant, app_id)
@@ -243,13 +300,15 @@ class Enterprise:
         embed_revision=None,
         ip=None,
         user_agent=None,
+        ttl_minutes=None,
     ):
         if not user["enabled"]:
             raise DomainError("enterprise_user_disabled", 403)
         if not app_id and not user["role"]:
             raise DomainError("workbench_access_pending", 403)
         token = ("chat_" if app_id else "ssow_") + secrets.token_urlsafe(32)
-        expiry = datetime.now(UTC) + timedelta(minutes=15 if app_id else 60)
+        minutes = ttl_minutes or (15 if app_id else 60)
+        expiry = datetime.now(UTC) + timedelta(minutes=minutes)
         await execute(
             c,
             """INSERT INTO enterprise_sessions(
@@ -277,7 +336,7 @@ class Enterprise:
         return {
             "access_token": token,
             "token_type": "Bearer",
-            "expires_in": 900 if app_id else 3600,
+            "expires_in": minutes * 60,
             "external_user_id": "enterprise:" + str(user["id"]),
             "user": {"id": user["id"], "name": user["name"], "role": user["role"]},
         }
@@ -306,7 +365,12 @@ class Enterprise:
             embed = await one(
                 c, "SELECT * FROM open_embed_configs WHERE app_id=:a", a=row["app_id"]
             )
-            if (
+            if row["provider_id"] is None and row["embed_revision"] is None:
+                # Hosted-page visitor: nobody signed in, so the only gate is the
+                # public-page switch. Toggling it off drops every open page.
+                if not embed or not embed["hosted"]:
+                    raise DomainError("hosted_page_disabled", 401)
+            elif (
                 not embed
                 or not embed["enabled"]
                 or embed["revision"] != row["embed_revision"]

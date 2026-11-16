@@ -2486,11 +2486,17 @@ def _canonical_event(event: dict[str, object], *, parallel: bool, model_round: i
         raise TypeError("event data must be a mapping")
     kind = normalized["type"]
     if kind in {"model.completed", "tool.completed"}:
-        if "gateway_call_id" not in data:
-            raise ValueError("missing gateway_call_id")
-        if data["gateway_call_id"] is not None and not isinstance(data["gateway_call_id"], str):
-            raise TypeError("gateway_call_id must be nullable string")
-        data["gateway_call_id"] = "<gateway_call_id>"
+        # A model round is linked to a gateway ledger call; a tool call is linked
+        # to a tool-operation ledger id. Both ledgers are normalised under
+        # whichever field name the engine wrote for that event kind.
+        id_fields = ("gateway_call_id",) if kind == "model.completed" else ("gateway_call_id", "operation_id")
+        present = [name for name in id_fields if name in data]
+        if not present:
+            raise ValueError(f"missing {id_fields[0]}")
+        for name in present:
+            if data[name] is not None and not isinstance(data[name], str):
+                raise TypeError(f"{name} must be nullable string")
+            data[name] = f"<{name}>"
         _require_duration(data, "duration_ms")
         data["duration_ms"] = 0
     if kind == "model.completed":

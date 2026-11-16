@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect,useState} from 'react';
 import {Alert,App,Button,Card,Form,Input,Modal,Pagination,Select,Space,Switch,Table,Tabs,Tag,Typography} from 'antd';
 import {ArrowLeftOutlined,PlusOutlined,ReloadOutlined} from '@ant-design/icons';
 import {t} from '../../i18n';
@@ -53,20 +53,67 @@ export function IdentityPage({back}:{back:()=>void}) {
   </div>;
 }
 
-interface EmbedConfig {enabled:boolean;origins:string[];provider_ids:string[];title:string;color:string;revision:number}
+interface EmbedConfig {enabled:boolean;hosted:boolean;hosted_key:string|null;welcome:string;origins:string[];provider_ids:string[];title:string;color:string;revision:number}
+/** Turn the documented error codes into something a person can act on. */
+function embedError(e:unknown) {
+  const raw=e instanceof Error?e.message:String(e),code=raw.replace(/^\d+\s·\s*/,'');
+  const known:Record<string,string>={
+    embed_origin_required:t('启用嵌入聊天时，至少填写一个允许的来源地址。'),
+    embed_revision_conflict:t('配置已被其他人修改，请刷新页面后重试。'),
+    embed_origin_not_allowed:t('该来源地址不在允许列表中。'),
+  };
+  if(known[code])return known[code];
+  return raw.startsWith('422')?t('有配置项未通过校验，请检查来源地址等字段。'):raw;
+}
 export function EmbedSettings({app}:{app:Application}) {
-  const {admin}=useAccess(),{message}=App.useApp(),[form]=Form.useForm();
+  const {admin}=useAccess(),{message,modal}=App.useApp(),[form]=Form.useForm();
   const config=useResource<EmbedConfig|null>(admin?`/open-platform/applications/${app.id}/embed`:null),providers=useResource<Provider[]>(admin?`${ROOT}/providers`:null);
-  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
+  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[draft,setDraft]=useState('');
+  // The form mounts before the config request resolves (useResource starts
+  // with loading=false), and a key-based remount does not re-apply
+  // initialValues because the form store persists. Push server state in
+  // explicitly whenever the config arrives or changes.
+  useEffect(()=>{
+    if(config.data){form.resetFields();form.setFieldsValue(config.data);}
+  },[config.data,form]);
   if(!admin)return <Alert type="warning" title={t('仅管理员可管理企业身份')}/>;
   if(config.loading)return <Card loading/>;
   const snippet=`<script src="${location.origin}/embed.js"></script>\n<script>\n  const chat = NexusDeskChat.mount({\n    appId: "${app.id}",\n    baseUrl: "${location.origin}"\n  });\n</script>`;
-  return <Card title={t('嵌入聊天')}><Alert showIcon type="info" title={t('将聊天助手嵌入企业网站，使用 SSO 或用户级短期凭据登录。')} description={t('不要将应用密钥放入网页。无 SSO 时，由企业服务端调用 /openapi/v1/chat/token 换取用户凭据。')}/>{(error||config.error||providers.error)&&<Alert type="error" title={error||config.error||providers.error}/>}
-    <Form form={form} key={config.data?.revision||0} layout="vertical" initialValues={config.data||{enabled:false,origins:[],provider_ids:[],title:app.name,color:'#6562ff'}} onFinish={async v=>{setBusy(true);setError('');try{await put(`/open-platform/applications/${app.id}/embed`,{...v,revision:config.data?.revision||0});config.refresh();message.success(t('已保存'));}catch(e){setError(errorOf(e));}finally{setBusy(false);}}}>
-      <Space size="large"><Form.Item name="enabled" label={t('启用嵌入聊天')} valuePropName="checked"><Switch/></Form.Item><Form.Item name="title" label={t('聊天标题')} rules={[{required:true}]}><Input maxLength={80}/></Form.Item><Form.Item name="color" label={t('主题色')} rules={[{pattern:/^#[\da-fA-F]{6}$/,required:true}]}><Input type="color"/></Form.Item></Space>
-      <Form.Item name="origins" label={t('允许嵌入的来源地址')} extra={t('填写完整来源，包含协议和端口，不支持通配符，例如 https://oa.company.com。')}><Select mode="tags" tokenSeparators={[',',' ']} placeholder="https://oa.company.com"/></Form.Item>
-      <Form.Item name="provider_ids" label={t('允许的登录方式')}><Select mode="multiple" options={(providers.data||[]).map(p=>({value:p.id,label:p.name+(p.enabled?'':` (${t('已停用')})`)}))}/></Form.Item>
-      <Button htmlType="submit" type="primary" loading={busy}>{t('保存配置')}</Button>
-    </Form><Typography.Title level={5}>{t('嵌入代码')}</Typography.Title><Typography.Paragraph copyable={{text:snippet}}><pre style={{whiteSpace:'pre-wrap'}}>{snippet}</pre></Typography.Paragraph><p className="op-muted">{t('配置变更会使已有聊天凭据失效，用户需要重新登录。')}</p>
-  </Card>;
+  // The public link is derived, never stored on the client: rotating it in the
+  // backend is the only way to hand out a new address.
+  const link=config.data?.hosted_key?`${location.origin}/h/${config.data.hosted_key}`:'';
+  // A tag typed but not confirmed with Enter never reaches the form value; it is
+  // folded in before validation so saving does not silently drop it.
+  const commitDraft=()=>{
+    const text=draft.trim();
+    if(!text)return;
+    const current=(form.getFieldValue('origins')||[]) as string[];
+    if(!current.includes(text))form.setFieldsValue({origins:[...current,text]});
+    setDraft('');
+  };
+  return <Form form={form} key={config.data?.revision||0} layout="vertical" initialValues={config.data||{enabled:false,hosted:false,welcome:'',origins:[],provider_ids:[],title:app.name,color:'#6562ff'}} onFinish={async v=>{setBusy(true);setError('');try{await put(`/open-platform/applications/${app.id}/embed`,{...v,revision:config.data?.revision||0});setDraft('');config.refresh();message.success(t('已保存'));}catch(e){setError(embedError(e));}finally{setBusy(false);}}}>
+    <div className="op-stack">
+      {(error||config.error||providers.error)&&<Alert type="error" title={error||config.error||providers.error}/>}
+      <Card title={t('嵌入聊天')}>
+        <Alert showIcon type="info" title={t('将聊天助手嵌入企业网站，使用 SSO 或用户级短期凭据登录。')} description={t('不要将应用密钥放入网页。无 SSO 时，由企业服务端调用 /openapi/v1/chat/token 换取用户凭据。')}/>
+        <Space size="large" wrap><Form.Item name="enabled" label={t('启用嵌入聊天')} valuePropName="checked"><Switch/></Form.Item><Form.Item name="title" label={t('聊天标题')} rules={[{required:true}]}><Input maxLength={80}/></Form.Item><Form.Item name="color" label={t('主题色')} rules={[{pattern:/^#[\da-fA-F]{6}$/,required:true}]}><Input type="color"/></Form.Item></Space>
+        <Form.Item name="origins" label={t('允许嵌入的来源地址')} dependencies={['enabled']} extra={t('填写完整来源，需带协议且不带路径，不支持通配符，例如 https://oa.company.com；多个来源按回车逐个确认。')} rules={[({getFieldValue})=>({validator:async(_,value)=>{
+          if(!getFieldValue('enabled')||(value||[]).length)return;
+          throw new Error(t('启用嵌入聊天时，至少填写一个允许的来源地址。'));
+        }})]}><Select mode="tags" tokenSeparators={[',',' ']} onSearch={setDraft} onBlur={commitDraft} placeholder="https://oa.company.com"/></Form.Item>
+        <p className="op-muted">{t('只使用独立网页时，关闭「启用嵌入聊天」即可，无需填写来源地址。')}</p>
+        <Form.Item name="provider_ids" label={t('允许的登录方式')}><Select mode="multiple" options={(providers.data||[]).map(p=>({value:p.id,label:p.name+(p.enabled?'':` (${t('已停用')})`)}))}/></Form.Item>
+      </Card>
+      <Card title={t('独立网页（Hosted Web）')}>
+        <Alert showIcon type="info" title={t('无需嵌入，直接把公开链接发给访客。')} description={t('访客免登录，会话按浏览器隔离；访问计入本应用的每分钟请求配额。链接泄露时可重新生成。')}/>
+        <Space size="large" wrap><Form.Item name="hosted" label={t('启用独立网页')} valuePropName="checked"><Switch/></Form.Item></Space>
+        <Form.Item name="welcome" label={t('欢迎语')} extra={t('显示在开始对话之前，留空使用默认提示。')}><Input.TextArea rows={2} maxLength={500} showCount/></Form.Item>
+        {link?<><p className="op-muted">{t('公开链接')}</p><Space wrap align="center"><Typography.Paragraph code copyable={{text:link,tooltips:[t('复制链接'),t('已复制')]}} style={{margin:0}}>{link}</Typography.Paragraph><Button danger onClick={()=>modal.confirm({title:t('重新生成公开链接？'),content:t('旧链接立即失效，已打开的页面需要重新进入。'),okText:t('重新生成'),cancelText:t('取消'),onOk:async()=>{try{await post(`/open-platform/applications/${app.id}/embed/hosted-key`);config.refresh();message.success(t('已重新生成'));}catch(e){setError(errorOf(e));}}})}>{t('重新生成链接')}</Button></Space></>:<p className="op-muted">{t('保存后生成公开链接；启用独立网页后即可分享。')}</p>}
+      </Card>
+      <Card title={t('嵌入代码')}>
+        <Typography.Paragraph copyable={{text:snippet}}><pre style={{whiteSpace:'pre-wrap'}}>{snippet}</pre></Typography.Paragraph><p className="op-muted">{t('配置变更会使已有聊天凭据失效，用户需要重新登录。')}</p>
+      </Card>
+      <Space><Button type="primary" htmlType="submit" loading={busy} onClick={commitDraft}>{t('保存配置')}</Button></Space>
+    </div>
+  </Form>;
 }

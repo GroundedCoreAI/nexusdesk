@@ -121,7 +121,9 @@ class Workspace:
             await audit(c, tenant, actor, "knowledge.folder_created", row["id"])
             return row
 
-    async def list_documents(self, tenant, query="", folder=None, offset=0, kind=None, status=None):
+    async def list_documents(
+        self, tenant, query="", folder=None, offset=0, kind=None, status=None, limit=20
+    ):
         scope_sql, scope_params = resource_scope_clause(alias="d")
         filters = (
             "d.tenant_id=:t"
@@ -151,8 +153,9 @@ class Workspace:
                 (SELECT count(*) FROM knowledge_links l WHERE l.document_id=d.id AND l.enabled AND l.published_version IS DISTINCT FROM d.current_version) AS pending_library_count
                 FROM knowledge_documents d WHERE """
                 + filters
-                + " ORDER BY d.updated_at DESC,d.id LIMIT 20 OFFSET :offset",
+                + " ORDER BY d.updated_at DESC,d.id LIMIT :limit OFFSET :offset",
                 **params,
+                limit=limit,
                 offset=offset,
             )
             return {"items": rows, "total": total["total"]}
@@ -674,23 +677,30 @@ class Workspace:
             await audit(c, tenant, actor, "knowledge.draft_saved", did, version=version)
             return {"id": did, "version": version}
 
-    async def link(self, tenant, actor, kid, did):
+    async def link(self, tenant, actor, kid, dids):
         async with self.engine.begin() as c:
             await self.base(c, tenant, kid, True)
-            doc = await self.document(c, tenant, did)
-            if doc["processing"] != "ready":
-                raise DomainError("document_not_ready", 409)
-            await execute(
-                c,
-                """INSERT INTO knowledge_links(kb_id,document_id,draft_version)
-                VALUES(:k,:d,:v) ON CONFLICT(kb_id,document_id) DO UPDATE SET draft_version=:v""",
-                k=kid,
-                d=did,
-                v=doc["current_version"],
-            )
-            await execute(c, "UPDATE knowledge_bases SET revision=revision+1 WHERE id=:k", k=kid)
-            await audit(c, tenant, actor, "knowledge.document_linked", did, kb_id=str(kid))
-            return {"version": doc["current_version"]}
+            linked, skipped = [], []
+            for did in dict.fromkeys(dids):
+                doc = await self.document(c, tenant, did)
+                if doc["processing"] != "ready":
+                    skipped.append({"document_id": str(did), "reason": "document_not_ready"})
+                    continue
+                await execute(
+                    c,
+                    """INSERT INTO knowledge_links(kb_id,document_id,draft_version)
+                    VALUES(:k,:d,:v) ON CONFLICT(kb_id,document_id) DO UPDATE SET draft_version=:v""",
+                    k=kid,
+                    d=did,
+                    v=doc["current_version"],
+                )
+                await audit(c, tenant, actor, "knowledge.document_linked", did, kb_id=str(kid))
+                linked.append({"document_id": str(did), "version": doc["current_version"]})
+            if linked:
+                await execute(
+                    c, "UPDATE knowledge_bases SET revision=revision+1 WHERE id=:k", k=kid
+                )
+            return {"linked": linked, "skipped": skipped}
 
     async def library(self, tenant, kid):
         base_scope_sql, base_scope_params = resource_scope_clause(alias="k")
