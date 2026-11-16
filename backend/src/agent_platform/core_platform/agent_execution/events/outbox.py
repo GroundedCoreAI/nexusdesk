@@ -139,6 +139,20 @@ class OutboxDispatcher:
             published += await self._mark_published(pending)
         return published
 
+    async def pending_count(self) -> int:
+        tenant_filter = " AND r.tenant_id=:tenant" if self._tenant_id is not None else ""
+        params: dict[str, object] = {"tenant": self._tenant_id} if self._tenant_id else {}
+        async with self._engine.connect() as conn:
+            return await conn.scalar(
+                text(
+                    """SELECT count(*) FROM runtime_event_outbox o
+                JOIN runtime_runs r ON r.id=o.run_id
+                WHERE o.status='pending'"""
+                    + tenant_filter
+                ),
+                params,
+            )
+
     async def reconcile(self) -> int:
         """Restore missing publishable Outbox rows at/after the rollout watermark."""
         tenant_filter = " AND r.tenant_id=:tenant" if self._tenant_id is not None else ""

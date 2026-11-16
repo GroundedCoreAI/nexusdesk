@@ -449,6 +449,21 @@ class ProcessRegistry:
         except (DBAPIError, OSError) as exc:
             raise RegistryUnavailableError("fetch failed") from exc
 
+    async def active_for_run(self, run_id: UUID) -> bool:
+        """True while any process group for this Run is not terminally closed."""
+        try:
+            async with self._engine.connect() as conn:
+                count = await conn.scalar(
+                    text("""SELECT count(*) FROM runtime_host_processes
+                    WHERE run_id=:run_id AND host_id=:host_id
+                    AND status IN ('starting','running','terminating','orphaned')"""),
+                    {"run_id": run_id, "host_id": self._host_id},
+                )
+                return bool(count)
+        except (DBAPIError, OSError) as exc:
+            # Unknown process state cannot confirm cleanup.
+            raise RegistryUnavailableError("active check failed") from exc
+
     async def fetch_one(self, managed_id: UUID) -> ProcessRecordRow | None:
         try:
             async with self._engine.begin() as conn:

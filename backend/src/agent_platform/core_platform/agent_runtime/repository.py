@@ -1050,6 +1050,42 @@ class RunRepository:
             "effective_total_tokens": float(row["effective_total_tokens"]),
         }
 
+    async def cleanup_retention(self, retention_days: int, *, batch: int = 200) -> int:
+        """Delete eligible durable events and advance the floor atomically.
+
+        Only rows older than the retention window and without a pending Outbox
+        publication are eligible; usage/audit/credential rows are never touched.
+        """
+        if type(retention_days) is not int or not 1 <= retention_days <= 3650:
+            raise ValueError("retention days must be within 1-3650")
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                text("""WITH eligible AS (
+                    SELECT e.run_id,e.seq
+                    FROM runtime_events e
+                    JOIN runtime_runs r ON r.id=e.run_id
+                    WHERE e.created_at < now() - (:days * interval '1 day')
+                      AND NOT EXISTS (
+                        SELECT 1 FROM runtime_event_outbox o
+                        WHERE o.run_id=e.run_id AND o.seq=e.seq
+                          AND o.status='pending')
+                    ORDER BY e.created_at,e.run_id,e.seq
+                    LIMIT :batch)
+                , deleted AS (
+                    DELETE FROM runtime_events e USING eligible
+                    WHERE e.run_id=eligible.run_id AND e.seq=eligible.seq
+                    RETURNING e.run_id,e.seq)
+                , floors AS (
+                    SELECT run_id,max(seq) AS floor FROM deleted GROUP BY run_id)
+                UPDATE runtime_runs r
+                SET event_retention_floor_seq=GREATEST(
+                    r.event_retention_floor_seq, floors.floor)
+                FROM floors WHERE r.id=floors.run_id
+                RETURNING r.id"""),
+                {"days": retention_days, "batch": batch},
+            )
+            return result.rowcount or 0
+
     async def expired_running(self, tenant: str, *, batch: int = 100) -> list[dict]:
         """Expired running rows for recovery; no cleanup runs in this read."""
         async with self.engine.connect() as conn:

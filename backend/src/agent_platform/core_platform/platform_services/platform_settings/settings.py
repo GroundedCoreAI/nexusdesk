@@ -200,6 +200,7 @@ class Settings(BaseSettings):
     # only advance the floor atomically with deletion when explicitly enabled.
     execution_event_retention_days: int = Field(default=30, ge=1, le=3650)
     execution_event_cleanup_enabled: bool = False
+    execution_event_cleanup_interval_seconds: float = Field(default=60.0, gt=0, le=3600)
     execution_parser_raw_sample_enabled: bool = False
     execution_parser_sample_max_bytes: int = Field(default=1024, ge=64, le=4096)
     execution_parser_max_diagnostics_per_minute: int = Field(default=10, ge=1, le=600)

@@ -189,7 +189,7 @@ async def test_reap_cleanup_failure_is_failed_and_alertable(repo):
 
 
 async def test_safe_retry_correlates_without_duplicate_attempts(repo):
-    repository, tenant, engine = repo
+    repository, tenant, _engine = repo
     owner = uuid4()
     claimed = await _claim(repository, tenant, owner, conversation="retry")
     run_id = claimed["id"]
