@@ -62,6 +62,7 @@ class ExecutionSnapshotBarrier(Protocol):
         *,
         run_id: UUID,
         owner: UUID | None,
+        lease_epoch: int | None = None,
         execution_id: UUID,
         payloads: Mapping[str, str],
     ) -> str: ...
@@ -143,6 +144,9 @@ class ExecutionContext:
     timeout_seconds: int | None = None
     prepared_instructions: PreparedInstructions | None = None
     owner: UUID | None = None
+    # Database-owned Fencing epoch bound to the same owner; None only on the
+    # pre-0068 legacy shape (old Writers must be drained before enforcement).
+    lease_epoch: int | None = None
     scope: BusinessScope | None = None
     execution_phase3_enabled: bool = False
 
@@ -167,6 +171,10 @@ class ExecutionContext:
                 )
                 and isinstance(self.prepared_instructions, PreparedInstructions | None)
                 and (self.owner is None or _is_uuid(self.owner))
+                and (
+                    self.lease_epoch is None
+                    or (type(self.lease_epoch) is int and self.lease_epoch > 0)
+                )
                 and isinstance(self.scope, BusinessScope | None)
                 and type(self.execution_phase3_enabled) is bool
             )
@@ -190,6 +198,7 @@ def build_execution_context(
     timeout_seconds: int | None = None,
     prepared_instructions: PreparedInstructions | None = None,
     owner: UUID | None = None,
+    lease_epoch: int | None = None,
     scope: BusinessScope | None = None,
     execution_phase3_enabled: bool = False,
 ) -> ExecutionContext:
@@ -207,6 +216,7 @@ def build_execution_context(
             timeout_seconds=timeout_seconds,
             prepared_instructions=prepared_instructions,
             owner=owner,
+            lease_epoch=lease_epoch,
             scope=scope,
             execution_phase3_enabled=execution_phase3_enabled,
         )

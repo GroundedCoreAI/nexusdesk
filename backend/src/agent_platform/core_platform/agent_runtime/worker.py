@@ -84,6 +84,13 @@ class RuntimeWorker:
             workspace_id=row.get("workspace_id") or DEFAULT_WORKSPACE_ID,
         )
         scope_token = bind_scope(scope)
+        # The claim's database-owned Fencing tuple. None only on the pre-0068
+        # legacy shape; production always carries it after the 0068 claim.
+        lease_epoch = row.get("lease_epoch")
+        # Only the post-0068 production row carries the tuple. Omitting the
+        # keyword for the legacy shape keeps old test/compat repository seams
+        # callable while production always sends it.
+        epoch_kwargs = {} if lease_epoch is None else {"lease_epoch": lease_epoch}
 
         async def emit(kind, data):
             if kind == "model.delta":
@@ -91,7 +98,7 @@ class RuntimeWorker:
                 if self.notifier is not None:
                     await self.notifier.send(row["id"], {"k": "delta", **data})
                 return
-            await self.repository.append(row["id"], self.owner, kind, data)
+            await self.repository.append(row["id"], self.owner, kind, data, **epoch_kwargs)
 
         async def monitor(task):
             nonlocal monitor_failure
@@ -99,7 +106,10 @@ class RuntimeWorker:
                 await asyncio.sleep(1)
                 try:
                     stop = await self.repository.heartbeat(
-                        row["id"], self.owner, self.settings.lease_seconds
+                        row["id"],
+                        self.owner,
+                        self.settings.lease_seconds,
+                        **epoch_kwargs,
                     )
                 except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
                     stop = "lost"  # Fail closed if lease ownership cannot be established.
@@ -146,6 +156,7 @@ class RuntimeWorker:
                     trace_id=row.get("trace_id"),
                     timeout_seconds=self.settings.run_timeout_seconds,
                     owner=self.owner,
+                    lease_epoch=lease_epoch,
                     scope=scope,
                     execution_phase3_enabled=phase3_enabled,
                 )
@@ -160,6 +171,8 @@ class RuntimeWorker:
                         output=outcome.output,
                         history=outcome.history,
                         completion=self._memory_context(row, outcome.dropped),
+                        **epoch_kwargs,
+                        usage=outcome.usage,
                     )
                 else:
                     await self.repository.finish(
@@ -167,6 +180,8 @@ class RuntimeWorker:
                         self.owner,
                         outcome.status,
                         error=outcome.legacy_error_code,
+                        **epoch_kwargs,
+                        usage=outcome.usage,
                     )
                 self._log_orchestrator_terminal(row, outcome.status, started_at)
             else:
@@ -193,6 +208,7 @@ class RuntimeWorker:
                     output=output,
                     history=history,
                     completion=self._memory_context(row, dropped),
+                    **epoch_kwargs,
                 )
         except asyncio.CancelledError:
             if execution:
@@ -206,22 +222,33 @@ class RuntimeWorker:
                 self.owner,
                 "failed" if monitor_failure else "cancelled",
                 error="worker_lost" if monitor_failure else None,
+                **epoch_kwargs,
             )
         except RuntimeFault as exc:
             if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
-            await self.repository.finish(row["id"], self.owner, "failed", error=exc.code)
+            await self.repository.finish(
+                row["id"], self.owner, "failed", error=exc.code, **epoch_kwargs
+            )
         except TimeoutError:
             if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
-            await self.repository.finish(row["id"], self.owner, "failed", error="run_timeout")
+            await self.repository.finish(
+                row["id"], self.owner, "failed", error="run_timeout", **epoch_kwargs
+            )
         except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
             # Provider errors may contain credentials or customer data; never expose raw messages.
             if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
             else:
                 logger.error("Run %s failed", row["id"])
-            await self.repository.finish(row["id"], self.owner, "failed", error="execution_error")
+            await self.repository.finish(
+                row["id"],
+                self.owner,
+                "failed",
+                error="execution_error",
+                **epoch_kwargs,
+            )
         finally:
             if watcher:
                 watcher.cancel()

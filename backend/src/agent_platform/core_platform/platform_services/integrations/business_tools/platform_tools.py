@@ -24,7 +24,9 @@ __all__ = ["PlatformTools"]
 
 
 class PlatformTools:
-    def __init__(self, http, bindings: RuntimeBindings, row, allowed, kb_ids, emit, skill_tools=frozenset()):
+    def __init__(
+        self, http, bindings: RuntimeBindings, row, allowed, kb_ids, emit, skill_tools=frozenset()
+    ):
         self.http, self.row = http, row
         self.bindings = bindings
         self.allowed, self.kb_ids, self.emit = allowed, [UUID(k) for k in kb_ids], emit
@@ -181,7 +183,13 @@ class PlatformTools:
                 "tool_version": version,
             }
             if idempotency_key and payload.get("ok") and self.bindings.replay is not None:
-                await self.bindings.replay.put(idempotency_key, payload)
+                row = self.row if isinstance(self.row, dict) else {}
+                await self.bindings.replay.put(
+                    idempotency_key,
+                    payload,
+                    owner=row.get("owner"),
+                    lease_epoch=row.get("lease_epoch"),
+                )
             return payload
         except asyncio.CancelledError:
             status, error = "cancelled", "tool_cancelled"

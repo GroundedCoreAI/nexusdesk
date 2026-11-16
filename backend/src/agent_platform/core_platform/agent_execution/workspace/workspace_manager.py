@@ -30,6 +30,12 @@ from ..host.observability import (
     AlertSink,
     ObservabilityRecord,
 )
+from ..reliability.ownership import (
+    ExecutionOwnership,
+    FencingDenial,
+    FencingDenialRecorder,
+    OwnershipDenied,
+)
 from . import execution_workdir as workdir_ops
 from . import workspace_policy as policy
 from .workspace_provider import WorkdirRecord, WorkdirStats
@@ -71,6 +77,7 @@ class ExecutionWorkspaceManager:
         mount_probe: Callable[[int, int], bool] | None = None,
         alert_sink: AlertSink | None = None,
         host_id: str | None = None,
+        denials: FencingDenialRecorder | None = None,
     ) -> None:
         if quota_bytes <= 0:
             raise ValueError("quota_bytes must be positive")
@@ -90,6 +97,51 @@ class ExecutionWorkspaceManager:
         # never a routing or scope input.
         self._alert_sink = alert_sink
         self._host_id = host_id
+        self._denials = denials or FencingDenialRecorder(engine)
+
+    async def _deny_if_stale(
+        self, run_id: UUID, tenant_id: str, ownership: ExecutionOwnership
+    ) -> str | None:
+        """Separate post-rollback denial audit (08 R-14)."""
+        async with self._engine.connect() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text(
+                            """SELECT owner, lease_epoch, status,
+                            lease_until>now() AS lease_valid
+                            FROM runtime_runs WHERE id=:id AND tenant_id=:tenant"""
+                        ),
+                        {"id": run_id, "tenant": tenant_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            reason = "run_missing"
+        elif row["status"] not in ("running", "queued"):
+            reason = "run_terminal"
+        elif row["lease_epoch"] != ownership.lease_epoch:
+            reason = "stale_epoch"
+        elif row["owner"] != ownership.owner:
+            reason = "owner_mismatch"
+        elif not row["lease_valid"]:
+            reason = "lease_lost"
+        else:
+            return None
+        await self._denials.record(
+            FencingDenial(
+                run_id=run_id,
+                operation="workdir",
+                reason=reason,  # type: ignore[arg-type]
+                stale_owner=ownership.owner,
+                stale_lease_epoch=ownership.lease_epoch,
+                current_owner=None if row is None else row["owner"],
+                current_lease_epoch=None if row is None else row["lease_epoch"],
+            )
+        )
+        return reason
 
     # ------------------------------------------------------------------
     # WorkspaceProvider contract
@@ -102,6 +154,7 @@ class ExecutionWorkspaceManager:
         tenant_id: str,
         business_id: str,
         workspace_id: str,
+        ownership: ExecutionOwnership | None = None,
     ) -> WorkdirRecord:
         """Persist ``preparing``, build the tree from the verified root, ``ready``.
 
@@ -120,30 +173,42 @@ class ExecutionWorkspaceManager:
         """
         relative_path = self._generated_path(tenant_id, run_id)
         workdir_id = uuid4()
+        params: dict[str, object] = {
+            "id": workdir_id,
+            "run_id": run_id,
+            "tenant_id": tenant_id,
+            "business_id": business_id,
+            "workspace_id": workspace_id,
+            "relative_path": relative_path,
+            "quota": self._quota_bytes,
+        }
+        if ownership is None:
+            statement = (
+                "INSERT INTO execution_workdirs"
+                " (id, run_id, tenant_id, business_id, workspace_id,"
+                " relative_path, status, quota_bytes)"
+                " VALUES (:id, :run_id, :tenant_id, :business_id, :workspace_id,"
+                " :relative_path, 'preparing', :quota)"
+                " ON CONFLICT (run_id) DO NOTHING"
+                " RETURNING id"
+            )
+        else:
+            params["owner"] = ownership.owner
+            params["lease_epoch"] = ownership.lease_epoch
+            statement = (
+                "INSERT INTO execution_workdirs"
+                " (id, run_id, tenant_id, business_id, workspace_id,"
+                " relative_path, status, quota_bytes)"
+                " SELECT :id, r.id, :tenant_id, :business_id, :workspace_id,"
+                " :relative_path, 'preparing', :quota"
+                " FROM runtime_runs r WHERE r.id=:run_id"
+                " AND r.owner=:owner AND r.lease_epoch=:lease_epoch"
+                " ON CONFLICT (run_id) DO NOTHING"
+                " RETURNING id"
+            )
         try:
             async with self._engine.begin() as conn:
-                inserted = (
-                    await conn.execute(
-                        text(
-                            "INSERT INTO execution_workdirs"
-                            " (id, run_id, tenant_id, business_id, workspace_id,"
-                            " relative_path, status, quota_bytes)"
-                            " VALUES (:id, :run_id, :tenant_id, :business_id, :workspace_id,"
-                            " :relative_path, 'preparing', :quota)"
-                            " ON CONFLICT (run_id) DO NOTHING"
-                            " RETURNING id"
-                        ),
-                        {
-                            "id": workdir_id,
-                            "run_id": run_id,
-                            "tenant_id": tenant_id,
-                            "business_id": business_id,
-                            "workspace_id": workspace_id,
-                            "relative_path": relative_path,
-                            "quota": self._quota_bytes,
-                        },
-                    )
-                ).first()
+                inserted = (await conn.execute(text(statement), params)).first()
         except IntegrityError as exc:
             raise WorkspaceStateError(
                 "workdir_persistence_conflict",
@@ -151,6 +216,10 @@ class ExecutionWorkspaceManager:
             ) from exc
         if inserted is None:
             existing = await self._fetch(where="run_id=:run_id", params={"run_id": run_id})
+            if ownership is not None:
+                reason = await self._deny_if_stale(run_id, tenant_id, ownership)
+                if reason is not None:
+                    raise OwnershipDenied(reason, "workdir")
             if existing is None:  # pragma: no cover - conflict implies the row
                 raise WorkspaceStateError("workdir_persistence_conflict", "conflict without row")
             if (
@@ -208,7 +277,14 @@ class ExecutionWorkspaceManager:
             raise WorkspaceStateError("workdir_state_invalid", "prepare did not reach ready")
         return record
 
-    async def activate(self, *, workdir_id: UUID, run_id: UUID, tenant_id: str) -> WorkdirRecord:
+    async def activate(
+        self,
+        *,
+        workdir_id: UUID,
+        run_id: UUID,
+        tenant_id: str,
+        ownership: ExecutionOwnership | None = None,
+    ) -> WorkdirRecord:
         """``ready`` -> ``active``; already-active rows return idempotently."""
         await self._conditional_update(
             to_status="active",
@@ -216,6 +292,7 @@ class ExecutionWorkspaceManager:
             run_id=run_id,
             tenant_id=tenant_id,
             workdir_id=workdir_id,
+            ownership=ownership,
         )
         return await self._require_current(workdir_id, run_id, tenant_id, acceptable=("active",))
 
@@ -226,6 +303,7 @@ class ExecutionWorkspaceManager:
         run_id: UUID,
         tenant_id: str,
         outcome: str,
+        ownership: ExecutionOwnership | None = None,
     ) -> WorkdirRecord:
         """Record the terminal decision with the success/failed retention window.
 
@@ -271,6 +349,7 @@ class ExecutionWorkspaceManager:
             run_id=run_id,
             tenant_id=tenant_id,
             workdir_id=workdir_id,
+            ownership=ownership,
             set_extra=", expires_at=:expires"
             + (", size_bytes=:size_bytes, file_count=:file_count" if size_params else ""),
             extra_params={
@@ -280,7 +359,14 @@ class ExecutionWorkspaceManager:
         )
         return await self._require_current(workdir_id, run_id, tenant_id, acceptable=("retained",))
 
-    async def cleanup(self, *, workdir_id: UUID, run_id: UUID, tenant_id: str) -> WorkdirRecord:
+    async def cleanup(
+        self,
+        *,
+        workdir_id: UUID,
+        run_id: UUID,
+        tenant_id: str,
+        ownership: ExecutionOwnership | None = None,
+    ) -> WorkdirRecord:
         """Idempotent safe cleanup; honest retry/alert on unprovable scope.
 
         The removal scope is re-derived from the durable record and re-checked
@@ -329,6 +415,7 @@ class ExecutionWorkspaceManager:
             run_id=run_id,
             tenant_id=tenant_id,
             workdir_id=workdir_id,
+            ownership=ownership,
         )
         if not entered:
             current = await self._fetch(where="id=:workdir_id", params={"workdir_id": workdir_id})
@@ -382,6 +469,7 @@ class ExecutionWorkspaceManager:
             run_id=run_id,
             tenant_id=tenant_id,
             workdir_id=workdir_id,
+            ownership=ownership,
             set_extra=", cleaned_at=now()",
         )
         current = await self._fetch(where="id=:workdir_id", params={"workdir_id": workdir_id})
@@ -640,6 +728,7 @@ class ExecutionWorkspaceManager:
         run_id: UUID,
         tenant_id: str,
         workdir_id: UUID | None = None,
+        ownership: ExecutionOwnership | None = None,
         set_extra: str = "",
         extra_params: dict[str, object] | None = None,
     ) -> bool:
@@ -655,17 +744,31 @@ class ExecutionWorkspaceManager:
         placeholders = ", ".join(f":ws_{index}" for index in range(len(where_status_in)))
         for index, status in enumerate(where_status_in):
             params[f"ws_{index}"] = status
+        ownership_clause = ""
+        if ownership is not None:
+            params["owner"] = ownership.owner
+            params["lease_epoch"] = ownership.lease_epoch
+            ownership_clause = (
+                " AND EXISTS (SELECT 1 FROM runtime_runs r"
+                " WHERE r.id=execution_workdirs.run_id"
+                " AND r.owner=:owner AND r.lease_epoch=:lease_epoch)"
+            )
         async with self._engine.begin() as conn:
             result = await conn.execute(
                 text(
                     "UPDATE execution_workdirs"
                     f" SET status=:status, updated_at=now(){set_extra}"
                     f" WHERE {identity}run_id=:run_id AND tenant_id=:tenant_id"
-                    f" AND status IN ({placeholders})"
+                    f" AND status IN ({placeholders}){ownership_clause}"
                 ),
                 params,
             )
-        return result.rowcount > 0
+        landed = result.rowcount > 0
+        if not landed and ownership is not None:
+            reason = await self._deny_if_stale(run_id, tenant_id, ownership)
+            if reason is not None:
+                raise OwnershipDenied(reason, "workdir")
+        return landed
 
     async def _mark_cleanup_failed(
         self,

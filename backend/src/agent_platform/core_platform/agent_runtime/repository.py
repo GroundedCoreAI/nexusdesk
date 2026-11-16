@@ -11,6 +11,12 @@ from agent_platform.core_platform.agent_execution.contracts.snapshots import (
     ExecutionSnapshotError,
     deserialize_execution_snapshots,
 )
+from agent_platform.core_platform.agent_execution.reliability.ownership import (
+    ExecutionOwnership,
+    FencingDenial,
+    FencingDenialRecorder,
+    OwnershipDenied,
+)
 from agent_platform.core_platform.agent_runtime.hooks import RuntimePersistenceHooks
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL, channel
 from agent_platform.core_platform.agent_runtime.schemas import (
@@ -33,12 +39,61 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
 from agent_platform.extension_contracts import BusinessScope
 
 
+def _denial_reason(
+    current: Mapping[str, object] | None,
+    owner,
+    lease_epoch: int | None,
+    *,
+    terminal: bool = False,
+) -> str | None:
+    """Classify one stale write strictly from the locked row, never payload."""
+    if current is None:
+        return "run_missing"
+    if terminal or current.get("status") in TERMINAL:
+        return "run_terminal"
+    if lease_epoch is not None and current.get("lease_epoch") != lease_epoch:
+        return "stale_epoch"
+    if current.get("owner") != owner:
+        return "owner_mismatch"
+    if current.get("lease_valid") is False:
+        return "lease_lost"
+    return None
+
+
 class RunRepository:
     def __init__(self, engine, hooks: RuntimePersistenceHooks):
         # Required, not defaulted: Core cannot persist a conversation or dispatch
         # memory work by itself, so the composition root must supply an adapter.
         self.engine = engine
         self.hooks = hooks
+        # A separate post-rollback transaction (08 R-14): audit failure never
+        # turns a denied write into an allowed one.
+        self.denials = FencingDenialRecorder(engine)
+
+    async def _audit_denial(
+        self,
+        run_id,
+        operation: str,
+        current: Mapping[str, object] | None,
+        owner,
+        lease_epoch: int | None,
+        *,
+        terminal: bool = False,
+    ) -> None:
+        reason = _denial_reason(current, owner, lease_epoch, terminal=terminal)
+        if reason is None:
+            return
+        await self.denials.record(
+            FencingDenial(
+                run_id=run_id,
+                operation=operation,  # type: ignore[arg-type]
+                reason=reason,  # type: ignore[arg-type]
+                stale_owner=owner if isinstance(owner, UUID) else None,
+                stale_lease_epoch=lease_epoch,
+                current_owner=current.get("owner") if current is not None else None,
+                current_lease_epoch=(current.get("lease_epoch") if current is not None else None),
+            )
+        )
 
     async def _event(self, conn, run_id, kind, data):
         seq = await conn.scalar(
@@ -233,7 +288,7 @@ class RunRepository:
                 (
                     await conn.execute(
                         text("""UPDATE runtime_runs SET status='running',
-                owner=:owner, started_at=now(),
+                owner=:owner, started_at=now(), lease_epoch=lease_epoch+1,
                 lease_until=now()+:lease * interval '1 second' WHERE id=:id RETURNING *"""),
                         {"id": row["id"], "owner": owner, "lease": lease_seconds},
                     )
@@ -263,8 +318,52 @@ class RunRepository:
                 "customer_id": history["customer_id"],
             }
 
+    async def takeover(self, owner, lease_seconds, tenant):
+        """Take over one expired running row with a strictly larger epoch.
+
+        T-09 owns the full recovery decision; this primitive only fences the old
+        claim before a new owner may write. The row lock plus the atomic
+        ``lease_epoch+1`` make the takeover monotonic across concurrent passes.
+        """
+        async with self.engine.begin() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text("""SELECT id FROM runtime_runs
+                        WHERE tenant_id=:tenant AND status='running'
+                        AND (lease_until IS NULL OR lease_until<=now())
+                        ORDER BY lease_until ASC NULLS FIRST
+                        FOR UPDATE SKIP LOCKED LIMIT 1"""),
+                        {"tenant": tenant},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if not row:
+                return None
+            taken = (
+                (
+                    await conn.execute(
+                        text("""UPDATE runtime_runs SET owner=:owner,
+                        lease_epoch=lease_epoch+1,
+                        lease_until=now()+:lease * interval '1 second'
+                        WHERE id=:id RETURNING *"""),
+                        {"id": row["id"], "owner": owner, "lease": lease_seconds},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            return dict(taken)
+
     async def write_execution_snapshots(
-        self, run_id: UUID, owner: UUID, payloads: ExecutionSnapshotPayloads
+        self,
+        run_id: UUID,
+        owner: UUID,
+        payloads: ExecutionSnapshotPayloads,
+        *,
+        lease_epoch: int | None = None,
     ) -> SnapshotWriteResult:
         """Write-once barrier for the five Phase 3 startup snapshots (03 §5.3).
 
@@ -338,6 +437,7 @@ class RunRepository:
                 effective_capabilities_snapshot=CAST(:effective AS jsonb),
                 execution_policy_snapshot=CAST(:policy AS jsonb)
                 WHERE id=:id AND owner=:owner AND status='running' AND lease_until>now()
+                AND (CAST(:lease_epoch AS BIGINT) IS NULL OR lease_epoch=CAST(:lease_epoch AS BIGINT))
                 AND CAST(:config AS jsonb)->>'execution_id'=CAST(id AS TEXT)
                 AND CAST(:declared AS jsonb)->>'execution_id'=CAST(id AS TEXT)
                 AND CAST(:available AS jsonb)->>'execution_id'=CAST(id AS TEXT)
@@ -362,6 +462,7 @@ class RunRepository:
                         {
                             "id": run_id,
                             "owner": owner,
+                            "lease_epoch": lease_epoch,
                             "execution_id": str(payloads.execution_id),
                             "config": payloads.execution_config_snapshot,
                             "declared": payloads.declared_capabilities_snapshot,
@@ -374,25 +475,32 @@ class RunRepository:
                 .mappings()
                 .one()
             )
+            classified = None
             if row["applied"]:
                 # ``was_absent`` is the state this statement itself saw before
                 # writing, so it cannot be shifted by our own UPDATE. A
                 # concurrent writer that committed in between can still make
                 # both sides report ``written``; the label is diagnostic only
                 # and the stored row is identical either way.
-                return SnapshotWriteResult("written" if row["was_absent"] else "reused")
-            classified = (
-                (
-                    await conn.execute(
-                        text("""SELECT status, owner, lease_until>now() AS lease_valid
-                FROM runtime_runs WHERE id=:id"""),
-                        {"id": run_id},
+                result = SnapshotWriteResult("written" if row["was_absent"] else "reused")
+            else:
+                classified = (
+                    (
+                        await conn.execute(
+                            text("""SELECT status, owner, lease_epoch, lease_until>now() AS lease_valid
+                    FROM runtime_runs WHERE id=:id"""),
+                            {"id": run_id},
+                        )
                     )
+                    .mappings()
+                    .first()
                 )
-                .mappings()
-                .first()
-            )
-            return SnapshotWriteResult(self._snapshot_write_diagnosis(classified, owner))
+                result = SnapshotWriteResult(
+                    self._snapshot_write_diagnosis(classified, owner, lease_epoch)
+                )
+        if result.outcome in ("lease_lost", "not_claimed") and lease_epoch is not None:
+            await self._audit_denial(run_id, "snapshot", classified, owner, lease_epoch)
+        return result
 
     @staticmethod
     def _clean_snapshot_payloads(payloads: ExecutionSnapshotPayloads) -> None:
@@ -447,7 +555,9 @@ class RunRepository:
 
     @staticmethod
     def _snapshot_write_diagnosis(
-        classified: Mapping[str, object] | None, owner: UUID
+        classified: Mapping[str, object] | None,
+        owner: UUID,
+        lease_epoch: int | None = None,
     ) -> SnapshotWriteOutcome:
         """Label for a conditional UPDATE that matched no row.
 
@@ -462,11 +572,15 @@ class RunRepository:
             return "not_claimed"
         if classified["status"] != "running":
             return "not_claimed"
+        if lease_epoch is not None and classified["lease_epoch"] != lease_epoch:
+            return "lease_lost"
         if classified["owner"] != owner or not classified["lease_valid"]:
             return "lease_lost"
         return "audit_conflict"
 
-    async def append(self, run_id, owner, kind, data):
+    async def append(self, run_id, owner, kind, data, *, lease_epoch: int | None = None):
+        current = None
+        denied = False
         async with self.engine.begin() as conn:
             current = (
                 (
@@ -477,28 +591,77 @@ class RunRepository:
                     )
                 )
                 .mappings()
-                .one()
+                .first()
             )
-            if current["status"] != "running" or current["owner"] != owner:
-                raise asyncio.CancelledError()
-            if current["cancel_requested"] or not current["lease_valid"]:
-                raise asyncio.CancelledError()
-            await self._event(conn, run_id, kind, data)
+            if (
+                (
+                    current is None
+                    or current["status"] != "running"
+                    or current["owner"] != owner
+                    or (lease_epoch is not None and current["lease_epoch"] != lease_epoch)
+                )
+                or current["cancel_requested"]
+                or not current["lease_valid"]
+            ):
+                denied = True
+            else:
+                await self._event(conn, run_id, kind, data)
+        if denied:
+            await self._audit_denial(
+                run_id,
+                "append",
+                current,
+                owner,
+                lease_epoch,
+                terminal=current is not None and current["status"] != "running",
+            )
+            raise asyncio.CancelledError()
 
-    async def heartbeat(self, run_id, owner, lease_seconds):
+    async def heartbeat(self, run_id, owner, lease_seconds, *, lease_epoch: int | None = None):
+        epoch_clause = " AND lease_epoch=:lease_epoch" if lease_epoch is not None else ""
         async with self.engine.begin() as conn:
             cancelled = await conn.scalar(
-                text("""UPDATE runtime_runs SET
+                text(
+                    """UPDATE runtime_runs SET
                 lease_until=now()+:lease * interval '1 second'
-                WHERE id=:id AND owner=:owner AND status='running' AND lease_until>now()
-                RETURNING cancel_requested"""),
-                {"id": run_id, "owner": owner, "lease": lease_seconds},
+                WHERE id=:id AND owner=:owner AND status='running' AND lease_until>now()"""
+                    + epoch_clause
+                    + " RETURNING cancel_requested"
+                ),
+                {"id": run_id, "owner": owner, "lease": lease_seconds, "lease_epoch": lease_epoch},
             )
-            return "lost" if cancelled is None else ("cancel" if cancelled else "ok")
+        if cancelled is not None:
+            return "cancel" if cancelled else "ok"
+        async with self.engine.connect() as conn:
+            current = (
+                (
+                    await conn.execute(
+                        text("""SELECT *, lease_until>now() AS lease_valid FROM runtime_runs
+                        WHERE id=:id"""),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        await self._audit_denial(run_id, "heartbeat", current, owner, lease_epoch)
+        return "lost"
 
     async def finish(
-        self, run_id, owner, status, output=None, error=None, history=None, completion=None
+        self,
+        run_id,
+        owner,
+        status,
+        output=None,
+        error=None,
+        history=None,
+        completion=None,
+        *,
+        lease_epoch: int | None = None,
+        usage: dict | None = None,
     ):
+        denial = None
+        row = None
         async with self.engine.begin() as conn:
             cid = await conn.scalar(
                 text("SELECT conversation_id FROM runtime_runs WHERE id=:id"), {"id": run_id}
@@ -522,24 +685,189 @@ class RunRepository:
                 .mappings()
                 .one()
             )
-            if row["status"] in TERMINAL or row["owner"] != owner or not row["lease_valid"]:
-                return
-            if row["cancel_requested"]:
-                status, output, error = "cancelled", None, None
-            await conn.execute(
-                text("""UPDATE runtime_runs SET status=:status,output=:output,
-                error_code=:error,finished_at=now(),lease_until=NULL WHERE id=:id"""),
-                {"id": run_id, "status": status, "output": output, "error": error},
+            if row["status"] in TERMINAL:
+                return  # duplicate finish is idempotent; usage is never recounted
+            denial = _denial_reason(row, owner, lease_epoch)
+            if denial is not None:
+                row = dict(row)
+            else:
+                if row["cancel_requested"]:
+                    status, output, error = "cancelled", None, None
+                await conn.execute(
+                    text("""UPDATE runtime_runs SET status=:status,output=:output,
+                    error_code=:error,finished_at=now(),lease_until=NULL WHERE id=:id"""),
+                    {"id": run_id, "status": status, "output": output, "error": error},
+                )
+                await self.hooks.on_finished(conn, row, status, error)
+                if status == "completed":
+                    for kind, data in await self.hooks.on_completed(
+                        conn, row, cid, output, history, completion
+                    ):
+                        await self._event(conn, run_id, kind, data)
+                await self._event(
+                    conn, run_id, "run." + status, {"output": output, "error_code": error}
+                )
+                if usage is not None:
+                    await self._insert_terminal_usage(conn, row, usage)
+        if denial is not None:
+            await self._audit_denial(run_id, "finish", row, owner, lease_epoch)
+
+    async def _insert_terminal_usage(self, conn, row, usage: dict) -> None:
+        """Insert one terminal usage row by source uniqueness (same transaction).
+
+        Unknown stays unknown: an empty/absent provider payload is stored as
+        ``{"status":"unknown"}`` and never zero-filled. Duplicate finish is
+        blocked by the terminal guard above, and the unique key is a second
+        idempotency gate.
+        """
+        payload = dict(usage) if usage else {"status": "unknown"}
+        if not payload:
+            payload = {"status": "unknown"}
+        await conn.execute(
+            text("""INSERT INTO runtime_usage_ledger
+            (id,run_id,tenant_id,lease_epoch,source,source_event_id,usage)
+            VALUES (:id,:run_id,:tenant_id,:lease_epoch,'engine_terminal','result',
+            CAST(:usage AS jsonb))
+            ON CONFLICT (run_id,source,source_event_id) DO NOTHING"""),
+            {
+                "id": uuid4(),
+                "run_id": row["id"],
+                "tenant_id": row["tenant_id"],
+                "lease_epoch": row["lease_epoch"],
+                "usage": json.dumps(payload),
+            },
+        )
+
+    async def record_usage(
+        self,
+        *,
+        run_id,
+        tenant_id,
+        ownership: ExecutionOwnership,
+        source: str,
+        source_event_id: str,
+        usage: dict,
+        usage_schema_version: str = "v1",
+        cost=None,
+        is_estimate: bool = False,
+        supersedes_id=None,
+    ) -> dict | None:
+        """Source-unique usage write bound to the current Fencing tuple.
+
+        Duplicate delivery returns the original row without consuming event
+        sequence or changing aggregates. A stale owner/epoch writes no ledger
+        row and records a separate denial audit.
+        """
+        if not isinstance(ownership, ExecutionOwnership) or ownership.run_id != run_id:
+            raise OwnershipDenied("owner_mismatch", "usage")
+        current = None
+        inserted = None
+        async with self.engine.begin() as conn:
+            inserted = (
+                (
+                    await conn.execute(
+                        text("""INSERT INTO runtime_usage_ledger
+                        (id,run_id,tenant_id,lease_epoch,source,source_event_id,
+                         usage_schema_version,usage,cost,is_estimate,supersedes_id)
+                        SELECT :id,r.id,COALESCE(:tenant_id,r.tenant_id),:lease_epoch,
+                        :source,:source_event_id,:usage_schema_version,
+                        CAST(:usage AS jsonb),:cost,:is_estimate,:supersedes_id
+                        FROM runtime_runs r
+                        WHERE r.id=:run_id AND r.owner=:owner AND r.lease_epoch=:lease_epoch
+                        ON CONFLICT (run_id,source,source_event_id) DO NOTHING
+                        RETURNING *"""),
+                        {
+                            "id": uuid4(),
+                            "run_id": run_id,
+                            "tenant_id": tenant_id,
+                            "owner": ownership.owner,
+                            "lease_epoch": ownership.lease_epoch,
+                            "source": source,
+                            "source_event_id": source_event_id,
+                            "usage_schema_version": usage_schema_version,
+                            "usage": json.dumps(usage),
+                            "cost": cost,
+                            "is_estimate": is_estimate,
+                            "supersedes_id": supersedes_id,
+                        },
+                    )
+                )
+                .mappings()
+                .first()
             )
-            await self.hooks.on_finished(conn, row, status, error)
-            if status == "completed":
-                for kind, data in await self.hooks.on_completed(
-                    conn, row, cid, output, history, completion
-                ):
-                    await self._event(conn, run_id, kind, data)
-            await self._event(
-                conn, run_id, "run." + status, {"output": output, "error_code": error}
+            if inserted is not None:
+                return dict(inserted)
+            existing = (
+                (
+                    await conn.execute(
+                        text("""SELECT * FROM runtime_usage_ledger
+                        WHERE run_id=:run_id AND source=:source
+                        AND source_event_id=:source_event_id"""),
+                        {
+                            "run_id": run_id,
+                            "source": source,
+                            "source_event_id": source_event_id,
+                        },
+                    )
+                )
+                .mappings()
+                .first()
             )
+            if existing is not None:
+                return dict(existing)
+            current = (
+                (
+                    await conn.execute(
+                        text("""SELECT *, lease_until>now() AS lease_valid
+                        FROM runtime_runs WHERE id=:id"""),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        await self._audit_denial(run_id, "usage", current, ownership.owner, ownership.lease_epoch)
+        return None
+
+    async def usage_summary(self, run_id, tenant) -> dict[str, int | float]:
+        """Rebuildable aggregate over effective ledger leaves only."""
+        async with self.engine.connect() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text("""SELECT
+                        count(*) AS records,
+                        count(*) FILTER (WHERE NOT EXISTS (
+                            SELECT 1 FROM runtime_usage_ledger s
+                            WHERE s.supersedes_id=u.id)) AS effective_records,
+                        count(*) FILTER (WHERE u.usage->>'status'='unknown')
+                            AS unknown_records,
+                        count(*) FILTER (WHERE NOT EXISTS (
+                            SELECT 1 FROM runtime_usage_ledger s
+                            WHERE s.supersedes_id=u.id)
+                            AND u.usage->>'status'='unknown')
+                            AS effective_unknown_records,
+                        COALESCE(SUM(CASE WHEN NOT EXISTS (
+                            SELECT 1 FROM runtime_usage_ledger s
+                            WHERE s.supersedes_id=u.id)
+                            AND u.usage->>'total_tokens' ~ '^[0-9]+([.][0-9]+)?$'
+                            THEN (u.usage->>'total_tokens')::numeric ELSE 0 END), 0)
+                            AS effective_total_tokens
+                        FROM runtime_usage_ledger u
+                        WHERE u.run_id=:run_id AND u.tenant_id=:tenant"""),
+                        {"run_id": run_id, "tenant": tenant},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        return {
+            "records": int(row["records"]),
+            "effective_records": int(row["effective_records"]),
+            "unknown_records": int(row["unknown_records"]),
+            "effective_unknown_records": int(row["effective_unknown_records"]),
+            "effective_total_tokens": float(row["effective_total_tokens"]),
+        }
 
     async def cancel(self, run_id, tenant, scope: BusinessScope | None = None):
         resolved_scope = resolve_scope(tenant, scope)
@@ -574,7 +902,7 @@ class RunRepository:
                 if row["status"] == "queued":
                     await conn.execute(
                         text("""UPDATE runtime_runs SET status='cancelled',
-                        finished_at=now() WHERE id=:id"""),
+                        finished_at=now(), lease_epoch=lease_epoch+1 WHERE id=:id"""),
                         {"id": run_id},
                     )
                     await self.hooks.on_finished(conn, row, "cancelled", None)
@@ -603,7 +931,8 @@ class RunRepository:
                 error = "worker_lost" if row["status"] == "running" else "queue_timeout"
                 await conn.execute(
                     text("""UPDATE runtime_runs SET status=:status,error_code=:error,
-                    finished_at=now(),lease_until=NULL WHERE id=:id"""),
+                    finished_at=now(),lease_until=NULL,
+                    lease_epoch=lease_epoch+1 WHERE id=:id"""),
                     {"id": row["id"], "status": status, "error": error},
                 )
                 await self.hooks.on_finished(conn, row, status, error)

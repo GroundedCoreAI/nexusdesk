@@ -1699,6 +1699,7 @@ def test_pg_write_barrier_sql_binds_payload_identity_without_entry_guard():
             params = {
                 "id": run_id,
                 "owner": owner,
+                "lease_epoch": None,
                 "execution_id": str(foreign_id),
                 "config": foreign.execution_config_snapshot,
                 "declared": foreign.declared_capabilities_snapshot,
@@ -1780,6 +1781,7 @@ def _barrier_binds(run_id: UUID, owner: UUID, payloads: ExecutionSnapshotPayload
     return {
         "id": run_id,
         "owner": owner,
+        "lease_epoch": None,
         "execution_id": str(payloads.execution_id),
         **{param: getattr(payloads, column) for column, param in SNAPSHOT_PAYLOAD_PARAMS.items()},
     }

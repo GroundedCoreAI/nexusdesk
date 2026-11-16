@@ -215,6 +215,7 @@ class _NoSnapshotBarrier:
         *,
         run_id: UUID,
         owner: UUID | None,
+        lease_epoch: int | None = None,
         execution_id: UUID,
         payloads: Mapping[str, str],
     ) -> str:
@@ -240,6 +241,7 @@ class _RepositorySnapshotBarrier:
         *,
         run_id: UUID,
         owner: UUID | None,
+        lease_epoch: int | None = None,
         execution_id: UUID,
         payloads: Mapping[str, str],
     ) -> str:
@@ -255,6 +257,7 @@ class _RepositorySnapshotBarrier:
                 execution_id=execution_id,
                 **{column: payloads[column] for column in SNAPSHOT_COLUMNS},
             ),
+            lease_epoch=lease_epoch,
         )
         return str(result)
 

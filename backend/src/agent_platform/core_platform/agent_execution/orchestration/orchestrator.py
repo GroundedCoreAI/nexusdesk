@@ -456,6 +456,7 @@ class ExecutionOrchestrator:
             outcome = await self._snapshot_barrier.write(
                 run_id=context.execution_id,
                 owner=context.owner,
+                lease_epoch=context.lease_epoch,
                 execution_id=context.execution_id,
                 payloads=serialized.payloads,
             )

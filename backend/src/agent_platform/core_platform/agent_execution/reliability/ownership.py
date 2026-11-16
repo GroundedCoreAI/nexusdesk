@@ -70,6 +70,15 @@ def _optional_epoch(value: object) -> bool:
     return value is None or (type(value) is int and value >= 0)
 
 
+class OwnershipDenied(RuntimeError):
+    """A fenced mutation was refused; its business transaction wrote nothing."""
+
+    def __init__(self, reason: str, operation: str) -> None:
+        super().__init__(f"{operation}:{reason}")
+        self.reason = reason
+        self.operation = operation
+
+
 @dataclass(frozen=True, slots=True)
 class ExecutionOwnership:
     """One claim's database-owned Fencing evidence.
