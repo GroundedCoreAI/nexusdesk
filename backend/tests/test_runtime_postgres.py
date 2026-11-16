@@ -843,7 +843,13 @@ async def test_p0_it_07_internal_sse_drains_more_than_200_events_before_terminal
         assert response.status_code == 200
         assert sse_ids(response.text) == list(range(1, 205))
         assert response.text.count("event: test.pagination") == 201
-        assert response.text.rstrip().endswith('data: {"output": "done", "error_code": null}')
+        # R-15: legacy fields stay, with only the reserved additive metadata.
+        terminal_payload = json.loads(
+            response.text.rstrip().splitlines()[-1].removeprefix("data: ")
+        )
+        assert terminal_payload["output"] == "done"
+        assert terminal_payload["error_code"] is None
+        assert terminal_payload["_execution"]["source"] == "platform"
         tail = await client.get(f"/api/v1/runs/{row['id']}/events", params={"after": 200})
         assert sse_ids(tail.text) == [201, 202, 203, 204]
         assert "event: run.completed" in tail.text
