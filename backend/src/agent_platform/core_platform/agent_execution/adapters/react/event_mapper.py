@@ -24,6 +24,9 @@ _ENVELOPE_FIELDS = frozenset(
         "timestamp",
         "payload",
         "trace_id",
+        "producer_id",
+        "producer_event_id",
+        "_execution",
     }
 )
 

@@ -146,7 +146,10 @@ def from_agent_event(
     bound_run = event.execution_id if run_id is None else run_id
     if not _is_uuid(bound_run) or bound_run != event.execution_id:
         raise ValueError("durable event run binding must match the AgentEvent execution identity")
-    identity = producer or EventProducerIdentity()
+    identity = producer or EventProducerIdentity(
+        producer_id=event.producer_id,
+        producer_event_id=event.producer_event_id,
+    )
     return AgentEventWrite(
         run_id=bound_run,
         event_id=event.event_id,

@@ -4,6 +4,7 @@ from math import isfinite
 from time import monotonic
 from uuid import uuid4
 
+from agent_platform.core_platform.agent_execution.events.envelope import from_agent_event
 from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
     build_execution_context,
     enforce_execution_rollout,
@@ -100,6 +101,36 @@ class RuntimeWorker:
                 return
             await self.repository.append(row["id"], self.owner, kind, data, **epoch_kwargs)
 
+        append_event = getattr(self.repository, "append_event", None)
+
+        async def emit_envelope(event):
+            """Persist one AgentEvent through the deduplicating Repository path."""
+            if event.event_type == "model.delta":
+                # Transient telemetry stays outside the durable cursor.
+                if self.notifier is not None:
+                    await self.notifier.send(row["id"], {"k": "delta", **event.payload})
+                return
+            if not callable(append_event):
+                # Legacy/compat repository seam without the T-04 method keeps
+                # the two-argument path (including its pre-migration shape).
+                await emit(event.event_type, event.payload)
+                return
+            await append_event(
+                row["id"],
+                self.owner,
+                from_agent_event(event),
+                **epoch_kwargs,
+            )
+
+        class _WorkerEventSink:
+            async def __call__(self, kind, data):
+                return await emit(kind, data)
+
+            async def emit_event(self, event):
+                return await emit_envelope(event)
+
+        event_sink = _WorkerEventSink()
+
         async def monitor(task):
             nonlocal monitor_failure
             while True:
@@ -160,7 +191,7 @@ class RuntimeWorker:
                     scope=scope,
                     execution_phase3_enabled=phase3_enabled,
                 )
-                execution = asyncio.create_task(self.orchestrator.execute(context, emit))
+                execution = asyncio.create_task(self.orchestrator.execute(context, event_sink))
                 watcher = asyncio.create_task(monitor(execution))
                 outcome = await execution
                 if outcome.status == "completed":

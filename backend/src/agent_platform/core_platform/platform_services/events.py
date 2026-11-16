@@ -157,6 +157,21 @@ class DurableEventBus(InProcessEventBus):
             "persistence_failures": self._persistence_failures,
         }
 
+    async def enqueue(self, event: EventEnvelope) -> bool:
+        """Acknowledged enqueue for the runtime Outbox (08 R-4, T-04).
+
+        True means the durable ``extension_event`` task exists; subscriber
+        delivery remains at-least-once and idempotent by ``idempotency_key``.
+        A rejected/failed task returns False so the Outbox row stays pending.
+        """
+        try:
+            task = await self._ensure_task(event)
+        except Exception:
+            self._persistence_failures += 1
+            logger.exception("Failed to enqueue extension event %s", event.event_type)
+            return False
+        return task["status"] in {"pending", "running", "done"}
+
     async def _ensure_task(self, event: EventEnvelope) -> dict[str, object]:
         payload = {
             "event": event.model_dump(mode="json"),
@@ -249,8 +264,7 @@ class DurableEventBus(InProcessEventBus):
             # (and the other known states) without special-casing an absent
             # key.
             counts = {
-                status: counts.get(status, 0)
-                for status in ("pending", "running", "done", "failed")
+                status: counts.get(status, 0) for status in ("pending", "running", "done", "failed")
             }
         return {**self.observability(), "queue": counts}
 

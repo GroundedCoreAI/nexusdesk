@@ -11,6 +11,10 @@ from agent_platform.core_platform.agent_execution.contracts.snapshots import (
     ExecutionSnapshotError,
     deserialize_execution_snapshots,
 )
+from agent_platform.core_platform.agent_execution.events.envelope import (
+    AgentEventWrite,
+    EventWriteResult,
+)
 from agent_platform.core_platform.agent_execution.reliability.ownership import (
     ExecutionOwnership,
     FencingDenial,
@@ -711,6 +715,154 @@ class RunRepository:
                     await self._insert_terminal_usage(conn, row, usage)
         if denial is not None:
             await self._audit_denial(run_id, "finish", row, owner, lease_epoch)
+
+    async def append_event(
+        self,
+        run_id,
+        owner,
+        event: AgentEventWrite,
+        *,
+        lease_epoch: int | None = None,
+    ) -> EventWriteResult:
+        """Persist one AgentEvent with database-owned sequence and dedup.
+
+        Duplicate ``event_id`` (or the optional producer key) returns the
+        original durable result and never increments ``event_seq``. The
+        AFTER INSERT Outbox trigger queues publishable types in the same
+        transaction; internal ``tool.replay`` is excluded by the trigger.
+        """
+        if not isinstance(event, AgentEventWrite) or event.run_id != run_id:
+            raise OwnershipDenied("owner_mismatch", "append")
+        current = None
+        reason = None
+        result: EventWriteResult | None = None
+        async with self.engine.begin() as conn:
+            current = (
+                (
+                    await conn.execute(
+                        text("""SELECT *, lease_until>now() AS lease_valid FROM runtime_runs
+                        WHERE id=:id FOR UPDATE"""),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            reason = _denial_reason(current, owner, lease_epoch)
+            if reason is None and (current["cancel_requested"] or current["status"] != "running"):
+                reason = "run_terminal" if current["status"] != "running" else "lease_lost"
+            if reason is None:
+                existing = (
+                    (
+                        await conn.execute(
+                            text("""SELECT seq,event_id FROM runtime_events
+                            WHERE run_id=:run_id AND event_id=:event_id"""),
+                            {"run_id": run_id, "event_id": event.event_id},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if existing is None and event.producer_id is not None:
+                    existing = (
+                        (
+                            await conn.execute(
+                                text("""SELECT seq,event_id FROM runtime_events
+                                WHERE run_id=:run_id AND producer_id=:producer_id
+                                AND producer_event_id=:producer_event_id
+                                ORDER BY seq LIMIT 1"""),
+                                {
+                                    "run_id": run_id,
+                                    "producer_id": event.producer_id,
+                                    "producer_event_id": event.producer_event_id,
+                                },
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                if existing is not None:
+                    result = EventWriteResult(
+                        seq=existing["seq"],
+                        event_id=existing["event_id"],
+                        duplicate=True,
+                    )
+                else:
+                    seq = await conn.scalar(
+                        text("""UPDATE runtime_runs SET event_seq=event_seq+1
+                        WHERE id=:id RETURNING event_seq"""),
+                        {"id": run_id},
+                    )
+                    if seq is None:
+                        reason = "run_missing"
+                    else:
+                        inserted = (
+                            (
+                                await conn.execute(
+                                    text("""INSERT INTO runtime_events
+                                    (run_id,seq,type,data,event_id,schema_version,source,
+                                     producer_id,producer_event_id,engine_session_id,trace_id)
+                                    VALUES (:run_id,:seq,:type,CAST(:data AS jsonb),
+                                    :event_id,:schema_version,:source,:producer_id,
+                                    :producer_event_id,:engine_session_id,:trace_id)
+                                    ON CONFLICT (event_id) DO NOTHING
+                                    RETURNING seq"""),
+                                    {
+                                        "run_id": run_id,
+                                        "seq": seq,
+                                        "type": event.event_type,
+                                        "data": json.dumps(event.payload),
+                                        "event_id": event.event_id,
+                                        "schema_version": event.schema_version,
+                                        "source": event.source,
+                                        "producer_id": event.producer_id,
+                                        "producer_event_id": event.producer_event_id,
+                                        "engine_session_id": event.engine_session_id,
+                                        "trace_id": event.trace_id,
+                                    },
+                                )
+                            )
+                            .scalars()
+                            .first()
+                        )
+                        if inserted is None:
+                            # The row lock makes this unreachable in practice;
+                            # report the durable original instead of counting again.
+                            existing = (
+                                (
+                                    await conn.execute(
+                                        text("""SELECT seq,event_id FROM runtime_events
+                                        WHERE run_id=:run_id AND event_id=:event_id"""),
+                                        {"run_id": run_id, "event_id": event.event_id},
+                                    )
+                                )
+                                .mappings()
+                                .first()
+                            )
+                            result = EventWriteResult(
+                                seq=existing["seq"],
+                                event_id=existing["event_id"],
+                                duplicate=True,
+                            )
+                        else:
+                            await conn.execute(
+                                text(
+                                    """SELECT pg_notify(:ch, :payload)""",
+                                ),
+                                {
+                                    "ch": channel(run_id),
+                                    "payload": json.dumps(
+                                        {"k": "durable", "seq": seq, "type": event.event_type}
+                                    ),
+                                },
+                            )
+                            result = EventWriteResult(
+                                seq=seq, event_id=event.event_id, duplicate=False
+                            )
+        if reason is not None or result is None:
+            await self._audit_denial(run_id, "append", current, owner, lease_epoch)
+            raise OwnershipDenied(reason or "run_missing", "append")
+        return result
 
     async def _insert_terminal_usage(self, conn, row, usage: dict) -> None:
         """Insert one terminal usage row by source uniqueness (same transaction).
