@@ -30,7 +30,7 @@ import { ApplicationExperienceTab } from '../experience/ApplicationExperienceTab
 import { SkillsTab } from '../skills/SkillsTab';
 import { ApplicationRulesTab } from '../rules/ApplicationRulesTab';
 import { ConversationRecordsTab } from '../conversations/ConversationRecordsTab';
-import { ChannelsReleaseTab } from '../release/ChannelsReleaseTab';
+import { DeliveryTab } from '../release/DeliveryTab';
 import { VersionHistoryPanel } from '../release/VersionHistoryPanel';
 
 const tabs: Array<{ key: ApplicationTabKey; label: string }> = [
@@ -418,7 +418,7 @@ export function ApplicationDetail({
                                 />
                                 : tab.key === 'conversations'
                                     ? <ConversationRecordsTab application={application}/>
-                                    : <ChannelsReleaseTab
+                                    : <DeliveryTab
                                         application={application}
                                         readOnly={readOnly}
                                         readiness={releaseReadiness}
