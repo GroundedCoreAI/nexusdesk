@@ -69,6 +69,7 @@ class OutboxDispatcher:
         *,
         batch_size: int = 100,
         poll_seconds: float = 1.0,
+        tenant_id: str | None = None,
     ) -> None:
         if batch_size < 1:
             raise ValueError("Outbox batch size must be positive")
@@ -78,6 +79,9 @@ class OutboxDispatcher:
         self._publisher = publisher
         self._batch_size = batch_size
         self._poll_seconds = poll_seconds
+        # Optional tenant scoping for sharded deployments and controlled tests;
+        # the production default publishes every tenant.
+        self._tenant_id = tenant_id
 
     async def dispatch_once(self) -> int:
         """Publish one bounded batch; returns rows transitioned to published.
@@ -86,20 +90,27 @@ class OutboxDispatcher:
         because ``event_id`` is the durable bus idempotency key, and a crash
         before/after the status update simply rescans the pending row.
         """
+        tenant_filter = " AND r.tenant_id=:tenant" if self._tenant_id is not None else ""
+        params: dict[str, object] = {"batch": self._batch_size}
+        if self._tenant_id is not None:
+            params["tenant"] = self._tenant_id
         async with self._engine.connect() as conn:
             rows = (
                 (
                     await conn.execute(
-                        text("""SELECT o.run_id,o.seq,o.event_id,o.attempts,
+                        text(
+                            """SELECT o.run_id,o.seq,o.event_id,o.attempts,
                         e.type AS event_type,e.data,e.trace_id,r.tenant_id
                         FROM runtime_event_outbox o
                         JOIN runtime_events e
                           ON e.run_id=o.run_id AND e.seq=o.seq
                         JOIN runtime_runs r ON r.id=o.run_id
-                        WHERE o.status='pending' AND o.available_at<=now()
-                        ORDER BY o.created_at,o.seq
-                        LIMIT :batch"""),
-                        {"batch": self._batch_size},
+                        WHERE o.status='pending' AND o.available_at<=now()"""
+                            + tenant_filter
+                            + """ ORDER BY o.created_at,o.seq
+                        LIMIT :batch"""
+                        ),
+                        params,
                     )
                 )
                 .mappings()
@@ -130,18 +141,28 @@ class OutboxDispatcher:
 
     async def reconcile(self) -> int:
         """Restore missing publishable Outbox rows at/after the rollout watermark."""
+        tenant_filter = " AND r.tenant_id=:tenant" if self._tenant_id is not None else ""
+        params: dict[str, object] = {}
+        if self._tenant_id is not None:
+            params["tenant"] = self._tenant_id
         async with self._engine.begin() as conn:
             result = await conn.execute(
-                text("""INSERT INTO runtime_event_outbox(run_id,seq,event_id,status)
+                text(
+                    """INSERT INTO runtime_event_outbox(run_id,seq,event_id,status)
                 SELECT e.run_id,e.seq,e.event_id,'pending'
                 FROM runtime_events e
+                JOIN runtime_runs r ON r.id=e.run_id
                 JOIN runtime_event_outbox_watermark w ON w.id='default'
                 WHERE e.type <> 'tool.replay'
-                  AND e.created_at >= w.created_after
+                  AND e.created_at >= w.created_after"""
+                    + tenant_filter
+                    + """
                   AND NOT EXISTS (
                     SELECT 1 FROM runtime_event_outbox o
                     WHERE o.run_id=e.run_id AND o.seq=e.seq)
-                ON CONFLICT DO NOTHING""")
+                ON CONFLICT DO NOTHING"""
+                ),
+                params,
             )
             return result.rowcount or 0
 

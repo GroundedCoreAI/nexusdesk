@@ -49,7 +49,7 @@ async def outbox(repo):
     repository, tenant = repo
     engine = repository.engine
     publisher = RecordingPublisher()
-    dispatcher = OutboxDispatcher(engine, publisher, batch_size=20)
+    dispatcher = OutboxDispatcher(engine, publisher, batch_size=20, tenant_id=tenant)
     try:
         yield repository, tenant, engine, publisher, dispatcher
     finally:
