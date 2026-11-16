@@ -133,8 +133,12 @@ class ParserDiagnosticCollector:
     def _bounded_sample(self, sample: str | None) -> str | None:
         if sample is None or not self._raw_samples_enabled:
             return None
+        # R-18(b): an enabled raw sample without a redactor fails closed — the
+        # raw value is never retained verbatim (no canary may survive).
+        if self._redact is None:
+            return None
         try:
-            text = self._redact(sample) if self._redact is not None else sample
+            text = self._redact(sample)
             encoded = text.encode("utf-8")[: self._max_sample_bytes]
             return encoded.decode("utf-8", "ignore")
         except Exception:  # noqa: BLE001 - unsafe diagnostics stay private.
