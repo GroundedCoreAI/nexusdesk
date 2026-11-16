@@ -73,9 +73,16 @@ from agent_platform.core_platform.agent_execution.credentials.repository import 
 from agent_platform.core_platform.agent_execution.credentials.vault import (
     ExecutionCredentialVault,
 )
+from agent_platform.core_platform.agent_execution.host.docker_sandbox_provider import (
+    DockerSandboxProvider,
+)
 from agent_platform.core_platform.agent_execution.host.host_models import ResourcePolicy
 from agent_platform.core_platform.agent_execution.host.local_sandbox_provider import (
     LocalSandboxProvider,
+)
+from agent_platform.core_platform.agent_execution.host.network_policy import (
+    NetworkPolicy,
+    NetworkRule,
 )
 from agent_platform.core_platform.agent_execution.host.observability import (
     EVENT_SWEEP_BATCH,
@@ -427,6 +434,7 @@ def _runtime_fingerprint_exclude_fields() -> set[str]:
                     "execution_event_",
                     "execution_parser_",
                     "execution_credential_",
+                    "execution_sandbox_",
                 )
             )
         ),
@@ -873,6 +881,17 @@ class ExecutionRuntimeSubsystem:
                 )
 
 
+def _docker_network_rule(entry: str) -> NetworkRule:
+    """Parse one deployment allowlist entry; malformed values fail closed."""
+    host, separator, port = entry.rpartition(":")
+    if not separator or not host or not port.isdigit():
+        raise ValueError("execution sandbox allowlist entries must be host:port")
+    value = int(port)
+    if not 1 <= value <= 65535:
+        raise ValueError("execution sandbox allowlist port is invalid")
+    return NetworkRule(host=host.strip("[]"), port=value)
+
+
 def _build_execution_runtime_subsystem(
     settings: Settings,
     engine,
@@ -899,9 +918,20 @@ def _build_execution_runtime_subsystem(
     # One structured alert surface for the whole subsystem (02 FR-9).
     alert_sink = LoggingAlertSink()
     sandbox_provider_id = f"{settings.execution_sandbox_provider}/v1"
-    provider = LocalSandboxProvider(
-        enforcement_required=settings.execution_resource_enforcement_required,
-    )
+    if settings.execution_sandbox_provider == "docker":
+        rules = tuple(
+            _docker_network_rule(entry) for entry in settings.execution_sandbox_docker_allowlist
+        )
+        provider = DockerSandboxProvider(
+            image=settings.execution_sandbox_docker_image,
+            enforcement_required=settings.execution_resource_enforcement_required,
+            network_policy=NetworkPolicy(rules=rules),
+            proxy_endpoint=settings.execution_sandbox_docker_proxy_endpoint or None,
+        )
+    else:
+        provider = LocalSandboxProvider(
+            enforcement_required=settings.execution_resource_enforcement_required,
+        )
     resources = ResourceManager(
         provider,
         sample_interval_seconds=settings.execution_resource_sample_interval_seconds,

@@ -192,6 +192,15 @@ class ResourceManager:
     def preexec_for(self, reservation: SandboxReservation) -> Callable[[], None] | None:
         return self._sandbox.preexec_for(reservation)
 
+    @property
+    def sandbox_provider(self):
+        return self._sandbox
+
+    def launch_plan(self, reservation: SandboxReservation, spec, **kwargs):
+        """Provider-generated launch seam; None for providers without one."""
+        make = getattr(self._sandbox, "launch_plan", None)
+        return None if make is None else make(reservation, spec, **kwargs)
+
     # ------------------------------------------------------------------
     # Sampling and excess decisions
     # ------------------------------------------------------------------

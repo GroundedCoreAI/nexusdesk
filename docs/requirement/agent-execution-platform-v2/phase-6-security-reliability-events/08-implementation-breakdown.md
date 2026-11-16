@@ -163,6 +163,15 @@
 
 **裁定：** 保留描述性文件名，revision 标识改用 ``0068_execution_fencing`` 与 ``0069_execution_credential``（均不超过 32）。0069 的 ``down_revision`` 为 ``0068_execution_fencing``。任务表中的文件名保持不变，仅标识字符串变化。
 
+
+### R-17 — 受管 allowlist egress proxy 属于外部部署依赖
+
+**文档：** T-08 与 FR-5 要求受管 allowlist egress proxy。
+
+**现实：** Docker provider 可以生成每 Execution 的网络/挂载/资源计划，并在未配置代理端点时 fail closed，但本轮纯代码交付不包含 proxy 服务镜像或 daemon 侧 proxy 容器。默认拒绝（`--network=none`）已实现并本地演练；allowlist、DNS rebinding、metadata 与 proxy bypass 演练需要专用环境提供的受管代理。
+
+**裁定：** 未配置 `execution_sandbox_docker_proxy_endpoint` 时 provider 拒绝 allowlist（fail closed，不开放直连）。该端点是部署级无 Secret URL。真实 allowlist/proxy 演练保持 `pending_env`，在受管代理交付并演练前 A5 不能通过。
+
 ## 3. 聚焦回归复用（未变化不得全量重跑）
 
 | 既有证据/用例 | 复用或重跑规则 |

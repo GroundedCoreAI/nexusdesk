@@ -163,6 +163,15 @@ The alternatives were a parallel replacement stack (rejected: duplicate sources 
 
 **Ruling:** keep the descriptive filenames, but use revision identifiers ``0068_execution_fencing`` and ``0069_execution_credential`` (both <= 32). ``down_revision`` for 0069 is ``0068_execution_fencing``. Filenames remain as listed in the task table; only the identifier string changes.
 
+
+### R-17 — Managed allowlist egress proxy is an external deployment dependency
+
+**Documents:** T-08 and FR-5 require a managed allowlist egress proxy.
+
+**Reality:** the Docker provider can generate the per-Execution network/mount/resource plan and fail closed when no proxy endpoint is configured, but this code-only pass does not ship a proxy service image or daemon-side proxy container. Default-deny (`--network=none`) is enforced and drilled locally; allowlist, DNS-rebinding, metadata, and proxy-bypass drills need the dedicated environment's managed proxy.
+
+**Ruling:** the provider refuses an allowlist without `execution_sandbox_docker_proxy_endpoint` (fail closed, no direct egress). The endpoint is a deployment Secret-free URL. Real allowlist/proxy drills remain `pending_env` and A5 cannot pass until that managed proxy is supplied and drilled.
+
 ## 3. Focused Regression Reuse (Do Not Rerun Wholesale Unchanged)
 
 | Existing evidence/cases | Reuse or rerun rule |

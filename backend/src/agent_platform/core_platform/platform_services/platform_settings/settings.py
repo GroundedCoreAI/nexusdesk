@@ -139,9 +139,15 @@ class Settings(BaseSettings):
     # Platform-owned execution root. The relative default is the development
     # fallback only; deployments always set an absolute volume path (08 R-7).
     execution_workdir_root: Path = Path("data/execution")
-    # Phase 4 ships the Local Provider only; a strong-sandbox value cannot be
-    # configured at all (fail closed by type, 02 FR-8).
-    execution_sandbox_provider: Literal["local"] = "local"
+    # Phase 4 shipped Local only; Phase 6 adds the strong Docker provider.
+    # Docker requires an explicit pinned image and a passing daemon probe at
+    # composition, otherwise admission fails closed (02 FR-4/FR-8).
+    execution_sandbox_provider: Literal["local", "docker"] = "local"
+    execution_sandbox_docker_image: str = ""
+    # Allowlisted egress entries ("host:port"). Empty means default-deny
+    # --network=none. Nonempty requires a managed proxy endpoint at composition.
+    execution_sandbox_docker_allowlist: tuple[str, ...] = ()
+    execution_sandbox_docker_proxy_endpoint: str = ""
     # True rejects start when a required capability is unsupported. Settings
     # validate shape here; the support matrix probe lives in the Host
     # composition (T11/T12), not in this class.
@@ -553,6 +559,17 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def validate_execution_sandbox_provider(self):
+        # Selecting Docker without an image cannot start anything; reject the
+        # deployment configuration instead of discovering it per Run.
+        if (
+            self.execution_sandbox_provider == "docker"
+            and not self.execution_sandbox_docker_image.strip()
+        ):
+            raise ValueError("execution_sandbox_docker_image is required for the docker provider")
+        return self
+
+    @model_validator(mode="after")
     def validate_execution_untrusted_gate(self):
         # FR-4/FR-16: untrusted execution has no host fallback and no
         # configuration-only strong sandbox. While the only shipped provider is
@@ -568,6 +585,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "execution_untrusted_tenants_enabled requires a strong sandbox provider"
             )
+        if not self.execution_sandbox_docker_image.strip():
+            raise ValueError("execution_untrusted_tenants_enabled requires a pinned sandbox image")
         return self
 
     @model_validator(mode="after")

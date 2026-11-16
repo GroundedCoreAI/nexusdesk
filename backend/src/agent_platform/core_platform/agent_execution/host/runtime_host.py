@@ -172,6 +172,8 @@ class RuntimeHost:
         working_dir: Path,
         workdir_id: UUID | None = None,
         managed_id: UUID | None = None,
+        secret_dir: Path | None = None,
+        artifact_dir: Path | None = None,
     ) -> ManagedProcess:
         """Validate the trusted target, register, spawn and attach - fail closed.
 
@@ -204,6 +206,21 @@ class RuntimeHost:
         # the untrusted gate run here before any durable side effect (03 §4.2
         # barrier order); unset slots skip the gate (Phase 3 seam rule).
         reservation = await self._admit_resources(spec, run_id)
+        launch_plan = None
+        make_plan = getattr(self.resource_manager, "launch_plan", None)
+        if reservation is not None and make_plan is not None:
+            try:
+                launch_plan = make_plan(
+                    reservation,
+                    spec,
+                    working_dir=working_dir,
+                    secret_dir=secret_dir,
+                    artifact_dir=artifact_dir,
+                )
+            except SandboxPolicyError as exc:
+                await self._release(reservation)
+                self._record_start_failure(self._stable_code(exc.code))
+                raise HostStartError(exc.code) from exc
 
         record_id = managed_id or uuid4()
         await self._registry.register_starting(
@@ -224,6 +241,7 @@ class RuntimeHost:
                 sandbox_provider=self._sandbox_provider_id,
                 working_dir=working_dir,
                 preexec=self._preexec_for(reservation),
+                launch_plan=launch_plan,
             )
         except Exception as exc:
             code = self._stable_code(getattr(exc, "code", REASON_SPAWN_FAILED))
