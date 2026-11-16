@@ -67,6 +67,12 @@ from agent_platform.core_platform.agent_execution.contracts.instructions import 
     REACT_INSTRUCTION_PROVIDER_VERSION,
 )
 from agent_platform.core_platform.agent_execution.contracts.snapshots import SNAPSHOT_COLUMNS
+from agent_platform.core_platform.agent_execution.credentials.repository import (
+    ExecutionCredentialRepository,
+)
+from agent_platform.core_platform.agent_execution.credentials.vault import (
+    ExecutionCredentialVault,
+)
 from agent_platform.core_platform.agent_execution.host.host_models import ResourcePolicy
 from agent_platform.core_platform.agent_execution.host.local_sandbox_provider import (
     LocalSandboxProvider,
@@ -980,6 +986,8 @@ class RuntimeServices:
     # owns an execution root; ``None`` is the default topology for API and the
     # non-runtime workers (08 R-7).
     execution_runtime: ExecutionRuntimeSubsystem | None = None
+    # T-07 admin credential lifecycle repository (Secret-free metadata API).
+    execution_credentials: ExecutionCredentialRepository | None = None
 
 
 @asynccontextmanager
@@ -1174,6 +1182,11 @@ async def runtime_services(
                 adapters,
                 barrier=_RepositorySnapshotBarrier(repository.write_execution_snapshots),
             )
+            # T-07: the admin lifecycle repository exists even when the key is
+            # absent; encrypting fails closed at request time, never auto-creates.
+            execution_credentials = ExecutionCredentialRepository(
+                engine, ExecutionCredentialVault(settings.execution_credential_key_file)
+            )
             execution_runtime = _build_execution_runtime_subsystem(settings, engine)
             orchestrator = _build_execution_orchestrator(
                 factory,
@@ -1249,6 +1262,7 @@ async def runtime_services(
                 scope=platform.scope,
                 execution_subsystem=subsystem,
                 execution_runtime=execution_runtime,
+                execution_credentials=execution_credentials,
             )
     finally:
         # R-46 close order: this subsystem first (a warm round may still be

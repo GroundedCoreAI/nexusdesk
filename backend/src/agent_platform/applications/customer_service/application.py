@@ -15,6 +15,7 @@ from agent_platform.core_platform.platform_services.monitoring.routes import (
     router as notifications_router,
 )
 
+from .execution_credential_routes import router as execution_credential_router
 from .platform_routes import ingress
 from .platform_routes import router as platform_router
 from .routes import router
@@ -33,6 +34,7 @@ def register_customer_service_routes(
     app.include_router(platform_router, prefix=api_prefix)
     app.include_router(knowledge_router, prefix=api_prefix)
     app.include_router(runtime_router, prefix=api_prefix)
+    app.include_router(execution_credential_router, prefix=api_prefix)
     app.include_router(memory_router, prefix=api_prefix)
     app.include_router(approval_router, prefix=api_prefix)
     app.include_router(service_app_router, prefix=api_prefix)
