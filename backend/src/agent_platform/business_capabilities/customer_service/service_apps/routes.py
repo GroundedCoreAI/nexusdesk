@@ -395,6 +395,29 @@ async def application_versions(
     )
 
 
+@router.get("/{key}/delivery")
+async def application_delivery(
+    key: str,
+    request: Request,
+    user: Reader,
+    version_page: int = 1,
+    version_page_size: int = 5,
+):
+    """Outbound exits of one application: open-platform bindings and channels.
+
+    Publishing only mints an internal version, so the release tab needs this
+    snapshot to show what is actually exposed to end users and which version
+    each exit is running.
+    """
+    return await _applications(request).delivery(
+        user.tenant,
+        key,
+        scope=request.state.business_scope,
+        version_page=max(1, version_page),
+        version_page_size=min(max(1, version_page_size), 20),
+    )
+
+
 @router.post("/{key}/rollback")
 async def rollback_application(
     key: str,

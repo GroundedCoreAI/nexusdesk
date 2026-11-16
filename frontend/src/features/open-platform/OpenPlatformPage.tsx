@@ -1,5 +1,5 @@
 import {consoleTheme} from '../../styles/theme';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, App, Button, Card, Checkbox, ConfigProvider, Empty, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography } from 'antd';
 import { ApiOutlined, ArrowLeftOutlined, ArrowRightOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { t, dateTime } from '../../i18n';
@@ -20,19 +20,26 @@ interface Key { id:string;prefix:string;active:boolean;created_at:string;expires
 interface Log { id:string;route:string;method:string;status:number;duration_ms:number;error_code:string|null;run_id:string|null;run_status:string|null;run_error:string|null;run_duration_ms:number|null;created_at:string }
 const errorOf=(e:unknown)=>e instanceof Error?e.message:String(e);
 
-function Editor({value,agents,close,saved}:{value:Application|null;agents:Agent[];close:()=>void;saved:(app:Application)=>void}) {
+function Editor({value,agents,preset,close,saved}:{value:Application|null;agents:Agent[];preset?:{subject?:string;version?:number};close:()=>void;saved:(app:Application)=>void}) {
   const [form]=Form.useForm();const [busy,setBusy]=useState(false);const [error,setError]=useState('');
   const bound=value&&value.target?.target_kind==='service_application'?value.target:null;
   // Binding a Service Application is optional: once bound, the wrapped agent
   // is associated automatically and the delivery target drives the runtime;
   // otherwise the application falls back to a legacy agent authorization.
-  const [subject,setSubject]=useState<string|undefined>(bound?.target_id);
-  const [pin,setPin]=useState<number|undefined>(bound?.version_pin||undefined);
+  // Coming from a service application's delivery tab the binding is preset and
+  // locked: an unbound open-platform application silently runs the bare agent,
+  // so letting the user clear it here would produce a page that looks correct
+  // but ignores skills, knowledge and rules.
+  const [subject,setSubject]=useState<string|undefined>(bound?.target_id||preset?.subject);
+  const [pin,setPin]=useState<number|undefined>(bound?.version_pin||preset?.version||undefined);
+  const locked=!value&&!!preset?.subject;
   const catalog=useResource<ServiceAppOption[]>('/open-platform/service-applications');
   const versions=useResource<{version:number}[]>(subject?`${ROOT}/service-applications/${subject}/versions`:null);
   const chosen=(catalog.data||[]).find(a=>a.id===subject);
+  useEffect(()=>{if(!subject)return;const app=(catalog.data||[]).find(x=>x.id===subject);if(app?.agent_id)form.setFieldValue('agent_ids',[app.agent_id]);},[subject,catalog.data,form]);
   return <Modal open title={value?t('编辑应用'):t('创建应用')} onCancel={close} onOk={()=>form.submit()} confirmLoading={busy} width={640} destroyOnHidden>
     {error&&<Alert type="error" title={error} showIcon/>}<Form form={form} layout="vertical" initialValues={value||{enabled:true,agent_ids:[],rpm:120,max_concurrency:5}} onFinish={async values=>{setBusy(true);setError('');try{
+      if(locked&&!subject){setError(t('请选择要绑定的服务应用'));return;}
       const base=value?appBody(value):{enabled:true,agent_ids:[],rpm:120,max_concurrency:5,knowledge_base_ids:[]};
       // ``values`` carries the edited name/description/limits; the subject
       // branch must still merge it in or renames on bound apps are silently
@@ -41,14 +48,16 @@ function Editor({value,agents,close,saved}:{value:Application|null;agents:Agent[
         ?{...base,...values,agent_ids:chosen?.agent_id?[chosen.agent_id]:[],agent_versions:{},service_application_id:subject,service_application_version:pin||null}
         :{...base,...values,agent_versions:Object.fromEntries(Object.entries(value?.agent_versions||{}).filter(([id])=>(values.agent_ids||[]).includes(id))),service_application_id:null,service_application_version:null};
       const result=value?await put<Application>(`${ROOT}/${value.id}`,payload):await post<Application>(ROOT,payload);saved(result);}catch(e){setError(errorOf(e));}finally{setBusy(false);}}}>
+      {locked&&<Alert showIcon type="info" style={{marginBottom:16}} title={t('从服务应用创建：绑定关系已锁定')} description={t('技能、连接、规则与知识随该服务应用的发布版本生效；如需改为仅授权 Agent，请在开放平台单独创建。')}/>}
       <Form.Item name="name" label={t('应用名称')} rules={[{required:true,whitespace:true}]}><Input maxLength={100} showCount/></Form.Item>
       <Form.Item name="description" label={t('描述')}><Input.TextArea rows={3} maxLength={1000}/></Form.Item>
-      <Form.Item label={t('绑定服务应用')} extra={t('绑定后，会话由该服务应用承接，技能、连接与知识随其发布版本生效。')}>
-        <Select allowClear showSearch optionFilterProp="label" placeholder={t('选择已发布的服务应用')} value={subject} loading={catalog.loading} disabled={busy} onChange={v=>{setSubject(v);setPin(undefined);const app=(catalog.data||[]).find(x=>x.id===v);if(app?.agent_id)form.setFieldValue('agent_ids',[app.agent_id]);}} options={(catalog.data||[]).map(a=>({value:a.id,label:`${a.name} · v${a.published_version}`}))}/>
+      <Form.Item label={t('绑定服务应用')} required={locked} extra={t('绑定后，会话由该服务应用承接，技能、连接与知识随其发布版本生效。')}>
+        <Select allowClear={!locked} showSearch optionFilterProp="label" placeholder={t('选择已发布的服务应用')} value={subject} loading={catalog.loading} disabled={busy||locked} onChange={v=>{setSubject(v);setPin(undefined);const app=(catalog.data||[]).find(x=>x.id===v);if(app?.agent_id)form.setFieldValue('agent_ids',[app.agent_id]);}} options={(catalog.data||[]).map(a=>({value:a.id,label:`${a.name} · v${a.published_version}`}))}/>
       </Form.Item>
       <Form.Item label={t('服务应用版本')} extra={t('固定版本后，新会话使用指定版本；留空跟随最新发布版本。')}>
         <Select allowClear placeholder={t('跟随当前发布版本')} value={pin} loading={versions.loading} disabled={busy||!subject} onChange={v=>setPin(v||undefined)} options={[...(versions.data||[]).map(v=>({value:v.version,label:`v${v.version}`}))]}/>
       </Form.Item>
+      {!subject&&!locked&&<Alert showIcon type="warning" style={{marginBottom:16}} title={t('未绑定服务应用：仅授权基础 Agent')} description={t('客服场景下技能、业务规则、知识库与人工转接都不会生效；如需这些能力，请先绑定服务应用。')}/>}
       {!subject&&<Form.Item name="agent_ids" label={t('授权 Agent')} extra={t('仅可授权已发布的 Agent，可在集成配置中固定版本。')}><Select mode="multiple" showSearch optionFilterProp="label" disabled={busy} options={agents.map(a=>({value:a.id,label:`${a.name} · v${a.published_version}`}))}/></Form.Item>}
       <div className="op-form-row"><Form.Item name="rpm" label={t('每分钟请求上限')} rules={[{required:true}]}><InputNumber min={1} max={10000} precision={0}/></Form.Item><Form.Item name="max_concurrency" label={t('最大并发运行数')} rules={[{required:true}]}><InputNumber min={1} max={100} precision={0}/></Form.Item><Form.Item name="enabled" label={t('启用应用')} valuePropName="checked"><Switch/></Form.Item></div>
     </Form></Modal>;
@@ -109,8 +118,20 @@ function Logs({app}:{app:Application}) {
 }
 
 function ApplicationWorkspace({route,onNavigate}:{route:string;onNavigate:(path:string)=>void}) {
-  const {admin}=useAccess();const appId=route.split('/')[2]||'';const tab=route.split('/')[3]||'settings';
-  const [page,setPage]=useState(1);const [status,setStatus]=useState('all');const [q,setQ]=useState('');const [editing,setEditing]=useState<{value:Application|null}|null>(null);
+  const {admin}=useAccess();
+  // ``route`` carries the hash path plus its query string, so split once here:
+  // the delivery tab deep-links into "create an application bound to this
+  // service application and version", and the id must not swallow the query.
+  const [base,query]=route.split('?');
+  const params=new URLSearchParams(query||'');
+  const appId=base.split('/')[2]||'';const tab=base.split('/')[3]||'settings';
+  const presetSubject=params.get('service_application_id')||'';
+  const presetVersion=Number(params.get('application_version')||'')||undefined;
+  const [page,setPage]=useState(1);const [status,setStatus]=useState('all');const [q,setQ]=useState('');const [editing,setEditing]=useState<{value:Application|null;preset?:{subject?:string;version?:number}}|null>(null);
+  useEffect(()=>{
+    if(params.get('create')!=='1'||appId||!admin)return;
+    setEditing(current=>current??{value:null,preset:presetSubject?{subject:presetSubject,version:presetVersion}:undefined});
+  },[admin,appId,presetSubject,presetVersion,query]);
   const catalog=useResource<{items:Application[];total:number}>(!appId?`${ROOT}?page=${page}&q=${encodeURIComponent(q)}${status!=='all'?'&enabled='+(status==='enabled'): ""}`:null);
   const detail=useResource<Application>(appId?`${ROOT}/${appId}`:null);const agents=useResource<Agent[]>('/open-platform/agents');
   const app=detail.data;const error=catalog.error||detail.error||agents.error;
@@ -136,7 +157,7 @@ function ApplicationWorkspace({route,onNavigate}:{route:string;onNavigate:(path:
       </Card>}
       {tab==='embed'&&<EmbedSettings app={app}/>}{tab==='integrations'&&<Integrations key={`${app.id}:${app.revision}`} app={app} agents={agents.data||[]} saved={detail.refresh}/>}{tab==='channels'&&<AppChannels key={app.id} app={app} onNavigate={onNavigate}/>}{tab==='webhook'&&<WebhookPanel key={app.id} app={app}/>}{tab==='keys'&&<Keys key={app.id} app={app}/>}{tab==='docs'&&<IntegrationDocs app={app}/ >}{tab==='debug'&&<Debugger key={app.id} app={app} agents={agents.data||[]}/ >}{tab==='logs'&&<Logs key={app.id} app={app}/>}
     </>:null}
-    {editing&&<Editor value={editing.value} agents={agents.data||[]} close={()=>setEditing(null)} saved={a=>{setEditing(null);catalog.refresh();detail.refresh();onNavigate(`/open-platform/${a.id}/settings`);}}/>}
+    {editing&&<Editor value={editing.value} preset={editing.preset} agents={agents.data||[]} close={()=>setEditing(null)} saved={a=>{setEditing(null);catalog.refresh();detail.refresh();onNavigate(`/open-platform/${a.id}/settings`);}}/>}
   </div></ConfigProvider>;
 }
 
