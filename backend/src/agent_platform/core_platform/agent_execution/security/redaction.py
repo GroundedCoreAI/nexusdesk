@@ -49,6 +49,18 @@ class SecretRedactor:
         self._max_depth = max_depth
         self._patterns = _DEFAULT_PATTERNS + tuple(pattern for pattern in patterns if pattern)
 
+    def contains_secret(self, value: str) -> bool:
+        """True when a registered canary or known Secret pattern appears."""
+        if not isinstance(value, str):
+            return False
+        for secret in self._registered:
+            if secret in value:
+                return True
+        for pattern in self._patterns:
+            if pattern.search(value):
+                return True
+        return False
+
     def redact_text(self, value: str, *, max_chars: int = 8192) -> str:
         if not isinstance(value, str):
             raise TypeError("redact_text requires a string")
@@ -82,3 +94,30 @@ class SecretRedactor:
         if isinstance(value, str):
             return self.redact_text(value)
         return deepcopy(value)
+
+
+class DisclosureResponse:
+    """FR-3 disclosure response: revoke affected credentials, close admission."""
+
+    def __init__(self, repository) -> None:
+        self._repository = repository
+        self.admission_closed = False
+
+    async def handle_disclosure(
+        self, *, tenant_id: str, credential_ref, reason: str = "secret_disclosure"
+    ) -> None:
+        """Revoke the affected credential and stop new admissions.
+
+        Forensic records carry identifiers and stable codes only, never the
+        disclosed Secret.
+        """
+        self.admission_closed = True
+        await self._repository.revoke(credential_ref=credential_ref, tenant_id=tenant_id)
+        await self._repository.audit(
+            tenant_id=tenant_id,
+            action="revoked",
+            outcome="success",
+            reason_code=reason,
+            credential_ref=credential_ref,
+            actor="disclosure_response",
+        )

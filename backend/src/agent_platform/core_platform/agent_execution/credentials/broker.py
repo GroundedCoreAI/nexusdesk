@@ -261,6 +261,15 @@ class ExecutionCredentialBroker:
             secret=secret,
         )
 
+    async def revoke_grant(self, grant_id: UUID) -> None:
+        """Revoke one grant on terminal/cleanup paths; idempotent."""
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                text("""UPDATE execution_credential_grants SET revoked_at=now()
+                WHERE id=:id AND revoked_at IS NULL"""),
+                {"id": grant_id},
+            )
+
     async def _credential_ref(self, credential_id: UUID, tenant_id: str) -> UUID:
         async with self._engine.connect() as conn:
             value = await conn.scalar(
