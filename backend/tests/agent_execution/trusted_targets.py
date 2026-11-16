@@ -7,6 +7,7 @@ the interpreter, so no user-supplied code and no arbitrary argv ever reaches
 is numeric or slug-shaped and re-validated here as the second line of defense.
 """
 
+import hashlib
 import os
 import signal
 import subprocess
@@ -28,12 +29,32 @@ CASES = (
     "cpu-burn",
     "alloc-write",
     "child-group-probe",
+    "stdin-digest",
+    "stdin-refuse",
+    "stdin-never-read",
+    "stdin-slow-read",
 )
+
+# Bounded read ceiling for the stdin cases: one byte above the Host payload
+# limit, so reading "everything" can never buffer more than the largest thing
+# the Host may legitimately send (08 R18).
+_STDIN_READ_LIMIT = 1_000_001
 
 
 def _write(stream, payload: bytes) -> None:
     stream.write(payload)
     stream.flush()
+
+
+def _stdin_digest() -> str:
+    """Read the whole stdin payload and summarize it as ``stdin=<len>:<sha16>``."""
+    payload = sys.stdin.buffer.read(_STDIN_READ_LIMIT)
+    digest = hashlib.sha256(payload).hexdigest()[:16]
+    return f"stdin={len(payload)}:{digest}"
+
+
+def _emit_line(text: str) -> None:
+    _write(sys.stdout.buffer, text.encode() + b"\n")
 
 
 def main(argv: list[str]) -> int:
@@ -156,6 +177,26 @@ def main(argv: list[str]) -> int:
             child.wait(timeout=25)
         except subprocess.TimeoutExpired:  # pragma: no cover
             pass
+        return 0
+    # -- 08 R18: stdin delivery cases -------------------------------------
+    if case == "stdin-digest":
+        # Proves the payload arrived byte for byte and reached EOF: the child
+        # must CONSUME stdin, not merely have it buffered in the pipe.
+        _emit_line(_stdin_digest())
+        return 0
+    if case == "stdin-refuse":
+        # R1: exit immediately without reading. The Host's write then fails with
+        # EPIPE/ECONNRESET and the start must fail closed.
+        return 1
+    if case == "stdin-never-read":
+        # R2: never read, so the Host's drain can only end at its deadline.
+        time.sleep(min(float(param or "60"), 120.0))
+        return 0
+    if case == "stdin-slow-read":
+        # Big-payload delivery: sleep first (forcing the write to make progress
+        # through the pipe buffer), then read everything and report the digest.
+        time.sleep(min(float(param or "1"), 60.0))
+        _emit_line(_stdin_digest())
         return 0
     return 99  # pragma: no cover - CASES gate above
 

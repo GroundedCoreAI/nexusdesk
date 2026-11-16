@@ -37,6 +37,8 @@
 | A11 | 注入未知版本、坏 CLI 输出、非法 JSON-RPC、缺失 usage，检查错误和遥测。 | 稳定错误/unknown、无原始异常或 Secret；可按 Run/Protocol/版本定位。 | AC-11；FR-11 |
 | A12 | 关闭 Codex 全部开关，执行 React、历史配置、Run/API/SSE 回归与回滚。 | Codex 新执行被拒绝；Phase 0 diff 为零；回滚不删表、不改历史 Run。 | AC-12；FR-12 |
 
+**prompt 投递（实施期追加，2026-11-14，`08` R18）。** A1 的真实半段还要求 prompt 经 stdin 到达 CLI：Stage A 通道把请求 input 编码为有界 `stdin_payload`，Host 写入并关闭 EOF，真实二进制必须据此完成 Turn（exit 0，含 `turn.completed` usage），而不是以 `No prompt provided via stdin.` 退出 1。子进程提前关闭或不读取时必须以 `runtime_host_pipe_setup_failed` 失败关闭且无残留进程组。prompt 不得出现在 argv、环境变量、文件名、日志行、事件 payload 或 `command_digest` 中。环境无 Codex 二进制时真实半段保持 `pending_env`；确定性 fixture 半段在所有环境必须执行。
+
 每个场景执行记录：执行人、日期、环境、Codex/Adapter 版本、前置数据、实际结果、判定、截图/日志/Host 清理证据链接。真实环境不可用项标 `pending_env` 并指定验收人，不得记为通过。
 
 **证据复用**：A1～A12 优先直接引用 `06-test-report.md` 中对应的 UT/IT/CM、CI、真实 Codex、Host、PG 与 SSE 原始证据，不重复手工执行整套测试。Protocol 数、Stage 门禁、事件/usage 关联、清理、泄露与 React diff 直接按 A/C 判据统计，不另做第二轮业务指标验收。

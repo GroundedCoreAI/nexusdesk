@@ -16,7 +16,7 @@
 | 凭据 | `platform_services/secrets/vault.py` 提供安装密钥 Fernet 加解密；`model_gateway/catalog.py` 绑定租户/连接/地址/协议，尚无 Execution Broker。 | Phase 5 仅用受控引用与最小暴露；完整 Broker、短期授权和强沙箱归 Phase 6。 |
 | 事件/SSE | `agent_runtime/repository.py` 同事务递增 `runtime_runs.event_seq` 并写 `runtime_events`；`customer_service/runtime_routes.py` 支持 `after` 与 `Last-Event-ID`，NOTIFY 仅作唤醒。 | 复用持久事件与 SSE 外层，不另建 Codex 专用事件通道；Outbox/去重/usage 幂等归 Phase 6。 |
 | 终态/Lease | Repository 已校验 owner、lease 和终态，`test_runtime_postgres.py` 覆盖取消竞态、Worker 丢失与迟到结果。 | 保留先例；跨 Worker Epoch/Fencing 不在 Phase 5 冒充完成。 |
-| 迁移 | 当前 head 为 `0052_memory_tasks_tenant_index`。 | `0055_agent_engine_sessions` 仅为规划预留号，Stage B 需要时才新增；实施前重核 head 和依赖，不修改历史迁移。 |
+| 迁移 | 当前 head 为 `0059_execution_runtime_host`；`0055` 已被 `0055_service_applications` 占用。 | 规划号 `0055` 不可用；本阶段不新增任何迁移，Stage B 需要时取当时 head+1，不修改历史迁移。 |
 
 ## 改动总览
 
@@ -28,7 +28,7 @@
 | 新模块 | `.../adapters/codex/events.py` | CLI/App-Server 原生事件规范化、稳定平台映射、有界 payload 与 usage 提取。 | FR-4、FR-11 |
 | 新模块 | `.../adapters/codex/config.py` | 类型化配置、版本/能力交集校验；不信任客户端 Effective 能力。 | FR-1、FR-2、FR-12 |
 | 新模块 | `.../agent_execution/session/{models,manager,repository}.py` | Stage B Session 映射、过期、Resume 重新鉴权；CLI 无此依赖。 | FR-8、FR-10 |
-| 迁移 | `backend/migrations/versions/0055_agent_engine_sessions.py` | 规划号、条件性新增 `agent_engine_sessions`；实际 `down_revision` 由实施时 head 决定。 | FR-8 |
+| 迁移 | 本阶段无 | `0055` 已被占用；`agent_engine_sessions` 表仅 Stage B 条件性新增，编号取当时 head+1。 | FR-8 |
 | 入口 | `backend/src/agent_platform/applications/platform_runtime/runtime_composition.py` | 按 Phase 1~4 实际组合根注册 Codex Protocol、Host、Workspace、Session 与策略依赖。 | FR-1、FR-12 |
 | 配置 | `backend/src/agent_platform/core_platform/platform_services/platform_settings/settings.py` | 增加默认关闭、版本白名单、可信租户和 Session 开关；敏感值仅存部署 Secret 环境。 | FR-6、FR-12 |
 | API | Phase 3 实际通用能力/审批路由（路径实施前重核） | 仅暴露通用能力与审批/输入契约；不得新增公共 Codex JSON-RPC 路由。 | FR-7、FR-9 |
@@ -40,6 +40,8 @@
 ## 数据模型
 
 ### 规划迁移 `0055_agent_engine_sessions.py`（仅 Stage B 需要时）
+
+> 实施期更正（2026-11-14）：规划号 `0055` 已被 `0055_service_applications` 占用，当前 head 为 `0059_execution_runtime_host`。**本阶段不新增迁移**；下表仅为 Stage B 设计草案，编号取 Stage B 启动时的实际 head+1。
 
 | 字段 | 规划类型/约束 | 用途 |
 |---|---|---|
@@ -73,12 +75,14 @@ Run 创建（默认关闭时拒绝 Codex）
 → Workspace Provider 创建 Execution Workdir 和授权挂载
 → 凭据引用按当前 Execution 最小化解析，不读取宿主 ~/.codex/auth.json
 → RuntimeHost 启动进程组并返回内部 Handle
+→ prompt 写入该进程组的 stdin 管道并关闭管道（08 R18）
 → CLI Adapter 有界读取 stdout/stderr，映射平台事件并保留原生事件
 → 收集最终 output/artifacts/usage（usage 缺失为 unknown）
 → Orchestrator 提交结果；Host 确认进程退出与资源清理
 ```
 
 - Adapter 不直接 `subprocess`、不操作队列、不提交 Run 终态；命令参数由白名单构造，敏感参数不进入日志。
+- **prompt 投递（实施期更正，2026-11-14，`08` R18）。** 规划流程没有说明 prompt 如何到达 Codex。`codex exec … -` 从 stdin 读取，而 Phase 4 Host 原本把 `stdin` 固定为 `DEVNULL` 且无 payload 字段，因此该通道无法投递。现在 `ProcessSpec` 增加一个可选且有界的 `stdin_payload`（`bytes`，1..800_000），Host 一次写入并在最多 10 秒且受剩余进程 wall 预算约束的截止时间内关闭；`None` 对所有其他目标保持历史 `DEVNULL` 行为。prompt 永不进入 argv、环境变量、文件名，也不进入 `command_digest`。800_000 字节上限覆盖公共契约 200_000 **字符** 的最坏 UTF-8 展开，合法请求不会在字节层被拒。
 - stderr 既可能是诊断也可能含 Secret，不能无条件作为公开错误；原始输出有大小上限并脱敏。
 - Stage A 的稳定门禁为 FR-1/AC-2 的强制前置：测试报告、预发布连续回归和混合场景证据齐全后，Stage B 才可合入/启用。
 
@@ -132,6 +136,9 @@ Stage A 门禁 + app_server 开关 + 版本协商
 
 - 敏感配置只保存 `credential_ref`，实际值由部署 Secret 环境/挂载维护，`.env.example` 仅放占位。
 - `codex.timeout_seconds` 默认规划 1800 秒，但必须受部署硬上限约束；当前全局 `run_timeout_seconds` 上限及 Phase 3 配置合并规则须实施前重核。
+- 实施期更正（2026-11-14）：`timeout_seconds` 默认 **600** 且上限 600，因为 `settings.run_timeout_seconds` 为 `le=600`；1800 秒默认值会让 Codex 执行超过其所属 Run。实际每次执行的封顶取配置值、Run 截止时间与 Host wall 三者最小值。
+- 实施期更正（2026-11-14，`08` R17）：该通道只注入一个环境变量——类型化 `path_env`（部署项 `codex_path_env`，默认 `/usr/local/bin:/usr/bin:/bin`），因为安装的 CLI 是 `#!/usr/bin/env node` 启动脚本。不存在自由格式环境 map，凭据、代理或宿主密钥没有字段可承载。
+- 实施期更正（2026-11-14，`08` R18）：stdin 投递截止时间是模块常量（`STDIN_DELIVERY_TIMEOUT_SECONDS = 10.0`），可由 `ProcessRunner` 构造注入，刻意**不**新增配置项——没有部署需要调它，也不扩大配置面。
 - 所有 Agent 侧 `sandbox_mode`、`approval_mode` 与能力值只能收窄部署策略；Phase 6 前信任白名单为空即拒绝。
 
 ## 模型调用路径
@@ -151,7 +158,7 @@ Codex 是外部 Engine，模型选择、推理循环和工具执行由 Codex 原
 ## 上线与回滚
 
 1. 前置确认 Phase 0~4 验收和 Phase 0 基线；固定 Codex 版本、测试账号、可信租户与审计保留策略。
-2. 仅在 Stage B 需要时执行规划 `0055`；实施前重核迁移 head、在线锁行为与 downgrade 数据保护，绝不改历史迁移。
+2. 本阶段不新增迁移；若 Stage B 需要 Session 表，取当时的实际 head+1，并重核在线锁行为与 downgrade 数据保护，绝不改历史迁移。
 3. 先部署默认关闭代码，再对单个可信租户开启 CLI；通过 Stage A 门禁后才允许 App-Server 灰度，最后按需开启 Session。
 4. 回滚顺序为关闭 Session → 关闭 App-Server → 停止新 CLI Run → 按 Host 策略清理活动进程；保留新增表与历史事件，无需 down migration。
 5. 任一 Secret 泄露、跨租户访问、不可信租户误开放或孤儿进程失控均立即停止新执行并关闭开关；不得通过放宽沙箱/凭据策略恢复可用性。

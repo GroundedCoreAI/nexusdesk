@@ -1,0 +1,21 @@
+services:
+  fake-codex-cli:
+    build: .
+    environment:
+      FAKE_CODEX_MODE: cli
+      FAKE_CODEX_SCENARIO: ${FAKE_CODEX_SCENARIO:-success}
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('ok')"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
+  fake-codex-app-server:
+    build: .
+    environment:
+      FAKE_CODEX_MODE: app-server
+      FAKE_CODEX_SCENARIO: ${FAKE_CODEX_SCENARIO:-success}
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('ok')"]
+      interval: 2s
+      timeout: 2s
+      retries: 3

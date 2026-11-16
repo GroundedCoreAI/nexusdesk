@@ -16,7 +16,7 @@
 | Credentials | `platform_services/secrets/vault.py` provides Fernet encryption with an installation key; `model_gateway/catalog.py` binds tenant/connection/address/protocol, but there is no Execution Broker. | Phase 5 uses controlled references and minimal exposure only; complete Broker, short-lived grants, and strong sandbox belong to Phase 6. |
 | Events/SSE | `agent_runtime/repository.py` increments `runtime_runs.event_seq` and writes `runtime_events` in one transaction; `customer_service/runtime_routes.py` supports `after` and `Last-Event-ID`, with NOTIFY only as a wakeup. | Reuse durable events and the SSE envelope rather than creating a Codex-specific channel; Outbox/deduplication/idempotent usage belong to Phase 6. |
 | Terminal state/Lease | Repository checks owner, lease, and terminal state; `test_runtime_postgres.py` covers cancellation races, Worker loss, and late results. | Preserve these precedents; do not claim cross-Worker Epoch/Fencing is complete in Phase 5. |
-| Migrations | Current head is `0052_memory_tasks_tenant_index`. | `0055_agent_engine_sessions` is only a reserved planning number, added conditionally for Stage B; recheck head and dependencies before implementation and never modify historical migrations. |
+| Migrations | Rechecked 2026-11-14: head is `0059_execution_runtime_host`, and `0055` is already taken by `0055_service_applications`. | `0055_agent_engine_sessions` is not free, so the Session table is **not** created in this phase. If Stage B needs it, take the head at implementation time +1; never reuse a taken number and never modify historical migrations. |
 
 ## Change Overview
 
@@ -28,7 +28,7 @@
 | New module | `.../adapters/codex/events.py` | CLI/App-Server native-event normalization, stable platform mapping, bounded payloads, and usage extraction. | FR-4, FR-11 |
 | New module | `.../adapters/codex/config.py` | Typed configuration and version/capability intersection validation; never trust client-supplied Effective capabilities. | FR-1, FR-2, FR-12 |
 | New module | `.../agent_execution/session/{models,manager,repository}.py` | Stage B Session mapping, expiration, and Resume reauthorization; CLI has no such dependency. | FR-8, FR-10 |
-| Migration | `backend/migrations/versions/0055_agent_engine_sessions.py` | Planning number; conditionally add `agent_engine_sessions`, with actual `down_revision` determined by the implementation-time head. | FR-8 |
+| Migration | none in this phase | `0055` is taken and head is `0059`; the Session table stays a Stage B decision, numbered head+1 when that stage starts. | FR-8 |
 | Entry point | `backend/src/agent_platform/applications/platform_runtime/runtime_composition.py` | Register Codex Protocols, Host, Workspace, Session, and policy dependencies at the actual Phase 1–4 composition root. | FR-1, FR-12 |
 | Configuration | `backend/src/agent_platform/core_platform/platform_services/platform_settings/settings.py` | Add default-off, version-allowlist, trusted-tenant, and Session switches; sensitive values remain deployment Secrets. | FR-6, FR-12 |
 | API | Actual Phase 3 common capability/approval routes (recheck paths before implementation) | Expose only common capability and approval/input contracts; add no public Codex JSON-RPC route. | FR-7, FR-9 |
@@ -39,7 +39,9 @@
 
 ## Data Model
 
-### Planned migration `0055_agent_engine_sessions.py` (only if required by Stage B)
+### Session migration (Stage B only; not created in this phase)
+
+> Implementation-time correction (2026-11-14): the planning number `0055` is already occupied by `0055_service_applications`, and the current head is `0059_execution_runtime_host`. **No migration is added in this phase.** The table below is a Stage B design sketch only; its number must be the actual head + 1 at the time Stage B starts.
 
 | Field | Planned type/constraint | Purpose |
 |---|---|---|
@@ -73,12 +75,14 @@ Run creation (Codex denied while switched off)
 → Workspace Provider creates Execution Workdir and authorized mounts
 → Resolve credential references minimally for this Execution; never read host ~/.codex/auth.json
 → RuntimeHost starts a process group and returns an internal Handle
+→ The prompt is written to that group's stdin pipe and the pipe is closed (08 R18)
 → CLI Adapter reads stdout/stderr with bounds, maps platform events, and preserves native events
 → Collect final output/artifacts/usage (missing usage is unknown)
 → Orchestrator commits the result; Host confirms process exit and resource cleanup
 ```
 
 - The Adapter never invokes `subprocess` directly, manipulates the queue, or commits Run terminal state; arguments are built from an allowlist and sensitive arguments are excluded from logs.
+- **Prompt delivery (implementation-time correction, 2026-11-14, `08` R18).** The planning flow did not say how the prompt reaches Codex. `codex exec … -` reads it from stdin, and the Phase 4 Host originally pinned `stdin=DEVNULL` with no payload field, so the lane could not deliver one. `ProcessSpec` now carries one optional bounded `stdin_payload` (`bytes`, 1..800_000) that the Host writes once and closes inside a deadline capped at 10 seconds and by the remaining process wall budget; `None` keeps the historical `DEVNULL` start for every other target. A prompt is never an argv element, never an environment value, never a file name, and never part of `command_digest`. The 800_000-byte ceiling covers the worst-case UTF-8 expansion of the public 200_000-**character** request bound, so a valid request is never rejected at the byte layer.
 - stderr may contain diagnostics or Secrets and must not become a public error unconditionally; raw output is bounded and redacted.
 - The Stage A stability gate is mandatory under FR-1/AC-2: Stage B can merge/enable only after test reports, consecutive pre-release regressions, and mixed-scenario evidence are complete.
 
@@ -131,7 +135,9 @@ Platform Session ID + current authentication context
 Plan to add `codex_cli_enabled=false`, `codex_app_server_enabled=false`, `codex_allowed_versions=[]`, `codex_trusted_tenants=[]`, and `codex_session_persistence_enabled=false` to `platform_settings/settings.py`, plus bounded output, connection, Session, and cancellation-grace settings.
 
 - Sensitive configuration stores only `credential_ref`; actual values live in deployment Secret environments/mounts, and `.env.example` contains placeholders only.
-- `codex.timeout_seconds` has a planned default of 1800 seconds but remains bounded by a deployment hard limit; recheck the current global `run_timeout_seconds` limit and Phase 3 configuration merge rules before implementation.
+- Implementation-time correction (2026-11-14): `timeout_seconds` defaults to **600** and is capped at 600, because `settings.run_timeout_seconds` is `le=600`. A 1800-second default would let a Codex execution outlive every Run that owns it. The effective per-execution ceiling is the minimum of the configured value, the Run deadline, and the Host wall ceiling.
+- Implementation-time correction (2026-11-14, `08` R17): the lane supplies exactly one environment variable, a typed `path_env` (deployment setting `codex_path_env`, default `/usr/local/bin:/usr/bin:/bin`), because the installed CLI is a `#!/usr/bin/env node` launcher. No free-form environment map exists, so a credential, proxy or host secret has no field to travel in.
+- Implementation-time correction (2026-11-14, `08` R18): the stdin delivery deadline is a module constant (`STDIN_DELIVERY_TIMEOUT_SECONDS = 10.0`) injectable through the `ProcessRunner` constructor, deliberately **not** a new setting — there is no deployment reason to tune it and no configuration surface to widen.
 - Agent-side `sandbox_mode`, `approval_mode`, and capability values can only narrow deployment policy; before Phase 6, an empty trust allowlist denies execution.
 
 ## Model Invocation Path

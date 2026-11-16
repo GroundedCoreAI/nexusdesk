@@ -54,6 +54,8 @@
 | P5-UT-16 | Reentrant Session expiration cleanup | Repeated expiration/closure does not duplicate release or fail unexpectedly, and expired Sessions cannot resume. | FR-8, FR-10 |
 | P5-UT-17 | Log/event diagnostic bounds | Oversized stderr, JSON-RPC payloads, and Secret canaries are truncated/redacted, with no host details in public responses. | FR-11, FR-6 |
 | P5-UT-18 | Codex switches and React default | React resolves by default; every Codex switch defaults false and disabled execution cannot be constructed. | FR-12 |
+| P5-UT-19 | StdIn payload validation and representation | `stdin_payload` accepts 1..800_000 bytes and rejects empty, oversized and non-byte values; the payload is absent from `repr()`, `model_dump()`, events and logs, and never changes `command_digest`. | FR-2, FR-11; `08` R18 |
+| P5-UT-20 | StdIn delivery failure semantics | A child that closes early or never reads fails closed with `runtime_host_pipe_setup_failed` inside the delivery deadline, leaves no process group, and never logs the payload; a child that consumes the prompt reports the exact byte length and digest. | FR-2, FR-3; `08` R18 |
 
 ## 4. Integration Tests
 
@@ -77,6 +79,7 @@
 | P5-IT-16 | Switch-off React/API/SSE/historical-configuration regression | Reproduce AC-12; diff is zero when a Phase 0 baseline exists, otherwise mark blocked pending baseline rather than passed. | AC-12 |
 | P5-IT-17 | Conditional Session migration upgrade/downgrade protection | Upgrade from the implementation-time head succeeds; populated downgrade requires export, and historical migration checksums remain unchanged. | FR-8, G6 |
 | P5-IT-18 | Stage A pre-release stability batch | At least 20 mixed scenarios have no P0/P1, and three consecutive applicable regressions pass before the acceptance owner confirms the Stage B unlock record. | FR-1; G5 |
+| P5-IT-19 | Prompt delivery end to end through the Host | The Stage A CLI lane delivers the request input on the Host stdin channel; the target consumes it and reports the exact bytes, the durable record reaches a terminal state with zero survivors, and a real Codex binary (when present) completes the Turn from the delivered prompt. CI covers the deterministic fixture; the real-binary half is `pending_env` where Codex is absent. | FR-2, FR-4; AC-1, AC-3; `08` R18 |
 
 ## 5. General Checks (Applicable to This Phase)
 

@@ -279,6 +279,16 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "adapters/__init__.py",
         "adapters/testing/__init__.py",
         "adapters/testing/local_test_adapter.py",
+        # Phase 5 (08 T2-T5): the Codex family lands under the same adapters
+        # package. ``adapter.py`` only talks to the RuntimeHost contract, so the
+        # dependency-direction assertions below still hold for these files.
+        "adapters/codex/__init__.py",
+        "adapters/codex/adapter.py",
+        "adapters/codex/app_server.py",
+        "adapters/codex/cli_exec.py",
+        "adapters/codex/config.py",
+        "adapters/codex/events.py",
+        "adapters/codex/jsonrpc.py",
     }
     t2_modules = {
         "orchestration/__init__.py",
