@@ -1,12 +1,14 @@
 # Phase 6 · 安全、可靠性与事件治理 — 业务目标
 
-> 状态：待评审（仅规划，未实施；不可信多租户代码执行前的阻断阶段）
+> 状态：已批准作为直接继续开发的范围基线；未实施、未验收；不可信多租户代码执行前的阻断阶段
 > 创建：2026-11-02
+> 修订：2026-11-16（授权开发入口但不虚构上游验收；按代码核查修正迁移号）
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 3、7~10、12~13、17（Phase 6）、18.2/18.4/18.6、19~22 节；现状核查见 `03-technical-design.md`
 
 > 阶段：Phase 6（安全、执行可靠性、事件可靠性三条工作流，统一硬门禁验收）
 > 预估工期：约 6~8 周，设计评审与故障演练环境确认后冻结
-> 依赖：Phase 0~5 已验收；Phase 4 RuntimeHost/Workspace 可用；支持故障注入、沙箱对抗与独立安全审计的类生产环境
+> 开发入口：基于已合入 Phase 4 Host/Workspace 与 Phase 5 Stage A 代码直接继续；Phase 5B 不属于本阶段范围。
+> 最终验收依赖：适用的 Phase 0~5 验收证据；类生产故障注入与强沙箱环境；不可信开放所需独立安全及 SRE/运维批准。缺失项仍是阻断，不得视为已批准。
 
 ## 要解决的问题
 
@@ -24,7 +26,7 @@
 
 ### 问题 4：事件持久化与 SSE 先例尚未形成完整可靠投递体系
 
-当前事件和 Run 可同事务写入，SSE 支持游标重放，NOTIFY 只作唤醒；但缺统一 schema/version/source/event_id、原生事件去重、事务性 Outbox、保留期游标缺口处理和 usage 幂等聚合。parser 失败也缺有界、脱敏、可统计诊断。
+当前事件和 Run 可同事务写入，SSE 支持游标重放，NOTIFY 只作唤醒；但既有 v1 AgentEvent 信封在持久化前被丢弃，持久身份/source 元数据、原生事件去重、事务性 Outbox、保留期游标缺口处理和 usage 幂等聚合仍缺失。parser 失败也缺有界、脱敏、可统计诊断。
 
 ## 业务目标
 
@@ -63,7 +65,7 @@
 - Lease Epoch/Fencing Token、Worker 丢失检测、迟到结果/终态保护、取消确认、超时清理、重试副作用与配额释放。
 - 事件 schema/version/source/event_id/sequence、去重、Event Store/事务性 Outbox、SSE 重连/游标重放与保留期缺口处理。
 - usage 幂等聚合、parser diagnostics、迁移/回填/协调任务、指标告警、对抗与故障注入演练。
-- 规划迁移 `0056_execution_fencing_event_outbox` 与 `0057_execution_credential_security`，以及兼容发布和回滚方案。
+- 规划迁移标识 `0068_execution_fencing`（文件 `0068_execution_fencing_event_outbox.py`）与 `0069_execution_credential`，以及兼容发布和回滚方案。
 
 **不包含**（属于后续阶段 / 明确不做）：
 
