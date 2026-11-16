@@ -185,6 +185,15 @@ The alternatives were a parallel replacement stack (rejected: duplicate sources 
 
 For item (d), R-17's default-deny pass and `pending_env` verdict remain valid, and real allowlist/DNS/metadata/proxy-bypass drills belong to T-12. However, R-17 must not reclassify the approved managed-proxy integration as wholly external/test work: development must supply or integrate the managed endpoint and prove its actual enforcement contract before calling T-08 code-complete. No proxy means allowlist remains unavailable/fail-closed and A5 cannot pass. Real multi-Worker/fault drills likewise remain T-12 testing work. This ruling changes no FR/AC and waives no hard gate; untrusted execution remains off.
 
+
+### R-19 — Actual network boundary, live-reaper confirmation, and fence-before-cleanup
+
+**Documents:** testing preflight (coordination round 1) verified three production blockers under FR-5/FR-8/FR-9.
+
+**Reality at `7c2373c`:** (1) the Docker allowlist used unrestricted `--network=bridge` plus advisory proxy env vars, which is not an enforced network boundary; (2) the live Worker still calls `repository.reap()`, which terminal-cancels/fails expired runs without confirmed cleanup; (3) `RecoveryCoordinator` performed cleanup before `apply_recovery` incremented the epoch, so cleanup ran under stale ownership.
+
+**Ruling (same coordination round 1, not a new round):** (1) the managed allowlist must enforce an actual network boundary (internal container network plus a managed egress proxy, with explicit denial when the proxy is unavailable); default-deny stays `--network=none`. (2) the live Worker reaper path must use the confirmed RecoveryCoordinator so unconfirmed cancellation never reports cancelled. (3) recovery must fence/take over the expired claim (new epoch) first, then perform cleanup under the new ownership. These are production fixes, not test debt; no FR/AC or hard gate changes.
+
 ## 3. Focused Regression Reuse (Do Not Rerun Wholesale Unchanged)
 
 | Existing evidence/cases | Reuse or rerun rule |

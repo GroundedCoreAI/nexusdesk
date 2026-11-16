@@ -185,6 +185,15 @@
 
 对 (d)，R-17 的默认拒绝通过与 `pending_env` 结论保持有效，真实 allowlist/DNS/元数据/proxy-bypass 演练属于 T-12；但 R-17 不得把已批准的受管 proxy 集成整体改划为外部/测试工作：开发必须提供或集成受管 endpoint 并证明真实 enforcement 契约，之后才能宣称 T-08 code-complete。无 proxy 时 allowlist 保持不可用/失败关闭，A5 不得通过。真实多 Worker/故障演练同样属于 T-12。此裁定不改变任何 FR/AC、不豁免硬门禁；不可信执行保持关闭。
 
+
+### R-19 — 真实网络边界、在线 reaper 确认、以及先 fence 后 cleanup
+
+**文档：** 测试 preflight（协调第 1 轮）验证了 FR-5/FR-8/FR-9 下的三个生产阻断项。
+
+**现实（`7c2373c`）：**（1）Docker allowlist 使用不受限 `--network=bridge` 加建议性 proxy 环境变量，并非真实网络边界；（2）在线 Worker 仍调用 `repository.reap()`，在未确认 cleanup 的情况下终态取消/失败过期 Run；（3）`RecoveryCoordinator` 在 `apply_recovery` 递增 epoch 之前执行 cleanup，导致 cleanup 运行在过期 ownership 下。
+
+**裁定（同属协调第 1 轮，不计新一轮）：**（1）受管 allowlist 必须落实真实网络边界（internal 容器网络 + 受管 egress proxy，proxy 不可用时显式拒绝）；默认拒绝保持 `--network=none`。（2）在线 Worker reaper 路径必须使用已确认的 RecoveryCoordinator，未确认取消不得报告 cancelled。（3）recovery 必须先 fence/接管过期 claim（新 epoch），再在新 ownership 下执行 cleanup。这些是生产修复而非测试债；不变更 FR/AC 或硬门禁。
+
 ## 3. 聚焦回归复用（未变化不得全量重跑）
 
 | 既有证据/用例 | 复用或重跑规则 |
