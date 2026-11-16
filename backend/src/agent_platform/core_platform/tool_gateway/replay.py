@@ -103,6 +103,12 @@ class DurableToolReplayCache:
             )
             if current is None:
                 denial = ("run_missing", None)
+            elif current["status"] in ("completed", "failed", "cancelled"):
+                # R-19: terminal Runs accept no further replay writes.
+                denial = ("run_terminal", current)
+            elif not current["lease_valid"]:
+                # R-19: an expired lease cannot write, even for the current owner.
+                denial = ("lease_lost", current)
             elif (owner is not None or lease_epoch is not None) and (
                 owner != current["owner"] or lease_epoch != current["lease_epoch"]
             ):
