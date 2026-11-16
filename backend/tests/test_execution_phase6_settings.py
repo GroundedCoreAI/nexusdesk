@@ -108,7 +108,9 @@ def test_untrusted_execution_cannot_disable_the_sandbox_or_use_local():
             execution_untrusted_tenants_enabled=True,
             execution_sandbox_required=False,
         )
-    assert Settings(_env_file=None, execution_untrusted_tenants_enabled=False).execution_sandbox_required
+    assert Settings(
+        _env_file=None, execution_untrusted_tenants_enabled=False
+    ).execution_sandbox_required
 
 
 def test_phase6_rollout_family_stays_out_of_the_runtime_fingerprint():
