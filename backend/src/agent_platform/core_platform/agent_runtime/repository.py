@@ -15,6 +15,11 @@ from agent_platform.core_platform.agent_execution.events.envelope import (
     AgentEventWrite,
     EventWriteResult,
 )
+from agent_platform.core_platform.agent_execution.events.usage import (
+    TERMINAL_USAGE_EVENT_ID,
+    TERMINAL_USAGE_SOURCE,
+    normalize_usage,
+)
 from agent_platform.core_platform.agent_execution.reliability.ownership import (
     ExecutionOwnership,
     FencingDenial,
@@ -872,13 +877,11 @@ class RunRepository:
         blocked by the terminal guard above, and the unique key is a second
         idempotency gate.
         """
-        payload = dict(usage) if usage else {"status": "unknown"}
-        if not payload:
-            payload = {"status": "unknown"}
+        payload = normalize_usage(usage)
         await conn.execute(
             text("""INSERT INTO runtime_usage_ledger
             (id,run_id,tenant_id,lease_epoch,source,source_event_id,usage)
-            VALUES (:id,:run_id,:tenant_id,:lease_epoch,'engine_terminal','result',
+            VALUES (:id,:run_id,:tenant_id,:lease_epoch,:source,:source_event_id,
             CAST(:usage AS jsonb))
             ON CONFLICT (run_id,source,source_event_id) DO NOTHING"""),
             {
@@ -886,6 +889,8 @@ class RunRepository:
                 "run_id": row["id"],
                 "tenant_id": row["tenant_id"],
                 "lease_epoch": row["lease_epoch"],
+                "source": TERMINAL_USAGE_SOURCE,
+                "source_event_id": TERMINAL_USAGE_EVENT_ID,
                 "usage": json.dumps(payload),
             },
         )
@@ -937,7 +942,7 @@ class RunRepository:
                             "source": source,
                             "source_event_id": source_event_id,
                             "usage_schema_version": usage_schema_version,
-                            "usage": json.dumps(usage),
+                            "usage": json.dumps(normalize_usage(usage)),
                             "cost": cost,
                             "is_estimate": is_estimate,
                             "supersedes_id": supersedes_id,

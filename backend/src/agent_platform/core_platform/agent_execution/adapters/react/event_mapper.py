@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from ...contracts import AdapterExecutionError, AgentEvent, ExecutionRequest
+from ...events.diagnostics import ParserDiagnosticCollector
 from .error_mapper import map_protocol_error
 
 _ENVELOPE_FIELDS = frozenset(
@@ -49,11 +50,13 @@ class ReactEventMapper:
         *,
         clock: Callable[[], datetime] | None = None,
         id_factory: Callable[[], UUID] | None = None,
+        diagnostics: ParserDiagnosticCollector | None = None,
     ) -> None:
         self._request = request
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or uuid4
         self._sequence = 0
+        self._diagnostics = diagnostics
 
     def map(self, kind: object, data: object) -> AgentEvent:
         """Create one fresh event or fail safely before it reaches a consumer."""
@@ -82,6 +85,15 @@ class ReactEventMapper:
         except (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit):
             raise
         except Exception:  # noqa: BLE001 - arbitrary runtime payloads must fail closed.
+            if self._diagnostics is not None:
+                self._diagnostics.report(
+                    "malformed",
+                    engine_id=self._request.engine_id,
+                    protocol_id=self._request.protocol_id,
+                    adapter_version=self._request.adapter_version,
+                    run_id=self._request.execution_id,
+                    location="envelope",
+                )
             raise _protocol_error() from None
         self._sequence += 1
         return event
