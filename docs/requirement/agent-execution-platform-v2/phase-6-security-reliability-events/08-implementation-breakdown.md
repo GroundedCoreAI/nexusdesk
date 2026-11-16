@@ -172,6 +172,19 @@
 
 **裁定：** 未配置 `execution_sandbox_docker_proxy_endpoint` 时 provider 拒绝 allowlist（fail closed，不开放直连）。该端点是部署级无 Secret URL。真实 allowlist/proxy 演练保持 `pending_env`，在受管代理交付并演练前 A5 不能通过。
 
+### R-18 — 延后的启动、脱敏、原生用量与 allowlist 接线不是纯测试工作
+
+**文档**：T-06 要求终态**和原生** usage 持久化；T-07 要求 Broker/脱敏/泄露处置；T-08 要求受管 allowlist proxy；T-10 要求组合接线。T-12 负责真实演练与报告，不负责缺失的生产行为。
+
+**`671b637` 现实**：生产代码在 Codex/Host 启动处没有 Broker issue/consume 调用，也没有 Secret channel；`SecretRedactor` 无生产调用点，Outbox 直接转发存储 data，泄露处置未接线；`RunRepository.record_usage` 无 Adapter/Orchestrator 调用方，故只有终态 usage 被持久化。R-17 正确记录默认拒绝的失败关闭证据，但受管 allowlist 集成同样缺失。
+
+**裁定（协调第 1 轮）**：(a)～(c) 是立即返回开发的修复，完成前不得再次宣称 code-ready，不得转为 T-12 测试债：
+1. 在 spawn 前接线 Broker 签发/消费，绑定当前 Run/engine/protocol/workspace/scopes；Secret 仅物化到受控 launch channel，所有终态路径吊销/清理；证明拒绝时零 spawn 且日志/事件/DB 无 Secret。
+2. 在日志、事件、SSE、Outbox、错误/诊断和产物信任边界统一脱敏；实现泄露触发的凭据吊销与准入关闭，并以 canary 断言。
+3. 原生 usage 经 Adapter/Orchestrator 边界写入受所有权校验的来源唯一台账，使用稳定 producer 身份，保持重复/旧 epoch/修正/unknown 语义；仅终态持久化不算完成 FR-14。
+
+对 (d)，R-17 的默认拒绝通过与 `pending_env` 结论保持有效，真实 allowlist/DNS/元数据/proxy-bypass 演练属于 T-12；但 R-17 不得把已批准的受管 proxy 集成整体改划为外部/测试工作：开发必须提供或集成受管 endpoint 并证明真实 enforcement 契约，之后才能宣称 T-08 code-complete。无 proxy 时 allowlist 保持不可用/失败关闭，A5 不得通过。真实多 Worker/故障演练同样属于 T-12。此裁定不改变任何 FR/AC、不豁免硬门禁；不可信执行保持关闭。
+
 ## 3. 聚焦回归复用（未变化不得全量重跑）
 
 | 既有证据/用例 | 复用或重跑规则 |

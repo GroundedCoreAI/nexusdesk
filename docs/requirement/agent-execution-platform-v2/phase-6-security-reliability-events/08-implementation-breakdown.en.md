@@ -172,6 +172,19 @@ The alternatives were a parallel replacement stack (rejected: duplicate sources 
 
 **Ruling:** the provider refuses an allowlist without `execution_sandbox_docker_proxy_endpoint` (fail closed, no direct egress). The endpoint is a deployment Secret-free URL. Real allowlist/proxy drills remain `pending_env` and A5 cannot pass until that managed proxy is supplied and drilled.
 
+### R-18 — Deferred launch, redaction, native-usage, and allowlist wiring is not test-only work
+
+**Documents:** T-06 requires terminal **and native** usage persistence; T-07 requires Broker/redaction/disclosure response; T-08 requires a managed allowlist proxy; T-10 requires composition wiring. T-12 owns real drills and reports, not missing production behavior.
+
+**Reality at `671b637`:** production code contains no Broker issue/consume call at Codex/Host launch and no Secret channel. `SecretRedactor` has no production call site; Outbox forwards stored data directly and no disclosure response is wired. `RunRepository.record_usage` has no adapter/Orchestrator caller, so only terminal usage is persisted. R-17 correctly records fail-closed default-deny evidence, but the managed allowlist integration itself is also absent.
+
+**Ruling (coordination round 1):** items (a)–(c) are immediate development fixes required before another code-ready handoff, not T-12 test debt:
+1. Wire Broker issuance/consumption before spawn, bind the current Run/engine/protocol/workspace/scopes, materialize Secrets only into the controlled launch channel, revoke/clean them on every terminal path, and prove denial leaves zero spawn plus no Secret in logs/events/DB.
+2. Apply common redaction at log, event, SSE, Outbox, error/diagnostic, and artifact trust boundaries; implement disclosure-driven credential revocation and admission closure with canary assertions.
+3. Route native usage through the Adapter/Orchestrator boundary into the ownership-checked source-unique ledger, using stable producer identity and preserving duplicate/old-epoch/correction/unknown semantics. Terminal-only persistence does not complete FR-14.
+
+For item (d), R-17's default-deny pass and `pending_env` verdict remain valid, and real allowlist/DNS/metadata/proxy-bypass drills belong to T-12. However, R-17 must not reclassify the approved managed-proxy integration as wholly external/test work: development must supply or integrate the managed endpoint and prove its actual enforcement contract before calling T-08 code-complete. No proxy means allowlist remains unavailable/fail-closed and A5 cannot pass. Real multi-Worker/fault drills likewise remain T-12 testing work. This ruling changes no FR/AC and waives no hard gate; untrusted execution remains off.
+
 ## 3. Focused Regression Reuse (Do Not Rerun Wholesale Unchanged)
 
 | Existing evidence/cases | Reuse or rerun rule |
