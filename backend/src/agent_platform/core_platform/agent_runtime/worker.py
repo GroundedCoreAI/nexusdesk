@@ -36,6 +36,7 @@ class RuntimeWorker:
         listener=None,
         memory: MemoryInjectionPort | None = None,
         orchestrator=None,
+        cleanup_confirmation=None,
     ):
         self.repository, self.runtime, self.settings = repository, runtime, settings
         self.fingerprint = fingerprint
@@ -48,6 +49,10 @@ class RuntimeWorker:
         # constructs a memory implementation itself.
         self.memory = memory
         self.orchestrator = orchestrator
+        # T-09 seam: an injected Host/Workspace confirmation is awaited before
+        # any cancellation reports ``cancelled``. Unset keeps pre-0069 behavior
+        # for legacy tests; composition wires the real confirmation in T-10.
+        self.cleanup_confirmation = cleanup_confirmation
 
     def _log_orchestrator_terminal(self, row, status, started_at):
         selector = getattr(self.orchestrator, "selector", None)
@@ -244,15 +249,28 @@ class RuntimeWorker:
         except asyncio.CancelledError:
             if execution:
                 execution.cancel()
+            cleanup_confirmed = True
+            if self.cleanup_confirmation is not None:
+                try:
+                    cleanup_confirmed = bool(await self.cleanup_confirmation(row))
+                except Exception:  # noqa: BLE001 - unconfirmed cleanup fails closed.
+                    cleanup_confirmed = False
+            status = "cancelled" if (not monitor_failure and cleanup_confirmed) else "failed"
+            error = (
+                "worker_lost"
+                if monitor_failure
+                else None
+                if status == "cancelled"
+                else "cancellation_unconfirmed"
+            )
             if orchestrator_enabled:
-                self._log_orchestrator_terminal(
-                    row, "failed" if monitor_failure else "cancelled", started_at
-                )
+                self._log_orchestrator_terminal(row, status, started_at)
             await self.repository.finish(
                 row["id"],
                 self.owner,
-                "failed" if monitor_failure else "cancelled",
-                error="worker_lost" if monitor_failure else None,
+                status,
+                error=error,
+                cleanup_confirmed=cleanup_confirmed,
                 **epoch_kwargs,
             )
         except RuntimeFault as exc:
@@ -262,10 +280,21 @@ class RuntimeWorker:
                 row["id"], self.owner, "failed", error=exc.code, **epoch_kwargs
             )
         except TimeoutError:
+            cleanup_confirmed = True
+            if self.cleanup_confirmation is not None:
+                try:
+                    cleanup_confirmed = bool(await self.cleanup_confirmation(row))
+                except Exception:  # noqa: BLE001 - unconfirmed cleanup fails closed.
+                    cleanup_confirmed = False
             if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
             await self.repository.finish(
-                row["id"], self.owner, "failed", error="run_timeout", **epoch_kwargs
+                row["id"],
+                self.owner,
+                "failed",
+                error="run_timeout" if cleanup_confirmed else "cleanup_failed",
+                cleanup_confirmed=cleanup_confirmed,
+                **epoch_kwargs,
             )
         except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
             # Provider errors may contain credentials or customer data; never expose raw messages.

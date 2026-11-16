@@ -48,6 +48,12 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
 from agent_platform.extension_contracts import BusinessScope
 
 
+def _now_utc():
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC)
+
+
 def _denial_reason(
     current: Mapping[str, object] | None,
     owner,
@@ -668,6 +674,7 @@ class RunRepository:
         *,
         lease_epoch: int | None = None,
         usage: dict | None = None,
+        cleanup_confirmed: bool = True,
     ):
         denial = None
         row = None
@@ -701,11 +708,28 @@ class RunRepository:
                 row = dict(row)
             else:
                 if row["cancel_requested"]:
-                    status, output, error = "cancelled", None, None
+                    if cleanup_confirmed:
+                        status, output, error = "cancelled", None, None
+                        cleanup_status = "completed"
+                    else:
+                        status, output, error = ("failed", None, "cancellation_unconfirmed")
+                        cleanup_status = "failed"
+                else:
+                    cleanup_status = "completed" if cleanup_confirmed else "failed"
                 await conn.execute(
                     text("""UPDATE runtime_runs SET status=:status,output=:output,
-                    error_code=:error,finished_at=now(),lease_until=NULL WHERE id=:id"""),
-                    {"id": run_id, "status": status, "output": output, "error": error},
+                    error_code=:error,finished_at=now(),lease_until=NULL,
+                    cleanup_status=:cleanup_status,cleanup_updated_at=now(),
+                    cancel_confirmed_at=CASE WHEN :status='cancelled'
+                        THEN COALESCE(cancel_confirmed_at,now()) ELSE cancel_confirmed_at END
+                    WHERE id=:id"""),
+                    {
+                        "id": run_id,
+                        "status": status,
+                        "output": output,
+                        "error": error,
+                        "cleanup_status": cleanup_status,
+                    },
                 )
                 await self.hooks.on_finished(conn, row, status, error)
                 if status == "completed":
@@ -1026,6 +1050,142 @@ class RunRepository:
             "effective_total_tokens": float(row["effective_total_tokens"]),
         }
 
+    async def expired_running(self, tenant: str, *, batch: int = 100) -> list[dict]:
+        """Expired running rows for recovery; no cleanup runs in this read."""
+        async with self.engine.connect() as conn:
+            rows = (
+                (
+                    await conn.execute(
+                        text("""SELECT * FROM runtime_runs
+                        WHERE tenant_id=:tenant AND status='running'
+                          AND (lease_until IS NULL OR lease_until<=now())
+                        ORDER BY lease_until ASC NULLS FIRST LIMIT :batch"""),
+                        {"tenant": tenant, "batch": batch},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [dict(row) for row in rows]
+
+    async def apply_recovery(self, items, *, new_owner) -> int:
+        """Fence each expired row and commit one confirmed terminal state."""
+        recovered = 0
+        async with self.engine.begin() as conn:
+            for item in items:
+                row = (
+                    (
+                        await conn.execute(
+                            text("""SELECT * FROM runtime_runs
+                            WHERE id=:id FOR UPDATE"""),
+                            {"id": item["id"]},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if (
+                    row is None
+                    or row["status"] != "running"
+                    or row["lease_until"] is None
+                    or row["lease_until"] > _now_utc()
+                ):
+                    continue
+                status, cleanup_status = (
+                    ("cancelled", "completed")
+                    if row["cancel_requested"] and item["cleanup_confirmed"]
+                    else ("failed", "completed")
+                    if item["cleanup_confirmed"]
+                    else ("failed", "failed")
+                )
+                error = (
+                    None
+                    if status == "cancelled"
+                    else "cleanup_failed"
+                    if not item["cleanup_confirmed"]
+                    else "worker_lost"
+                )
+                await conn.execute(
+                    text("""UPDATE runtime_runs SET status=:status,error_code=:error,
+                    finished_at=now(),lease_until=NULL,lease_epoch=lease_epoch+1,
+                    owner=COALESCE(:owner,owner),cleanup_status=:cleanup,
+                    cleanup_updated_at=now(),
+                    cancel_confirmed_at=CASE WHEN :status='cancelled'
+                        THEN COALESCE(cancel_confirmed_at,now())
+                        ELSE cancel_confirmed_at END
+                    WHERE id=:id"""),
+                    {
+                        "id": row["id"],
+                        "status": status,
+                        "error": error,
+                        "owner": new_owner,
+                        "cleanup": cleanup_status,
+                    },
+                )
+                await self.hooks.on_finished(conn, row, status, error)
+                await self._event(conn, row["id"], "run." + status, {"error_code": error})
+                recovered += 1
+        return recovered
+
+    async def prepare_retry(self, original_run_id, tenant, *, queue_timeout_seconds: int = 120):
+        """Create one correlated retry attempt (Run=one attempt, no Task table)."""
+        async with self.engine.begin() as conn:
+            original = (
+                (
+                    await conn.execute(
+                        text("""SELECT * FROM runtime_runs
+                        WHERE id=:id AND tenant_id=:tenant FOR UPDATE"""),
+                        {"id": original_run_id, "tenant": tenant},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if original is None or original["status"] != "failed":
+                return None
+            if original["error_code"] == "cancellation_unconfirmed":
+                return None
+            policy = original["side_effect_policy"]
+            if isinstance(policy, dict) and policy.get("side_effects") is True:
+                return None
+            exists = await conn.scalar(
+                text("""SELECT 1 FROM runtime_runs WHERE retry_of_run_id=:id
+                AND tenant_id=:tenant"""),
+                {"id": original_run_id, "tenant": tenant},
+            )
+            if exists:
+                return None
+            new_id = uuid4()
+            row = (
+                (
+                    await conn.execute(
+                        text("""INSERT INTO runtime_runs
+                        (id,conversation_id,tenant_id,business_id,workspace_id,input,
+                         config,status,queue_expires_at,retry_of_run_id,attempt_no)
+                        VALUES (:id,:conversation_id,:tenant,:business,:workspace,
+                        :input,CAST(:config AS jsonb),'queued',
+                        now()+:seconds * interval '1 second',:retry_of,
+                        :attempt_no) RETURNING *"""),
+                        {
+                            "id": new_id,
+                            "conversation_id": original["conversation_id"],
+                            "tenant": tenant,
+                            "business": original["business_id"],
+                            "workspace": original["workspace_id"],
+                            "input": original["input"],
+                            "config": json.dumps(original["config"]),
+                            "seconds": queue_timeout_seconds,
+                            "retry_of": original_run_id,
+                            "attempt_no": int(original["attempt_no"]) + 1,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            await self._event(conn, new_id, "run.queued", {})
+            return dict(row)
+
     async def cancel(self, run_id, tenant, scope: BusinessScope | None = None):
         resolved_scope = resolve_scope(tenant, scope)
         scope_sql, scope_params = scope_predicate(resolved_scope)
@@ -1053,13 +1213,18 @@ class RunRepository:
                 return None
             if row["status"] not in TERMINAL and not row["cancel_requested"]:
                 await conn.execute(
-                    text("UPDATE runtime_runs SET cancel_requested=true WHERE id=:id"),
+                    text("""UPDATE runtime_runs SET cancel_requested=true,
+                    cancel_requested_at=COALESCE(cancel_requested_at,now())
+                    WHERE id=:id"""),
                     {"id": run_id},
                 )
                 if row["status"] == "queued":
                     await conn.execute(
                         text("""UPDATE runtime_runs SET status='cancelled',
-                        finished_at=now(), lease_epoch=lease_epoch+1 WHERE id=:id"""),
+                        finished_at=now(), lease_epoch=lease_epoch+1,
+                        cancel_confirmed_at=now(),
+                        cleanup_status='completed', cleanup_updated_at=now()
+                        WHERE id=:id"""),
                         {"id": run_id},
                     )
                     await self.hooks.on_finished(conn, row, "cancelled", None)
