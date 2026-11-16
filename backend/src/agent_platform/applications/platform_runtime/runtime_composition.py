@@ -598,6 +598,13 @@ def _codex_adapters(
         # row's retained window comes from the captured per-run context, exactly
         # like ReactAdapterFactory reads it.
         context = capture_execution_context()
+        ownership = None
+        if context.owner is not None and context.lease_epoch is not None:
+            from agent_platform.core_platform.agent_execution.reliability.ownership import (
+                ExecutionOwnership,
+            )
+
+            ownership = ExecutionOwnership(context.execution_id, context.owner, context.lease_epoch)
         return CodexCliAdapter(
             runtime_host,
             config=_codex_config(settings, CodexProtocol.CLI_EXEC),
@@ -605,6 +612,7 @@ def _codex_adapters(
             workdir_root=settings.execution_workdir_root,
             resource_policy=_codex_resource_policy(settings),
             history=context.history,
+            ownership=ownership,
         )
 
     def app_server_factory() -> AgentEngineAdapter:

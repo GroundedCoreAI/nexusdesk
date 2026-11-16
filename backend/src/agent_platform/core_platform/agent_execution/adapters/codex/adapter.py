@@ -165,10 +165,14 @@ class CodexCliAdapter:
         workdir_root: Path,
         resource_policy: ResourcePolicy,
         history: Sequence[Mapping[str, object]] = (),
+        ownership: object | None = None,
         clock: object | None = None,
         id_factory: object | None = None,
     ) -> None:
         self._host = host
+        # Internal Fencing evidence captured from the claimed ExecutionContext;
+        # never serialized into the public handle or request.
+        self._ownership = ownership
         self._config = config
         self._gate = gate
         self._root = workdir_root

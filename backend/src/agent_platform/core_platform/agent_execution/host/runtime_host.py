@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+from ..reliability.ownership import ExecutionOwnership
 from .host_models import (
     HOST_REASON_CODES,
     REASON_ADMISSION_CLOSED,
@@ -96,6 +97,7 @@ class _Tracked:
     started: StartedProcess
     result: ProcessResult | None = None
     reservation: object | None = None
+    ownership: ExecutionOwnership | None = None
 
 
 class RuntimeHost:
@@ -174,6 +176,7 @@ class RuntimeHost:
         managed_id: UUID | None = None,
         secret_dir: Path | None = None,
         artifact_dir: Path | None = None,
+        ownership: ExecutionOwnership | None = None,
     ) -> ManagedProcess:
         """Validate the trusted target, register, spawn and attach - fail closed.
 
@@ -230,6 +233,7 @@ class RuntimeHost:
             command_digest=spec.command_digest,
             workdir_id=workdir_id,
             metadata={"executable_id": spec.executable_id},
+            ownership=ownership,
         )
         try:
             started = await self._runner.start(
@@ -255,11 +259,14 @@ class RuntimeHost:
                 last_error_code=code,
                 metadata_merge={"recovery": "start-failed"},
                 run_id=run_id,
+                ownership=ownership,
             )
             raise HostStartError(code) from exc
 
-        await self._registry.attach_spawn(managed=started.managed)
-        self._tracked[record_id] = _Tracked(started=started, reservation=reservation)
+        await self._registry.attach_spawn(managed=started.managed, ownership=ownership)
+        self._tracked[record_id] = _Tracked(
+            started=started, reservation=reservation, ownership=ownership
+        )
         return started.managed
 
     async def wait(
@@ -282,7 +289,7 @@ class RuntimeHost:
         result = self._classify(tracked, result)
         tracked.result = result
         self._observe_result(result)
-        await self._persist_result(result)
+        await self._persist_result(result, tracked.ownership)
         await self._release(tracked.reservation)
         self._untrack(managed_id)
         return result
@@ -299,7 +306,7 @@ class RuntimeHost:
         result = self._classify(tracked, result)
         tracked.result = result
         self._observe_result(result)
-        await self._persist_result(result)
+        await self._persist_result(result, tracked.ownership)
         await self._release(tracked.reservation)
         self._untrack(managed_id)
         return result
@@ -498,7 +505,9 @@ class RuntimeHost:
         self._tracked.pop(managed_id, None)
         self._supervisor.forget(managed_id)
 
-    async def _persist_result(self, result: ProcessResult) -> None:
+    async def _persist_result(
+        self, result: ProcessResult, ownership: ExecutionOwnership | None = None
+    ) -> None:
         if result.final_state == "cleanup_failed":
             await self._registry.mark_state(
                 managed_id=result.managed_id,
@@ -512,6 +521,7 @@ class RuntimeHost:
                 to_status="cleanup_failed",
                 last_error_code=result.reason_code,
                 run_id=result.run_id,
+                ownership=ownership,
             )
             return
         await self._registry.mark_state(
@@ -524,6 +534,7 @@ class RuntimeHost:
                 None if result.reason_code == "runtime_host_exited" else result.reason_code
             ),
             run_id=result.run_id,
+            ownership=ownership,
         )
 
     async def _decide(self, row: ProcessRecordRow) -> str:
