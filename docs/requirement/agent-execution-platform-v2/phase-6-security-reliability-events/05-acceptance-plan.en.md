@@ -1,9 +1,10 @@
 # Phase 6 · Security, Reliability, and Event Governance — Acceptance Plan
 
-> Status: Pending implementation (execute before this phase goes live; not currently accepted, and untrusted execution remains disabled)
+> Status: Approved acceptance baseline; pending implementation and execution (not currently accepted, and untrusted execution remains disabled)
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence while retaining independent security and SRE approval for untrusted execution)
-> Basis: `01-business-goals.md` (G1–G7 and success metrics), `02-requirements.md` (AC-1–AC-16); test execution is governed by `04-test-plan.md`
+> Revised: 2026-11-16 (separated direct-continue development entry from final acceptance prerequisites; corrected migration IDs and additive SSE compatibility)
+> Basis: `01-business-goals.en.md` (G1–G7 and success metrics), `02-requirements.en.md` (AC-1–AC-16); test execution is governed by `04-test-plan.en.md`
 
 ## 1. Acceptance Scope and Responsibility
 
@@ -17,11 +18,11 @@ Confirm every AC, zero successful real attacks, consistent data/terminal state/r
 |---|---|
 | Production-like strong-sandbox adversarial environment | Real untrusted tasks, network/file/resource attacks, Secret canaries, and disclosure response. |
 | Multi-Worker/Host fault environment | SIGKILL, lease/heartbeat, late results, cancellation/timeout/cleanup, and quota recovery. |
-| PG migration and event environment | 0056/0057 replica upgrade/backfill, Outbox fault points, usage ledger, and audit. |
+| PG migration and event environment | 0068/0069 replica upgrade/backfill, Outbox fault points, usage ledger, and audit. |
 | Multi-API/SSE environment | Multipage replay, lost notifications, reconnects, expired cursors, and terminal catch-up. |
 | React/Codex regression environment | Phase 0 baseline, historical Runs/events/configuration, and existing execution paths. |
 
-**Prerequisites**: Phases 0–5 accepted; Phase 0 baseline completed; all applicable `04-test-plan.md` cases pass with no P0/P1; real sandbox, multi-Worker, and fault-point environments have no pending_env; migrations rehearsed on a production-data replica. Use disposable dedicated hosts/networks/volumes and at least two dedicated tenants. Real Secrets are prohibited; only revocable canaries are allowed.
+**Development entry versus final prerequisites**: Direct-continue authorizes code development on the current Phase 4/5 Stage A baseline; it does not satisfy acceptance prerequisites. Before final acceptance, applicable Phase 0–5 evidence must be complete, including the Phase 0 baseline and Phase 5 Stage A full acceptance; all applicable `04-test-plan.en.md` cases pass with no P0/P1; real sandbox, multi-Worker, and fault-point environments have no pending_env; migrations are rehearsed on a production-data replica. Current upstream gaps remain recorded blockers under `08` R-5/R-9. Use disposable dedicated hosts/networks/volumes and at least two dedicated tenants. Real Secrets are prohibited; only revocable canaries are allowed.
 
 ## 3. Functional Acceptance Checklist (AC-1–AC-16)
 
@@ -42,7 +43,7 @@ Confirm every AC, zero successful real attacks, consistent data/terminal state/r
 | A13 | Produce multiple event pages, drop notifications, disconnect/reconnect, and use invalid/expired cursors to catch terminal state. | No silent gaps within retention, event_id deduplicates and SSE id remains compatible; 400/409 are correct and final event agrees. | AC-13; FR-13 |
 | A14 | Duplicate/replay usage, submit old-epoch usage, provider corrections, and missing fields, then rebuild aggregates. | One source counts once, old epochs deny, corrections remain traceable, unknown is not zero-filled, and rebuilds agree. | AC-14; FR-14 |
 | A15 | Inject malformed/unknown/oversized/continuous errors and Secret samples. | Classification, correlation, redaction, rate limiting, and skip/quarantine/fail behave correctly without event storms/disclosure. | AC-15; FR-15 |
-| A16 | Upgrade planned migrations on a data replica, roll out/roll back capabilities, and run React/Codex/API/SSE regressions. | Online expansion/backfill is correct, security does not degrade, data is retained, Outbox loses nothing, and Phase 0 diff is zero. | AC-16; FR-16 |
+| A16 | Upgrade planned migrations on a data replica, roll out/roll back capabilities, and run React/Codex/API/SSE regressions. | Online expansion/backfill is correct, security does not degrade, data is retained, Outbox loses nothing, and Phase 0 behavioral regression diff is zero except for documented additive SSE `_execution` metadata. | AC-16; FR-16 |
 
 Record for every scenario: executor, date, environment, versions, attack/fault point, prerequisite data, actual result, verdict, and log/DB/Host/network evidence links. Mark unavailable hard-gate environments `pending_env`; neither the phase nor untrusted exposure may pass.
 
@@ -71,8 +72,8 @@ Use these only to supplement client semantics and messaging that automation does
 | C7 | State+event+Outbox+required usage commit atomically, and Event Store is the source of truth. | Must pass | FR-12; G5 |
 | C8 | SSE has no silent gaps within retention, expired cursors return explicit 409, event_id deduplicates, and id=seq remains compatible. | Must pass | FR-13; G5 |
 | C9 | Parser diagnostics are bounded/redacted/rate-limited, and usage source idempotency/corrections are traceable. | Must pass | FR-14, FR-15; G6 |
-| C10 | Recheck head before implementing 0056/0057, expand/backfill online, never modify historical migrations, and retain data on rollback. | Must pass | FR-16; G7 |
-| C11 | React/Codex, Run/API/SSE, and historical configuration have no regressions; baselines pending Phase 0 cannot pass. | Must pass | FR-16; G7 |
+| C10 | Recheck head before implementing 0068/0069, expand/backfill online, never modify historical migrations, and retain data on rollback. | Must pass | FR-16; G7 |
+| C11 | React/Codex, Run/API/SSE, and historical configuration have no behavioral regressions; only documented additive SSE `_execution` metadata is permitted, and baselines pending Phase 0 cannot pass. | Must pass | FR-16; G7 |
 | C12 | The untrusted master switch remains false until independent security and SRE/operations approvals complete; no role may waive it. Usage/accounting hard gates remain proven by A14, C6, C9, and reconciliation evidence and are not waived by removing finance sign-off. | Veto item | FR-16; G1–G7 |
 
 **Engineering measurement (not a separate business-acceptance round)**: Record p50/p95, Outbox lag, recovery and migration-lock durations, sample size, and environment under fixed load and fault sets for capacity and release-budget review. Record `not_measured` when unmeasured and never prefill improvements. These records replace no correctness, security, or recovery hard gate.

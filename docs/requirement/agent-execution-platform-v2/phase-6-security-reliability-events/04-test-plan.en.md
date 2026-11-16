@@ -1,9 +1,10 @@
 # Phase 6 · Security, Reliability, and Event Governance — Test Plan
 
-> Status: Pending implementation (execute after this phase is developed; not currently executed or passed)
+> Status: Approved test baseline; pending implementation and execution (not currently executed or passed)
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence while retaining independent approval for untrusted execution)
-> Basis: `02-requirements.md` (FR-1–FR-16, AC-1–AC-16), `03-technical-design.md` (planned migrations 0056/0057, Fencing, Outbox, Vault/Broker, Sandbox)
+> Revised: 2026-11-16 (code-checked migration IDs, direct-writer coverage, additive SSE compatibility, and focused regression reuse)
+> Basis: `02-requirements.en.md` (FR-1–FR-16, AC-1–AC-16), `03-technical-design.en.md` (planned migrations 0068/0069, Fencing, Outbox, Vault/Broker, Sandbox), `08-implementation-breakdown.en.md`
 
 ## 1. Test Scope and Principles
 
@@ -15,7 +16,7 @@
 2. **Fault points must be precise**: Inject crashes at claim/takeover, before/after transaction commit, before/after Outbox publication, each cleanup stage, and the SSE catch-up window rather than relying on random restarts.
 3. **Zero effective stale writes**: Fencing assertions cover state, events, usage, Sessions, Outbox, and resource operations, not Run state alone.
 4. **Availability cannot replace safe failure**: Unavailable sandbox/Broker/key/policy must deny; never fall back to host execution, open networking, or skip redaction.
-5. **Compatibility and empty states are mandatory**: Existing v1 events, empty new fields, transient deltas, historical Runs, and switch rollback retain defined behavior; unmeasured Phase 0 baselines cannot pass.
+5. **Compatibility and empty states are mandatory**: Existing v1 events, empty new fields, transient deltas, historical Runs, and switch rollback retain defined behavior; the only permitted SSE wire addition is reserved `_execution` metadata. Unmeasured Phase 0 baselines cannot pass.
 6. **Control time and scale**: Use controllable clocks for expiry/backoff; exercise sequence/dedup/replay with concurrency and more than one page rather than long sleeps.
 7. **Isolate evidence**: All Secrets are dedicated canaries; attacks run in dedicated environments, followed by grant revocation, sandbox cleanup, and residue checks.
 8. **Reuse evidence**: A/C acceptance directly references automated UT/IT/CM results and adversarial, fault-point, DB, Host, network, and Outbox/SSE evidence instead of manually repeating the full suite; manual work is limited to key checks that cannot be automated. Evidence reuse does not remove independent approval for untrusted execution.
@@ -85,8 +86,8 @@
 | P6-IT-19 | SSE invalid/expired cursor and terminal catch-up | 400/409 semantics are correct; subscribe/query races lose no final event, and terminal state agrees. | AC-13 |
 | P6-IT-20 | Duplicate/replayed/old-Worker/corrected usage | Reproduce AC-14; one source counts once, old epochs deny, and corrections/rebuilds agree. | AC-14 |
 | P6-IT-21 | Continuous parser failure/oversize/Secret samples | Reproduce AC-15; classification/rate limiting/redaction and skip/quarantine/fail work without event storms. | AC-15 |
-| P6-IT-22 | 0056 online expansion/backfill/validation | Upgrade from actual head; existing seq/event_id/schema/source are correct without duplication/renumbering, and lock budget is recorded. | AC-16; FR-7–FR-14 |
-| P6-IT-23 | 0057 credential migration and data protection | Upgrade from actual head succeeds; public queries contain no plaintext, and populated downgrade follows protection policy. | AC-16; FR-1, FR-2 |
+| P6-IT-22 | 0068 online expansion/backfill/validation | Upgrade from actual head; existing seq/event_id/schema/source are correct without duplication/renumbering, and lock budget is recorded. | AC-16; FR-7–FR-14 |
+| P6-IT-23 | 0069 credential migration and data protection | Upgrade from actual head succeeds; public queries contain no plaintext, and populated downgrade follows protection policy. | AC-16; FR-1, FR-2 |
 | P6-IT-24 | Rollout/rollback and React/Codex/API/SSE regressions | Reproduce AC-16; security checks do not degrade, Outbox reconciliation loses nothing, and Phase 0 diff is zero. | AC-16 |
 | P6-IT-25 | Full resource/quota/accounting reconciliation after failures | After mixed SIGKILL, network loss, disk full, and process hangs, Run/Host/usage/Outbox reconciliation leaves no residue. | AC-8–AC-10, AC-12, AC-14 |
 
@@ -94,7 +95,7 @@
 
 | ID | Check | Pass criterion | Traceability |
 |---|---|---|---|
-| P6-CM-01 | Migration head and historical protection | 0056/0057 are planning numbers only; recheck actual head/dependencies before implementation and never modify 0001–0052 or merged migrations. | FR-16; G7 |
+| P6-CM-01 | Migration head and historical protection | 0068/0069 are planning numbers only; recheck actual head/dependencies before implementation and never modify 0001–0067 or merged migrations. | FR-16; G7 |
 | P6-CM-02 | Online migration and backfill | expand/backfill/validate/switch evidence is complete; existing events receive deterministic IDs without renumbering or uncontrolled long locks. | FR-11, FR-16 |
 | P6-CM-03 | Secret and audit scan | Public DB views, logs, events, SSE, errors, diagnostics, artifacts, and audit contain no plaintext Secrets/grant Tokens. | FR-1–FR-3 |
 | P6-CM-04 | Untrusted-exposure gate | Default off; no failed security/reliability hard item can be bypassed by enablement or configuration. | FR-4, FR-16 |
@@ -111,7 +112,8 @@
 - React/Codex common contracts, Session Resume, RuntimeHost/Workspace, approvals/input, and historical Agent configuration.
 - `test_gateway_credentials.py`, tool credential/egress/Workspace suites: new Execution Broker/Sandbox must not weaken existing boundaries.
 - Historical v1 event fixtures, transient model.delta, SSE `after`/`Last-Event-ID`, the 200-event page boundary, and existing client consumption.
-- Full migration chain and replica upgrade from actual implementation-time head; 0056/0057 backfill, old-binary reads, rollback reconciliation, and data protection.
+- Full migration chain and replica upgrade from actual implementation-time head; 0068/0069 backfill, old-binary reads, rollback reconciliation, direct-writer Outbox coverage and internal tool.replay publication exclusion, and data protection.
+- Reuse or rerun existing cases only according to `08-implementation-breakdown.en.md` §3; unchanged passed cases are not rerun wholesale after every task, while affected cases are mandatory.
 - Keep items with unmeasured Phase 0 baselines marked “pending Phase 0”; averages or samples cannot conceal P0/P1 scenarios.
 
 ## 7. Defect Severity and Exit Criteria
@@ -123,4 +125,4 @@
 | P2 major | Non-core diagnostic/metric/compatibility quality deviation without security or correctness impact. | Only for non-hard-gate items: record owner/deadline and have the acceptance owner confirm in the single acceptance record; security, reliability, event, and accounting hard gates cannot be waived. |
 | P3 minor | Wording, non-sensitive logging, and documentation issues. | Schedule fixes and retain traceability. |
 
-**Exit criteria**: All applicable UT/IT/CM and AC pass; real-sandbox, multi-Worker, fault-point, and real SSE/Outbox items have no unapproved skips; successful adversarial attacks=0; stale writes/duplicate usage/silent event gaps=0; regressions are green, Phase 0 diff is zero, and no P0/P1 remains. If any hard gate fails, `execution_untrusted_tenants_enabled` remains false and the phase cannot pass overall.
+**Exit criteria**: All applicable UT/IT/CM and AC pass; real-sandbox, multi-Worker, fault-point, and real SSE/Outbox items have no unapproved skips; successful adversarial attacks=0; stale writes/duplicate usage/silent event gaps=0; regressions are green, Phase 0 behavioral regression diff is zero apart from documented additive SSE `_execution` metadata, and no P0/P1 remains. If any hard gate fails, `execution_untrusted_tenants_enabled` remains false and the phase cannot pass overall.
