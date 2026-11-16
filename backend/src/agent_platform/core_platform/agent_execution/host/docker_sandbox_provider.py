@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from .egress_proxy import EgressProxyEndpoint
 from .host_models import ProcessSpec
 from .launch_plan import SandboxLaunchPlan
 from .network_policy import NetworkPolicy
@@ -83,7 +84,7 @@ class DockerSandboxProvider:
         docker_probe: CallableProbe | None = None,
         enforcement_required: bool = True,
         network_policy: NetworkPolicy | None = None,
-        proxy_endpoint: str | None = None,
+        proxy_endpoint: EgressProxyEndpoint | None = None,
     ) -> None:
         self._image = image.strip()
         self._probe = docker_probe or default_docker_probe
@@ -168,7 +169,10 @@ class DockerSandboxProvider:
         container = f"nexus-exec-{str(reservation.run_id).replace('-', '')[:24]}"
         policy = spec.resource_policy
         cpu_cores = max(1.0, min(4.0, policy.cpu_seconds / max(1, policy.wall_seconds)))
-        network_mode = "none" if not self._network_policy.rules else "bridge"
+        # Enforced boundary (R-19): default-deny stays --network=none; an
+        # allowlist joins an isolated internal network whose only egress is the
+        # managed proxy. Never an open bridge.
+        network_mode = "none" if not self._network_policy.rules else self._egress_network()
         argv: list[str] = [
             "docker",
             "run",
@@ -208,9 +212,11 @@ class DockerSandboxProvider:
             artifacts = Path(artifact_dir).resolve()
             argv += ["--mount", f"type=bind,source={artifacts},target=/artifacts"]
         if self._network_policy.rules and self._proxy_endpoint is not None:
-            argv += ["--add-host", "host.docker.internal:host-gateway"]
+            # The proxy is the only egress route on the internal network; these
+            # are the managed endpoint coordinates, not advisory hints on an
+            # open bridge. NO_PROXY excludes loopback/metadata explicitly.
             for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-                environment.append((name, self._proxy_endpoint))
+                environment.append((name, self._proxy_endpoint.url))
             environment += [("NO_PROXY", "127.0.0.1,localhost,169.254.169.254")]
         for key, value in spec.environment.items():
             environment.append((key, value))
@@ -221,6 +227,13 @@ class DockerSandboxProvider:
             environment=tuple(environment),
             container_name=container,
         )
+
+    def _egress_network(self) -> str:
+        """Isolated internal network name for the managed allowlist path."""
+        # One deterministic internal network per deployment/proxy. Docker
+        # networks with no external gateway provide no direct egress; only the
+        # managed proxy on this network can reach allowlisted destinations.
+        return f"nexus-egress-{self._proxy_endpoint.host}" if self._proxy_endpoint else "none"
 
     async def release(self, reservation: SandboxReservation) -> None:
         if reservation.released:
