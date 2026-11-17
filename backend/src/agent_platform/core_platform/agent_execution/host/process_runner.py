@@ -42,6 +42,7 @@ from .host_models import (
     ProcessSpec,
     ResourcePolicy,
 )
+from .launch_plan import SandboxLaunchPlan
 from .process_identity import capture_start_token_async, read_pgid
 
 logger = logging.getLogger(__name__)
@@ -279,6 +280,7 @@ class ProcessRunner:
         sandbox_provider: str,
         working_dir: Path,
         preexec: Callable[[], None] | None = None,
+        launch_plan: SandboxLaunchPlan | None = None,
     ) -> StartedProcess:
         """Resolve through the allowlist, spawn in a new session, capture identity.
 
@@ -292,7 +294,13 @@ class ProcessRunner:
         ``hard_cleanup`` (which closes the pumps only through the handle).
         """
         argv = self._registry.resolve(spec)  # raises before any side effect
-        if not working_dir.is_dir():
+        spawn_dir = working_dir if launch_plan is None else (launch_plan.working_dir or working_dir)
+        spawn_env = dict(spec.environment)
+        if launch_plan is not None:
+            # Provider-generated argv/environment: the client never supplies it.
+            argv = launch_plan.argv
+            spawn_env = dict(launch_plan.environment)
+        if not spawn_dir.is_dir():
             raise ProcessSpawnError(REASON_PIPE_SETUP_FAILED, "workdir missing at spawn")
 
         # The stdin channel must also fit the process wall budget (D22). The
@@ -315,8 +323,8 @@ class ProcessRunner:
                 ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=str(working_dir),
-                env=dict(spec.environment),
+                cwd=str(spawn_dir),
+                env=spawn_env,
                 start_new_session=True,
                 preexec_fn=preexec_fn,
             )

@@ -15,7 +15,8 @@ execution's diagnostic text can never carry provider output.
 """
 
 import json
-from collections.abc import Iterable, Mapping
+import logging
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -29,7 +30,10 @@ from ...contracts import (
     ExecutionErrorCategory,
     ExecutionErrorCode,
 )
+from ...events.diagnostics import ParserDiagnosticCollector
 from .config import CodexProtocol
+
+logger = logging.getLogger(__name__)
 
 # The measured Stage A usage shape. All six keys are optional on the wire; a
 # missing key is never zero-filled (an invented zero is fabricated evidence).
@@ -118,27 +122,50 @@ def normalize_event_type(native_type: str) -> str:
 class CodexEventParser:
     """Parse newline-delimited JSON with a strict size limit."""
 
-    def __init__(self, *, max_line_bytes: int = 1_048_576) -> None:
+    def __init__(
+        self,
+        *,
+        max_line_bytes: int = 1_048_576,
+        on_diagnostic: Callable[[str, str | None], None] | None = None,
+    ) -> None:
         if max_line_bytes < 1:
             raise ValueError("max_line_bytes must be positive")
         self.max_line_bytes = max_line_bytes
+        self._on_diagnostic = on_diagnostic
+
+    def _diagnose(self, category: str, location: str | None = None) -> None:
+        if self._on_diagnostic is None:
+            return
+        try:
+            self._on_diagnostic(category, location)
+        except Exception:  # noqa: BLE001 - diagnostic failure never changes parsing.
+            logger.warning("codex parser diagnostic sink failed category=%s", category)
 
     def parse_lines(self, lines: Iterable[bytes | str]) -> list[CodexNativeEvent]:
         events: list[CodexNativeEvent] = []
         for raw in lines:
             line = raw.encode() if isinstance(raw, str) else raw
             if len(line) > self.max_line_bytes:
+                self._diagnose("size_limit", "line")
                 raise ValueError("Codex event exceeds size limit")
             if not line.strip():
                 continue
             try:
                 value = json.loads(line)
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                category = (
+                    "critical_terminal"
+                    if b"turn.completed" in line or b"turn.failed" in line
+                    else "malformed"
+                )
+                self._diagnose(category, "json")
                 raise ValueError("Malformed Codex event") from exc
             if not isinstance(value, Mapping):
+                self._diagnose("malformed", "shape")
                 raise TypeError("Codex event must be an object")
             event_type = value.get("type") or value.get("event")
             if not isinstance(event_type, str) or not event_type:
+                self._diagnose("malformed", "type")
                 raise ValueError("Codex event type is missing")
             events.append(CodexNativeEvent(event_type=event_type, payload=dict(value)))
         return events
@@ -219,6 +246,8 @@ class CodexEventMapper:
         trace_id: str | None = None,
         clock: Any | None = None,
         id_factory: Any | None = None,
+        diagnostics: ParserDiagnosticCollector | None = None,
+        known_event_types: frozenset[str] = frozenset(),
     ) -> None:
         self._execution_id = execution_id
         self._engine_id = engine_id
@@ -229,6 +258,23 @@ class CodexEventMapper:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or uuid4
         self._sequence = 0
+        self._diagnostics = diagnostics
+        self._known_event_types = known_event_types
+
+    def _report(
+        self, category: str, location: str | None = None, native_event_id: str | None = None
+    ) -> None:
+        if self._diagnostics is None:
+            return
+        self._diagnostics.report(
+            category,
+            engine_id=self._engine_id,
+            protocol_id=self._protocol_id,
+            adapter_version=self._adapter_version,
+            run_id=self._execution_id,
+            native_event_id=native_event_id,
+            location=location,
+        )
 
     @classmethod
     def for_cli(
@@ -253,8 +299,11 @@ class CodexEventMapper:
         try:
             if not isinstance(native, CodexNativeEvent):
                 raise TypeError
+            if self._known_event_types and native.event_type not in self._known_event_types:
+                self._report("unknown_type", "type", native.event_type[:128])
             payload, truncated = _bounded_payload(native.payload)
             if truncated:
+                self._report("size_limit", "payload", native.event_type[:128])
                 payload["native_type"] = native.event_type[:128]
             event = AgentEvent(
                 event_id=self._id_factory(),
@@ -273,14 +322,24 @@ class CodexEventMapper:
         except AdapterExecutionError:
             raise
         except Exception:  # noqa: BLE001 - arbitrary provider payloads fail closed.
+            native_type = getattr(native, "event_type", None)
+            self._report(
+                "malformed",
+                "envelope",
+                native_type[:128] if isinstance(native_type, str) else None,
+            )
             raise _protocol_error() from None
         self._sequence += 1
         return event
 
     def map_lines(self, lines: Iterable[bytes | str], *, max_line_bytes: int) -> list[AgentEvent]:
         """Parse then map; any malformed line aborts with ``PROTOCOL_ERROR``."""
+        parser = CodexEventParser(
+            max_line_bytes=max_line_bytes,
+            on_diagnostic=lambda category, location: self._report(category, location),
+        )
         try:
-            natives = CodexEventParser(max_line_bytes=max_line_bytes).parse_lines(lines)
+            natives = parser.parse_lines(lines)
         except (TypeError, ValueError):
             raise _protocol_error() from None
         return [self.map(native) for native in natives]

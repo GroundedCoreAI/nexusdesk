@@ -476,23 +476,32 @@ async def test_p2_it20_real_pg_open_sse_drain_cursor_delta_and_authorization(pla
         await services.repository.append(
             claimed["id"], owner, "open.pagination", {"index": index, "private": "redact-me"}
         )
+    # R-19: an internal replay is fenced like every Worker write, so it must be
+    # written while the Run still owns a live lease -- never after terminal.
+    replay_key = f"runtime:{run_id}:" + "b" * 64
+    await DurableToolReplayCache(services.repository.engine).put(
+        replay_key,
+        {"private_replay": "never-public"},
+        owner=owner,
+        lease_epoch=claimed["lease_epoch"],
+    )
+    replay_seq = (await services.repository.get(claimed["id"], settings.tenant_id))["event_seq"]
+    assert replay_seq > 0
     await services.repository.finish(
         claimed["id"], owner, "completed", output="public-open-answer", history=[]
     )
     terminal = await services.repository.get(claimed["id"], settings.tenant_id)
     terminal_seq = terminal["event_seq"]
-    replay_key = f"runtime:{run_id}:" + "b" * 64
-    await DurableToolReplayCache(services.repository.engine).put(
-        replay_key, {"private_replay": "never-public"}
-    )
     final = await services.repository.get(claimed["id"], settings.tenant_id)
-    assert final["event_seq"] == terminal_seq + 1
+    assert final["event_seq"] == terminal_seq
 
     events_url = f"{PUBLIC}/runs/{run_id}/events"
     response = await client.get(events_url, headers=auth)
     assert response.status_code == 200, response.text
     ids = [int(line[4:]) for line in response.text.splitlines() if line.startswith("id: ")]
-    assert ids == list(range(1, terminal_seq + 1))
+    # ``tool.replay`` is durable internally but never serialized publicly, so its
+    # sequence is the one gap in the otherwise contiguous Run-local stream.
+    assert ids == [seq for seq in range(1, terminal_seq + 1) if seq != replay_seq]
     assert response.text.count("event: open.pagination") == 201
     assert response.text.rstrip().endswith("}")
     assert response.text.rfind(f"id: {terminal_seq}\nevent: run.completed") > response.text.rfind(

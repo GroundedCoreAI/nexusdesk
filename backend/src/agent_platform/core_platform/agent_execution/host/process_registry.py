@@ -22,6 +22,12 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from ..reliability.ownership import (
+    ExecutionOwnership,
+    FencingDenial,
+    FencingDenialRecorder,
+    OwnershipDenied,
+)
 from .host_models import (
     REASON_CLEANUP_FAILED,
     HostReasonCode,
@@ -108,6 +114,7 @@ class ProcessRegistry:
         sandbox_provider: str = "local/v1",
         clock=None,
         alert_sink: AlertSink | None = None,
+        denials: FencingDenialRecorder | None = None,
     ) -> None:
         self._engine = engine
         self._host_id = host_id
@@ -117,6 +124,54 @@ class ProcessRegistry:
         # T15: the durable landing point for every cleanup_failed state,
         # supervised or recovered alike, alerts through the same seam.
         self._alert_sink = alert_sink
+        self._denials = denials or FencingDenialRecorder(engine)
+
+    # ------------------------------------------------------------------
+    # 08 R-14: denial audit lives outside the fenced business transaction
+    # ------------------------------------------------------------------
+
+    async def _deny_stale(
+        self, run_id: UUID, ownership: ExecutionOwnership, operation: str
+    ) -> str | None:
+        async with self._engine.connect() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text(
+                            """SELECT owner, lease_epoch, status,
+                            lease_until>now() AS lease_valid
+                            FROM runtime_runs WHERE id=:id"""
+                        ),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            reason = "run_missing"
+        elif row["status"] not in ("running", "queued"):
+            reason = "run_terminal"
+        elif row["lease_epoch"] != ownership.lease_epoch:
+            reason = "stale_epoch"
+        elif row["owner"] != ownership.owner:
+            reason = "owner_mismatch"
+        elif not row["lease_valid"]:
+            reason = "lease_lost"
+        else:
+            return None
+        await self._denials.record(
+            FencingDenial(
+                run_id=run_id,
+                operation=operation,  # type: ignore[arg-type]
+                reason=reason,  # type: ignore[arg-type]
+                stale_owner=ownership.owner,
+                stale_lease_epoch=ownership.lease_epoch,
+                current_owner=None if row is None else row["owner"],
+                current_lease_epoch=None if row is None else row["lease_epoch"],
+            )
+        )
+        return reason
 
     @property
     def host_instance_id(self) -> str:
@@ -139,36 +194,77 @@ class ProcessRegistry:
         command_digest: str,
         workdir_id: UUID | None = None,
         metadata: dict | None = None,
+        ownership: ExecutionOwnership | None = None,
     ) -> None:
         """Persist the ``starting`` record before the spawn attempt (03 §4.2)."""
+        params: dict[str, object] = {
+            "id": managed_id,
+            "run_id": run_id,
+            "tenant_id": tenant_id,
+            "host_id": self._host_id,
+            "host_instance_id": self._host_instance_id,
+            "sandbox_provider": self._sandbox_provider,
+            "digest": command_digest,
+            "workdir_id": workdir_id,
+            "metadata": json.dumps(metadata or {}),
+        }
+        landed = False
         try:
             async with self._engine.begin() as conn:
-                await conn.execute(
-                    text(
+                if ownership is None:
+                    statement = (
                         "INSERT INTO runtime_host_processes"
                         " (id, run_id, workdir_id, tenant_id, host_id, host_instance_id,"
                         " sandbox_provider, status, command_digest, metadata)"
                         " VALUES (:id, :run_id, :workdir_id, :tenant_id, :host_id,"
                         " :host_instance_id, :sandbox_provider, 'starting', :digest,"
                         " CAST(:metadata AS jsonb))"
-                    ),
-                    {
-                        "id": managed_id,
-                        "run_id": run_id,
-                        "tenant_id": tenant_id,
-                        "host_id": self._host_id,
-                        "host_instance_id": self._host_instance_id,
-                        "sandbox_provider": self._sandbox_provider,
-                        "digest": command_digest,
-                        "workdir_id": workdir_id,
-                        "metadata": json.dumps(metadata or {}),
-                    },
-                )
+                    )
+                else:
+                    params["owner"] = ownership.owner
+                    params["lease_epoch"] = ownership.lease_epoch
+                    statement = (
+                        "INSERT INTO runtime_host_processes"
+                        " (id, run_id, workdir_id, tenant_id, host_id, host_instance_id,"
+                        " sandbox_provider, status, command_digest, metadata)"
+                        " SELECT :id, r.id, :workdir_id, :tenant_id, :host_id,"
+                        " :host_instance_id, :sandbox_provider, 'starting', :digest,"
+                        " CAST(:metadata AS jsonb)"
+                        " FROM runtime_runs r WHERE r.id=:run_id"
+                        " AND r.owner=:owner AND r.lease_epoch=:lease_epoch"
+                    )
+                result = await conn.execute(text(statement), params)
+                landed = result.rowcount > 0
         except (DBAPIError, OSError) as exc:
             raise RegistryUnavailableError("register failed") from exc
+        if ownership is not None and not landed:
+            reason = await self._deny_stale(run_id, ownership, "process")
+            if reason is not None:
+                raise OwnershipDenied(reason, "process")
+            raise RegistryUnavailableError("register failed")
 
-    async def attach_spawn(self, *, managed: ManagedProcess) -> bool:
+    async def attach_spawn(
+        self, *, managed: ManagedProcess, ownership: ExecutionOwnership | None = None
+    ) -> bool:
         """Fill in pid/pgid/start token/digest once the group exists."""
+        params: dict[str, object] = {
+            "pid": managed.os_pid,
+            "pgid": managed.process_group_id,
+            "token": managed.start_token,
+            "digest": managed.command_digest,
+            "started_at": _dt(managed.started_at_posix),
+            "id": managed.managed_id,
+            "host_id": self._host_id,
+        }
+        clause = ""
+        if ownership is not None:
+            params["owner"] = ownership.owner
+            params["lease_epoch"] = ownership.lease_epoch
+            clause += (
+                " AND EXISTS (SELECT 1 FROM runtime_runs r"
+                " WHERE r.id=runtime_host_processes.run_id"
+                " AND r.owner=:owner AND r.lease_epoch=:lease_epoch)"
+            )
         try:
             async with self._engine.begin() as conn:
                 result = await conn.execute(
@@ -178,21 +274,16 @@ class ProcessRegistry:
                         " process_start_token=:token, command_digest=:digest,"
                         " status='running', started_at=:started_at,"
                         " last_observed_at=now(), updated_at=now()"
-                        " WHERE id=:id AND host_id=:host_id AND status='starting'"
+                        " WHERE id=:id AND host_id=:host_id AND status='starting'" + clause
                     ),
-                    {
-                        "pid": managed.os_pid,
-                        "pgid": managed.process_group_id,
-                        "token": managed.start_token,
-                        "digest": managed.command_digest,
-                        "started_at": _dt(managed.started_at_posix),
-                        "id": managed.managed_id,
-                        "host_id": self._host_id,
-                    },
+                    params,
                 )
-                return result.rowcount > 0
+                landed = result.rowcount > 0
         except (DBAPIError, OSError) as exc:
             raise RegistryUnavailableError("attach failed") from exc
+        if ownership is not None and not landed:
+            await self._deny_stale(managed.run_id, ownership, "process")
+        return landed
 
     async def mark_state(
         self,
@@ -207,6 +298,7 @@ class ProcessRegistry:
         cleanup_deadline_posix: float | None = None,
         metadata_merge: dict | None = None,
         run_id: UUID | None = None,
+        ownership: ExecutionOwnership | None = None,
     ) -> bool:
         """Conditional state move; ``term_signal`` lands in exit_code as -signal.
 
@@ -231,6 +323,15 @@ class ProcessRegistry:
         if metadata_merge:
             metadata_clause = ", metadata = metadata || CAST(:merge AS jsonb)"
             params["merge"] = json.dumps(metadata_merge)
+        ownership_clause = ""
+        if ownership is not None:
+            params["owner"] = ownership.owner
+            params["lease_epoch"] = ownership.lease_epoch
+            ownership_clause = (
+                " AND EXISTS (SELECT 1 FROM runtime_runs r"
+                " WHERE r.id=runtime_host_processes.run_id"
+                " AND r.owner=:owner AND r.lease_epoch=:lease_epoch)"
+            )
         try:
             async with self._engine.begin() as conn:
                 result = await conn.execute(
@@ -243,13 +344,17 @@ class ProcessRegistry:
                         " last_error_code=COALESCE(:last_error_code, last_error_code)"
                         f"{exited_clause}{cancel_clause}{metadata_clause}"
                         f" WHERE id=:id AND host_id=:host_id"
-                        f" AND status IN ({placeholders})"
+                        f" AND status IN ({placeholders}){ownership_clause}"
                     ),
                     params,
                 )
             landed = result.rowcount > 0
         except (DBAPIError, OSError) as exc:
             raise RegistryUnavailableError("mark failed") from exc
+        if ownership is not None and not landed:
+            target_run = run_id or await self._run_id_for(managed_id)
+            if target_run is not None:
+                await self._deny_stale(target_run, ownership, "process")
         if landed and to_status == "cleanup_failed" and self._alert_sink is not None:
             # The honest durable escalation (FR-3 failure row, FR-9 alert):
             # one alert per real landing, never per attempted call.
@@ -266,19 +371,37 @@ class ProcessRegistry:
             )
         return landed
 
-    async def observe(self, managed_id: UUID) -> None:
+    async def observe(
+        self, managed_id: UUID, *, ownership: ExecutionOwnership | None = None
+    ) -> None:
+        params: dict[str, object] = {"id": managed_id, "host_id": self._host_id}
+        clause = ""
+        if ownership is not None:
+            params["owner"] = ownership.owner
+            params["lease_epoch"] = ownership.lease_epoch
+            clause = (
+                " AND EXISTS (SELECT 1 FROM runtime_runs r"
+                " WHERE r.id=runtime_host_processes.run_id"
+                " AND r.owner=:owner AND r.lease_epoch=:lease_epoch)"
+            )
+        landed = False
         try:
             async with self._engine.begin() as conn:
-                await conn.execute(
+                result = await conn.execute(
                     text(
                         "UPDATE runtime_host_processes"
                         " SET last_observed_at=now(), updated_at=now()"
-                        " WHERE id=:id AND host_id=:host_id"
+                        " WHERE id=:id AND host_id=:host_id" + clause
                     ),
-                    {"id": managed_id, "host_id": self._host_id},
+                    params,
                 )
+                landed = result.rowcount > 0
         except (DBAPIError, OSError) as exc:
             raise RegistryUnavailableError("observe failed") from exc
+        if ownership is not None and not landed:
+            run_id = await self._run_id_for(managed_id)
+            if run_id is not None:
+                await self._deny_stale(run_id, ownership, "process")
 
     # ------------------------------------------------------------------
     # Reads
@@ -326,6 +449,21 @@ class ProcessRegistry:
         except (DBAPIError, OSError) as exc:
             raise RegistryUnavailableError("fetch failed") from exc
 
+    async def active_for_run(self, run_id: UUID) -> bool:
+        """True while any process group for this Run is not terminally closed."""
+        try:
+            async with self._engine.connect() as conn:
+                count = await conn.scalar(
+                    text("""SELECT count(*) FROM runtime_host_processes
+                    WHERE run_id=:run_id AND host_id=:host_id
+                    AND status IN ('starting','running','terminating','orphaned')"""),
+                    {"run_id": run_id, "host_id": self._host_id},
+                )
+                return bool(count)
+        except (DBAPIError, OSError) as exc:
+            # Unknown process state cannot confirm cleanup.
+            raise RegistryUnavailableError("active check failed") from exc
+
     async def fetch_one(self, managed_id: UUID) -> ProcessRecordRow | None:
         try:
             async with self._engine.begin() as conn:
@@ -357,6 +495,19 @@ class ProcessRegistry:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    async def _run_id_for(self, managed_id: UUID) -> UUID | None:
+        try:
+            async with self._engine.connect() as conn:
+                return await conn.scalar(
+                    text(
+                        "SELECT run_id FROM runtime_host_processes"
+                        " WHERE id=:id AND host_id=:host_id"
+                    ),
+                    {"id": managed_id, "host_id": self._host_id},
+                )
+        except (DBAPIError, OSError):
+            return None
 
     @staticmethod
     def _to_row(row) -> ProcessRecordRow:

@@ -4,6 +4,7 @@ from math import isfinite
 from time import monotonic
 from uuid import uuid4
 
+from agent_platform.core_platform.agent_execution.events.envelope import from_agent_event
 from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
     build_execution_context,
     enforce_execution_rollout,
@@ -35,6 +36,7 @@ class RuntimeWorker:
         listener=None,
         memory: MemoryInjectionPort | None = None,
         orchestrator=None,
+        cleanup_confirmation=None,
     ):
         self.repository, self.runtime, self.settings = repository, runtime, settings
         self.fingerprint = fingerprint
@@ -47,6 +49,11 @@ class RuntimeWorker:
         # constructs a memory implementation itself.
         self.memory = memory
         self.orchestrator = orchestrator
+        # T-09 seam: an injected Host/Workspace confirmation is awaited before
+        # any cancellation reports ``cancelled``. Unset keeps pre-0069 behavior
+        # for legacy tests; composition wires the real confirmation in T-10.
+        self.cleanup_confirmation = cleanup_confirmation
+        self._recovery_coordinator = None
 
     def _log_orchestrator_terminal(self, row, status, started_at):
         selector = getattr(self.orchestrator, "selector", None)
@@ -84,6 +91,13 @@ class RuntimeWorker:
             workspace_id=row.get("workspace_id") or DEFAULT_WORKSPACE_ID,
         )
         scope_token = bind_scope(scope)
+        # The claim's database-owned Fencing tuple. None only on the pre-0068
+        # legacy shape; production always carries it after the 0068 claim.
+        lease_epoch = row.get("lease_epoch")
+        # Only the post-0068 production row carries the tuple. Omitting the
+        # keyword for the legacy shape keeps old test/compat repository seams
+        # callable while production always sends it.
+        epoch_kwargs = {} if lease_epoch is None else {"lease_epoch": lease_epoch}
 
         async def emit(kind, data):
             if kind == "model.delta":
@@ -91,7 +105,37 @@ class RuntimeWorker:
                 if self.notifier is not None:
                     await self.notifier.send(row["id"], {"k": "delta", **data})
                 return
-            await self.repository.append(row["id"], self.owner, kind, data)
+            await self.repository.append(row["id"], self.owner, kind, data, **epoch_kwargs)
+
+        append_event = getattr(self.repository, "append_event", None)
+
+        async def emit_envelope(event):
+            """Persist one AgentEvent through the deduplicating Repository path."""
+            if event.event_type == "model.delta":
+                # Transient telemetry stays outside the durable cursor.
+                if self.notifier is not None:
+                    await self.notifier.send(row["id"], {"k": "delta", **event.payload})
+                return
+            if not callable(append_event):
+                # Legacy/compat repository seam without the T-04 method keeps
+                # the two-argument path (including its pre-migration shape).
+                await emit(event.event_type, event.payload)
+                return
+            await append_event(
+                row["id"],
+                self.owner,
+                from_agent_event(event),
+                **epoch_kwargs,
+            )
+
+        class _WorkerEventSink:
+            async def __call__(self, kind, data):
+                return await emit(kind, data)
+
+            async def emit_event(self, event):
+                return await emit_envelope(event)
+
+        event_sink = _WorkerEventSink()
 
         async def monitor(task):
             nonlocal monitor_failure
@@ -99,7 +143,10 @@ class RuntimeWorker:
                 await asyncio.sleep(1)
                 try:
                     stop = await self.repository.heartbeat(
-                        row["id"], self.owner, self.settings.lease_seconds
+                        row["id"],
+                        self.owner,
+                        self.settings.lease_seconds,
+                        **epoch_kwargs,
                     )
                 except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
                     stop = "lost"  # Fail closed if lease ownership cannot be established.
@@ -146,12 +193,17 @@ class RuntimeWorker:
                     trace_id=row.get("trace_id"),
                     timeout_seconds=self.settings.run_timeout_seconds,
                     owner=self.owner,
+                    lease_epoch=lease_epoch,
                     scope=scope,
                     execution_phase3_enabled=phase3_enabled,
                 )
-                execution = asyncio.create_task(self.orchestrator.execute(context, emit))
+                execution = asyncio.create_task(self.orchestrator.execute(context, event_sink))
                 watcher = asyncio.create_task(monitor(execution))
                 outcome = await execution
+                # Unknown/absent usage stays unknown: omit the keyword instead
+                # of writing an empty ledger entry, and keep the legacy call
+                # shape byte-identical when the Adapter reported no usage.
+                usage_kwargs = {"usage": outcome.usage} if outcome.usage else {}
                 if outcome.status == "completed":
                     await self.repository.finish(
                         row["id"],
@@ -160,6 +212,8 @@ class RuntimeWorker:
                         output=outcome.output,
                         history=outcome.history,
                         completion=self._memory_context(row, outcome.dropped),
+                        **epoch_kwargs,
+                        **usage_kwargs,
                     )
                 else:
                     await self.repository.finish(
@@ -167,6 +221,8 @@ class RuntimeWorker:
                         self.owner,
                         outcome.status,
                         error=outcome.legacy_error_code,
+                        **epoch_kwargs,
+                        **usage_kwargs,
                     )
                 self._log_orchestrator_terminal(row, outcome.status, started_at)
             else:
@@ -193,35 +249,74 @@ class RuntimeWorker:
                     output=output,
                     history=history,
                     completion=self._memory_context(row, dropped),
+                    **epoch_kwargs,
                 )
         except asyncio.CancelledError:
             if execution:
                 execution.cancel()
+            cleanup_confirmed = True
+            if self.cleanup_confirmation is not None:
+                try:
+                    cleanup_confirmed = bool(await self.cleanup_confirmation(row))
+                except Exception:  # noqa: BLE001 - unconfirmed cleanup fails closed.
+                    cleanup_confirmed = False
+            status = "cancelled" if (not monitor_failure and cleanup_confirmed) else "failed"
+            error = (
+                "worker_lost"
+                if monitor_failure
+                else None
+                if status == "cancelled"
+                else "cancellation_unconfirmed"
+            )
             if orchestrator_enabled:
-                self._log_orchestrator_terminal(
-                    row, "failed" if monitor_failure else "cancelled", started_at
-                )
+                self._log_orchestrator_terminal(row, status, started_at)
+            # ``finish`` defaults to a confirmed cleanup; only an unconfirmed
+            # result needs to be passed so the existing call shape (and its
+            # Phase 2/3 compatibility evidence) stays unchanged.
             await self.repository.finish(
                 row["id"],
                 self.owner,
-                "failed" if monitor_failure else "cancelled",
-                error="worker_lost" if monitor_failure else None,
+                status,
+                error=error,
+                **({} if cleanup_confirmed else {"cleanup_confirmed": False}),
+                **epoch_kwargs,
             )
         except RuntimeFault as exc:
             if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
-            await self.repository.finish(row["id"], self.owner, "failed", error=exc.code)
+            await self.repository.finish(
+                row["id"], self.owner, "failed", error=exc.code, **epoch_kwargs
+            )
         except TimeoutError:
+            cleanup_confirmed = True
+            if self.cleanup_confirmation is not None:
+                try:
+                    cleanup_confirmed = bool(await self.cleanup_confirmation(row))
+                except Exception:  # noqa: BLE001 - unconfirmed cleanup fails closed.
+                    cleanup_confirmed = False
             if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
-            await self.repository.finish(row["id"], self.owner, "failed", error="run_timeout")
+            await self.repository.finish(
+                row["id"],
+                self.owner,
+                "failed",
+                error="run_timeout" if cleanup_confirmed else "cleanup_failed",
+                **({} if cleanup_confirmed else {"cleanup_confirmed": False}),
+                **epoch_kwargs,
+            )
         except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
             # Provider errors may contain credentials or customer data; never expose raw messages.
             if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, "failed", started_at)
             else:
                 logger.error("Run %s failed", row["id"])
-            await self.repository.finish(row["id"], self.owner, "failed", error="execution_error")
+            await self.repository.finish(
+                row["id"],
+                self.owner,
+                "failed",
+                error="execution_error",
+                **epoch_kwargs,
+            )
         finally:
             if watcher:
                 watcher.cancel()
@@ -250,6 +345,22 @@ class RuntimeWorker:
         if not task.cancelled() and task.exception():
             logger.error("Worker could not persist final state; lease reaper will recover it")
 
+    async def _reap_expired(self, tenant: str, cleanup) -> None:
+        """Confirmed recovery for the live reaper (R-19).
+
+        Uses RecoveryCoordinator so unconfirmed cancellation never reports
+        cancelled, instead of the legacy terminal-cancel/fail reaper.
+        """
+        if self._recovery_coordinator is None:
+            from agent_platform.core_platform.agent_execution.reliability.recovery import (
+                RecoveryCoordinator,
+            )
+
+            self._recovery_coordinator = RecoveryCoordinator(self.repository, cleanup)
+        else:
+            self._recovery_coordinator._cleanup = cleanup
+        await self._recovery_coordinator.recover_expired(tenant)
+
     async def serve(self):
         # A submitted run is claimed as soon as it is queued rather than at the next
         # poll, which removes most of the queue wait a customer sits through. The
@@ -267,7 +378,10 @@ class RuntimeWorker:
                 # wakes the wait below.
                 wake.clear()
                 try:
-                    await self.repository.reap(self.settings.tenant_id)
+                    if self.cleanup_confirmation is not None:
+                        await self._reap_expired(self.settings.tenant_id, self.cleanup_confirmation)
+                    else:
+                        await self.repository.reap(self.settings.tenant_id)
                     while len(self.tasks) < self.settings.worker_concurrency:
                         row = await self.repository.claim(
                             self.owner, self.settings.lease_seconds, self.settings.tenant_id

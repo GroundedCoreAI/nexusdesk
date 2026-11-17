@@ -1,8 +1,9 @@
 # Phase 6 · Security, Reliability, and Event Governance — Requirements
 
-> Status: Pending review (planning only, not implemented)
+> Status: Approved scope baseline for direct-continue development; not implemented or accepted
 > Created: 2026-11-02
-> Basis: `01-business-goals.md` (G1–G7); `docs/architecture/agent-execution-platform-v2.md`, Sections 7–10, 12, 17 (Phase 6), and 18.2/18.4
+> Revised: 2026-11-16 (froze concrete rollout defaults and clarified additive SSE compatibility)
+> Basis: `01-business-goals.en.md` (G1–G7); `docs/architecture/agent-execution-platform-v2.md`, Sections 7–10, 12, 17 (Phase 6), and 18.2/18.4
 
 ## User Stories
 
@@ -179,15 +180,16 @@
 | `execution_untrusted_tenants_enabled` | Global settings | `false` | Enabled only after every hard gate passes and independent security and SRE/operations approvals complete; cannot independently bypass sub-policies. Remains disabled without the required personnel or evidence. |
 | `execution_sandbox_required` | Global settings | `true` | Untrusted execution requires a sandbox; configuration cannot degrade to host execution. |
 | `execution_network_default_deny` | Deployment policy | `true` | No egress by default, with minimal per-Execution allowances. |
-| `execution_credential_grant_ttl_seconds` | Global settings | Bounded short default, frozen at review | Grants expire on schedule and cannot exceed the deployment hard limit. |
-| `execution_outbox_enabled` | Global settings | Compatibility rollout, target always on | Controls the publisher during rollout; Event Store polling always recovers and security checks never roll back. |
-| `execution_event_retention_days` | Deployment policy | Determined at review | Cleans only retention-eligible data; cursor gaps are explicit. |
+| `execution_credential_grant_ttl_seconds` | Global settings | `300` seconds, allowed 30–3600 | Grants expire on schedule and cannot exceed the 3600-second deployment hard limit. |
+| `execution_outbox_enabled` | Global settings | `false` during rollout, target always on | Controls only the publisher; Event Store polling always recovers and security checks never roll back. |
+| `execution_event_retention_days` | Deployment policy | `30` days, allowed 1–3650 | Policy for eligible data only; cursor gaps are explicit. |
+| `execution_event_cleanup_enabled` | Global settings | `false` | Prevents historical deletion during rollout; reviewed enablement advances the retention floor atomically with deletion. |
 | `execution_parser_raw_sample_enabled` | Global settings | `false` | Raw samples are not retained by default; temporary enablement still enforces redaction, size, and retention limits. |
 
 ## Non-functional Requirements
 
 - **Performance**: Fencing/Outbox/redaction must not create unbounded lock waits or event backlogs; p50/p95, Outbox-lag, and recovery-time targets are frozen after the Phase 0 baseline.
-- **Compatibility**: Existing Run states, event types, SSE `id`, React/Codex public contracts, and historical configuration remain compatible; new fields use expansion/backfill without modifying historical migrations.
+- **Compatibility**: Existing Run states, event types, SSE `id`, React/Codex public contracts, and historical configuration remain compatible; new fields use expansion/backfill without modifying historical migrations. SSE may add only the documented reserved `_execution` metadata while retaining every existing data field and transient-delta behavior.
 - **Multi-tenancy**: Credentials, grants, Workspaces, events, usage, diagnostics, and audit bind to trusted tenant/scope, with cross-tenant access denied by default.
 - **Security**: Untrusted execution has no “disable sandbox for availability” mode; Secrets are not stored in plaintext in databases/logs/events, and network/file access denies by default.
 - **Reliability**: Every multi-step write has transaction boundaries and reentrant recovery; terminal state is unique, final events agree, and resources/quotas are reconcilable.
@@ -212,4 +214,4 @@
 | AC-13 | Reconnect SSE after more than one page of events, drop notifications, use invalid/expired cursors, and catch up to terminal state. | No silent gaps within retention, event_id deduplicates, SSE id remains compatible; expired cursors return explicit 409, and terminal state agrees with the final event. | FR-13; G5 |
 | AC-14 | Duplicate/replay one usage record, submit late usage from an old Worker, and send provider corrections and missing fields. | One source counts once, old epochs are denied, corrections remain traceable, unknown is not zero-filled, and aggregates rebuild correctly. | FR-14; G6 |
 | AC-15 | Inject malformed, unknown-type, oversized payload, continuous parse failures, and Secret-containing samples. | Diagnostics classify/correlate/rate-limit correctly and samples are redacted; skip/quarantine/fail follows policy without event storms or Secret disclosure. | FR-15; G6 |
-| AC-16 | Gradually enable/roll back each capability, upgrade planned migrations, and run React/Codex, Run/API/SSE, and historical-data regressions. | Switches cannot bypass security checks; migrations expand/backfill online, rollback retains data, and Phase 0 diff is zero. | FR-16; G7 |
+| AC-16 | Gradually enable/roll back each capability, upgrade planned migrations, and run React/Codex, Run/API/SSE, and historical-data regressions. | Switches cannot bypass security checks; migrations expand/backfill online, rollback retains data, and Phase 0 behavioral regression diff is zero except for the documented additive SSE `_execution` metadata. | FR-16; G7 |

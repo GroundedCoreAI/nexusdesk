@@ -324,6 +324,10 @@ class ExecutionOrchestrator:
         stream: AsyncIterator[AgentEvent] | None = None
         acknowledging: AcknowledgingEventStream | None = None
         collect_attempted = False
+        # T-04: the Worker's sink exposes ``emit_event`` so the existing
+        # AgentEvent identity reaches persistence. A plain callable keeps the
+        # Phase 2/3 two-argument seam (and its tests) byte-identical.
+        envelope_emit = getattr(worker_emit, "emit_event", None)
         stage = "claim"
         try:
             stream = adapter.stream_events(handle)
@@ -335,7 +339,10 @@ class ExecutionOrchestrator:
                 except StopAsyncIteration:
                     break
                 stage = "worker_emit"
-                await worker_emit(event.event_type, event.payload)
+                if callable(envelope_emit):
+                    await envelope_emit(event)
+                else:
+                    await worker_emit(event.event_type, event.payload)
                 if acknowledging is not None:
                     stage = "acknowledge"
                     await acknowledging.acknowledge(event)
@@ -456,6 +463,7 @@ class ExecutionOrchestrator:
             outcome = await self._snapshot_barrier.write(
                 run_id=context.execution_id,
                 owner=context.owner,
+                lease_epoch=context.lease_epoch,
                 execution_id=context.execution_id,
                 payloads=serialized.payloads,
             )

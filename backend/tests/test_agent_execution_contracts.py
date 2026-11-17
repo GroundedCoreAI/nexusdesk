@@ -152,6 +152,8 @@ EXPECTED_FIELDS = {
         "timestamp",
         "payload",
         "trace_id",
+        "producer_id",
+        "producer_event_id",
     },
     EngineCapabilities: {
         "contract_version",

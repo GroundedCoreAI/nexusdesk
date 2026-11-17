@@ -7,6 +7,11 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from agent_platform.core_platform.agent_execution.reliability.ownership import (
+    FencingDenial,
+    FencingDenialRecorder,
+    OwnershipDenied,
+)
 from agent_platform.core_platform.platform_services.persistence.store import execute, one
 
 
@@ -31,7 +36,17 @@ class ProcessToolReplayCache:
             self._items.move_to_end(idempotency_key)
             return dict(result)
 
-    async def put(self, idempotency_key: str, result: dict[str, object]) -> None:
+    async def put(
+        self,
+        idempotency_key: str,
+        result: dict[str, object],
+        *,
+        owner=None,
+        lease_epoch: int | None = None,
+    ) -> None:
+        # This cache is process-local and owns no durable Run row, so the
+        # Fencing evidence is accepted for port compatibility but not enforced.
+        # ``DurableToolReplayCache`` is the implementation that enforces it.
         async with self._lock:
             self._items[idempotency_key] = dict(result)
             self._items.move_to_end(idempotency_key)
@@ -48,8 +63,9 @@ class DurableToolReplayCache:
 
     event_type = "tool.replay"
 
-    def __init__(self, engine):
+    def __init__(self, engine, denials: FencingDenialRecorder | None = None):
         self.engine = engine
+        self.denials = denials or FencingDenialRecorder(engine)
 
     @staticmethod
     def _run_id(idempotency_key: str) -> UUID:
@@ -77,43 +93,89 @@ class DurableToolReplayCache:
         result = row["result"] if row else None
         return dict(result) if isinstance(result, dict) else None
 
-    async def put(self, idempotency_key: str, result: dict[str, object]) -> None:
+    async def put(
+        self,
+        idempotency_key: str,
+        result: dict[str, object],
+        *,
+        owner=None,
+        lease_epoch: int | None = None,
+    ) -> None:
         run_id = self._run_id(idempotency_key)
+        denial = None
         async with self.engine.begin() as connection:
-            await connection.execute(
-                text("SELECT id FROM runtime_runs WHERE id=:run_id FOR UPDATE"),
-                {"run_id": run_id},
-            )
-            existing = await one(
+            current = await one(
                 connection,
-                """SELECT 1 AS present
-                FROM runtime_events
-                WHERE run_id=:run_id
-                  AND type=:event_type
-                  AND data->>'idempotency_key'=:idempotency_key
-                LIMIT 1""",
+                """SELECT id,owner,lease_epoch,status,
+                    lease_until>now() AS lease_valid
+                    FROM runtime_runs WHERE id=:run_id FOR UPDATE""",
                 run_id=run_id,
-                event_type=self.event_type,
-                idempotency_key=idempotency_key,
             )
-            if existing:
-                return
-            sequence = await connection.scalar(
-                text("""UPDATE runtime_runs SET event_seq=event_seq+1
-                WHERE id=:run_id RETURNING event_seq"""),
-                {"run_id": run_id},
-            )
-            if sequence is None:
-                raise ValueError("runtime_run_not_found")
-            await execute(
-                connection,
-                """INSERT INTO runtime_events(run_id,seq,type,data)
-                VALUES (:run_id,:sequence,:event_type,CAST(:data AS jsonb))""",
-                run_id=run_id,
-                sequence=sequence,
-                event_type=self.event_type,
-                data=json.dumps(
-                    {"idempotency_key": idempotency_key, "result": dict(result)},
-                    ensure_ascii=False,
-                ),
-            )
+            if current is None:
+                denial = ("run_missing", None)
+            elif current["status"] in ("completed", "failed", "cancelled"):
+                # R-19: terminal Runs accept no further replay writes.
+                denial = ("run_terminal", current)
+            elif not current["lease_valid"]:
+                # R-19: an expired lease cannot write, even for the current owner.
+                denial = ("lease_lost", current)
+            elif (owner is not None or lease_epoch is not None) and (
+                owner != current["owner"] or lease_epoch != current["lease_epoch"]
+            ):
+                denial = (
+                    "stale_epoch" if lease_epoch != current["lease_epoch"] else "owner_mismatch",
+                    current,
+                )
+            if denial is None:
+                existing = await one(
+                    connection,
+                    """SELECT 1 AS present
+                    FROM runtime_events
+                    WHERE run_id=:run_id
+                      AND type=:event_type
+                      AND data->>'idempotency_key'=:idempotency_key
+                    LIMIT 1""",
+                    run_id=run_id,
+                    event_type=self.event_type,
+                    idempotency_key=idempotency_key,
+                )
+                if existing:
+                    return
+                sequence = await connection.scalar(
+                    text("""UPDATE runtime_runs SET event_seq=event_seq+1
+                    WHERE id=:run_id RETURNING event_seq"""),
+                    {"run_id": run_id},
+                )
+                if sequence is None:
+                    raise ValueError("runtime_run_not_found")
+                await execute(
+                    connection,
+                    """INSERT INTO runtime_events(run_id,seq,type,data)
+                    VALUES (:run_id,:sequence,:event_type,CAST(:data AS jsonb))""",
+                    run_id=run_id,
+                    sequence=sequence,
+                    event_type=self.event_type,
+                    data=json.dumps(
+                        {"idempotency_key": idempotency_key, "result": dict(result)},
+                        ensure_ascii=False,
+                    ),
+                )
+        if denial is not None:
+            reason, current = denial
+            if current is None:
+                await self.denials.record(
+                    FencingDenial(run_id=run_id, operation="tool_replay", reason=reason)
+                )
+            else:
+                await self.denials.record(
+                    FencingDenial(
+                        run_id=run_id,
+                        operation="tool_replay",
+                        reason=reason,
+                        stale_owner=owner,
+                        stale_lease_epoch=lease_epoch,
+                        current_owner=current["owner"],
+                        current_lease_epoch=current["lease_epoch"],
+                    )
+                )
+            raise OwnershipDenied(reason, "tool_replay")

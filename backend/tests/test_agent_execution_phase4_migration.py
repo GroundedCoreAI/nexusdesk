@@ -157,6 +157,23 @@ def _repository(url, tenant):
     return engine, RunRepository(engine, BusinessRuntimePersistenceHooks())
 
 
+def _clear_phase6_event_data(url):
+    async def run():
+        connection = await asyncpg.connect(url)
+        try:
+            for statement in (
+                "DELETE FROM runtime_event_outbox",
+                "DELETE FROM runtime_usage_ledger",
+                "DELETE FROM execution_fencing_denials",
+                "DELETE FROM runtime_events",
+            ):
+                await connection.execute(statement)
+        finally:
+            await connection.close()
+
+    return asyncio.run(run())
+
+
 def _submit_run(url, tenant, conversation_id):
     async def run():
         engine, repo = _repository(url, tenant)
@@ -294,7 +311,24 @@ def test_0059_chain_fk_semantics_and_reacts_across_upgrade(migration_database):
     head = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads()[0]
     assert query(url, "SELECT version_num FROM alembic_version")[0][0] == head
     assert _tables(url) >= {"execution_workdirs", "runtime_host_processes"}
-    assert _runtime_columns(url) == columns_before
+    # Phase 4's 0059 migration itself is additive. Later Phase 6 migrations
+    # (0070) extend runtime_runs, so the head schema must be exactly the
+    # pre-0059 columns plus that reviewed additive set -- never a rewrite or a
+    # dropped legacy column.
+    phase6_runtime_columns = {
+        "lease_epoch",
+        "cancel_requested_at",
+        "cancel_confirmed_at",
+        "cleanup_status",
+        "cleanup_updated_at",
+        "retry_of_run_id",
+        "attempt_no",
+        "side_effect_policy",
+        "event_retention_floor_seq",
+    }
+    columns_at_head = _runtime_columns(url)
+    assert set(columns_before) <= set(columns_at_head)
+    assert set(columns_at_head) - set(columns_before) == phase6_runtime_columns
 
     workdir_columns = _columns(url, "execution_workdirs")
     assert set(workdir_columns) == {
@@ -453,6 +487,11 @@ def test_0059_chain_fk_semantics_and_reacts_across_upgrade(migration_database):
     _execute(url, "DELETE FROM runtime_runs WHERE id=$1", legacy_run_id)
     assert not query(url, "SELECT 1 FROM runtime_host_processes WHERE id=$1", process_id)
 
+    # 0070 refuses a populated downgrade by design (export-first policy). This
+    # disposable fixture simulates that export by clearing the Phase 6 event,
+    # usage, Outbox and denial rows the fresh submit created; the runtime_runs
+    # rows the rollback assertion cares about stay in place.
+    _clear_phase6_event_data(url)
     migrate(url, PREVIOUS_REVISION, "downgrade")
     assert not _tables(url) & {"execution_workdirs", "runtime_host_processes"}
     assert _runtime_columns(url) == columns_before

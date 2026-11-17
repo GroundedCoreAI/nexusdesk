@@ -11,6 +11,25 @@ from agent_platform.core_platform.agent_execution.contracts.snapshots import (
     ExecutionSnapshotError,
     deserialize_execution_snapshots,
 )
+from agent_platform.core_platform.agent_execution.events.envelope import (
+    AgentEventWrite,
+    EventWriteResult,
+)
+from agent_platform.core_platform.agent_execution.events.usage import (
+    TERMINAL_USAGE_EVENT_ID,
+    TERMINAL_USAGE_SOURCE,
+    normalize_usage,
+)
+from agent_platform.core_platform.agent_execution.reliability.ownership import (
+    ExecutionOwnership,
+    FencingDenial,
+    FencingDenialRecorder,
+    OwnershipDenied,
+)
+from agent_platform.core_platform.agent_execution.reliability.retry import (
+    RetryInput,
+    classify_retry,
+)
 from agent_platform.core_platform.agent_runtime.hooks import RuntimePersistenceHooks
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL, channel
 from agent_platform.core_platform.agent_runtime.schemas import (
@@ -33,12 +52,67 @@ from agent_platform.core_platform.platform_services.tenant_isolation.service imp
 from agent_platform.extension_contracts import BusinessScope
 
 
+def _now_utc():
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC)
+
+
+def _denial_reason(
+    current: Mapping[str, object] | None,
+    owner,
+    lease_epoch: int | None,
+    *,
+    terminal: bool = False,
+) -> str | None:
+    """Classify one stale write strictly from the locked row, never payload."""
+    if current is None:
+        return "run_missing"
+    if terminal or current.get("status") in TERMINAL:
+        return "run_terminal"
+    if lease_epoch is not None and current.get("lease_epoch") != lease_epoch:
+        return "stale_epoch"
+    if current.get("owner") != owner:
+        return "owner_mismatch"
+    if current.get("lease_valid") is False:
+        return "lease_lost"
+    return None
+
+
 class RunRepository:
     def __init__(self, engine, hooks: RuntimePersistenceHooks):
         # Required, not defaulted: Core cannot persist a conversation or dispatch
         # memory work by itself, so the composition root must supply an adapter.
         self.engine = engine
         self.hooks = hooks
+        # A separate post-rollback transaction (08 R-14): audit failure never
+        # turns a denied write into an allowed one.
+        self.denials = FencingDenialRecorder(engine)
+
+    async def _audit_denial(
+        self,
+        run_id,
+        operation: str,
+        current: Mapping[str, object] | None,
+        owner,
+        lease_epoch: int | None,
+        *,
+        terminal: bool = False,
+    ) -> None:
+        reason = _denial_reason(current, owner, lease_epoch, terminal=terminal)
+        if reason is None:
+            return
+        await self.denials.record(
+            FencingDenial(
+                run_id=run_id,
+                operation=operation,  # type: ignore[arg-type]
+                reason=reason,  # type: ignore[arg-type]
+                stale_owner=owner if isinstance(owner, UUID) else None,
+                stale_lease_epoch=lease_epoch,
+                current_owner=current.get("owner") if current is not None else None,
+                current_lease_epoch=(current.get("lease_epoch") if current is not None else None),
+            )
+        )
 
     async def _event(self, conn, run_id, kind, data):
         seq = await conn.scalar(
@@ -233,7 +307,7 @@ class RunRepository:
                 (
                     await conn.execute(
                         text("""UPDATE runtime_runs SET status='running',
-                owner=:owner, started_at=now(),
+                owner=:owner, started_at=now(), lease_epoch=lease_epoch+1,
                 lease_until=now()+:lease * interval '1 second' WHERE id=:id RETURNING *"""),
                         {"id": row["id"], "owner": owner, "lease": lease_seconds},
                     )
@@ -263,8 +337,52 @@ class RunRepository:
                 "customer_id": history["customer_id"],
             }
 
+    async def takeover(self, owner, lease_seconds, tenant):
+        """Take over one expired running row with a strictly larger epoch.
+
+        T-09 owns the full recovery decision; this primitive only fences the old
+        claim before a new owner may write. The row lock plus the atomic
+        ``lease_epoch+1`` make the takeover monotonic across concurrent passes.
+        """
+        async with self.engine.begin() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text("""SELECT id FROM runtime_runs
+                        WHERE tenant_id=:tenant AND status='running'
+                        AND (lease_until IS NULL OR lease_until<=now())
+                        ORDER BY lease_until ASC NULLS FIRST
+                        FOR UPDATE SKIP LOCKED LIMIT 1"""),
+                        {"tenant": tenant},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if not row:
+                return None
+            taken = (
+                (
+                    await conn.execute(
+                        text("""UPDATE runtime_runs SET owner=:owner,
+                        lease_epoch=lease_epoch+1,
+                        lease_until=now()+:lease * interval '1 second'
+                        WHERE id=:id RETURNING *"""),
+                        {"id": row["id"], "owner": owner, "lease": lease_seconds},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            return dict(taken)
+
     async def write_execution_snapshots(
-        self, run_id: UUID, owner: UUID, payloads: ExecutionSnapshotPayloads
+        self,
+        run_id: UUID,
+        owner: UUID,
+        payloads: ExecutionSnapshotPayloads,
+        *,
+        lease_epoch: int | None = None,
     ) -> SnapshotWriteResult:
         """Write-once barrier for the five Phase 3 startup snapshots (03 §5.3).
 
@@ -338,6 +456,7 @@ class RunRepository:
                 effective_capabilities_snapshot=CAST(:effective AS jsonb),
                 execution_policy_snapshot=CAST(:policy AS jsonb)
                 WHERE id=:id AND owner=:owner AND status='running' AND lease_until>now()
+                AND (CAST(:lease_epoch AS BIGINT) IS NULL OR lease_epoch=CAST(:lease_epoch AS BIGINT))
                 AND CAST(:config AS jsonb)->>'execution_id'=CAST(id AS TEXT)
                 AND CAST(:declared AS jsonb)->>'execution_id'=CAST(id AS TEXT)
                 AND CAST(:available AS jsonb)->>'execution_id'=CAST(id AS TEXT)
@@ -362,6 +481,7 @@ class RunRepository:
                         {
                             "id": run_id,
                             "owner": owner,
+                            "lease_epoch": lease_epoch,
                             "execution_id": str(payloads.execution_id),
                             "config": payloads.execution_config_snapshot,
                             "declared": payloads.declared_capabilities_snapshot,
@@ -374,25 +494,32 @@ class RunRepository:
                 .mappings()
                 .one()
             )
+            classified = None
             if row["applied"]:
                 # ``was_absent`` is the state this statement itself saw before
                 # writing, so it cannot be shifted by our own UPDATE. A
                 # concurrent writer that committed in between can still make
                 # both sides report ``written``; the label is diagnostic only
                 # and the stored row is identical either way.
-                return SnapshotWriteResult("written" if row["was_absent"] else "reused")
-            classified = (
-                (
-                    await conn.execute(
-                        text("""SELECT status, owner, lease_until>now() AS lease_valid
-                FROM runtime_runs WHERE id=:id"""),
-                        {"id": run_id},
+                result = SnapshotWriteResult("written" if row["was_absent"] else "reused")
+            else:
+                classified = (
+                    (
+                        await conn.execute(
+                            text("""SELECT status, owner, lease_epoch, lease_until>now() AS lease_valid
+                    FROM runtime_runs WHERE id=:id"""),
+                            {"id": run_id},
+                        )
                     )
+                    .mappings()
+                    .first()
                 )
-                .mappings()
-                .first()
-            )
-            return SnapshotWriteResult(self._snapshot_write_diagnosis(classified, owner))
+                result = SnapshotWriteResult(
+                    self._snapshot_write_diagnosis(classified, owner, lease_epoch)
+                )
+        if result.outcome in ("lease_lost", "not_claimed") and lease_epoch is not None:
+            await self._audit_denial(run_id, "snapshot", classified, owner, lease_epoch)
+        return result
 
     @staticmethod
     def _clean_snapshot_payloads(payloads: ExecutionSnapshotPayloads) -> None:
@@ -447,7 +574,9 @@ class RunRepository:
 
     @staticmethod
     def _snapshot_write_diagnosis(
-        classified: Mapping[str, object] | None, owner: UUID
+        classified: Mapping[str, object] | None,
+        owner: UUID,
+        lease_epoch: int | None = None,
     ) -> SnapshotWriteOutcome:
         """Label for a conditional UPDATE that matched no row.
 
@@ -462,11 +591,15 @@ class RunRepository:
             return "not_claimed"
         if classified["status"] != "running":
             return "not_claimed"
+        if lease_epoch is not None and classified["lease_epoch"] != lease_epoch:
+            return "lease_lost"
         if classified["owner"] != owner or not classified["lease_valid"]:
             return "lease_lost"
         return "audit_conflict"
 
-    async def append(self, run_id, owner, kind, data):
+    async def append(self, run_id, owner, kind, data, *, lease_epoch: int | None = None):
+        current = None
+        denied = False
         async with self.engine.begin() as conn:
             current = (
                 (
@@ -477,28 +610,78 @@ class RunRepository:
                     )
                 )
                 .mappings()
-                .one()
+                .first()
             )
-            if current["status"] != "running" or current["owner"] != owner:
-                raise asyncio.CancelledError()
-            if current["cancel_requested"] or not current["lease_valid"]:
-                raise asyncio.CancelledError()
-            await self._event(conn, run_id, kind, data)
+            if (
+                (
+                    current is None
+                    or current["status"] != "running"
+                    or current["owner"] != owner
+                    or (lease_epoch is not None and current["lease_epoch"] != lease_epoch)
+                )
+                or current["cancel_requested"]
+                or not current["lease_valid"]
+            ):
+                denied = True
+            else:
+                await self._event(conn, run_id, kind, data)
+        if denied:
+            await self._audit_denial(
+                run_id,
+                "append",
+                current,
+                owner,
+                lease_epoch,
+                terminal=current is not None and current["status"] != "running",
+            )
+            raise asyncio.CancelledError()
 
-    async def heartbeat(self, run_id, owner, lease_seconds):
+    async def heartbeat(self, run_id, owner, lease_seconds, *, lease_epoch: int | None = None):
+        epoch_clause = " AND lease_epoch=:lease_epoch" if lease_epoch is not None else ""
         async with self.engine.begin() as conn:
             cancelled = await conn.scalar(
-                text("""UPDATE runtime_runs SET
+                text(
+                    """UPDATE runtime_runs SET
                 lease_until=now()+:lease * interval '1 second'
-                WHERE id=:id AND owner=:owner AND status='running' AND lease_until>now()
-                RETURNING cancel_requested"""),
-                {"id": run_id, "owner": owner, "lease": lease_seconds},
+                WHERE id=:id AND owner=:owner AND status='running' AND lease_until>now()"""
+                    + epoch_clause
+                    + " RETURNING cancel_requested"
+                ),
+                {"id": run_id, "owner": owner, "lease": lease_seconds, "lease_epoch": lease_epoch},
             )
-            return "lost" if cancelled is None else ("cancel" if cancelled else "ok")
+        if cancelled is not None:
+            return "cancel" if cancelled else "ok"
+        async with self.engine.connect() as conn:
+            current = (
+                (
+                    await conn.execute(
+                        text("""SELECT *, lease_until>now() AS lease_valid FROM runtime_runs
+                        WHERE id=:id"""),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        await self._audit_denial(run_id, "heartbeat", current, owner, lease_epoch)
+        return "lost"
 
     async def finish(
-        self, run_id, owner, status, output=None, error=None, history=None, completion=None
+        self,
+        run_id,
+        owner,
+        status,
+        output=None,
+        error=None,
+        history=None,
+        completion=None,
+        *,
+        lease_epoch: int | None = None,
+        usage: dict | None = None,
+        cleanup_confirmed: bool = True,
     ):
+        denial = None
+        row = None
         async with self.engine.begin() as conn:
             cid = await conn.scalar(
                 text("SELECT conversation_id FROM runtime_runs WHERE id=:id"), {"id": run_id}
@@ -522,24 +705,596 @@ class RunRepository:
                 .mappings()
                 .one()
             )
-            if row["status"] in TERMINAL or row["owner"] != owner or not row["lease_valid"]:
-                return
-            if row["cancel_requested"]:
-                status, output, error = "cancelled", None, None
-            await conn.execute(
-                text("""UPDATE runtime_runs SET status=:status,output=:output,
-                error_code=:error,finished_at=now(),lease_until=NULL WHERE id=:id"""),
-                {"id": run_id, "status": status, "output": output, "error": error},
+            if row["status"] in TERMINAL:
+                return  # duplicate finish is idempotent; usage is never recounted
+            denial = _denial_reason(row, owner, lease_epoch)
+            if denial is not None:
+                row = dict(row)
+            else:
+                if row["cancel_requested"]:
+                    if cleanup_confirmed:
+                        status, output, error = "cancelled", None, None
+                        cleanup_status = "completed"
+                    else:
+                        status, output, error = ("failed", None, "cancellation_unconfirmed")
+                        cleanup_status = "failed"
+                else:
+                    cleanup_status = "completed" if cleanup_confirmed else "failed"
+                await conn.execute(
+                    text("""UPDATE runtime_runs SET status=:status,output=:output,
+                    error_code=:error,finished_at=now(),lease_until=NULL,
+                    cleanup_status=:cleanup_status,cleanup_updated_at=now(),
+                    cancel_confirmed_at=CASE WHEN :status='cancelled'
+                        THEN COALESCE(cancel_confirmed_at,now()) ELSE cancel_confirmed_at END
+                    WHERE id=:id"""),
+                    {
+                        "id": run_id,
+                        "status": status,
+                        "output": output,
+                        "error": error,
+                        "cleanup_status": cleanup_status,
+                    },
+                )
+                await self.hooks.on_finished(conn, row, status, error)
+                if status == "completed":
+                    for kind, data in await self.hooks.on_completed(
+                        conn, row, cid, output, history, completion
+                    ):
+                        await self._event(conn, run_id, kind, data)
+                await self._event(
+                    conn, run_id, "run." + status, {"output": output, "error_code": error}
+                )
+                if usage is not None:
+                    await self._insert_terminal_usage(conn, row, usage)
+        if denial is not None:
+            await self._audit_denial(run_id, "finish", row, owner, lease_epoch)
+
+    async def append_event(
+        self,
+        run_id,
+        owner,
+        event: AgentEventWrite,
+        *,
+        lease_epoch: int | None = None,
+    ) -> EventWriteResult:
+        """Persist one AgentEvent with database-owned sequence and dedup.
+
+        Duplicate ``event_id`` (or the optional producer key) returns the
+        original durable result and never increments ``event_seq``. The
+        AFTER INSERT Outbox trigger queues publishable types in the same
+        transaction; internal ``tool.replay`` is excluded by the trigger.
+        """
+        if not isinstance(event, AgentEventWrite) or event.run_id != run_id:
+            raise OwnershipDenied("owner_mismatch", "append")
+        current = None
+        reason = None
+        result: EventWriteResult | None = None
+        async with self.engine.begin() as conn:
+            current = (
+                (
+                    await conn.execute(
+                        text("""SELECT *, lease_until>now() AS lease_valid FROM runtime_runs
+                        WHERE id=:id FOR UPDATE"""),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
             )
-            await self.hooks.on_finished(conn, row, status, error)
-            if status == "completed":
-                for kind, data in await self.hooks.on_completed(
-                    conn, row, cid, output, history, completion
+            reason = _denial_reason(current, owner, lease_epoch)
+            if reason is None and (current["cancel_requested"] or current["status"] != "running"):
+                reason = "run_terminal" if current["status"] != "running" else "lease_lost"
+            if reason is None:
+                existing = (
+                    (
+                        await conn.execute(
+                            text("""SELECT seq,event_id FROM runtime_events
+                            WHERE run_id=:run_id AND event_id=:event_id"""),
+                            {"run_id": run_id, "event_id": event.event_id},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if existing is None and event.producer_id is not None:
+                    existing = (
+                        (
+                            await conn.execute(
+                                text("""SELECT seq,event_id FROM runtime_events
+                                WHERE run_id=:run_id AND producer_id=:producer_id
+                                AND producer_event_id=:producer_event_id
+                                ORDER BY seq LIMIT 1"""),
+                                {
+                                    "run_id": run_id,
+                                    "producer_id": event.producer_id,
+                                    "producer_event_id": event.producer_event_id,
+                                },
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                if existing is not None:
+                    result = EventWriteResult(
+                        seq=existing["seq"],
+                        event_id=existing["event_id"],
+                        duplicate=True,
+                    )
+                else:
+                    seq = await conn.scalar(
+                        text("""UPDATE runtime_runs SET event_seq=event_seq+1
+                        WHERE id=:id RETURNING event_seq"""),
+                        {"id": run_id},
+                    )
+                    if seq is None:
+                        reason = "run_missing"
+                    else:
+                        inserted = (
+                            (
+                                await conn.execute(
+                                    text("""INSERT INTO runtime_events
+                                    (run_id,seq,type,data,event_id,schema_version,source,
+                                     producer_id,producer_event_id,engine_session_id,trace_id)
+                                    VALUES (:run_id,:seq,:type,CAST(:data AS jsonb),
+                                    :event_id,:schema_version,:source,:producer_id,
+                                    :producer_event_id,:engine_session_id,:trace_id)
+                                    ON CONFLICT (event_id) DO NOTHING
+                                    RETURNING seq"""),
+                                    {
+                                        "run_id": run_id,
+                                        "seq": seq,
+                                        "type": event.event_type,
+                                        "data": json.dumps(event.payload),
+                                        "event_id": event.event_id,
+                                        "schema_version": event.schema_version,
+                                        "source": event.source,
+                                        "producer_id": event.producer_id,
+                                        "producer_event_id": event.producer_event_id,
+                                        "engine_session_id": event.engine_session_id,
+                                        "trace_id": event.trace_id,
+                                    },
+                                )
+                            )
+                            .scalars()
+                            .first()
+                        )
+                        if inserted is None:
+                            # The row lock makes this unreachable in practice;
+                            # report the durable original instead of counting again.
+                            existing = (
+                                (
+                                    await conn.execute(
+                                        text("""SELECT seq,event_id FROM runtime_events
+                                        WHERE run_id=:run_id AND event_id=:event_id"""),
+                                        {"run_id": run_id, "event_id": event.event_id},
+                                    )
+                                )
+                                .mappings()
+                                .first()
+                            )
+                            result = EventWriteResult(
+                                seq=existing["seq"],
+                                event_id=existing["event_id"],
+                                duplicate=True,
+                            )
+                        else:
+                            await conn.execute(
+                                text(
+                                    """SELECT pg_notify(:ch, :payload)""",
+                                ),
+                                {
+                                    "ch": channel(run_id),
+                                    "payload": json.dumps(
+                                        {"k": "durable", "seq": seq, "type": event.event_type}
+                                    ),
+                                },
+                            )
+                            result = EventWriteResult(
+                                seq=seq, event_id=event.event_id, duplicate=False
+                            )
+                            # R-18(c): native usage events also feed the
+                            # source-unique ledger in the same transaction,
+                            # using stable producer identity for dedup.
+                            usage_payload = event.payload.get("usage")
+                            if usage_payload is not None and event.producer_id is not None:
+                                await self._insert_native_usage(
+                                    conn, row=current, event=event, usage=usage_payload
+                                )
+        if reason is not None or result is None:
+            await self._audit_denial(run_id, "append", current, owner, lease_epoch)
+            raise OwnershipDenied(reason or "run_missing", "append")
+        return result
+
+    async def _insert_native_usage(self, conn, row, event, usage: dict) -> None:
+        """Insert one native usage row by stable producer identity (same txn).
+
+        Source = producer_id, source_event_id = producer_event_id. Duplicate
+        native delivery is a no-op via the source-unique constraint. Unknown
+        stays explicit, never zero-filled.
+        """
+        if not isinstance(usage, dict):
+            return
+        await conn.execute(
+            text("""INSERT INTO runtime_usage_ledger
+            (id,run_id,tenant_id,lease_epoch,source,source_event_id,usage)
+            VALUES (:id,:run_id,:tenant_id,:lease_epoch,:source,:source_event_id,
+            CAST(:usage AS jsonb))
+            ON CONFLICT (run_id,source,source_event_id) DO NOTHING"""),
+            {
+                "id": uuid4(),
+                "run_id": row["id"],
+                "tenant_id": row["tenant_id"],
+                "lease_epoch": row["lease_epoch"],
+                "source": event.producer_id,
+                "source_event_id": event.producer_event_id,
+                "usage": json.dumps(normalize_usage(usage)),
+            },
+        )
+
+    async def _insert_terminal_usage(self, conn, row, usage: dict) -> None:
+        """Insert one terminal usage row by source uniqueness (same transaction).
+
+        Unknown stays unknown: an empty/absent provider payload is stored as
+        ``{"status":"unknown"}`` and never zero-filled. Duplicate finish is
+        blocked by the terminal guard above, and the unique key is a second
+        idempotency gate.
+        """
+        payload = normalize_usage(usage)
+        await conn.execute(
+            text("""INSERT INTO runtime_usage_ledger
+            (id,run_id,tenant_id,lease_epoch,source,source_event_id,usage)
+            VALUES (:id,:run_id,:tenant_id,:lease_epoch,:source,:source_event_id,
+            CAST(:usage AS jsonb))
+            ON CONFLICT (run_id,source,source_event_id) DO NOTHING"""),
+            {
+                "id": uuid4(),
+                "run_id": row["id"],
+                "tenant_id": row["tenant_id"],
+                "lease_epoch": row["lease_epoch"],
+                "source": TERMINAL_USAGE_SOURCE,
+                "source_event_id": TERMINAL_USAGE_EVENT_ID,
+                "usage": json.dumps(payload),
+            },
+        )
+
+    async def record_usage(
+        self,
+        *,
+        run_id,
+        tenant_id,
+        ownership: ExecutionOwnership,
+        source: str,
+        source_event_id: str,
+        usage: dict,
+        usage_schema_version: str = "v1",
+        cost=None,
+        is_estimate: bool = False,
+        supersedes_id=None,
+    ) -> dict | None:
+        """Source-unique usage write bound to the current Fencing tuple.
+
+        Duplicate delivery returns the original row without consuming event
+        sequence or changing aggregates. A stale owner/epoch writes no ledger
+        row and records a separate denial audit.
+        """
+        if not isinstance(ownership, ExecutionOwnership) or ownership.run_id != run_id:
+            raise OwnershipDenied("owner_mismatch", "usage")
+        current = None
+        inserted = None
+        async with self.engine.begin() as conn:
+            inserted = (
+                (
+                    await conn.execute(
+                        text("""INSERT INTO runtime_usage_ledger
+                        (id,run_id,tenant_id,lease_epoch,source,source_event_id,
+                         usage_schema_version,usage,cost,is_estimate,supersedes_id)
+                        SELECT :id,r.id,COALESCE(:tenant_id,r.tenant_id),:lease_epoch,
+                        :source,:source_event_id,:usage_schema_version,
+                        CAST(:usage AS jsonb),:cost,:is_estimate,:supersedes_id
+                        FROM runtime_runs r
+                        WHERE r.id=:run_id AND r.owner=:owner AND r.lease_epoch=:lease_epoch
+                        ON CONFLICT (run_id,source,source_event_id) DO NOTHING
+                        RETURNING *"""),
+                        {
+                            "id": uuid4(),
+                            "run_id": run_id,
+                            "tenant_id": tenant_id,
+                            "owner": ownership.owner,
+                            "lease_epoch": ownership.lease_epoch,
+                            "source": source,
+                            "source_event_id": source_event_id,
+                            "usage_schema_version": usage_schema_version,
+                            "usage": json.dumps(normalize_usage(usage)),
+                            "cost": cost,
+                            "is_estimate": is_estimate,
+                            "supersedes_id": supersedes_id,
+                        },
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if inserted is not None:
+                return dict(inserted)
+            existing = (
+                (
+                    await conn.execute(
+                        text("""SELECT * FROM runtime_usage_ledger
+                        WHERE run_id=:run_id AND source=:source
+                        AND source_event_id=:source_event_id"""),
+                        {
+                            "run_id": run_id,
+                            "source": source,
+                            "source_event_id": source_event_id,
+                        },
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if existing is not None:
+                return dict(existing)
+            current = (
+                (
+                    await conn.execute(
+                        text("""SELECT *, lease_until>now() AS lease_valid
+                        FROM runtime_runs WHERE id=:id"""),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        await self._audit_denial(run_id, "usage", current, ownership.owner, ownership.lease_epoch)
+        return None
+
+    async def usage_summary(self, run_id, tenant) -> dict[str, int | float]:
+        """Rebuildable aggregate over effective ledger leaves only."""
+        async with self.engine.connect() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text("""SELECT
+                        count(*) AS records,
+                        count(*) FILTER (WHERE NOT EXISTS (
+                            SELECT 1 FROM runtime_usage_ledger s
+                            WHERE s.supersedes_id=u.id)) AS effective_records,
+                        count(*) FILTER (WHERE u.usage->>'status'='unknown')
+                            AS unknown_records,
+                        count(*) FILTER (WHERE NOT EXISTS (
+                            SELECT 1 FROM runtime_usage_ledger s
+                            WHERE s.supersedes_id=u.id)
+                            AND u.usage->>'status'='unknown')
+                            AS effective_unknown_records,
+                        COALESCE(SUM(CASE WHEN NOT EXISTS (
+                            SELECT 1 FROM runtime_usage_ledger s
+                            WHERE s.supersedes_id=u.id)
+                            AND u.usage->>'total_tokens' ~ '^[0-9]+([.][0-9]+)?$'
+                            THEN (u.usage->>'total_tokens')::numeric ELSE 0 END), 0)
+                            AS effective_total_tokens
+                        FROM runtime_usage_ledger u
+                        WHERE u.run_id=:run_id AND u.tenant_id=:tenant"""),
+                        {"run_id": run_id, "tenant": tenant},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        return {
+            "records": int(row["records"]),
+            "effective_records": int(row["effective_records"]),
+            "unknown_records": int(row["unknown_records"]),
+            "effective_unknown_records": int(row["effective_unknown_records"]),
+            "effective_total_tokens": float(row["effective_total_tokens"]),
+        }
+
+    async def cleanup_retention(self, retention_days: int, *, batch: int = 200) -> int:
+        """Delete eligible durable events and advance the floor atomically.
+
+        Only rows older than the retention window and without a pending Outbox
+        publication are eligible; usage/audit/credential rows are never touched.
+        """
+        if type(retention_days) is not int or not 1 <= retention_days <= 3650:
+            raise ValueError("retention days must be within 1-3650")
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                text("""WITH eligible AS (
+                    SELECT e.run_id,e.seq
+                    FROM runtime_events e
+                    JOIN runtime_runs r ON r.id=e.run_id
+                    WHERE e.created_at < now() - (:days * interval '1 day')
+                      AND NOT EXISTS (
+                        SELECT 1 FROM runtime_event_outbox o
+                        WHERE o.run_id=e.run_id AND o.seq=e.seq
+                          AND o.status='pending')
+                    ORDER BY e.created_at,e.run_id,e.seq
+                    LIMIT :batch)
+                , deleted AS (
+                    DELETE FROM runtime_events e USING eligible
+                    WHERE e.run_id=eligible.run_id AND e.seq=eligible.seq
+                    RETURNING e.run_id,e.seq)
+                , floors AS (
+                    SELECT run_id,max(seq) AS floor FROM deleted GROUP BY run_id)
+                UPDATE runtime_runs r
+                SET event_retention_floor_seq=GREATEST(
+                    r.event_retention_floor_seq, floors.floor)
+                FROM floors WHERE r.id=floors.run_id
+                RETURNING r.id"""),
+                {"days": retention_days, "batch": batch},
+            )
+            return result.rowcount or 0
+
+    async def expired_running(self, tenant: str, *, batch: int = 100) -> list[dict]:
+        """Expired running rows for recovery; no cleanup runs in this read."""
+        async with self.engine.connect() as conn:
+            rows = (
+                (
+                    await conn.execute(
+                        text("""SELECT * FROM runtime_runs
+                        WHERE tenant_id=:tenant AND status='running'
+                          AND (lease_until IS NULL OR lease_until<=now())
+                        ORDER BY lease_until ASC NULLS FIRST LIMIT :batch"""),
+                        {"tenant": tenant, "batch": batch},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [dict(row) for row in rows]
+
+    async def fence_expired(self, run_id, *, new_owner) -> dict | None:
+        """Fence/take over one expired claim: new epoch + new owner, no terminal.
+
+        Returns the freshly-fenced row, or None if the row is no longer an
+        expired running claim (another worker recovered it). Cleanup runs only
+        after this returns, under the new ownership (R-19).
+        """
+        async with self.engine.begin() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text("""UPDATE runtime_runs SET owner=:owner,
+                        lease_epoch=lease_epoch+1
+                        WHERE id=:id AND status='running'
+                          AND (lease_until IS NULL OR lease_until<=now())
+                        RETURNING *"""),
+                        {"id": run_id, "owner": new_owner},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return None if row is None else dict(row)
+
+    async def apply_recovery(self, items, *, new_owner) -> int:
+        """Fence each expired row and commit one confirmed terminal state."""
+        recovered = 0
+        async with self.engine.begin() as conn:
+            for item in items:
+                row = (
+                    (
+                        await conn.execute(
+                            text("""SELECT * FROM runtime_runs
+                            WHERE id=:id FOR UPDATE"""),
+                            {"id": item["id"]},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if (
+                    row is None
+                    or row["status"] != "running"
+                    or row["lease_until"] is None
+                    or row["lease_until"] > _now_utc()
                 ):
-                    await self._event(conn, run_id, kind, data)
-            await self._event(
-                conn, run_id, "run." + status, {"output": output, "error_code": error}
+                    continue
+                status, cleanup_status = (
+                    ("cancelled", "completed")
+                    if row["cancel_requested"] and item["cleanup_confirmed"]
+                    else ("failed", "completed")
+                    if item["cleanup_confirmed"]
+                    else ("failed", "failed")
+                )
+                error = (
+                    None
+                    if status == "cancelled"
+                    else "cleanup_failed"
+                    if not item["cleanup_confirmed"]
+                    else "worker_lost"
+                )
+                await conn.execute(
+                    text("""UPDATE runtime_runs SET status=:status,error_code=:error,
+                    finished_at=now(),lease_until=NULL,lease_epoch=lease_epoch+1,
+                    owner=COALESCE(:owner,owner),cleanup_status=:cleanup,
+                    cleanup_updated_at=now(),
+                    cancel_confirmed_at=CASE WHEN :status='cancelled'
+                        THEN COALESCE(cancel_confirmed_at,now())
+                        ELSE cancel_confirmed_at END
+                    WHERE id=:id"""),
+                    {
+                        "id": row["id"],
+                        "status": status,
+                        "error": error,
+                        "owner": new_owner,
+                        "cleanup": cleanup_status,
+                    },
+                )
+                await self.hooks.on_finished(conn, row, status, error)
+                await self._event(conn, row["id"], "run." + status, {"error_code": error})
+                recovered += 1
+        return recovered
+
+    async def prepare_retry(self, original_run_id, tenant, *, queue_timeout_seconds: int = 120):
+        """Create one correlated retry attempt (Run=one attempt, no Task table)."""
+        async with self.engine.begin() as conn:
+            original = (
+                (
+                    await conn.execute(
+                        text("""SELECT * FROM runtime_runs
+                        WHERE id=:id AND tenant_id=:tenant FOR UPDATE"""),
+                        {"id": original_run_id, "tenant": tenant},
+                    )
+                )
+                .mappings()
+                .first()
             )
+            if original is None or original["status"] != "failed":
+                return None
+            if original["error_code"] == "cancellation_unconfirmed":
+                return None
+            # Enforce the approved retry classifier (FR-10): only proven
+            # pre-launch, side-effect-free failure (or an explicitly idempotent
+            # Outbox) may auto-retry. Ambiguous timeout/disconnect/worker-lost
+            # with unknown policy must never auto-retry.
+            policy = original["side_effect_policy"]
+            phase = "pre_launch"
+            if (
+                original["error_code"] in {"run_timeout", "external_write_disconnect"}
+                or original["error_code"] == "worker_lost"
+            ):
+                phase = "ambiguous"
+            side_effects = policy.get("side_effects") is True if isinstance(policy, dict) else False
+            decision = classify_retry(RetryInput(phase, side_effects=side_effects))
+            if decision.action != "retry":
+                return None
+            exists = await conn.scalar(
+                text("""SELECT 1 FROM runtime_runs WHERE retry_of_run_id=:id
+                AND tenant_id=:tenant"""),
+                {"id": original_run_id, "tenant": tenant},
+            )
+            if exists:
+                return None
+            new_id = uuid4()
+            row = (
+                (
+                    await conn.execute(
+                        text("""INSERT INTO runtime_runs
+                        (id,conversation_id,tenant_id,business_id,workspace_id,input,
+                         config,status,queue_expires_at,retry_of_run_id,attempt_no)
+                        VALUES (:id,:conversation_id,:tenant,:business,:workspace,
+                        :input,CAST(:config AS jsonb),'queued',
+                        now()+:seconds * interval '1 second',:retry_of,
+                        :attempt_no) RETURNING *"""),
+                        {
+                            "id": new_id,
+                            "conversation_id": original["conversation_id"],
+                            "tenant": tenant,
+                            "business": original["business_id"],
+                            "workspace": original["workspace_id"],
+                            "input": original["input"],
+                            "config": json.dumps(original["config"]),
+                            "seconds": queue_timeout_seconds,
+                            "retry_of": original_run_id,
+                            "attempt_no": int(original["attempt_no"]) + 1,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            await self._event(conn, new_id, "run.queued", {})
+            return dict(row)
 
     async def cancel(self, run_id, tenant, scope: BusinessScope | None = None):
         resolved_scope = resolve_scope(tenant, scope)
@@ -568,13 +1323,18 @@ class RunRepository:
                 return None
             if row["status"] not in TERMINAL and not row["cancel_requested"]:
                 await conn.execute(
-                    text("UPDATE runtime_runs SET cancel_requested=true WHERE id=:id"),
+                    text("""UPDATE runtime_runs SET cancel_requested=true,
+                    cancel_requested_at=COALESCE(cancel_requested_at,now())
+                    WHERE id=:id"""),
                     {"id": run_id},
                 )
                 if row["status"] == "queued":
                     await conn.execute(
                         text("""UPDATE runtime_runs SET status='cancelled',
-                        finished_at=now() WHERE id=:id"""),
+                        finished_at=now(), lease_epoch=lease_epoch+1,
+                        cancel_confirmed_at=now(),
+                        cleanup_status='completed', cleanup_updated_at=now()
+                        WHERE id=:id"""),
                         {"id": run_id},
                     )
                     await self.hooks.on_finished(conn, row, "cancelled", None)
@@ -603,7 +1363,8 @@ class RunRepository:
                 error = "worker_lost" if row["status"] == "running" else "queue_timeout"
                 await conn.execute(
                     text("""UPDATE runtime_runs SET status=:status,error_code=:error,
-                    finished_at=now(),lease_until=NULL WHERE id=:id"""),
+                    finished_at=now(),lease_until=NULL,
+                    lease_epoch=lease_epoch+1 WHERE id=:id"""),
                     {"id": row["id"], "status": status, "error": error},
                 )
                 await self.hooks.on_finished(conn, row, status, error)

@@ -53,6 +53,12 @@ async def test_durable_replay_survives_cache_recreation(database):
         10,
         120,
     )
+    # R-19: replay writes carry the live Run's Fencing evidence. A queued row
+    # has no valid lease, so the durable cache intentionally denies it.
+    owner = uuid4()
+    claimed = await repository.claim(owner, 30, settings.tenant_id)
+    assert claimed is not None and str(claimed["id"]) == str(row["id"])
+    lease_epoch = claimed["lease_epoch"]
     digest = hashlib.sha256(b"same-write").hexdigest()
     key = f"runtime:{row['id']}:{digest}"
     result = {
@@ -63,7 +69,10 @@ async def test_durable_replay_survives_cache_recreation(database):
 
     first = DurableToolReplayCache(repository.engine)
     await asyncio.gather(
-        first.put(key, result), DurableToolReplayCache(repository.engine).put(key, result)
+        first.put(key, result, owner=owner, lease_epoch=lease_epoch),
+        DurableToolReplayCache(repository.engine).put(
+            key, result, owner=owner, lease_epoch=lease_epoch
+        ),
     )
     assert await first.get(key) == result
 
@@ -71,7 +80,7 @@ async def test_durable_replay_survives_cache_recreation(database):
     assert await recreated.get(key) == result
 
     before = (await repository.get(row["id"], settings.tenant_id))["event_seq"]
-    await recreated.put(key, result)
+    await recreated.put(key, result, owner=owner, lease_epoch=lease_epoch)
     after = (await repository.get(row["id"], settings.tenant_id))["event_seq"]
     assert after == before
 

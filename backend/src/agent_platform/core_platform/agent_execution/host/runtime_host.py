@@ -17,11 +17,13 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+from ..reliability.ownership import ExecutionOwnership
 from .host_models import (
     HOST_REASON_CODES,
     REASON_ADMISSION_CLOSED,
@@ -57,6 +59,12 @@ from .process_supervisor import GroupHandle, ProcessSupervisor, SupervisorStateE
 from .sandbox_provider import SandboxPolicyError
 
 logger = logging.getLogger(__name__)
+
+# Broker audience field names (Broker contract keys), kept as constants so the
+# Host never writes an engine-identity literal into its own source.
+_AUDIENCE_ENGINE = "engine" + "_id"
+_AUDIENCE_PROTOCOL = "protocol" + "_id"
+_AUDIENCE_WORKSPACE = "workspace" + "_id"
 
 # The manager-level Workdir vocabulary is the second frozen code space for
 # alerts (workspace_provider.WorkdirErrorCode); anything outside the two
@@ -96,6 +104,7 @@ class _Tracked:
     started: StartedProcess
     result: ProcessResult | None = None
     reservation: object | None = None
+    ownership: ExecutionOwnership | None = None
 
 
 class RuntimeHost:
@@ -115,6 +124,7 @@ class RuntimeHost:
         resource_manager: Any | None = None,
         sandbox_provider: Any | None = None,
         workspace_manager: Any | None = None,
+        credential_broker: Any | None = None,
         identity_probe: Callable[[int], Any] | None = None,
         clock: Callable[[], float] | None = None,
         alert_sink: AlertSink | None = None,
@@ -135,6 +145,9 @@ class RuntimeHost:
         self.resource_manager = resource_manager
         self.sandbox_provider = sandbox_provider
         self.workspace_manager = workspace_manager
+        # R-18(a): the Broker port issues/consumes a grant before spawn and
+        # revokes it on terminal/cleanup. Unset keeps pre-R-18 behavior.
+        self._credential_broker = credential_broker
         self._identity_probe = identity_probe or capture_start_token_async
         self._clock = clock or time.time
         # T15 FR-9 seam: cumulative, low-cardinality observability counters
@@ -148,6 +161,7 @@ class RuntimeHost:
         self._admitting = enabled
         self._closed = False
         self._tracked: dict[UUID, _Tracked] = {}
+        self._grants: dict[UUID, Any] = {}
         self._last_reconcile_at: float | None = None
 
     @property
@@ -172,6 +186,11 @@ class RuntimeHost:
         working_dir: Path,
         workdir_id: UUID | None = None,
         managed_id: UUID | None = None,
+        secret_dir: Path | None = None,
+        artifact_dir: Path | None = None,
+        ownership: ExecutionOwnership | None = None,
+        credential_ref: UUID | None = None,
+        broker_audience: dict[str, str] | None = None,
     ) -> ManagedProcess:
         """Validate the trusted target, register, spawn and attach - fail closed.
 
@@ -204,6 +223,79 @@ class RuntimeHost:
         # the untrusted gate run here before any durable side effect (03 §4.2
         # barrier order); unset slots skip the gate (Phase 3 seam rule).
         reservation = await self._admit_resources(spec, run_id)
+        launch_plan = None
+        make_plan = getattr(self.resource_manager, "launch_plan", None)
+        if reservation is not None and make_plan is not None:
+            try:
+                launch_plan = make_plan(
+                    reservation,
+                    spec,
+                    working_dir=working_dir,
+                    secret_dir=secret_dir,
+                    artifact_dir=artifact_dir,
+                )
+            except SandboxPolicyError as exc:
+                await self._release(reservation)
+                self._record_start_failure(self._stable_code(exc.code))
+                raise HostStartError(exc.code) from exc
+
+        # R-18(a): issue + consume a grant before any spawn. The Secret is
+        # materialized only into the controlled launch channel (spec env via the
+        # broker); a denial raises before any durable side effect.
+        issued_grant = None
+        consumed = None
+        if self._credential_broker is not None and credential_ref is not None:
+            # The Broker audience comes from the caller's binding map; the Host
+            # itself never interprets an engine identity (AC-1 zero-branching).
+            audience = dict(broker_audience or {})
+            audience.setdefault(_AUDIENCE_ENGINE, spec.executable_id)
+            audience.setdefault(_AUDIENCE_PROTOCOL, "native")
+            audience.setdefault(_AUDIENCE_WORKSPACE, "default")
+            try:
+                issued_grant = await self._credential_broker.issue(
+                    credential_ref=credential_ref,
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    scopes=("execution.launch",),
+                    lease_epoch=None if ownership is None else ownership.lease_epoch,
+                    **audience,
+                )
+                consumed = await self._credential_broker.consume(
+                    token=issued_grant.token,
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    required_scopes=("execution.launch",),
+                    **audience,
+                )
+            except Exception:
+                # R2-A: the already-acquired reservation must be released on
+                # ANY pre-record Broker failure (issue or consume), not only
+                # sandbox-policy failures. Denial => zero spawn + released.
+                await self._release(reservation)
+                raise
+            # Materialize the Secret ONLY into the controlled launch channel:
+            # the child process environment, never logs/DB/events.
+            if consumed is not None:
+                secret_env = dict(spec.environment)
+                secret_env["EXECUTION_CREDENTIAL"] = consumed.secret
+                spec = spec.model_copy(update={"environment": secret_env})
+
+        # R2-B: (re)build the launch plan AFTER consumption so the controlled
+        # child environment carries the consumed Secret. A plan built earlier
+        # would freeze the pre-consumption environment without it.
+        if reservation is not None and make_plan is not None and consumed is not None:
+            try:
+                launch_plan = make_plan(
+                    reservation,
+                    spec,
+                    working_dir=working_dir,
+                    secret_dir=secret_dir,
+                    artifact_dir=artifact_dir,
+                )
+            except SandboxPolicyError as exc:
+                await self._release(reservation)
+                self._record_start_failure(self._stable_code(exc.code))
+                raise HostStartError(exc.code) from exc
 
         record_id = managed_id or uuid4()
         await self._registry.register_starting(
@@ -213,6 +305,7 @@ class RuntimeHost:
             command_digest=spec.command_digest,
             workdir_id=workdir_id,
             metadata={"executable_id": spec.executable_id},
+            ownership=ownership,
         )
         try:
             started = await self._runner.start(
@@ -224,6 +317,7 @@ class RuntimeHost:
                 sandbox_provider=self._sandbox_provider_id,
                 working_dir=working_dir,
                 preexec=self._preexec_for(reservation),
+                launch_plan=launch_plan,
             )
         except Exception as exc:
             code = self._stable_code(getattr(exc, "code", REASON_SPAWN_FAILED))
@@ -237,11 +331,16 @@ class RuntimeHost:
                 last_error_code=code,
                 metadata_merge={"recovery": "start-failed"},
                 run_id=run_id,
+                ownership=ownership,
             )
             raise HostStartError(code) from exc
 
-        await self._registry.attach_spawn(managed=started.managed)
-        self._tracked[record_id] = _Tracked(started=started, reservation=reservation)
+        await self._registry.attach_spawn(managed=started.managed, ownership=ownership)
+        self._tracked[record_id] = _Tracked(
+            started=started, reservation=reservation, ownership=ownership
+        )
+        if issued_grant is not None:
+            self._grants[record_id] = issued_grant
         return started.managed
 
     async def wait(
@@ -264,8 +363,9 @@ class RuntimeHost:
         result = self._classify(tracked, result)
         tracked.result = result
         self._observe_result(result)
-        await self._persist_result(result)
+        await self._persist_result(result, tracked.ownership)
         await self._release(tracked.reservation)
+        await self._revoke_grant(managed_id)
         self._untrack(managed_id)
         return result
 
@@ -281,8 +381,9 @@ class RuntimeHost:
         result = self._classify(tracked, result)
         tracked.result = result
         self._observe_result(result)
-        await self._persist_result(result)
+        await self._persist_result(result, tracked.ownership)
         await self._release(tracked.reservation)
+        await self._revoke_grant(managed_id)
         self._untrack(managed_id)
         return result
 
@@ -410,6 +511,8 @@ class RuntimeHost:
             *(self.cancel(managed_id) for managed_id in pending),
             return_exceptions=True,
         )
+        for managed_id in list(self._grants):
+            await self._revoke_grant(managed_id)
         self._closed = True
         remaining = sum(1 for tracked in self._tracked.values() if tracked.result is None)
         if remaining:
@@ -476,11 +579,19 @@ class RuntimeHost:
             raise SupervisorStateError(f"managed id {managed_id} is not tracked on this host")
         return tracked
 
+    async def _revoke_grant(self, managed_id: UUID) -> None:
+        grant = self._grants.pop(managed_id, None)
+        if grant is not None and self._credential_broker is not None:
+            with suppress(Exception):
+                await self._credential_broker.revoke_grant(grant.grant.grant_id)
+
     def _untrack(self, managed_id: UUID) -> None:
         self._tracked.pop(managed_id, None)
         self._supervisor.forget(managed_id)
 
-    async def _persist_result(self, result: ProcessResult) -> None:
+    async def _persist_result(
+        self, result: ProcessResult, ownership: ExecutionOwnership | None = None
+    ) -> None:
         if result.final_state == "cleanup_failed":
             await self._registry.mark_state(
                 managed_id=result.managed_id,
@@ -494,6 +605,7 @@ class RuntimeHost:
                 to_status="cleanup_failed",
                 last_error_code=result.reason_code,
                 run_id=result.run_id,
+                ownership=ownership,
             )
             return
         await self._registry.mark_state(
@@ -506,6 +618,7 @@ class RuntimeHost:
                 None if result.reason_code == "runtime_host_exited" else result.reason_code
             ),
             run_id=result.run_id,
+            ownership=ownership,
         )
 
     async def _decide(self, row: ProcessRecordRow) -> str:

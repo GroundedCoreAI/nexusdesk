@@ -67,9 +67,26 @@ from agent_platform.core_platform.agent_execution.contracts.instructions import 
     REACT_INSTRUCTION_PROVIDER_VERSION,
 )
 from agent_platform.core_platform.agent_execution.contracts.snapshots import SNAPSHOT_COLUMNS
+from agent_platform.core_platform.agent_execution.credentials.broker import (
+    ExecutionCredentialBroker,
+)
+from agent_platform.core_platform.agent_execution.credentials.repository import (
+    ExecutionCredentialRepository,
+)
+from agent_platform.core_platform.agent_execution.credentials.vault import (
+    ExecutionCredentialVault,
+)
+from agent_platform.core_platform.agent_execution.events.outbox import OutboxDispatcher
+from agent_platform.core_platform.agent_execution.host.docker_sandbox_provider import (
+    DockerSandboxProvider,
+)
 from agent_platform.core_platform.agent_execution.host.host_models import ResourcePolicy
 from agent_platform.core_platform.agent_execution.host.local_sandbox_provider import (
     LocalSandboxProvider,
+)
+from agent_platform.core_platform.agent_execution.host.network_policy import (
+    NetworkPolicy,
+    NetworkRule,
 )
 from agent_platform.core_platform.agent_execution.host.observability import (
     EVENT_SWEEP_BATCH,
@@ -101,6 +118,10 @@ from agent_platform.core_platform.agent_execution.registry import (
     ProtocolDescriptor,
     ProtocolRegistry,
 )
+from agent_platform.core_platform.agent_execution.reliability.recovery import (
+    RecoveryCoordinator,
+)
+from agent_platform.core_platform.agent_execution.security.redaction import SecretRedactor
 from agent_platform.core_platform.agent_execution.workspace.workspace_manager import (
     ExecutionWorkspaceManager,
 )
@@ -215,6 +236,7 @@ class _NoSnapshotBarrier:
         *,
         run_id: UUID,
         owner: UUID | None,
+        lease_epoch: int | None = None,
         execution_id: UUID,
         payloads: Mapping[str, str],
     ) -> str:
@@ -240,6 +262,7 @@ class _RepositorySnapshotBarrier:
         *,
         run_id: UUID,
         owner: UUID | None,
+        lease_epoch: int | None = None,
         execution_id: UUID,
         payloads: Mapping[str, str],
     ) -> str:
@@ -255,6 +278,7 @@ class _RepositorySnapshotBarrier:
                 execution_id=execution_id,
                 **{column: payloads[column] for column in SNAPSHOT_COLUMNS},
             ),
+            lease_epoch=lease_epoch,
         )
         return str(result)
 
@@ -403,6 +427,25 @@ def _runtime_fingerprint_exclude_fields() -> set[str]:
             or name == "execution_sandbox_provider"
         ),
         *(name for name in Settings.model_fields if name.startswith("codex_")),
+        # Phase 6 rollout/event/credential family: publisher switches, retention,
+        # parser limits, grant TTL, key path and the untrusted master gate are
+        # rollout controls, never Runtime assembly inputs (02 FR-16).
+        "execution_untrusted_tenants_enabled",
+        "execution_sandbox_required",
+        "execution_network_default_deny",
+        *(
+            name
+            for name in Settings.model_fields
+            if name.startswith(
+                (
+                    "execution_outbox_",
+                    "execution_event_",
+                    "execution_parser_",
+                    "execution_credential_",
+                    "execution_sandbox_",
+                )
+            )
+        ),
     }
 
 
@@ -559,6 +602,13 @@ def _codex_adapters(
         # row's retained window comes from the captured per-run context, exactly
         # like ReactAdapterFactory reads it.
         context = capture_execution_context()
+        ownership = None
+        if context.owner is not None and context.lease_epoch is not None:
+            from agent_platform.core_platform.agent_execution.reliability.ownership import (
+                ExecutionOwnership,
+            )
+
+            ownership = ExecutionOwnership(context.execution_id, context.owner, context.lease_epoch)
         return CodexCliAdapter(
             runtime_host,
             config=_codex_config(settings, CodexProtocol.CLI_EXEC),
@@ -566,6 +616,7 @@ def _codex_adapters(
             workdir_root=settings.execution_workdir_root,
             resource_policy=_codex_resource_policy(settings),
             history=context.history,
+            ownership=ownership,
         )
 
     def app_server_factory() -> AgentEngineAdapter:
@@ -758,12 +809,54 @@ class ExecutionRuntimeSubsystem:
     reconcile_interval_seconds: float
     cleanup_interval_seconds: float
     alert_sink: AlertSink | None = None
+    repository: RunRepository | None = None
+    tenant_id: str = "local"
+    outbox: OutboxDispatcher | None = None
+    outbox_poll_seconds: float = 1.0
+    retention_days: int = 30
+    retention_cleanup_enabled: bool = False
+    retention_interval_seconds: float = 60.0
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
     async def recover_on_startup(self) -> None:
-        """R-8: process records left by previous boots before admission opens."""
+        """R-8/T-10: recovery finishes before admission opens.
+
+        Order: process records, Workdir sweep, expired-Run recovery with a real
+        cleanup confirmation, then Outbox reconciliation/publication. No new
+        claim is admitted until this coroutine returns.
+        """
         await self.host.reconcile()
         await self._sweep_once()
+        await self.recover_runs()
+        if self.outbox is not None:
+            await self.outbox.reconcile()
+            await self.outbox.dispatch_once()
+
+    async def recover_runs(self) -> int:
+        """Fence expired claims and commit confirmed terminal states."""
+        if self.repository is None:
+            return 0
+        coordinator = RecoveryCoordinator(self.repository, self.confirm_cleanup)
+        return await coordinator.recover_expired(self.tenant_id)
+
+    async def confirm_cleanup(self, row) -> bool:
+        """Confirm process exit and Workdir removal before any cancelled state."""
+        run_id, tenant_id = row["id"], row["tenant_id"]
+        try:
+            if await self.registry.active_for_run(run_id):
+                return False
+            workdir = await self.workspace.get(run_id=run_id, tenant_id=tenant_id)
+            if workdir is None or workdir.status == "deleted":
+                return True
+            if workdir.status == "cleanup_failed":
+                return False
+            result = await self.workspace.cleanup(
+                workdir_id=workdir.workdir_id, run_id=run_id, tenant_id=tenant_id
+            )
+            return result.status == "deleted"
+        except Exception:  # noqa: BLE001 - unconfirmed cleanup fails closed.
+            logger.warning("execution cleanup confirmation deferred run_id=%s", run_id)
+            return False
 
     async def health_report(self):
         """Internal operational health read (FR-9; 08 §6 defers HTTP routing).
@@ -780,6 +873,12 @@ class ExecutionRuntimeSubsystem:
             asyncio.create_task(self._reconcile_loop(), name="execution-runtime-reconcile"),
             asyncio.create_task(self._cleanup_loop(), name="execution-workdir-cleanup"),
         ]
+        if self.outbox is not None:
+            self._tasks.append(asyncio.create_task(self._outbox_loop(), name="execution-outbox"))
+        if self.retention_cleanup_enabled and self.repository is not None:
+            self._tasks.append(
+                asyncio.create_task(self._retention_loop(), name="execution-retention")
+            )
 
     async def aclose(self) -> None:
         """Stop loops, then the Host's stop-admission->drain machine (T14 order).
@@ -822,6 +921,41 @@ class ExecutionRuntimeSubsystem:
             await asyncio.sleep(self.cleanup_interval_seconds)
             await self._sweep_once()
 
+    async def _outbox_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.outbox_poll_seconds)
+            try:
+                await self.outbox.dispatch_once()
+            except Exception:  # noqa: BLE001 - retry on the next tick.
+                logger.warning("execution outbox dispatch deferred")
+
+    async def _retention_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.retention_interval_seconds)
+            try:
+                removed = await self.repository.cleanup_retention(self.retention_days)
+                if removed and self.alert_sink is not None:
+                    self.alert_sink.emit(
+                        ObservabilityRecord(
+                            event="execution.events_retention_pruned",
+                            severity="info",
+                            host_id=self.registry.host_id,
+                            fields={"removed": removed},
+                        )
+                    )
+            except Exception:  # noqa: BLE001 - retry on the next tick.
+                logger.warning("execution event retention deferred")
+
+    async def operational_stats(self) -> dict[str, int | None]:
+        """Bounded metrics surface for the composition health check."""
+        pending = None
+        if self.outbox is not None:
+            pending = await self.outbox.pending_count()
+        return {
+            "outbox_pending": pending,
+            "retention_enabled": int(self.retention_cleanup_enabled),
+        }
+
     async def _sweep_once(self) -> None:
         try:
             candidates = await self.workspace.sweep_expired()
@@ -846,12 +980,27 @@ class ExecutionRuntimeSubsystem:
                 )
 
 
+def _docker_network_rule(entry: str) -> NetworkRule:
+    """Parse one deployment allowlist entry; malformed values fail closed."""
+    host, separator, port = entry.rpartition(":")
+    if not separator or not host or not port.isdigit():
+        raise ValueError("execution sandbox allowlist entries must be host:port")
+    value = int(port)
+    if not 1 <= value <= 65535:
+        raise ValueError("execution sandbox allowlist port is invalid")
+    return NetworkRule(host=host.strip("[]"), port=value)
+
+
 def _build_execution_runtime_subsystem(
     settings: Settings,
     engine,
     *,
     boot_id: str | None = None,
     clock: Callable[[], float] | None = None,
+    repository: RunRepository | None = None,
+    event_bus=None,
+    execution_broker=None,
+    execution_redactor=None,
 ) -> ExecutionRuntimeSubsystem | None:
     """Assemble the Phase 4 runtime from FR-10 settings without starting it.
 
@@ -872,9 +1021,20 @@ def _build_execution_runtime_subsystem(
     # One structured alert surface for the whole subsystem (02 FR-9).
     alert_sink = LoggingAlertSink()
     sandbox_provider_id = f"{settings.execution_sandbox_provider}/v1"
-    provider = LocalSandboxProvider(
-        enforcement_required=settings.execution_resource_enforcement_required,
-    )
+    if settings.execution_sandbox_provider == "docker":
+        rules = tuple(
+            _docker_network_rule(entry) for entry in settings.execution_sandbox_docker_allowlist
+        )
+        provider = DockerSandboxProvider(
+            image=settings.execution_sandbox_docker_image,
+            enforcement_required=settings.execution_resource_enforcement_required,
+            network_policy=NetworkPolicy(rules=rules),
+            proxy_endpoint=settings.execution_sandbox_docker_proxy_endpoint or None,
+        )
+    else:
+        provider = LocalSandboxProvider(
+            enforcement_required=settings.execution_resource_enforcement_required,
+        )
     resources = ResourceManager(
         provider,
         sample_interval_seconds=settings.execution_resource_sample_interval_seconds,
@@ -914,9 +1074,25 @@ def _build_execution_runtime_subsystem(
         sandbox_provider_id=sandbox_provider_id,
         resource_manager=resources,
         workspace_manager=workspace,
+        credential_broker=execution_broker,
         clock=shared_clock,
         alert_sink=alert_sink,
     )
+    outbox = None
+    if settings.execution_outbox_enabled:
+        if event_bus is not None and callable(getattr(event_bus, "enqueue", None)):
+            outbox = OutboxDispatcher(
+                engine,
+                event_bus,
+                batch_size=settings.execution_outbox_batch_size,
+                poll_seconds=settings.execution_outbox_poll_seconds,
+                tenant_id=settings.tenant_id,
+                redactor=execution_redactor,
+            )
+        else:
+            # Persistence/trigger/security stay on; publication stays pending
+            # and recoverable instead of silently disabling the Outbox.
+            logger.error("execution outbox enabled without an acknowledged bus")
     return ExecutionRuntimeSubsystem(
         host=host,
         workspace=workspace,
@@ -925,6 +1101,13 @@ def _build_execution_runtime_subsystem(
         reconcile_interval_seconds=settings.execution_process_reconcile_interval_seconds,
         cleanup_interval_seconds=settings.execution_workdir_cleanup_interval_seconds,
         alert_sink=alert_sink,
+        repository=repository,
+        tenant_id=settings.tenant_id,
+        outbox=outbox,
+        outbox_poll_seconds=settings.execution_outbox_poll_seconds,
+        retention_days=settings.execution_event_retention_days,
+        retention_cleanup_enabled=settings.execution_event_cleanup_enabled,
+        retention_interval_seconds=settings.execution_event_cleanup_interval_seconds,
     )
 
 
@@ -959,6 +1142,9 @@ class RuntimeServices:
     # owns an execution root; ``None`` is the default topology for API and the
     # non-runtime workers (08 R-7).
     execution_runtime: ExecutionRuntimeSubsystem | None = None
+    # T-07 admin credential lifecycle repository (Secret-free metadata API).
+    execution_credentials: ExecutionCredentialRepository | None = None
+    execution_redactor: SecretRedactor | None = None
 
 
 @asynccontextmanager
@@ -1153,7 +1339,25 @@ async def runtime_services(
                 adapters,
                 barrier=_RepositorySnapshotBarrier(repository.write_execution_snapshots),
             )
-            execution_runtime = _build_execution_runtime_subsystem(settings, engine)
+            # T-07: the admin lifecycle repository exists even when the key is
+            # absent; encrypting fails closed at request time, never auto-creates.
+            execution_vault = ExecutionCredentialVault(settings.execution_credential_key_file)
+            execution_credentials = ExecutionCredentialRepository(engine, execution_vault)
+            execution_broker = ExecutionCredentialBroker(
+                engine,
+                execution_vault,
+                repository=execution_credentials,
+                grant_ttl_seconds=settings.execution_credential_grant_ttl_seconds,
+            )
+            execution_redactor = SecretRedactor()
+            execution_runtime = _build_execution_runtime_subsystem(
+                settings,
+                engine,
+                repository=repository,
+                event_bus=platform.event_bus,
+                execution_broker=execution_broker,
+                execution_redactor=execution_redactor,
+            )
             orchestrator = _build_execution_orchestrator(
                 factory,
                 adapters,
@@ -1211,6 +1415,9 @@ async def runtime_services(
                     listener,
                     memory=MemoryInjection(groups.business.memory),
                     orchestrator=orchestrator if settings.execution_orchestrator_enabled else None,
+                    cleanup_confirmation=(
+                        execution_runtime.confirm_cleanup if execution_runtime is not None else None
+                    ),
                 ),
                 snapshot=snapshot,
                 listener=listener,
@@ -1228,6 +1435,8 @@ async def runtime_services(
                 scope=platform.scope,
                 execution_subsystem=subsystem,
                 execution_runtime=execution_runtime,
+                execution_credentials=execution_credentials,
+                execution_redactor=execution_redactor,
             )
     finally:
         # R-46 close order: this subsystem first (a warm round may still be

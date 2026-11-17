@@ -1,9 +1,10 @@
 # Phase 6 · 安全、可靠性与事件治理 — 测试方案
 
-> 状态：待实施（本阶段开发完成后执行；当前未执行、未通过）
+> 状态：已批准测试基线；待实施与执行（当前未执行、未通过）
 > 创建：2026-11-02
 > 修订：2026-11-11（小团队轻量验收：复用自动化证据，保留不可信执行独立审批例外）
-> 依据：`02-requirements.md`（FR-1~FR-16、AC-1~AC-16）、`03-technical-design.md`（规划迁移 0056/0057、Fencing、Outbox、Vault/Broker、Sandbox）
+> 修订：2026-11-16（按代码核查迁移号、直接写入覆盖、SSE 附加兼容与聚焦回归复用）
+> 依据：`02-requirements.md`（FR-1~FR-16、AC-1~AC-16）、`03-technical-design.md`（规划迁移 0070/0071、Fencing、Outbox、Vault/Broker、Sandbox）、`08-implementation-breakdown.md`
 
 ## 1. 测试范围与原则
 
@@ -15,7 +16,7 @@
 2. **故障点必须精确**：在 claim/takeover、事务提交前后、Outbox 发布前后、清理各阶段和 SSE 追赶窗口注入崩溃，不只随机重启。
 3. **零有效过期写入**：Fencing 同时断言状态、事件、usage、Session、Outbox 和资源操作，不能只断言 Run 状态。
 4. **安全失败不可用降级替代**：沙箱/Broker/密钥/策略不可用必须拒绝，不得回退宿主执行、开放网络或跳过脱敏。
-5. **兼容与空态必测**：存量 v1 事件、空新字段、瞬时 delta、历史 Run 和开关回滚均保持定义行为；Phase 0 未测基线不得记通过。
+5. **兼容与空态必测**：存量 v1 事件、空新字段、瞬时 delta、历史 Run 和开关回滚均保持定义行为；SSE 唯一允许的线上附加项是保留 `_execution` 元数据；Phase 0 未测基线不得记通过。
 6. **时间与规模可控**：过期/退避用可控时钟；sequence/去重/重放使用并发和大于单页数据，不依赖长时间 sleep。
 7. **证据隔离**：所有 Secret 均为专用 canary；攻击在专用环境，测试后吊销 grant、清理沙箱并核对无残留。
 8. **证据复用**：UT/IT/CM 的自动化结果及对抗、故障点、DB、Host、网络、Outbox/SSE 证据直接供 A/C 验收引用，不为验收重复手工执行整套测试；人工只补无法自动化的关键检查。不可信执行独立审批不因证据复用而取消。
@@ -85,8 +86,8 @@
 | P6-IT-19 | SSE 非法/过旧游标与终态追赶 | 400/409 语义正确；订阅查询竞态不漏最终事件，终态一致。 | AC-13 |
 | P6-IT-20 | usage 重复/重放/旧 Worker/修正 | 复现 AC-14；同源一次、旧 epoch 拒绝、修正与重建一致。 | AC-14 |
 | P6-IT-21 | parser 连续失败/超限/Secret 样本 | 复现 AC-15；分类/率限/脱敏和 skip/quarantine/fail 正确，无事件风暴。 | AC-15 |
-| P6-IT-22 | 0056 在线扩展/回填/校验 | 从实际 head 升级；存量 seq/event_id/schema/source 正确，无重复/重编号，锁预算有记录。 | AC-16；FR-7~FR-14 |
-| P6-IT-23 | 0057 凭据迁移与数据保护 | 从实际 head 升级成功；公共查询无明文，有数据降级按策略保护。 | AC-16；FR-1、FR-2 |
+| P6-IT-22 | 0070 在线扩展/回填/校验 | 从实际 head 升级；存量 seq/event_id/schema/source 正确，无重复/重编号，锁预算有记录。 | AC-16；FR-7~FR-14 |
+| P6-IT-23 | 0071 凭据迁移与数据保护 | 从实际 head 升级成功；公共查询无明文，有数据降级按策略保护。 | AC-16；FR-1、FR-2 |
 | P6-IT-24 | 灰度/回滚与 React/Codex/API/SSE 回归 | 复现 AC-16；安全校验不降级、Outbox 协调无遗漏、Phase 0 diff 为零。 | AC-16 |
 | P6-IT-25 | 故障后资源/配额/账务全量对账 | 混合 SIGKILL、断网、磁盘满和进程 hang 后，Run/Host/usage/Outbox 对账无残留。 | AC-8~AC-10、AC-12、AC-14 |
 
@@ -94,7 +95,7 @@
 
 | 编号 | 核对项 | 通过标准 | 溯源 |
 |---|---|---|---|
-| P6-CM-01 | 迁移 head 与历史保护 | 0056/0057 仅规划号；实施前重核实际 head/依赖，0001~0052 及已合入迁移不修改。 | FR-16；G7 |
+| P6-CM-01 | 迁移 head 与历史保护 | 0070/0071 仅规划号；实施前重核实际 head/依赖，0001~0069（含已合入的开放平台 0068/0069）及已合入迁移不修改。 | FR-16；G7 |
 | P6-CM-02 | 在线迁移与回填 | expand/backfill/validate/switch 证据完整；存量事件确定性 ID、无重编号、无长锁失控。 | FR-11、FR-16 |
 | P6-CM-03 | Secret 与审计扫描 | DB 公共视图、日志、事件、SSE、错误、诊断、产物、审计无明文 Secret/grant Token。 | FR-1~FR-3 |
 | P6-CM-04 | 不可信开放门禁 | 默认关闭；任一安全/可靠性硬项未过均无法启用，配置不能绕过。 | FR-4、FR-16 |
@@ -111,7 +112,8 @@
 - React/Codex 公共契约、Session Resume、RuntimeHost/Workspace、审批/输入和历史 Agent 配置。
 - `test_gateway_credentials.py`、工具凭据/egress/Workspace 套件：新 Execution Broker/Sandbox 不削弱已有边界。
 - 事件 v1 历史 fixtures、瞬时 model.delta、SSE `after`/`Last-Event-ID`、分页 200 条边界与现有客户端消费。
-- 全迁移链路和实施时实际 head 的副本升级；0056/0057 的回填、旧二进制读取、回滚协调与数据保护。
+- 全迁移链路和实施时实际 head 的副本升级；0070/0071 的回填、旧二进制读取、回滚协调、直接写入 Outbox 覆盖与内部 tool.replay 发布排除与数据保护。
+- 按 `08-implementation-breakdown.md` §3 复用或重跑既有用例；未变化的通过用例不在每个任务后全量重跑，受影响用例必须重跑。
 - Phase 0 未测基线项保留“待 Phase 0”，不得通过平均性能或抽样结果掩盖 P0/P1 场景。
 
 ## 7. 缺陷分级与出口准则
@@ -123,4 +125,4 @@
 | P2 一般 | 非核心诊断/指标/兼容质量偏差，无安全与正确性影响。 | 仅限非硬门禁项：记录 owner/期限后由验收负责人在单一验收记录中确认；安全、可靠性、事件与账务硬门禁不得豁免。 |
 | P3 轻微 | 文案、非敏感日志和文档问题。 | 排期修复并保留溯源。 |
 
-**出口准则**：全部适用 UT/IT/CM 与 AC 通过；真实沙箱、多 Worker、故障点和真实 SSE/Outbox 项无未批准 skip；对抗攻击成功数为 0；过期写入/重复 usage/静默事件缺口为 0；回归全绿、Phase 0 diff 为零、无 P0/P1。任一硬门禁未过时，`execution_untrusted_tenants_enabled` 必须保持 false，阶段不得判整体通过。
+**出口准则**：全部适用 UT/IT/CM 与 AC 通过；真实沙箱、多 Worker、故障点和真实 SSE/Outbox 项无未批准 skip；对抗攻击成功数为 0；过期写入/重复 usage/静默事件缺口为 0；回归全绿、除文档约定的 SSE `_execution` 附加元数据外 Phase 0 行为回归 diff 为零、无 P0/P1。任一硬门禁未过时，`execution_untrusted_tenants_enabled` 必须保持 false，阶段不得判整体通过。

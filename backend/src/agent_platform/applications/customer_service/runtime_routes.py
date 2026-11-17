@@ -9,6 +9,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from agent_platform.core_platform.agent_execution.events.replay import (
+    resolve_cursor,
+    retention_gap,
+    sse_payload,
+)
 from agent_platform.core_platform.agent_runtime.schemas import (
     TERMINAL,
     BusyError,
@@ -89,23 +94,27 @@ async def stream_events(
     last_event_id: Annotated[str | None, Header()] = None,
 ):
     repository = request.app.state.runtime.repository
-    if last_event_id is not None:
-        try:
-            last_id = int(last_event_id)
-            if not 0 <= last_id <= 2147483647:
-                raise ValueError()
-            after = max(after, last_id)
-        except ValueError:
-            raise HTTPException(400, "invalid_last_event_id") from None
-        if after < 0:
-            raise HTTPException(400, "invalid_last_event_id")
+    try:
+        cursor_after = resolve_cursor(after, last_event_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "invalid_last_event_id") from None
     scope = request.state.business_scope
-    if await repository.get(run_id, tenant, scope) is None:
+    run_row = await repository.get(run_id, tenant, scope)
+    if run_row is None:
         raise HTTPException(404, "run_not_found")
+    floor = int(run_row.get("event_retention_floor_seq") or 0)
+    if retention_gap(cursor_after, floor):
+        # Explicit gap, never a silent earliest-available reset (FR-13/R-10).
+        raise HTTPException(
+            409,
+            "event_replay_gap",
+            headers={"X-Event-Retention-Floor": str(floor)},
+        )
+    redactor = getattr(request.app.state.runtime, "execution_redactor", None)
     listener = request.app.state.runtime.listener
 
     async def stream():
-        cursor = after
+        cursor = cursor_after
         queue = await listener.subscribe(run_id)
         try:
             while not await request.is_disconnected():
@@ -117,7 +126,7 @@ async def stream_events(
                     cursor = event["seq"]
                     if event["type"] == "tool.replay":
                         continue
-                    payload = json.dumps(event["data"], ensure_ascii=False)
+                    payload = json.dumps(sse_payload(event, redactor=redactor), ensure_ascii=False)
                     yield f"id: {cursor}\nevent: {event['type']}\ndata: {payload}\n\n"
                 if run["status"] in TERMINAL and cursor >= run["event_seq"]:
                     return

@@ -21,6 +21,10 @@ class AgentEvent(ExecutionKey):
     timestamp: datetime
     payload: dict[str, JsonValue] = Field(default_factory=dict)
     trace_id: OpaqueString | None = None
+    # Additive optional v1 producer metadata for durable deduplication (R-3).
+    # Existing producers that supply neither remain valid.
+    producer_id: OpaqueString | None = None
+    producer_event_id: OpaqueString | None = None
 
     @field_validator("timestamp")
     @classmethod

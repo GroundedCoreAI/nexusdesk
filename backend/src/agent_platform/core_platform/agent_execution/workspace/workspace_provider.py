@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import Field, StringConstraints
 
 from agent_platform.core_platform.agent_execution.contracts.base import ExecutionContractModel
+from agent_platform.core_platform.agent_execution.reliability.ownership import ExecutionOwnership
 
 WorkdirStatus = Literal[
     "preparing", "ready", "active", "retained", "cleaning", "deleted", "cleanup_failed"
@@ -111,6 +112,7 @@ class WorkspaceProvider(Protocol):
         tenant_id: str,
         business_id: str,
         workspace_id: str,
+        ownership: ExecutionOwnership | None = None,
     ) -> WorkdirRecord:
         """Generate the platform path, persist ``preparing``, build the tree, ``ready``.
 
@@ -123,7 +125,14 @@ class WorkspaceProvider(Protocol):
         """
         ...
 
-    async def activate(self, *, workdir_id: UUID, run_id: UUID, tenant_id: str) -> WorkdirRecord:
+    async def activate(
+        self,
+        *,
+        workdir_id: UUID,
+        run_id: UUID,
+        tenant_id: str,
+        ownership: ExecutionOwnership | None = None,
+    ) -> WorkdirRecord:
         """``ready`` -> ``active`` immediately before a process/adapter starts."""
         ...
 
@@ -134,11 +143,19 @@ class WorkspaceProvider(Protocol):
         run_id: UUID,
         tenant_id: str,
         outcome: RetainOutcome,
+        ownership: ExecutionOwnership | None = None,
     ) -> WorkdirRecord:
         """Terminal decision bookkeeping: ``active`` -> ``retained`` with the outcome window."""
         ...
 
-    async def cleanup(self, *, workdir_id: UUID, run_id: UUID, tenant_id: str) -> WorkdirRecord:
+    async def cleanup(
+        self,
+        *,
+        workdir_id: UUID,
+        run_id: UUID,
+        tenant_id: str,
+        ownership: ExecutionOwnership | None = None,
+    ) -> WorkdirRecord:
         """Idempotent safe removal: ``retained``/``cleanup_failed`` -> ``deleted``.
 
         On an unprovable removal scope the record enters ``cleanup_failed``

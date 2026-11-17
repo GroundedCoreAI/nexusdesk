@@ -1,12 +1,14 @@
 # Phase 6 · Security, Reliability, and Event Governance — Business Goals
 
-> Status: Pending review (planning only, not implemented; a blocking phase before untrusted multi-tenant code execution)
+> Status: Approved scope baseline for direct-continue development; not implemented or accepted; a blocking phase before untrusted multi-tenant code execution
 > Created: 2026-11-02
-> Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 3, 7–10, 12–13, 17 (Phase 6), 18.2/18.4/18.6, and 19–22; see `03-technical-design.md` for the current-state audit
+> Revised: 2026-11-16 (development entry authorized without inventing upstream acceptance; migration IDs corrected after code audit)
+> Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 3, 7–10, 12–13, 17 (Phase 6), 18.2/18.4/18.6, and 19–22; see `03-technical-design.en.md` for the current-state audit
 
 > Phase: Phase 6 (security, execution reliability, and event reliability workstreams accepted under one hard gate)
 > Estimated effort: approximately 6–8 weeks, frozen after design review and fault-drill environment confirmation
-> Dependencies: Phases 0–5 accepted; Phase 4 RuntimeHost/Workspace available; production-like environment supporting fault injection, sandbox adversarial tests, and independent security audit
+> Development entry: Direct-continue authorization on the merged Phase 4 Host/Workspace and Phase 5 Stage A code; Phase 5B remains outside scope.
+> Final acceptance dependencies: Applicable Phase 0–5 acceptance evidence; production-like fault-injection and strong-sandbox environments; independent security and SRE/operations approvals for untrusted exposure. Missing items remain blockers, not assumed approvals.
 
 ## Problems to Solve
 
@@ -24,7 +26,7 @@ The current Repository rejects some expired-owner writes, but no monotonically i
 
 ### Problem 4: Durable-event and SSE precedents are not yet a complete reliable-delivery system
 
-Events and Runs currently commit in one transaction and SSE supports cursor replay, while NOTIFY only wakes readers. However, common schema/version/source/event_id, native-event deduplication, transactional Outbox, retained-cursor gap handling, and idempotent usage aggregation are missing. Parser failures also lack bounded, redacted, measurable diagnostics.
+Events and Runs currently commit in one transaction and SSE supports cursor replay, while NOTIFY only wakes readers. However, the existing v1 AgentEvent envelope is dropped before persistence, and common persisted identity/source metadata, native-event deduplication, transactional Outbox, retained-cursor gap handling, and idempotent usage aggregation are missing. Parser failures also lack bounded, redacted, measurable diagnostics.
 
 ## Business Goals
 
@@ -63,7 +65,7 @@ Events and Runs currently commit in one transaction and SSE supports cursor repl
 - Lease Epoch/Fencing Tokens, Worker-loss detection, late-result/terminal protection, cancellation confirmation, timeout cleanup, retry side effects, and quota release.
 - Event schema/version/source/event_id/sequence, deduplication, Event Store/transactional Outbox, SSE reconnect/cursor replay, and retention-gap handling.
 - Idempotent usage aggregation, parser diagnostics, migration/backfill/reconciliation jobs, metrics/alerts, and adversarial/fault-injection drills.
-- Planned migrations `0056_execution_fencing_event_outbox` and `0057_execution_credential_security`, plus compatible rollout and rollback plans.
+- Planned migration identifiers `0070_execution_fencing` (file `0070_execution_fencing_event_outbox.py`) and `0071_execution_credential`, plus compatible rollout and rollback plans.
 
 **Excluded** (later phase / explicitly out of scope):
 

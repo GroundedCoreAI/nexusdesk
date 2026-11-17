@@ -1,7 +1,8 @@
 # Phase 6 · 安全、可靠性与事件治理 — 需求文档
 
-> 状态：待评审（仅规划，未实施）
+> 状态：已批准作为直接继续开发的范围基线；未实施、未验收
 > 创建：2026-11-02
+> 修订：2026-11-16（冻结具体灰度默认值并明确 SSE 附加兼容规则）
 > 依据：`01-business-goals.md`（G1~G7）；`docs/architecture/agent-execution-platform-v2.md` 第 7~10、12、17（Phase 6）、18.2/18.4 节
 
 ## 用户故事
@@ -179,15 +180,16 @@
 | `execution_untrusted_tenants_enabled` | 全局 settings | `false` | 只有全部硬门禁通过且独立安全与 SRE/运维批准完成才能开启，不能单独绕过子策略；人员或证据不足时保持关闭。 |
 | `execution_sandbox_required` | 全局 settings | `true` | 不可信执行必须沙箱；禁止用配置降级为宿主执行。 |
 | `execution_network_default_deny` | 部署策略 | `true` | 默认无出口，按 Execution 最小放行。 |
-| `execution_credential_grant_ttl_seconds` | 全局 settings | 有界短默认值，评审冻结 | grant 到期即不可用，不得超过部署硬上限。 |
-| `execution_outbox_enabled` | 全局 settings | 兼容灰度，目标常开 | 灰度期可控制发布器；Event Store 轮询始终可恢复，不回退安全校验。 |
-| `execution_event_retention_days` | 部署策略 | 评审后确定 | 仅清理允许保留的数据；游标缺口显式返回。 |
+| `execution_credential_grant_ttl_seconds` | 全局 settings | `300` 秒，允许 30～3600 | grant 到期即不可用，不得超过 3600 秒部署硬上限。 |
+| `execution_outbox_enabled` | 全局 settings | 灰度期 `false`，目标常开 | 仅控制发布器；Event Store 轮询始终可恢复，不回退安全校验。 |
+| `execution_event_retention_days` | 部署策略 | `30` 天，允许 1～3650 | 仅用于合格数据；游标缺口显式返回。 |
+| `execution_event_cleanup_enabled` | 全局 settings | `false` | 防止灰度时删除历史；评审启用后与删除原子推进保留下界。 |
 | `execution_parser_raw_sample_enabled` | 全局 settings | `false` | 默认不保留原始样本；临时启用仍有脱敏和大小/期限限制。 |
 
 ## 非功能需求
 
 - **性能**：Fencing/Outbox/脱敏不得造成无界锁等待或事件积压；p50/p95、Outbox lag、恢复时间目标在 Phase 0 基线后冻结。
-- **兼容**：既有 Run 状态、事件类型、SSE `id`、React/Codex 公共契约与历史配置保持兼容；新增字段采用扩展/回填，不改历史迁移。
+- **兼容**：既有 Run 状态、事件类型、SSE `id`、React/Codex 公共契约与历史配置保持兼容；新增字段采用扩展/回填，不改历史迁移。SSE 仅可增加文档约定的保留 `_execution` 元数据，既有 data 字段和瞬时 delta 行为不变。
 - **多租户**：凭据、grant、Workspace、事件、usage、诊断和审计全部绑定可信 tenant/scope，跨租户默认拒绝。
 - **安全**：不可信执行没有“关闭沙箱以提高可用性”的模式；Secret 不明文落库/日志/事件，网络与文件默认拒绝。
 - **可靠性**：所有多步写入具备事务边界和可重入恢复；终态唯一、最终事件一致、资源与配额可核对。
@@ -212,4 +214,4 @@
 | AC-13 | SSE 在大于单页事件量下断线重连、丢通知、非法/过旧游标和终态追赶。 | 保留期内无静默缺口，event_id 去重、SSE id 兼容；过旧游标明确 409，终态与最终事件一致。 | FR-13；G5 |
 | AC-14 | 重复/重放同一 usage，旧 Worker 迟到 usage，供应商发送修正和缺失字段。 | 同源只计一次，旧 epoch 拒绝，修正可追溯，未知不填零，聚合可重建。 | FR-14；G6 |
 | AC-15 | 注入 malformed、未知类型、超限 payload、连续解析失败和含 Secret 样本。 | 诊断分类/关联/率限正确，样本脱敏；按策略 skip/quarantine/fail，无事件风暴或 Secret 泄露。 | FR-15；G6 |
-| AC-16 | 灰度启用/回滚各能力，升级规划迁移并运行 React/Codex、Run/API/SSE 与历史数据回归。 | 安全校验不可被开关绕过；迁移可在线扩展/回填，回滚不删数据；Phase 0 diff 为零。 | FR-16；G7 |
+| AC-16 | 灰度启用/回滚各能力，升级规划迁移并运行 React/Codex、Run/API/SSE 与历史数据回归。 | 安全校验不可被开关绕过；迁移可在线扩展/回填，回滚不删数据；除文档约定的 SSE `_execution` 附加元数据外，Phase 0 行为回归 diff 为零。 | FR-16；G7 |

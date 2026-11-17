@@ -1209,6 +1209,7 @@ class RecordingBarrier:
         *,
         run_id: UUID,
         owner: UUID | None,
+        lease_epoch: int | None = None,
         execution_id: UUID,
         payloads: Mapping,
     ) -> str:
@@ -1216,6 +1217,7 @@ class RecordingBarrier:
             {
                 "run_id": run_id,
                 "owner": owner,
+                "lease_epoch": lease_epoch,
                 "execution_id": execution_id,
                 "payloads": dict(payloads),
             }

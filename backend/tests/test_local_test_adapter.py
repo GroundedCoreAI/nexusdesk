@@ -338,6 +338,32 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "workspace/workspace_provider.py",
         "workspace/workspace_manager.py",
     }
+    # Phase 6: credentials, durable events, reliability and security land as
+    # implementation subpackages of agent_execution, and the Docker/network
+    # sandbox pieces extend the existing host package.
+    phase6_modules = {
+        "credentials/__init__.py",
+        "credentials/broker.py",
+        "credentials/models.py",
+        "credentials/repository.py",
+        "credentials/vault.py",
+        "events/__init__.py",
+        "events/diagnostics.py",
+        "events/envelope.py",
+        "events/outbox.py",
+        "events/replay.py",
+        "events/usage.py",
+        "reliability/__init__.py",
+        "reliability/ownership.py",
+        "reliability/recovery.py",
+        "reliability/retry.py",
+        "security/__init__.py",
+        "security/redaction.py",
+        "host/docker_sandbox_provider.py",
+        "host/egress_proxy.py",
+        "host/launch_plan.py",
+        "host/network_policy.py",
+    }
     implementation_packages = {
         "registry",
         "adapters",
@@ -346,6 +372,10 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "instructions",
         "host",
         "workspace",
+        "credentials",
+        "events",
+        "reliability",
+        "security",
     }
     execution_marker = "agent_platform.core_platform.agent_execution."
 
@@ -374,6 +404,7 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         | phase3_instruction_modules
         | phase4_host_modules
         | phase4_workspace_modules
+        | phase6_modules
     )
     actual_modules = {str(path.relative_to(package_root)) for path in package_root.rglob("*.py")}
     assert actual_modules == expected_modules
