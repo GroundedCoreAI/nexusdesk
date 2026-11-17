@@ -6,7 +6,6 @@
 (3) recovery fences/takes over the claim (new epoch) before cleanup runs under
     the new ownership.
 """
-import asyncio
 import os
 from uuid import uuid4
 
@@ -150,7 +149,7 @@ async def _claim(repo, tenant, owner):
 async def test_recovery_fences_epoch_before_cleanup_runs(repo):
     repository, tenant, engine = repo
     owner_a, owner_b = uuid4(), uuid4()
-    run_id, claimed = await _claim(repository, tenant, owner_a)
+    run_id, _claimed = await _claim(repository, tenant, owner_a)
     await repository.cancel(run_id, tenant)
     async with engine.begin() as conn:
         await conn.execute(
@@ -187,7 +186,7 @@ async def test_recovery_fences_epoch_before_cleanup_runs(repo):
 async def test_live_worker_reaper_uses_confirmed_recovery(repo):
     repository, tenant, engine = repo
     owner = uuid4()
-    run_id, claimed = await _claim(repository, tenant, owner)
+    run_id, _claimed = await _claim(repository, tenant, owner)
     await repository.cancel(run_id, tenant)
     async with engine.begin() as conn:
         await conn.execute(

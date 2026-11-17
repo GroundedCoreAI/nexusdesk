@@ -17,7 +17,6 @@ from agent_platform.applications.platform_runtime.runtime_hooks import (
 )
 from agent_platform.core_platform.agent_execution.contracts import AgentEvent
 from agent_platform.core_platform.agent_execution.events.envelope import (
-    EventProducerIdentity,
     from_agent_event,
 )
 from agent_platform.core_platform.agent_runtime.repository import RunRepository

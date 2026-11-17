@@ -9,7 +9,6 @@ import shutil
 import socket
 import subprocess
 import threading
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -102,16 +101,20 @@ async def test_allowlist_proxy_permits_allowed_and_denies_metadata(tmp_path):
         proxy_endpoint=EgressProxyEndpoint(host="host.docker.internal", port=proxy.port),
     )
     # The sandbox reaches the proxy; the proxy enforces the allowlist.
-    allowed_spec = _spec((
-        "/bin/sh", "-c",
-        f"wget -T5 -q -O- http://example.com/ 2>/dev/null && echo ALLOWED "
-        f"|| echo PROXY_PATH",
-    ))
+    allowed_spec = _spec(
+        (
+            "/bin/sh",
+            "-c",
+            "wget -T5 -q -O- http://example.com/ 2>/dev/null && echo ALLOWED || echo PROXY_PATH",
+        )
+    )
     reservation = await provider.prepare(allowed_spec, run_id=uuid4())
     plan = provider.launch_plan(reservation, allowed_spec, working_dir=workdir)
     # Point the proxy env at our test proxy (the plan already carries it).
     assert any("host.docker.internal" in v for _, v in plan.environment)
-    result = subprocess.run(list(plan.argv), capture_output=True, text=True, timeout=30, check=False)
+    await asyncio.to_thread(
+        subprocess.run, list(plan.argv), capture_output=True, text=True, timeout=30, check=False
+    )
     proxy.close()
     # The proxy saw the request; the sandbox used the managed path.
     assert proxy.allow_hits + proxy.deny_hits >= 0  # proxy is contactable
