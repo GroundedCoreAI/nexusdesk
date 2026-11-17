@@ -2,6 +2,7 @@
 
 > Status: Approved acceptance baseline; pending implementation and execution (not currently accepted, and untrusted execution remains disabled)
 > Created: 2026-11-02
+> Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner; phase acceptance separated from high-risk capability enablement, with the independent security and SRE approval exception fully retained; technical criteria and hard gates unchanged)
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence while retaining independent security and SRE approval for untrusted execution)
 > Revised: 2026-11-16 (separated direct-continue development entry from final acceptance prerequisites; corrected migration IDs and additive SSE compatibility)
 > Basis: `01-business-goals.en.md` (G1–G7 and success metrics), `02-requirements.en.md` (AC-1–AC-16); test execution is governed by `04-test-plan.en.md`

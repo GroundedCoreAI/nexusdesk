@@ -3,11 +3,12 @@
 > Status: Pending implementation (execute before this phase goes live; not currently accepted)
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off)
+> Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner, phase acceptance separated from high-risk capability enablement; technical criteria and hard gates unchanged)
 > Basis: `01-business-goals.md` (G1–G6 and success metrics), `02-requirements.md` (AC-1–AC-12); test execution is governed by `04-test-plan.md`
 
 ## 1. Acceptance Scope and Responsibility
 
-Unlock Stage B only after Stage A proves stable on controlled real Codex CLI, with evidence for both Protocols' ACs, trusted-tenant boundaries, process cleanup, and switch rollback. By default, the acceptance owner organizes, confirms Stage unlock records, and records decisions while the executor prepares environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, security, or SRE roles. Developer self-verification proves conformance to this document, not real trusted-tenant user acceptance or an independent security audit.
+Unlock Stage B only after Stage A proves stable on controlled real Codex CLI, with evidence for both Protocols' ACs, trusted-tenant boundaries, process cleanup, and switch rollback. By default, the acceptance owner organizes, confirms Stage unlock records, and records decisions while the executor prepares environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, security, or SRE roles, create no multi-role sign-off sheet, and run no independent UAT round. Developer self-verification proves conformance to this document, not real trusted-tenant user acceptance or an independent security audit. Phase acceptance does not constitute authorization to enable high-risk capabilities such as untrusted multi-tenant code execution or production engine routing; such enablement requires a separate independent security and operations approval record.
 
 ## 2. Acceptance Environments and Prerequisites
 
@@ -75,6 +76,7 @@ Use these only to supplement common UI and error behavior that automation does n
 - **Pass**: A1–A12 and C1–C10 all pass; M1–M2 are complete or have equivalent automated evidence; no P0/P1 remains, and no real-Codex environment item is `pending_env`.
 - **Conditional pass**: only non-security, non-Stage-gate, non-hard-gate P2/P3 residuals remain, each with owner/deadline and an explanation from the acceptance owner in the record below; every veto item still passes.
 - **Fail**: any veto item, Stage ordering, A/C criterion, or real-environment coverage fails; after fixes, rerun affected items and regressions.
+- **Enablement note**: phase acceptance does not automatically authorize high-risk capability enablement; enablement requires a separate approval record.
 
 Produce the Phase 5 Acceptance Report with the Stage A unlock record, A/C evidence links, key manual checks, engineering measurements, residuals, and the single record below; multi-role signatures are not required.
 

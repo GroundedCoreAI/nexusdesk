@@ -4,12 +4,13 @@
 > Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; acceptance runs independently per slice only after the phase is reactivated
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off; phase remains deferred)
+> Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner, phase acceptance separated from high-risk capability enablement; technical criteria and hard gates unchanged)
 > Basis: `01-business-goals.en.md` (G1~G11 and success metrics), `02-requirements.en.md` (AC-1~AC-22), `03-technical-design.en.md` (S7-01~S7-09), and `04-test-plan.en.md` (P7-UT/IT/CM)
 > Baseline statement: Business and performance baselines are unmeasured pending Phase 0; comparative metrics without baselines remain pending and cannot pass
 
 ## 1. Acceptance Scope and Responsibility
 
-After the phase is reactivated, verify applicable ACs, reauthorization, no duplicate side effects, and flag-rollback evidence independently for each slice. Passing one slice approves neither other slices nor any specific vendor Adapter. For each slice, the acceptance owner confirms scope and records the decision while the executor prepares environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, finance, SRE, or Adapter-reviewer roles. Developer self-verification proves conformance to this document, not real-user acceptance or an independent security audit. Approval separation of duties, tenancy, Secrets, usage, quotas, and rollback remain technical hard gates even when one person holds multiple responsibilities.
+After the phase is reactivated, verify applicable ACs, reauthorization, no duplicate side effects, and flag-rollback evidence independently for each slice. Passing one slice approves neither other slices nor any specific vendor Adapter. For each slice, the acceptance owner confirms scope and records the decision while the executor prepares environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, finance, SRE, or Adapter-reviewer roles, create no multi-role sign-off sheet, and run no independent UAT round. Developer self-verification proves conformance to this document, not real-user acceptance or an independent security audit. Approval separation of duties, tenancy, Secrets, usage, quotas, and rollback remain technical hard gates even when one person holds multiple responsibilities. Phase acceptance does not by itself authorize the enablement of any high-risk capability or subsequent phase.
 
 ## 2. Acceptance Environments and Prerequisites
 
@@ -112,6 +113,7 @@ Every slice also executes all applicable C1~C12. A21/A22 are shared release gate
 - **Single-slice conditional pass**: only non-hard-gate P2/P3 residuals remain, each with owner, deadline, impact, and an explanation from the acceptance owner in the record below; security, tenancy, side-effect, usage/double-charge, and other hard gates all pass, and canary scope is explicitly limited.
 - **Fail**: any veto or A/C criterion fails, a Phase dependency/baseline is missing, rollback fails, or pending/skip is recorded as passed. Reverify affected A/C and regressions after fixes.
 - **Phase 7 overall pass**: every slice in the final approved scope has an independent pass record. One slice's decision or a vendor Adapter count cannot establish overall success. Lightweight acceptance does not change the current deferred status.
+- **Enablement note**: phase or single-slice acceptance does not automatically authorize high-risk capability enablement; enablement requires a separate approval record.
 
 Each slice produces a “Phase 7 / S7-xx Acceptance Report” with scope and flag, A/C evidence links, key manual checks, necessary raw performance/lock/EXPLAIN data, migration/CI/canary/rollback evidence, residuals, and the single record below; multi-role signatures are not required.
 

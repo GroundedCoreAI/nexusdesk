@@ -8,11 +8,12 @@
 > Revised: 2026-11-13 (T4 rework rulings R-17–R-22: trusted policy-revision entry point, capability settings home and TTL floor, single Effective projection, non-bypassable Available narrowing)
 > Revised: 2026-11-13 (A4 clarifies the start-blocking boundary between required-capability missing and policy narrowing, per R-16)
 > Revised: 2026-11-12 (development entry versus final gates, real C11, flag matrix, and post-acceptance seed)
+> Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner, phase acceptance separated from high-risk capability enablement; technical criteria and hard gates unchanged)
 > Basis: `01-business-goals.md` (G1–G4, success metrics), `02-requirements.md` (AC-1–AC-11), `04-test-plan.md`
 
 ## 1. Scope and Lightweight Responsibility
 
-Verify actual evidence for AC-1–AC-11, C1–C11, and M1–M3 across compatibility, security, snapshots, performance, four locales, and rollback. The acceptance owner organizes and records one conclusion; the executor prepares environments, performs supplemental checks, and organizes evidence. They may be the same person. Invent no independent product/QA/business/security/operations roles or multi-role sign-off. Developer self-verification is neither real-user acceptance nor independent audit.
+Verify actual evidence for AC-1–AC-11, C1–C11, and M1–M3 across compatibility, security, snapshots, performance, four locales, and rollback. The acceptance owner organizes and records one conclusion; the executor prepares environments, performs supplemental checks, and organizes evidence. They may be the same person. Invent no independent product/QA/business/security/operations roles or multi-role sign-off. Developer self-verification is neither real-user acceptance nor independent audit. Phase acceptance does not by itself authorize the enablement of any high-risk capability or subsequent phase.
 
 ## 2. Development Entry, Acceptance Preconditions, and Final Launch Gates
 
@@ -79,6 +80,7 @@ Only supplement actual UI/rollback checks not fully covered by automation. Recor
 - **Pass**: A1–A11 and C1–C11 all pass; M1–M3 complete/equivalent; no P0/P1; rollback evidence complete; no final-launch blockers.
 - **Conditional pass**: only non-hard-gate P2/P3 items unrelated to security, compatibility, snapshots, C11, or rollback, each with owner/deadline and acceptance-owner explanation; never for veto items.
 - **Fail**: any AC/hard gate fails, missing real baseline prevents a compatibility verdict, elevation/cross-scope/disclosure/silent non-React degradation occurs, or C11 lacks valid measurements.
+- **Enablement note**: phase acceptance does not automatically authorize high-risk capability enablement; enablement requires a separate approval record.
 
 Only after actual acceptance create bilingual `07-acceptance-report.md/.en.md`, containing A/C evidence, raw C11 measurements, M checks, migration/rollback, open items, and this single record.
 
