@@ -26,6 +26,10 @@ from agent_platform.core_platform.agent_execution.reliability.ownership import (
     FencingDenialRecorder,
     OwnershipDenied,
 )
+from agent_platform.core_platform.agent_execution.reliability.retry import (
+    RetryInput,
+    classify_retry,
+)
 from agent_platform.core_platform.agent_runtime.hooks import RuntimePersistenceHooks
 from agent_platform.core_platform.agent_runtime.notify import QUEUE_CHANNEL, channel
 from agent_platform.core_platform.agent_runtime.schemas import (
@@ -1239,8 +1243,20 @@ class RunRepository:
                 return None
             if original["error_code"] == "cancellation_unconfirmed":
                 return None
+            # Enforce the approved retry classifier (FR-10): only proven
+            # pre-launch, side-effect-free failure (or an explicitly idempotent
+            # Outbox) may auto-retry. Ambiguous timeout/disconnect/worker-lost
+            # with unknown policy must never auto-retry.
             policy = original["side_effect_policy"]
-            if isinstance(policy, dict) and policy.get("side_effects") is True:
+            phase = "pre_launch"
+            if (
+                original["error_code"] in {"run_timeout", "external_write_disconnect"}
+                or original["error_code"] == "worker_lost"
+            ):
+                phase = "ambiguous"
+            side_effects = policy.get("side_effects") is True if isinstance(policy, dict) else False
+            decision = classify_retry(RetryInput(phase, side_effects=side_effects))
+            if decision.action != "retry":
                 return None
             exists = await conn.scalar(
                 text("""SELECT 1 FROM runtime_runs WHERE retry_of_run_id=:id
