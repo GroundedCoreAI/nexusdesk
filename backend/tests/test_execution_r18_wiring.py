@@ -188,9 +188,11 @@ async def test_host_start_consumes_grant_before_spawn_and_revokes_on_terminal(en
         working_dir=workdir,
         ownership=ownership,
         credential_ref=credential.credential_ref,
-        engine_id="codex-cli",
-        protocol_id="cli_exec",
-        workspace_id="default",
+        broker_audience={
+            "engine_id": "codex-cli",
+            "protocol_id": "cli_exec",
+            "workspace_id": "default",
+        },
     )
     assert managed is not None
     # The grant is consumed exactly once and revoked on terminal.
@@ -242,9 +244,11 @@ async def test_host_start_denied_grant_yields_no_spawn(env, tmp_path):
             working_dir=workdir,
             ownership=ownership,
             credential_ref=credential.credential_ref,
-            engine_id="codex-cli",
-            protocol_id="cli_exec",
-            workspace_id="default",
+            broker_audience={
+                "engine_id": "codex-cli",
+                "protocol_id": "cli_exec",
+                "workspace_id": "default",
+            },
         )
     async with env["engine"].connect() as conn:
         procs = await conn.scalar(

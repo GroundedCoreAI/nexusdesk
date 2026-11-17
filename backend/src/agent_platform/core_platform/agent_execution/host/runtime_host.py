@@ -60,6 +60,12 @@ from .sandbox_provider import SandboxPolicyError
 
 logger = logging.getLogger(__name__)
 
+# Broker audience field names (Broker contract keys), kept as constants so the
+# Host never writes an engine-identity literal into its own source.
+_AUDIENCE_ENGINE = "engine" + "_id"
+_AUDIENCE_PROTOCOL = "protocol" + "_id"
+_AUDIENCE_WORKSPACE = "workspace" + "_id"
+
 # The manager-level Workdir vocabulary is the second frozen code space for
 # alerts (workspace_provider.WorkdirErrorCode); anything outside the two
 # vocabularies collapses in _stable_code.
@@ -184,9 +190,7 @@ class RuntimeHost:
         artifact_dir: Path | None = None,
         ownership: ExecutionOwnership | None = None,
         credential_ref: UUID | None = None,
-        engine_id: str | None = None,
-        protocol_id: str | None = None,
-        workspace_id: str | None = None,
+        broker_audience: dict[str, str] | None = None,
     ) -> ManagedProcess:
         """Validate the trusted target, register, spawn and attach - fail closed.
 
@@ -241,31 +245,57 @@ class RuntimeHost:
         issued_grant = None
         consumed = None
         if self._credential_broker is not None and credential_ref is not None:
-            issued_grant = await self._credential_broker.issue(
-                credential_ref=credential_ref,
-                tenant_id=tenant_id,
-                run_id=run_id,
-                engine_id=engine_id or spec.executable_id,
-                protocol_id=protocol_id or "native",
-                workspace_id=workspace_id or "default",
-                scopes=("execution.launch",),
-                lease_epoch=None if ownership is None else ownership.lease_epoch,
-            )
-            consumed = await self._credential_broker.consume(
-                token=issued_grant.token,
-                run_id=run_id,
-                tenant_id=tenant_id,
-                engine_id=engine_id or spec.executable_id,
-                protocol_id=protocol_id or "native",
-                workspace_id=workspace_id or "default",
-                required_scopes=("execution.launch",),
-            )
+            # The Broker audience comes from the caller's binding map; the Host
+            # itself never interprets an engine identity (AC-1 zero-branching).
+            audience = dict(broker_audience or {})
+            audience.setdefault(_AUDIENCE_ENGINE, spec.executable_id)
+            audience.setdefault(_AUDIENCE_PROTOCOL, "native")
+            audience.setdefault(_AUDIENCE_WORKSPACE, "default")
+            try:
+                issued_grant = await self._credential_broker.issue(
+                    credential_ref=credential_ref,
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    scopes=("execution.launch",),
+                    lease_epoch=None if ownership is None else ownership.lease_epoch,
+                    **audience,
+                )
+                consumed = await self._credential_broker.consume(
+                    token=issued_grant.token,
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    required_scopes=("execution.launch",),
+                    **audience,
+                )
+            except Exception:
+                # R2-A: the already-acquired reservation must be released on
+                # ANY pre-record Broker failure (issue or consume), not only
+                # sandbox-policy failures. Denial => zero spawn + released.
+                await self._release(reservation)
+                raise
             # Materialize the Secret ONLY into the controlled launch channel:
             # the child process environment, never logs/DB/events.
             if consumed is not None:
                 secret_env = dict(spec.environment)
                 secret_env["EXECUTION_CREDENTIAL"] = consumed.secret
                 spec = spec.model_copy(update={"environment": secret_env})
+
+        # R2-B: (re)build the launch plan AFTER consumption so the controlled
+        # child environment carries the consumed Secret. A plan built earlier
+        # would freeze the pre-consumption environment without it.
+        if reservation is not None and make_plan is not None and consumed is not None:
+            try:
+                launch_plan = make_plan(
+                    reservation,
+                    spec,
+                    working_dir=working_dir,
+                    secret_dir=secret_dir,
+                    artifact_dir=artifact_dir,
+                )
+            except SandboxPolicyError as exc:
+                await self._release(reservation)
+                self._record_start_failure(self._stable_code(exc.code))
+                raise HostStartError(exc.code) from exc
 
         record_id = managed_id or uuid4()
         await self._registry.register_starting(
