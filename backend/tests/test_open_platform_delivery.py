@@ -42,7 +42,7 @@ async def _bound_application(client, application, **options):
     response = await client.post(
         ROOT,
         json={
-            "name": "应用交付",
+            "name": "应用交付 " + uuid4().hex[:8],
             "service_application_id": application["id"],
             **options,
         },

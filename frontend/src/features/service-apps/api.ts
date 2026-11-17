@@ -8,6 +8,7 @@ import {
     type ApplicationConversationRun,
     type ApplicationConversationTurn,
     type ApplicationDetail,
+    type ApplicationDelivery,
     type ApplicationExperience,
     type ApplicationInput,
     type ApplicationOverview,
@@ -894,4 +895,59 @@ export async function switchChannelVersion(channelId: string, applicationVersion
             body: JSON.stringify({ application_version: applicationVersion }),
         },
     );
+}
+
+export async function getApplicationDelivery(
+    key: string,
+    versionPage = 1,
+    versionPageSize = 5,
+): Promise<ApplicationDelivery> {
+    const raw = record(await api<Raw>(
+        `/service-apps/${encodeURIComponent(key)}/delivery${queryString({
+            version_page: versionPage,
+            version_page_size: versionPageSize,
+        })}`,
+    ));
+    return {
+        id: text(raw.id),
+        key: text(raw.key),
+        name: text(raw.name),
+        status: text(raw.status) as ApplicationDelivery['status'],
+        published_version: nullableNumber(raw.published_version),
+        published_at: raw.published_at ? text(raw.published_at) : null,
+        draft_revision: number(raw.draft_revision, 1),
+        has_unpublished_changes: boolean(raw.has_unpublished_changes),
+        open_applications: array<Raw>(raw.open_applications).map(item => ({
+            id: text(item.id),
+            name: text(item.name),
+            enabled: boolean(item.enabled),
+            version_pin: nullableNumber(item.version_pin),
+            embed_enabled: boolean(item.embed_enabled),
+            hosted: boolean(item.hosted),
+            hosted_key: item.hosted_key ? text(item.hosted_key) : null,
+            origins: array<string>(item.origins).map(origin => text(origin)),
+            active_keys: number(item.active_keys, 0),
+        })),
+        channels: array<Raw>(raw.channels).map(item => ({
+            id: text(item.id),
+            name: text(item.name),
+            provider: text(item.provider),
+            enabled: boolean(item.enabled),
+            application_version: number(item.application_version, 1),
+            credentials_configured: boolean(item.credentials_configured),
+        })),
+        versions: array<Raw>(raw.versions).map(item => ({
+            version: number(item.version, 1),
+            created_at: text(item.created_at),
+            channel_references: number(item.channel_references, 0),
+            open_application_references: number(item.open_application_references, 0),
+            follows_latest_references: number(item.follows_latest_references, 0),
+        })),
+        version_total: number(
+            raw.version_total,
+            array<Raw>(raw.versions).length,
+        ),
+        version_page: number(raw.version_page, versionPage),
+        version_page_size: number(raw.version_page_size, versionPageSize),
+    };
 }

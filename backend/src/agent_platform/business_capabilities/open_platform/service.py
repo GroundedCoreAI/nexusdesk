@@ -95,10 +95,23 @@ class OpenPlatform:
 
     async def save(self, tenant, actor, body, app_id=None):
         async with self.engine.begin() as c:
+            # Names are the human handle across keys, logs and the impact
+            # dialogs, so they must stay unique per tenant. Archived rows still
+            # count: they can be restored, and purging releases the name.
             if app_id:
                 old = await self.application(c, tenant, app_id, True)
+                if old["archived"]:
+                    raise DomainError("application_archived", 409)
                 if old["revision"] != body.revision:
                     raise DomainError("application_revision_conflict", 409)
+                if body.name != old["name"] and await one(
+                    c,
+                    "SELECT id FROM open_applications WHERE tenant_id=:t AND name=:n AND id<>:id",
+                    t=tenant,
+                    n=body.name,
+                    id=app_id,
+                ):
+                    raise DomainError("application_name_taken", 409)
                 if "service_application_id" not in body.model_fields_set:
                     # An update that omits the delivery subject keeps the
                     # current binding: partial writers (e.g. the integration
@@ -119,6 +132,13 @@ class OpenPlatform:
                                 "service_application_version": current["version_pin"],
                             }
                         )
+            elif await one(
+                c,
+                "SELECT id FROM open_applications WHERE tenant_id=:t AND name=:n",
+                t=tenant,
+                n=body.name,
+            ):
+                raise DomainError("application_name_taken", 409)
             delivery = await self._validate_service_application(c, tenant, body)
             if delivery is not None:
                 # Binding a Service Application derives the agent grant
@@ -405,7 +425,9 @@ class OpenPlatform:
             raise DomainError("key_expiry_must_be_future", 422)
         secret = "opk_" + secrets.token_urlsafe(36)
         async with self.engine.begin() as c:
-            await self.application(c, tenant, app_id, True)
+            app = await self.application(c, tenant, app_id, True)
+            if app["archived"]:
+                raise DomainError("application_archived", 409)
             if replace_id:
                 required(
                     await one(
@@ -449,7 +471,9 @@ class OpenPlatform:
 
     async def revoke(self, tenant, actor, app_id, key_id):
         async with self.engine.begin() as c:
-            await self.application(c, tenant, app_id, True)
+            app = await self.application(c, tenant, app_id, True)
+            if app["archived"]:
+                raise DomainError("application_archived", 409)
             required(
                 await one(
                     c,
@@ -460,6 +484,163 @@ class OpenPlatform:
             )
             await audit(c, tenant, actor, "open_key.revoked", key_id, app_id=str(app_id))
         return {"revoked": True}
+
+    async def archive_impact(self, tenant, app_id):
+        """Count what archiving one application would affect, for the UI.
+
+        The numbers are the confirm-dialog contract: active API keys that will
+        be revoked, the embed / hosted page switches that will stop answering,
+        the request volume of the last 30 days and the bound Service
+        Application count. Kept read-only so the dialog can refresh without
+        side effects.
+        """
+
+        async with self.engine.connect() as c:
+            app = await self.application(c, tenant, app_id)
+            if app["archived"]:
+                raise DomainError("application_archived", 409)
+            keys = await one(
+                c,
+                """SELECT count(*) AS n FROM open_api_keys WHERE app_id=:a AND revoked_at IS NULL
+                AND (expires_at IS NULL OR expires_at>now())""",
+                a=app_id,
+            )
+            embed = await one(
+                c,
+                "SELECT enabled,hosted FROM open_embed_configs WHERE app_id=:a",
+                a=app_id,
+            )
+            requests = await one(
+                c,
+                """SELECT count(*) AS n FROM open_request_logs WHERE app_id=:a
+                AND created_at>now()-interval '30 days'""",
+                a=app_id,
+            )
+            targets = await one(
+                c,
+                """SELECT count(*) AS n FROM open_application_targets
+                WHERE app_id=:a AND target_kind='service_application'""",
+                a=app_id,
+            )
+            return {
+                "name": app["name"],
+                "active_keys": int(keys["n"]),
+                "embed_enabled": bool(embed["enabled"]) if embed else False,
+                "hosted_enabled": bool(embed["hosted"]) if embed else False,
+                "requests_30d": int(requests["n"]),
+                "service_applications": int(targets["n"]),
+            }
+
+    async def archive(self, tenant, actor, app_id):
+        """Soft-archive one application.
+
+        Keys are revoked (records kept, ``revoked_at`` written) so every
+        credential stops working immediately; embed / hosted / webhook rows are
+        kept untouched so a restore brings the whole configuration back. There
+        is no physical delete: request logs are the only audit trail of the
+        open API and must survive.
+        """
+
+        async with self.engine.begin() as c:
+            app = await self.application(c, tenant, app_id, True)
+            if app["archived"]:
+                return app
+            await execute(
+                c,
+                "UPDATE open_api_keys SET revoked_at=COALESCE(revoked_at,now()) WHERE app_id=:a AND revoked_at IS NULL",
+                a=app_id,
+            )
+            row = await one(
+                c,
+                """UPDATE open_applications SET archived=true,revision=revision+1,updated_at=now()
+                WHERE id=:id AND tenant_id=:t RETURNING *""",
+                id=app_id,
+                t=tenant,
+            )
+            await audit(c, tenant, actor, "open_application.archived", app_id, app_id=str(app_id))
+            return row
+
+    async def restore(self, tenant, actor, app_id):
+        async with self.engine.begin() as c:
+            app = await self.application(c, tenant, app_id, True)
+            if not app["archived"]:
+                raise DomainError("application_not_archived", 409)
+            row = await one(
+                c,
+                """UPDATE open_applications SET archived=false,revision=revision+1,updated_at=now()
+                WHERE id=:id AND tenant_id=:t RETURNING *""",
+                id=app_id,
+                t=tenant,
+            )
+            await audit(c, tenant, actor, "open_application.restored", app_id, app_id=str(app_id))
+            return row
+
+    async def purge_impact(self, tenant, app_id):
+        """Count what a permanent delete would physically remove, for the UI.
+
+        Only archived applications may be purged. Unlike the archive preview
+        these numbers are rows that will be cascade-deleted and can never be
+        recovered, so the dialog shows totals (all keys, all request logs)
+        rather than the "active" slices used by the archive preview.
+        """
+
+        async with self.engine.connect() as c:
+            app = await self.application(c, tenant, app_id)
+            if not app["archived"]:
+                raise DomainError("application_not_archived", 409)
+            keys = await one(
+                c, "SELECT count(*) AS n FROM open_api_keys WHERE app_id=:a", a=app_id
+            )
+            logs = await one(
+                c, "SELECT count(*) AS n FROM open_request_logs WHERE app_id=:a", a=app_id
+            )
+            sessions = await one(
+                c, "SELECT count(*) AS n FROM open_sessions WHERE app_id=:a", a=app_id
+            )
+            runs = await one(
+                c, "SELECT count(*) AS n FROM open_runs WHERE app_id=:a", a=app_id
+            )
+            webhooks = await one(
+                c, "SELECT count(*) AS n FROM open_webhooks WHERE app_id=:a", a=app_id
+            )
+            targets = await one(
+                c,
+                """SELECT count(*) AS n FROM open_application_targets
+                WHERE app_id=:a AND target_kind='service_application'""",
+                a=app_id,
+            )
+            return {
+                "name": app["name"],
+                "keys": int(keys["n"]),
+                "request_logs": int(logs["n"]),
+                "sessions": int(sessions["n"]),
+                "runs": int(runs["n"]),
+                "webhooks": int(webhooks["n"]),
+                "service_applications": int(targets["n"]),
+            }
+
+    async def purge(self, tenant, actor, app_id):
+        """Physically delete one archived application and all of its rows.
+
+        Every child table (keys, sessions, runs, request logs, webhooks,
+        embed / hosted config, targets, rate windows, sync state) cascades via
+        foreign keys, so one statement is enough. Irreversible by design: the
+        caller must already have confirmed through the archive flow, and only
+        archived applications can be purged.
+        """
+
+        async with self.engine.begin() as c:
+            app = await self.application(c, tenant, app_id, True)
+            if not app["archived"]:
+                raise DomainError("application_not_archived", 409)
+            await audit(c, tenant, actor, "open_application.purged", app_id, app_id=str(app_id))
+            await execute(
+                c,
+                "DELETE FROM open_applications WHERE id=:id AND tenant_id=:t",
+                id=app_id,
+                t=tenant,
+            )
+            return {"purged": True, "id": str(app_id), "name": app["name"]}
 
     async def authenticate(self, authorization, request):
         if authorization and authorization.startswith("Bearer chat_") and len(authorization) < 200:
@@ -487,7 +668,7 @@ class OpenPlatform:
             row = await one(
                 c,
                 """SELECT k.id,k.app_id,a.tenant_id FROM open_api_keys k JOIN open_applications a ON a.id=k.app_id
-                WHERE k.token_hash=:hash AND a.tenant_id=:t""",
+                WHERE k.token_hash=:hash AND a.tenant_id=:t AND NOT a.archived""",
                 hash=digest(authorization[7:]),
                 t=self.p.settings.tenant_id,
             )
@@ -515,6 +696,10 @@ class OpenPlatform:
 
     async def check(self, c, identity, lock=False):
         app = await self.application(c, identity.tenant, identity.app_id, lock)
+        if app["archived"]:
+            # Archived applications answer every open-API path as if they did
+            # not exist: no feature negotiation, no state leakage.
+            raise DomainError("application_not_found", 404)
         if identity.external_user_id:
             session = await self.enterprise.validate_session(c, session_id=identity.key_id)
             if (

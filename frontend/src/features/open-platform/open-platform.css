@@ -18,3 +18,7 @@
 
 @media(max-width:1000px){.op-debug{grid-template-columns:1fr}.op-heading{flex-wrap:wrap}.op-stats{gap:24px}}
 
+.op-impact{margin:16px 0;padding:0;list-style:none;display:grid;gap:8px}
+.op-impact li{background:#f8f8fb;border:1px solid #eef0f5;border-radius:8px;padding:8px 12px;font-size:13px;color:#4a4a58;line-height:1.6}
+.op-impact-name{display:flex;align-items:center;gap:8px;margin:14px 0 0;padding:10px 12px;background:#f8f8fb;border:1px solid #eef0f5;border-radius:8px;font-size:13px;color:#81818f}
+.op-impact-name .ant-typography{color:#252434;overflow-wrap:anywhere}
