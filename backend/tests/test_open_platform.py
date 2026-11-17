@@ -32,7 +32,10 @@ async def test_application_status_filter_preserves_total_and_search(platform):
 
 
 async def application(client, aid, **options):
-    r = await client.post(ROOT, json={"name": "Enterprise", "agent_ids": [aid], **options})
+    # Application names are unique per tenant, and a single test often creates
+    # several applications, so every call needs its own handle.
+    name = options.pop("name", "Enterprise " + uuid4().hex[:8])
+    r = await client.post(ROOT, json={"name": name, "agent_ids": [aid], **options})
     assert r.status_code == 201, r.text
     app = r.json()
     r = await client.post(f"{ROOT}/{app['id']}/keys", json={})

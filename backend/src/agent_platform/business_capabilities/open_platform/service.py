@@ -112,13 +112,6 @@ class OpenPlatform:
                     id=app_id,
                 ):
                     raise DomainError("application_name_taken", 409)
-            elif await one(
-                c,
-                "SELECT id FROM open_applications WHERE tenant_id=:t AND name=:n",
-                t=tenant,
-                n=body.name,
-            ):
-                raise DomainError("application_name_taken", 409)
                 if "service_application_id" not in body.model_fields_set:
                     # An update that omits the delivery subject keeps the
                     # current binding: partial writers (e.g. the integration
@@ -139,6 +132,13 @@ class OpenPlatform:
                                 "service_application_version": current["version_pin"],
                             }
                         )
+            elif await one(
+                c,
+                "SELECT id FROM open_applications WHERE tenant_id=:t AND name=:n",
+                t=tenant,
+                n=body.name,
+            ):
+                raise DomainError("application_name_taken", 409)
             delivery = await self._validate_service_application(c, tenant, body)
             if delivery is not None:
                 # Binding a Service Application derives the agent grant
