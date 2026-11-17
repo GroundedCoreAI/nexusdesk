@@ -2,25 +2,21 @@
 
 > Status: Local T2–T11 and R17 live validation are complete, as are the R18 production remediation and focused validation; see 06/07 and their appendices. Minimal R18 live on/off revalidation is complete; the overall result remains conditionally passed
 > Created: 2026-11-02
+> Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner; removed multi-role responsibility/sign-off, the business-metric table, and standalone UAT; technical criteria and hard gates unchanged)
 > Revised: 2026-11-12 (R18 and current-status alignment; design-phase content remains a historical plan)
 > Basis: `01-business-goals.md` (G1–G4), `02-requirements.md` (US-1–US-4, FR-1–FR-6, AC-1–AC-9), `03-technical-design.md`, `04-test-plan.md`, `08-implementation-breakdown.md` (R1–R18, T8–T11)
 
 ## 1. Acceptance Organization and Evidence Boundaries
 
-| Role | Responsibility |
-|---|---|
-| Backend owner | Explain implementation boundaries against R1–R18/T1–T7 and provide off/on path, call-chain, error/cancellation, and resource-cleanup evidence |
-| QA | Execute every primary 04 test and create bilingual 06; prepare equivalent controlled fixtures, serial/parallel diffs, real PG, both SSE APIs, Memory, and rollback evidence |
-| SRE/release owner | Verify default off, explicit on, off API/on Worker, mixed Workers, existing rows, rolling restart, and rollback; review low-cardinality observability |
-| Security/platform reviewer | Review UUID/nil identity boundaries, cross-tenant isolation, public errors, HTTP/SSE/log/metric redaction, and dependency direction |
-| Product/business acceptor | Decide whether replies, tools, Memory, events, errors, and cancellation remain compatible and sign accepted residual items |
-| Human acceptance owner | Create bilingual 07 only after A1–A9 primary scenarios and C1–C5 have actual evidence, stating passed/conditionally passed/failed and signoff |
+Apply minimal-core-team acceptance: a single acceptance owner, who may execute and reach the verdict personally; where assistance is needed, an executor may be designated and may be the same person. No backend/QA/SRE/security/business/human-acceptance-owner multi-role responsibility table, no multi-role sign-off sheet, and no standalone UAT round. Developer self-verification does not claim real-user or independent acceptance.
+
+Passing phase acceptance does not authorize later phases or any high-risk capability; enabling a high-risk capability requires a separate independent security and operations approval record.
 
 **Evidence boundaries**:
 
-- Code merge, automated testing, and human acceptance are three independent states; Phase 1 merging into integration through `0a6c4b5` substitutes for no human acceptance.
-- T8 local/dedicated-environment execution, CI runs, and T9 human operations separately record executor, time, environment, commit, commands/operations, and raw evidence links; none signs for another.
-- Every primary 04 test has an independent 06 row and every 05 A/C item an independent 07 judgment. Skip, unrun work, and insufficient environment are never passed; insufficient real environment or human signoff is `pending_env`.
+- Code merge, automated testing, and the acceptance verdict are three independent states; Phase 1 merging into integration through `0a6c4b5` substitutes for no acceptance.
+- Local/dedicated-environment execution, CI runs, and human operations separately record executor, time, environment, commit, commands/operations, and raw evidence links; none signs for another.
+- Every primary 04 test has an independent 06 row and every 05 A/C item an independent 07 judgment. Skip, unrun work, and insufficient environment are never passed; insufficient real environment is `pending_env`.
 - The current design freeze creates no Phase 2 06/07 and prefills no result. Create them only after actual T8/T9 completion; T11 only appends post-acceptance sections and never rewrites earlier evidence.
 
 ## 2. Environments, Data, and Entry Conditions
@@ -103,25 +99,17 @@ Only after T8 testing and T9 formal acceptance complete may T10 add Phase 2-spec
 - **Pass criteria**: No added/modified migration, ORM, public schema, or frontend exists; public API routes, schemas, status codes, and error bodies have zero changes, and R15's existing internal manual-header 400, internal typed-after 422, and Open typed-after/header 422 are never interchanged or rewritten. Current heads dynamically match the baseline, directory drift is zero, and existing rows remain compatible; run_id is limited to logs/traces, metric labels are low-cardinality, and no nil/secret/input/config/history/raw stack appears; Phase 1 DTO/Registry/LocalTest, Repository/hooks, and API behavior remain unchanged; every test/A/C item has locatable evidence. Every P2 functional UT/IT/CM must pass, while CM08 evidence-integrity/measurement boundaries may pass independently; insufficient real performance evidence leaves only that submetric pending_env, does not negate functional exit, and caps T9 at conditionally passed.
 - **Evidence**: Read-only command output, version-directory inventory/hashes, public-route/schema/status-code/error-body and frontend diffs, A4's actual ASGI/FastAPI route records for all three invalid-cursor boundaries plus valid max/strict replay, cross-tenant and observability samples, actual tests, and CI links; an unrun local full suite is never called fully passing.
 
-## 4. Business and Performance Metric Measurement
+## 4. Performance Measurement (the only release-relevant metric)
 
-| Metric | Method and pass criterion | Evidence boundary |
-|---|---|---|
-| Reply/tool/Memory parity | Compare under A1/A2 strict serial rules, parallel partial order/multisets, and real PG transactions; stable fields have zero unintended difference | Preserve original values and exact canonical paths; never globally remove IDs or hide differences |
-| Event/SSE/terminal compatibility | Replay every cursor under A4, inspect contiguous per-Run sequence, transient delta, tool.replay cursor, terminal-last position, and unique terminal state | Internal/Open evidence is separate; AgentEvent sequence never replaces DB/SSE ID |
-| Cancellation/timeout/Lease convergence | Under A6/A7 controlled races and real PG, inspect classification, cleanup, and late-result protection | Outer timeout is not functional duration; non-cooperative coroutines have no forced-kill promise |
-| Rollback recoverability | After all-off rolling restart, new Runs use only legacy with no migration/data repair/client change | Preserve before/after configuration, process, and path evidence |
-| Performance | Paired sampling under the reproducible method below in an equivalent real external environment shows new-path nearest-rank p95 end-to-end latency increase ≤5%; report first token, raw paired overhead, and error rate independently | Canonical diff cannot replace performance; test doubles support functional evidence only, and insufficient real external environment is `pending_env`, never claimed as passing |
-| Post-acceptance examples | T10/T11 idempotent seed and quickstart off/on/rollback appendix actually complete | Append only new evidence; failures reopen A8/C items |
+Correctness metrics such as reply/tool/Memory parity, event/SSE/terminal compatibility, cancellation/timeout/Lease convergence, and rollback recoverability are all proven by the criteria and evidence of A1–A9 and C1–C5; no separate business-metric acceptance round is held. Post-acceptance examples follow the A8 post-acceptance appendix. The only additional metric that may change the release decision is end-to-end performance, with the criterion and sampling method below:
 
-### 4.1 Reproducible Performance Sampling and Calculation
-
-1. **Fixed matched pairs**: Collect at least **30 valid matched pairs per fixed scenario**, each containing one legacy-off and one orchestrator-on execution of identical input. First run **five matched warm-up pairs** to warm processes, connections, and caches; label warm-ups explicitly and exclude them from the 30 sample pairs. Never silently discard failures/anomalous samples; record error rate separately.
-2. **Equivalent environment and order**: Use the same host/container resources, script, real model and Profile, tool configuration, data, and dependency versions. Alternate off/on or use a balanced order, preserving order, nonsensitive environment identifiers, and raw samples so path is not confused with time/cache trends.
-3. **p95 algorithm**: Sort old/new end-to-end samples independently in ascending order and use **nearest-rank**, taking the 1-based `ceil(0.95 × N)`th value; for N=30 take the **29th** value. The target is `p95(new) <= p95(old) * 1.05`; do not substitute interpolation or report only means.
-4. **Independent metrics**: Preserve raw old/new end-to-end values, paired delta/ratio, raw Adapter overhead, first token, and error rate for every pair. Present paired overhead separately from p95; canonical diff cannot replace or hide raw latency.
-5. **External-latency boundary**: Real external model/tool latency is included in end-to-end measurements and must not be deducted to conceal regression. Adapter-internal overhead may be reported separately for diagnosis but cannot replace the end-to-end target.
-6. **Insufficient environment**: Test doubles, mock/demo models, and MockTransport prove functionality/measurement mechanics only, never production performance. Without real external models/tools or an equivalent environment, mark the performance submetric `pending_env`; functional tests and CM08 evidence integrity may pass independently, but T9 is capped at conditionally passed/pending performance evidence, never fully passed.
+- **Target**: paired sampling under the reproducible method in an equivalent real external environment; new-path nearest-rank p95 end-to-end latency increase ≤5%; report first token, raw paired overhead, and error rate independently. Canonical diff cannot replace performance; test doubles support functional evidence only.
+- **Sampling**: at least 30 valid matched pairs per fixed scenario, each containing one legacy-off and one orchestrator-on execution of identical input; first run five matched warm-up pairs, explicitly labelled and excluded from the 30; never silently discard failed/anomalous samples, and record error rate separately.
+- **Equivalent environment and order**: same host/container resources, script, real model and Profile, tool configuration, data, and dependency versions; alternate off/on or use a balanced order, preserving order, nonsensitive environment identifiers, and raw samples.
+- **p95 algorithm**: sort old/new end-to-end samples ascending independently and use nearest-rank, taking the 1-based `ceil(0.95 × N)`th value; for N=30 take the 29th; target `p95(new) <= p95(old) * 1.05`; no interpolation or mean-only reporting.
+- **Independent metrics**: preserve raw old/new end-to-end values, paired delta/ratio, raw Adapter overhead, first token, and error rate per pair; present paired overhead separately from p95; canonical diff cannot replace or hide raw latency.
+- **External-latency boundary**: real external model/tool latency is included in end-to-end measurement and must not be deducted; Adapter-internal overhead may be reported separately for diagnosis but cannot replace the end-to-end target.
+- **Insufficient environment**: test doubles, mock/demo models, and MockTransport prove functionality/measurement mechanics only, never production performance. Without real external models/tools or an equivalent environment, mark the performance submetric `pending_env`; functional tests and CM08 evidence integrity may pass independently, but T9 is capped at conditionally passed/pending performance evidence, never fully passed.
 
 ## 5. Compliance Checks
 
@@ -133,25 +121,23 @@ Only after T8 testing and T9 formal acceptance complete may T10 add Phase 2-spec
 | C4 | Configuration, release, and dependency governance | Default off, startup application, fingerprint exclusion, enabled fail-fast, mixed Workers/rollback are evidenced; Core has no reverse application dependency, second ReAct, or new service | AC-3/8, R3/R8/R9, P2-CM-02/06 |
 | C5 | Lifecycle, functional/performance exit, and evidence integrity | T8 creates bilingual 06 and T9 bilingual 07 only after execution; every test/A/C item has an actual result, all functional UT/IT/CM pass, and CM08 evidence-integrity/measurement boundaries pass independently. Local/CI/human evidence remains separate, performance pending_env is honest with T9 capped at conditionally passed, and T10/T11 occur after acceptance, append only, and reopen on failure | AC-8/9, R11/R12, all primary/appendix cases in 04 |
 
-## 6. Pass Criteria, Residual Items, and Signoff
+## 6. Pass Criteria, Residuals, and Acceptance Record
 
 ### 6.1 Formal Primary Acceptance (T9)
 
-- A1–A9 **primary scenarios** and C1–C5 all have evidence and meet their criteria; the T8 primary-test exit is met and no P0/P1 remains open.
-- P2 permits conditional acceptance only with explicit product/business acceptance and an owner, deadline, and impact scope; P3 items are scheduled.
+- **Pass**: A1–A9 **primary scenarios** and C1–C5 all have evidence and meet their criteria; the T8 primary-test exit is met and no P0/P1 remains open.
+- **Conditional pass**: only non-hard-gate P2 residuals remain, each with owner, deadline, and impact scope, confirmed by the acceptance owner in the record below; P3 items are scheduled; security, compatibility, and sensitive information cannot be waived.
+- **Fail**: any A/C primary scenario or C criterion is unmet, or pending/skip is written as pass; re-run affected items and related regressions after remediation.
 - If the real external environment cannot support performance measurement, mark only the performance submetric `pending_env`; this does not negate fully green functional UT/IT/CM or independently passed CM08 evidence-integrity/measurement boundaries, but T9 overall is capped at conditionally passed/pending performance evidence and can never be fully passed.
-- Acceptors sign conclusion, date, commit, evidence links, and residual items; code merge or green CI alone cannot replace signoff.
+- The acceptance owner records the verdict, date, commit, evidence links, and residual items; code merge or green CI alone cannot replace the verdict.
+- **Release note**: passing phase acceptance does not authorize later phases or any high-risk capability.
 
 ### 6.2 Post-Acceptance Appendix (T11)
 
 T10/T11 does not retroactively become a prerequisite performed before T9; actual results must be appended to 06/07 and the A8/C5 appendix. If seed or quickstart validation fails, reopen A8 and related C items and restore the conclusion only after fix and revalidation; retain prior report text and failure evidence.
 
-### 6.3 Signoff Table (Completed During Actual Acceptance)
+### 6.3 Single Acceptance Record (completed during actual acceptance; no multi-role sign-off)
 
-| Role | Name | Conclusion | Date | Evidence/notes |
-|---|---|---|---|---|
-| Backend owner | To be completed | Pending acceptance | To be completed | To be completed |
-| QA | To be completed | Pending acceptance | To be completed | To be completed |
-| SRE/release owner | To be completed | Pending acceptance | To be completed | To be completed |
-| Security/platform reviewer | To be completed | Pending acceptance | To be completed | To be completed |
-| Product/business acceptor | To be completed | Pending acceptance | To be completed | To be completed |
+| Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
+|---|---|---|---|---|---|
+| To be filled | To be filled (may be the acceptance owner) | To be filled | To be filled | Pending acceptance | To be filled |

@@ -5,11 +5,12 @@
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off)
 > Revised: 2026-11-14 (08 R-1: planned migration renumbered `0054`→`0059_execution_runtime_host`, actual predecessor `0058_agent_execution_metadata`)
 > Revised: 2026-11-14 (coordination rulings 08 R-11/R-12: A6 evidence includes same-Run prepare convergence; A9 evidence includes persisted over-quota observations with structured excess alerts, not warn-only records)
+> Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner, phase acceptance separated from high-risk capability enablement; technical criteria and hard gates unchanged)
 > Basis: `01-business-goals.md` (G1–G5, success metrics), `02-requirements.md` (AC-1–AC-12); test execution follows `04-test-plan.md`
 
 ## 1. Acceptance Scope and Responsibility
 
-Confirm every AC and retain evidence for cleanup, isolation, resource, and observability criteria. Untrusted execution remains disabled; out-of-bound file operations, mistaken kills, silently ignored resources, and non-drainable rollback are unacceptable. By default, the acceptance owner organizes and records the decision while the executor prepares isolated environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, security, or operations roles. Developer self-verification proves conformance to this document, not real-user acceptance or an independent security audit.
+Confirm every AC and retain evidence for cleanup, isolation, resource, and observability criteria. Untrusted execution remains disabled; out-of-bound file operations, mistaken kills, silently ignored resources, and non-drainable rollback are unacceptable. By default, the acceptance owner organizes and records the decision while the executor prepares isolated environments, performs supplementary checks, and organizes evidence; one person may hold both responsibilities. Do not invent independent product, QA, business, security, or operations roles, create no multi-role sign-off sheet, and run no independent UAT round. Developer self-verification proves conformance to this document, not real-user acceptance or an independent security audit. Phase acceptance does not constitute authorization to enable high-risk capabilities such as untrusted multi-tenant code execution or production engine routing; such enablement requires a separate independent security and operations approval record.
 
 ## 2. Acceptance Environments and Prerequisites
 
