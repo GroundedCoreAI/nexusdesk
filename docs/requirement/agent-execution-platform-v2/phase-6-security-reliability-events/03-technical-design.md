@@ -11,7 +11,7 @@
 
 | 核查面 | 2026-11-16 已核实事实 | 约束性设计结论 |
 |---|---|---|
-| 迁移图 | 单一 head 为 `0067_merge_heads`，连接 `0066_hosted_web` 与 `0059_execution_runtime_host`；旧规划 0056/0057 已占用。 | 规划 `0068_execution_fencing`（文件 `0068_execution_fencing_event_outbox.py`），`down_revision="0067_merge_heads"`；再规划 `0069_execution_credential`，`down_revision="0068_execution_fencing"`；T-02 前立即重验。 |
+| 迁移图 | 设计时单一 head 为 `0067_merge_heads`；集成分支后续合入开放平台迁移 `0068_open_application_archive` 与 `0069_open_app_unique_name`，现为基线 head。 | 规划 `0070_execution_fencing`（文件 `0070_execution_fencing_event_outbox.py`），`down_revision="0069_open_app_unique_name"`；再规划 `0071_execution_credential`，`down_revision="0070_execution_fencing"`（08 R-20）；T-02 前立即重验。 |
 | Run/Lease | `agent_runtime/repository.py` 已按 `owner`、`lease_until`、取消和终态做条件校验；`claim` 不递增 epoch，`reap` 直接失败/取消过期行而非接管所有权。 | 新增数据库单调 `lease_epoch`，把 `(run_id, owner, lease_epoch)` 贯穿所有 Worker/Host/Workspace/replay 变更；保持 Run=一次尝试并复用队列。 |
 | Worker/编排器 | `worker.py` 持有 Worker UUID 与 heartbeat；`ExecutionContext` 已携带 `owner`；`ExecutionOutcome.usage` 已存在，但 `RuntimeWorker.finish` 未持久化。 | 扩展这些既有接缝；Worker 不增加 Engine 分支，Fencing Token 不进入客户端 DTO 或 AgentConfig。 |
 | 事件契约 | `contracts/events.py` 已定义 `AgentEvent.event_id`、`schema_version="v1"`、执行身份、Adapter 本地 sequence、source、timestamp、payload 和 trace ID；`orchestrator.py` 当前只向 Worker 传 `event_type` 与 `payload`。 | 保留既有信封并传到持久化。Adapter 本地 sequence 不等于 Run 内持久 `runtime_events.seq`；数据库仍是顺序权威。 |
@@ -31,8 +31,8 @@
 
 ### 选定：在现有模块上按三个垂直切片扩展
 
-1. **可靠性/事件底座**：0068、所有权/Fencing、持久事件身份/去重/Outbox、SSE 缺口、usage 与诊断。
-2. **执行安全**：0069、Vault/Broker/脱敏、强 launch/network/mount enforcement，以及 Host/Workspace 接线。
+1. **可靠性/事件底座**：0070、所有权/Fencing、持久事件身份/去重/Outbox、SSE 缺口、usage 与诊断。
+2. **执行安全**：0071、Vault/Broker/脱敏、强 launch/network/mount enforcement，以及 Host/Workspace 接线。
 3. **集成恢复与发布**：取消确认、重试/配额对账、组合/部署、聚焦回归、真实演练与可信报告。
 
 这是保留现有队列、Run/API/SSE 契约、Host、Workspace、Adapter 边界、durable event bus 与模块化单体的最小方案；每个切片都可在不开放不可信租户的情况下测试。
@@ -49,8 +49,8 @@
 
 | 层 | 具体文件 | 改动 | 溯源 |
 |---|---|---|---|
-| 迁移 | `backend/migrations/versions/0068_execution_fencing_event_outbox.py`（新） | epoch/取消/清理/重试/保留元数据、事件身份/去重、Outbox 触发器/表、usage 台账。 | FR-7~FR-14、FR-16 |
-| 迁移 | `backend/migrations/versions/0069_execution_credential_security.py`（新） | Execution 凭据版本、短期 grant 元数据与吊销索引。 | FR-1、FR-2、FR-16 |
+| 迁移 | `backend/migrations/versions/0070_execution_fencing_event_outbox.py`（新） | epoch/取消/清理/重试/保留元数据、事件身份/去重、Outbox 触发器/表、usage 台账。 | FR-7~FR-14、FR-16 |
+| 迁移 | `backend/migrations/versions/0071_execution_credential.py`（新） | Execution 凭据版本、短期 grant 元数据与吊销索引。 | FR-1、FR-2、FR-16 |
 | 所有权/恢复 | `core_platform/agent_execution/reliability/{ownership,recovery,retry}.py`（新）；`agent_runtime/{repository,worker}.py`；`tool_gateway/replay.py` | 内部所有权值对象、条件写协调、恢复/重试决策；SQL 权威仍在 Repository。 | FR-7~FR-10 |
 | 事件持久化 | `core_platform/agent_execution/events/{envelope,outbox,replay}.py`（新）；`agent_runtime/repository.py`；`orchestration/orchestrator.py` | 传递既有 AgentEvent、区分 Adapter/持久 sequence、去重、Outbox 调度与 replay gap。 | FR-11~FR-13 |
 | 既有 durable bus | `core_platform/platform_services/events.py` | 为 runtime Outbox 增加明确的 enqueue 确认操作；既有 `publish` 行为保持兼容。 | FR-12 |
@@ -67,7 +67,7 @@
 
 上述 `core_platform/...` 均位于 `backend/src/agent_platform/` 下。既有模块是修改点，不得复制成第二套实现。
 
-## 4. 数据模型与迁移 0068
+## 4. 数据模型与迁移 0070
 
 ### 4.1 `runtime_runs` 扩展
 
@@ -126,7 +126,7 @@
 - 开启 epoch 强制前必须排干旧 Worker；不支持新旧强制混写。回滚同样先停新执行并排干新 Writer，再运行旧代码；旧代码不得删除新列/表。
 - 正常回滚保留扩展；有数据 downgrade 需显式导出/保护，不属于常规回滚。
 
-## 5. 数据模型与迁移 0069
+## 5. 数据模型与迁移 0071
 
 ### 5.1 `execution_credentials`
 
@@ -285,9 +285,9 @@ Adapter 发出既有 AgentEvent
 ## 10. 上线与回滚
 
 1. 保留直接继续的开发入口，同时记录 Phase 0 与完整 Phase 5 验收尚未完成；代码就绪不得写成阶段最终验收。
-2. 重验 head，落地 0068，回填/校验并排干旧 Writer，再启用 epoch 强制。先开 Outbox 持久化、后开 dispatcher；每次切换前后对账 pending/缺失行。
+2. 重验 head，落地 0070，回填/校验并排干旧 Writer，再启用 epoch 强制。先开 Outbox 持久化、后开 dispatcher；每次切换前后对账 pending/缺失行。
 3. 发布 SSE 附加元数据与默认关闭的保留清理，再发布 usage/诊断；启用删除前演练旧二进制读取与显式 replay gap。
-4. 落地 0069 与凭据管理，不可信执行保持关闭；任何真实 Secret provider 场景前先在受控测试 Run 灰度 Broker/脱敏。
+4. 落地 0071 与凭据管理，不可信执行保持关闭；任何真实 Secret provider 场景前先在受控测试 Run 灰度 Broker/脱敏。
 5. 只有 support probe 与真实攻击矩阵通过才启用强 Provider；`execution_untrusted_tenants_enabled=true` 还须所有 A/C 门禁及独立安全、SRE/运维批准。
 6. 回滚关闭新执行、吊销 grant、隔离/清理活动沙箱、排干 Writer、关闭新发布器，同时保留表/事件/usage/凭据；旧二进制运行前对账 Outbox，禁止用删数据 downgrade 作为常规回滚。
 7. 任一 Secret 泄露、成功逃逸、有效过期写、重复计费、静默事件缺口或终态/账务不一致都停止新执行并阻断验收；五轮协调上限不是豁免硬门禁的依据。

@@ -4,7 +4,7 @@
 > 创建：2026-11-02
 > 修订：2026-11-11（小团队轻量验收：复用自动化证据，保留不可信执行独立审批例外）
 > 修订：2026-11-16（按代码核查迁移号、直接写入覆盖、SSE 附加兼容与聚焦回归复用）
-> 依据：`02-requirements.md`（FR-1~FR-16、AC-1~AC-16）、`03-technical-design.md`（规划迁移 0068/0069、Fencing、Outbox、Vault/Broker、Sandbox）、`08-implementation-breakdown.md`
+> 依据：`02-requirements.md`（FR-1~FR-16、AC-1~AC-16）、`03-technical-design.md`（规划迁移 0070/0071、Fencing、Outbox、Vault/Broker、Sandbox）、`08-implementation-breakdown.md`
 
 ## 1. 测试范围与原则
 
@@ -86,8 +86,8 @@
 | P6-IT-19 | SSE 非法/过旧游标与终态追赶 | 400/409 语义正确；订阅查询竞态不漏最终事件，终态一致。 | AC-13 |
 | P6-IT-20 | usage 重复/重放/旧 Worker/修正 | 复现 AC-14；同源一次、旧 epoch 拒绝、修正与重建一致。 | AC-14 |
 | P6-IT-21 | parser 连续失败/超限/Secret 样本 | 复现 AC-15；分类/率限/脱敏和 skip/quarantine/fail 正确，无事件风暴。 | AC-15 |
-| P6-IT-22 | 0068 在线扩展/回填/校验 | 从实际 head 升级；存量 seq/event_id/schema/source 正确，无重复/重编号，锁预算有记录。 | AC-16；FR-7~FR-14 |
-| P6-IT-23 | 0069 凭据迁移与数据保护 | 从实际 head 升级成功；公共查询无明文，有数据降级按策略保护。 | AC-16；FR-1、FR-2 |
+| P6-IT-22 | 0070 在线扩展/回填/校验 | 从实际 head 升级；存量 seq/event_id/schema/source 正确，无重复/重编号，锁预算有记录。 | AC-16；FR-7~FR-14 |
+| P6-IT-23 | 0071 凭据迁移与数据保护 | 从实际 head 升级成功；公共查询无明文，有数据降级按策略保护。 | AC-16；FR-1、FR-2 |
 | P6-IT-24 | 灰度/回滚与 React/Codex/API/SSE 回归 | 复现 AC-16；安全校验不降级、Outbox 协调无遗漏、Phase 0 diff 为零。 | AC-16 |
 | P6-IT-25 | 故障后资源/配额/账务全量对账 | 混合 SIGKILL、断网、磁盘满和进程 hang 后，Run/Host/usage/Outbox 对账无残留。 | AC-8~AC-10、AC-12、AC-14 |
 
@@ -95,7 +95,7 @@
 
 | 编号 | 核对项 | 通过标准 | 溯源 |
 |---|---|---|---|
-| P6-CM-01 | 迁移 head 与历史保护 | 0068/0069 仅规划号；实施前重核实际 head/依赖，0001~0067 及已合入迁移不修改。 | FR-16；G7 |
+| P6-CM-01 | 迁移 head 与历史保护 | 0070/0071 仅规划号；实施前重核实际 head/依赖，0001~0069（含已合入的开放平台 0068/0069）及已合入迁移不修改。 | FR-16；G7 |
 | P6-CM-02 | 在线迁移与回填 | expand/backfill/validate/switch 证据完整；存量事件确定性 ID、无重编号、无长锁失控。 | FR-11、FR-16 |
 | P6-CM-03 | Secret 与审计扫描 | DB 公共视图、日志、事件、SSE、错误、诊断、产物、审计无明文 Secret/grant Token。 | FR-1~FR-3 |
 | P6-CM-04 | 不可信开放门禁 | 默认关闭；任一安全/可靠性硬项未过均无法启用，配置不能绕过。 | FR-4、FR-16 |
@@ -112,7 +112,7 @@
 - React/Codex 公共契约、Session Resume、RuntimeHost/Workspace、审批/输入和历史 Agent 配置。
 - `test_gateway_credentials.py`、工具凭据/egress/Workspace 套件：新 Execution Broker/Sandbox 不削弱已有边界。
 - 事件 v1 历史 fixtures、瞬时 model.delta、SSE `after`/`Last-Event-ID`、分页 200 条边界与现有客户端消费。
-- 全迁移链路和实施时实际 head 的副本升级；0068/0069 的回填、旧二进制读取、回滚协调、直接写入 Outbox 覆盖与内部 tool.replay 发布排除与数据保护。
+- 全迁移链路和实施时实际 head 的副本升级；0070/0071 的回填、旧二进制读取、回滚协调、直接写入 Outbox 覆盖与内部 tool.replay 发布排除与数据保护。
 - 按 `08-implementation-breakdown.md` §3 复用或重跑既有用例；未变化的通过用例不在每个任务后全量重跑，受影响用例必须重跑。
 - Phase 0 未测基线项保留“待 Phase 0”，不得通过平均性能或抽样结果掩盖 P0/P1 场景。
 

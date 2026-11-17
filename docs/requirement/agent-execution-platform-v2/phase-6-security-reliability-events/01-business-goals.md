@@ -65,7 +65,7 @@
 - Lease Epoch/Fencing Token、Worker 丢失检测、迟到结果/终态保护、取消确认、超时清理、重试副作用与配额释放。
 - 事件 schema/version/source/event_id/sequence、去重、Event Store/事务性 Outbox、SSE 重连/游标重放与保留期缺口处理。
 - usage 幂等聚合、parser diagnostics、迁移/回填/协调任务、指标告警、对抗与故障注入演练。
-- 规划迁移标识 `0068_execution_fencing`（文件 `0068_execution_fencing_event_outbox.py`）与 `0069_execution_credential`，以及兼容发布和回滚方案。
+- 规划迁移标识 `0070_execution_fencing`（文件 `0070_execution_fencing_event_outbox.py`）与 `0071_execution_credential`，以及兼容发布和回滚方案。
 
 **不包含**（属于后续阶段 / 明确不做）：
 

@@ -1,4 +1,4 @@
-"""Phase 6 T-07: migration 0069 credential/version/grant/audit schema."""
+"""Phase 6 T-07: migration 0071 credential/version/grant/audit schema."""
 
 import asyncio
 import os
@@ -13,8 +13,8 @@ from alembic.script import ScriptDirectory
 from test_ticket_migrations import migrate, query
 
 BACKEND = Path(__file__).resolve().parents[1]
-REVISION = "0069_execution_credential"
-PREVIOUS_REVISION = "0068_execution_fencing"
+REVISION = "0071_execution_credential"
+PREVIOUS_REVISION = "0070_execution_fencing"
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def _execute(url, sql, *params):
     return asyncio.run(run())
 
 
-def test_0069_revision_chain_is_a_single_head_on_0068():
+def test_0071_revision_chain_is_a_single_head_on_0070():
     migration = _migration()
     scripts = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     assert migration.revision == REVISION
@@ -87,7 +87,7 @@ def test_0069_revision_chain_is_a_single_head_on_0068():
     assert len(REVISION) <= 32
 
 
-def test_0069_upgrade_contract_is_additive_credential_schema(monkeypatch):
+def test_0071_upgrade_contract_is_additive_credential_schema(monkeypatch):
     migration = _migration()
     recorder = _Recorder()
     monkeypatch.setattr(migration, "op", recorder)
@@ -110,7 +110,7 @@ def test_0069_upgrade_contract_is_additive_credential_schema(monkeypatch):
     assert "DROP TABLE runtime_events" not in joined
 
 
-def test_0069_downgrade_refuses_populated_credentials_before_dropping(monkeypatch):
+def test_0071_downgrade_refuses_populated_credentials_before_dropping(monkeypatch):
     migration = _migration()
     recorder = _Recorder()
     monkeypatch.setattr(migration, "op", recorder)
@@ -128,7 +128,7 @@ def test_0069_downgrade_refuses_populated_credentials_before_dropping(monkeypatc
 
 
 @pytest.mark.postgres
-def test_0069_chain_versions_grants_and_data_preserving_downgrade(migration_database):
+def test_0071_chain_versions_grants_and_data_preserving_downgrade(migration_database):
     url = migration_database
     migrate(url, PREVIOUS_REVISION)
     assert migrate(url, "head").returncode == 0
@@ -235,7 +235,7 @@ def test_0069_chain_versions_grants_and_data_preserving_downgrade(migration_data
 
 
 @pytest.mark.postgres
-def test_0069_empty_downgrade_succeeds(migration_database):
+def test_0071_empty_downgrade_succeeds(migration_database):
     url = migration_database
     migrate(url, PREVIOUS_REVISION)
     migrate(url, "head")

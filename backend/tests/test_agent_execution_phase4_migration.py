@@ -312,7 +312,7 @@ def test_0059_chain_fk_semantics_and_reacts_across_upgrade(migration_database):
     assert query(url, "SELECT version_num FROM alembic_version")[0][0] == head
     assert _tables(url) >= {"execution_workdirs", "runtime_host_processes"}
     # Phase 4's 0059 migration itself is additive. Later Phase 6 migrations
-    # (0068) extend runtime_runs, so the head schema must be exactly the
+    # (0070) extend runtime_runs, so the head schema must be exactly the
     # pre-0059 columns plus that reviewed additive set -- never a rewrite or a
     # dropped legacy column.
     phase6_runtime_columns = {
@@ -487,7 +487,7 @@ def test_0059_chain_fk_semantics_and_reacts_across_upgrade(migration_database):
     _execute(url, "DELETE FROM runtime_runs WHERE id=$1", legacy_run_id)
     assert not query(url, "SELECT 1 FROM runtime_host_processes WHERE id=$1", process_id)
 
-    # 0068 refuses a populated downgrade by design (export-first policy). This
+    # 0070 refuses a populated downgrade by design (export-first policy). This
     # disposable fixture simulates that export by clearing the Phase 6 event,
     # usage, Outbox and denial rows the fresh submit created; the runtime_runs
     # rows the rollback assertion cares about stay in place.

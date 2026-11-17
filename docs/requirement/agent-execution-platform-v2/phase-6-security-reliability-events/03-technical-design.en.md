@@ -11,7 +11,7 @@ The user’s direct-continue instruction authorizes development against the exis
 
 | Area | Verified facts on 2026-11-16 | Binding design consequence |
 |---|---|---|
-| Migration graph | `0067_merge_heads` is the single head, joining `0066_hosted_web` and `0059_execution_runtime_host`. Planned `0056`/`0057` are already occupied. | Plan `0068_execution_fencing` (file `0068_execution_fencing_event_outbox.py`) with `down_revision="0067_merge_heads"`, then `0069_execution_credential` with `down_revision="0068_execution_fencing"`; revalidate immediately before T-02. |
+| Migration graph | At design time `0067_merge_heads` was the single head. The integration branch later merged open-platform migrations `0068_open_application_archive` and `0069_open_app_unique_name`, which now form the base head. | Plan `0070_execution_fencing` (file `0070_execution_fencing_event_outbox.py`) with `down_revision="0069_open_app_unique_name"`, then `0071_execution_credential` with `down_revision="0070_execution_fencing"` (08 R-20); revalidate immediately before T-02. |
 | Run/lease | `agent_runtime/repository.py` conditionally checks `owner`, `lease_until`, cancellation, and terminal state. `claim` does not increment an epoch; `reap` fails or cancels expired rows rather than taking over ownership. | Add a database-owned monotonic `lease_epoch` and propagate `(run_id, owner, lease_epoch)` through every Worker/Host/Workspace/replay mutation. Preserve Run=one attempt and the existing queue. |
 | Worker/orchestrator | `worker.py` owns the Worker UUID and heartbeat task. `ExecutionContext` already carries `owner`. `ExecutionOutcome.usage` exists, but `RuntimeWorker.finish` does not persist it. | Extend these seams; do not add Engine branches to the Worker and do not put fencing tokens in client DTOs or AgentConfig. |
 | Event contract | `contracts/events.py` already defines `AgentEvent.event_id`, `schema_version="v1"`, execution identity, adapter-local sequence, source, timestamp, payload, and trace ID. `orchestrator.py` currently passes only `event_type` and `payload` to the Worker. | Preserve the existing envelope and carry it to persistence. Adapter-local sequence is not the Run-local durable `runtime_events.seq`; the database remains the sequence authority. |
@@ -31,8 +31,8 @@ The user’s direct-continue instruction authorizes development against the exis
 
 ### Selected: extend current modules in three vertical slices
 
-1. **Reliability/event foundation**: migration 0068, ownership/fencing, durable event identity/dedup/Outbox, SSE gaps, usage, and diagnostics.
-2. **Execution security**: migration 0069, Vault/Broker/redaction, strong launch/network/mount enforcement, and Host/Workspace integration.
+1. **Reliability/event foundation**: migration 0070, ownership/fencing, durable event identity/dedup/Outbox, SSE gaps, usage, and diagnostics.
+2. **Execution security**: migration 0071, Vault/Broker/redaction, strong launch/network/mount enforcement, and Host/Workspace integration.
 3. **Integrated recovery and release**: cancellation confirmation, retry/quota reconciliation, composition/deployment, focused regressions, real drills, and honest reports.
 
 This is the smallest approach that preserves the current queue, Run/API/SSE contracts, Host, Workspace, Adapter boundaries, durable event bus, and modular monolith. Each slice is testable without enabling untrusted tenants.
@@ -49,8 +49,8 @@ Implementing every schema and interface first, then wiring all sixteen FRs toget
 
 | Layer | Concrete file(s) | Change | Traceability |
 |---|---|---|---|
-| Migration | `backend/migrations/versions/0068_execution_fencing_event_outbox.py` (new) | Epoch/cancellation/cleanup/retry/retention metadata, event identity/dedup, Outbox trigger/table, usage ledger. | FR-7–FR-14, FR-16 |
-| Migration | `backend/migrations/versions/0069_execution_credential_security.py` (new) | Execution credential versions, short-lived grant metadata, and revocation indexes. | FR-1, FR-2, FR-16 |
+| Migration | `backend/migrations/versions/0070_execution_fencing_event_outbox.py` (new) | Epoch/cancellation/cleanup/retry/retention metadata, event identity/dedup, Outbox trigger/table, usage ledger. | FR-7–FR-14, FR-16 |
+| Migration | `backend/migrations/versions/0071_execution_credential.py` (new) | Execution credential versions, short-lived grant metadata, and revocation indexes. | FR-1, FR-2, FR-16 |
 | Ownership/recovery | `core_platform/agent_execution/reliability/{ownership,recovery,retry}.py` (new); `agent_runtime/{repository,worker}.py`; `tool_gateway/replay.py` | Internal ownership value object, conditional-write coordination, recovery/retry decisions; Repository remains SQL authority. | FR-7–FR-10 |
 | Event persistence | `core_platform/agent_execution/events/{envelope,outbox,replay}.py` (new); `agent_runtime/repository.py`; `orchestration/orchestrator.py` | Carry the existing AgentEvent, distinguish adapter/durable sequence, deduplicate, dispatch Outbox, and calculate replay gaps. | FR-11–FR-13 |
 | Existing durable bus | `core_platform/platform_services/events.py` | Add an explicit acknowledged enqueue operation for runtime Outbox; existing `publish` behavior remains compatible. | FR-12 |
@@ -67,7 +67,7 @@ Implementing every schema and interface first, then wiring all sixteen FRs toget
 
 All `core_platform/...` paths above are under `backend/src/agent_platform/`. Existing modules are modification points, not invitations to create duplicate implementations.
 
-## 4. Data Model and Migration 0068
+## 4. Data Model and Migration 0070
 
 ### 4.1 `runtime_runs` expansion
 
@@ -126,7 +126,7 @@ Use `UNIQUE(run_id, source, source_event_id)`. Duplicate delivery returns the or
 - Old Workers must be drained before epoch enforcement is switched on. Mixed old/new enforcement is not a supported writer configuration. Rollback likewise stops admission and drains new Writers before running old code; old code never deletes new columns/tables.
 - Normal rollback is expansion-preserving. A populated downgrade requires explicit export/protection and is not routine rollback.
 
-## 5. Data Model and Migration 0069
+## 5. Data Model and Migration 0071
 
 ### 5.1 `execution_credentials`
 
@@ -285,9 +285,9 @@ Detailed IDs remain in `04-test-plan.en.md`; unavailable real environments stay 
 ## 10. Rollout and Rollback
 
 1. Preserve the direct-continue development entry while recording that Phase 0 and full Phase 5 acceptance are not complete. Code readiness cannot be presented as final phase acceptance.
-2. Revalidate head, land 0068, backfill/validate, drain old Writers, then enable epoch enforcement. Enable Outbox persistence first and dispatcher later; reconcile pending/missing rows before and after each switch.
+2. Revalidate head, land 0070, backfill/validate, drain old Writers, then enable epoch enforcement. Enable Outbox persistence first and dispatcher later; reconcile pending/missing rows before and after each switch.
 3. Deploy SSE additive metadata and disabled retention cleanup, then usage/diagnostics. Rehearse old-binary reads and explicit replay gaps before enabling deletion.
-4. Land 0069 and credential management with untrusted execution off. Roll out Broker/redaction to controlled test Runs before any Secret-bearing real provider case.
+4. Land 0071 and credential management with untrusted execution off. Roll out Broker/redaction to controlled test Runs before any Secret-bearing real provider case.
 5. Enable the strong provider only after its support probe and real attack matrix pass. `execution_untrusted_tenants_enabled=true` additionally requires every A/C gate and separate independent security and SRE/operations approvals.
 6. Rollback closes new admissions, revokes grants, isolates/cleans active sandboxes, drains Writers, and disables new publishers while preserving tables/events/usage/credentials. Reconcile Outbox before old-binary operation; never use data-deleting downgrade as routine rollback.
 7. Any Secret disclosure, successful escape, effective stale write, duplicate billing, silent event gap, or terminal/accounting inconsistency stops new execution and blocks acceptance. Five coordination rounds are a rework limit, not permission to waive a hard gate.

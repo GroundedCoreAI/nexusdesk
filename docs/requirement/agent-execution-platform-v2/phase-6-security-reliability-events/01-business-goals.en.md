@@ -65,7 +65,7 @@ Events and Runs currently commit in one transaction and SSE supports cursor repl
 - Lease Epoch/Fencing Tokens, Worker-loss detection, late-result/terminal protection, cancellation confirmation, timeout cleanup, retry side effects, and quota release.
 - Event schema/version/source/event_id/sequence, deduplication, Event Store/transactional Outbox, SSE reconnect/cursor replay, and retention-gap handling.
 - Idempotent usage aggregation, parser diagnostics, migration/backfill/reconciliation jobs, metrics/alerts, and adversarial/fault-injection drills.
-- Planned migration identifiers `0068_execution_fencing` (file `0068_execution_fencing_event_outbox.py`) and `0069_execution_credential`, plus compatible rollout and rollback plans.
+- Planned migration identifiers `0070_execution_fencing` (file `0070_execution_fencing_event_outbox.py`) and `0071_execution_credential`, plus compatible rollout and rollback plans.
 
 **Excluded** (later phase / explicitly out of scope):
 

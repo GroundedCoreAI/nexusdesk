@@ -18,7 +18,7 @@ Confirm every AC, zero successful real attacks, consistent data/terminal state/r
 |---|---|
 | Production-like strong-sandbox adversarial environment | Real untrusted tasks, network/file/resource attacks, Secret canaries, and disclosure response. |
 | Multi-Worker/Host fault environment | SIGKILL, lease/heartbeat, late results, cancellation/timeout/cleanup, and quota recovery. |
-| PG migration and event environment | 0068/0069 replica upgrade/backfill, Outbox fault points, usage ledger, and audit. |
+| PG migration and event environment | 0070/0071 replica upgrade/backfill, Outbox fault points, usage ledger, and audit. |
 | Multi-API/SSE environment | Multipage replay, lost notifications, reconnects, expired cursors, and terminal catch-up. |
 | React/Codex regression environment | Phase 0 baseline, historical Runs/events/configuration, and existing execution paths. |
 
@@ -72,7 +72,7 @@ Use these only to supplement client semantics and messaging that automation does
 | C7 | State+event+Outbox+required usage commit atomically, and Event Store is the source of truth. | Must pass | FR-12; G5 |
 | C8 | SSE has no silent gaps within retention, expired cursors return explicit 409, event_id deduplicates, and id=seq remains compatible. | Must pass | FR-13; G5 |
 | C9 | Parser diagnostics are bounded/redacted/rate-limited, and usage source idempotency/corrections are traceable. | Must pass | FR-14, FR-15; G6 |
-| C10 | Recheck head before implementing 0068/0069, expand/backfill online, never modify historical migrations, and retain data on rollback. | Must pass | FR-16; G7 |
+| C10 | Recheck head before implementing 0070/0071, expand/backfill online, never modify historical migrations, and retain data on rollback. | Must pass | FR-16; G7 |
 | C11 | React/Codex, Run/API/SSE, and historical configuration have no behavioral regressions; only documented additive SSE `_execution` metadata is permitted, and baselines pending Phase 0 cannot pass. | Must pass | FR-16; G7 |
 | C12 | The untrusted master switch remains false until independent security and SRE/operations approvals complete; no role may waive it. Usage/accounting hard gates remain proven by A14, C6, C9, and reconciliation evidence and are not waived by removing finance sign-off. | Veto item | FR-16; G1–G7 |
 

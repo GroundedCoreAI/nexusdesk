@@ -10,8 +10,8 @@ The downgrade refuses populated security data and never touches Run history.
 
 from alembic import op
 
-revision = "0069_execution_credential"
-down_revision = "0068_execution_fencing"
+revision = "0071_execution_credential"
+down_revision = "0070_execution_fencing"
 branch_labels = None
 depends_on = None
 
@@ -115,7 +115,7 @@ def downgrade() -> None:
             IF EXISTS (SELECT 1 FROM execution_credentials)
                OR EXISTS (SELECT 1 FROM execution_credential_grants)
                OR EXISTS (SELECT 1 FROM execution_credential_audit) THEN
-                RAISE EXCEPTION 'execution credential 0069 downgrade refused:'
+                RAISE EXCEPTION 'execution credential 0071 downgrade refused:'
                     ' export credential, grant and audit data first';
             END IF;
         END

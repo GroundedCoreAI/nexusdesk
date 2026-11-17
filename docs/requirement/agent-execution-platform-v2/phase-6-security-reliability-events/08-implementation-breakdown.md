@@ -13,17 +13,17 @@
 2. 执行凭据与强隔离底座（T-07～T-08）。
 3. 集成恢复、发布与证据（T-09～T-12）。
 
-备选“平行替换栈”因制造两个事实源被否决；“一次性横向大爆炸”因垂直验证过晚、回滚风险高被否决。T-07 可在 T-03 后与 T-04～T-06 并行，但迁移图中 0069 始终在 0068 之后。任何任务都不得开放不可信执行。
+备选“平行替换栈”因制造两个事实源被否决；“一次性横向大爆炸”因垂直验证过晚、回滚风险高被否决。T-07 可在 T-03 后与 T-04～T-06 并行，但迁移图中 0071 始终在 0070 之后。任何任务都不得开放不可信执行。
 
 | # | 任务与具体完成边界 | 文件（新建/修改） | 依赖 | 快速自检范围 | 溯源 |
 |---|---|---|---|---|---|
 | T-01 | 冻结内部所有权/事件/凭据 DTO 与有界配置默认值；Token 仅在服务端内部；默认值不得开放暴露或删除历史。 | `core_platform/agent_execution/reliability/ownership.py`（新）、`events/envelope.py`（新）、`credentials/models.py`（新）、`platform_settings/settings.py`、settings 测试 | — | 新 DTO/settings 单测；`test_agent_execution_phase4_settings.py`；ruff | FR-1、FR-7、FR-11、FR-16；AC-16；R-3/R-10/R-11 |
-| T-02 | 新增 0068 扩展、确定性事件回填、Outbox 触发器/水位/对账、usage 台账与保数据 downgrade 策略；先重验实际 head。 | `backend/migrations/versions/0068_execution_fencing_event_outbox.py`（新）、`backend/tests/test_execution_migration.py`（新）、迁移 fixtures | T-01 | 全新/存量 PG 升级；重复回填；旧结构可发布插入获得 ID+Outbox，内部 replay 不产生公共 Outbox；锁/耗时证据；head 图检查 | FR-7～FR-14、FR-16；AC-16；R-1/R-4/R-10 |
+| T-02 | 新增 0070 扩展、确定性事件回填、Outbox 触发器/水位/对账、usage 台账与保数据 downgrade 策略；先重验实际 head。 | `backend/migrations/versions/0070_execution_fencing_event_outbox.py`（新）、`backend/tests/test_execution_migration.py`（新）、迁移 fixtures | T-01 | 全新/存量 PG 升级；重复回填；旧结构可发布插入获得 ID+Outbox，内部 replay 不产生公共 Outbox；锁/耗时证据；head 图检查 | FR-7～FR-14、FR-16；AC-16；R-1/R-4/R-10 |
 | T-03 | 实现单调 claim/takeover epoch，并在 snapshot、append/finish、heartbeat、usage、tool replay、process、Workdir 与资源释放上强制所有权；增加独立拒绝审计。 | `agent_runtime/{repository,worker}.py`、`orchestration/{execution_context,orchestrator}.py`、`tool_gateway/replay.py`、`host/process_registry.py`、`workspace/{workspace_provider,workspace_manager}.py`、`reliability/ownership.py`、`backend/tests/test_execution_fencing.py`（新） | T-02 | 新双 Worker/过期写矩阵，以及受影响的既有 claim/cancel/replay/Host/Workdir 用例 | FR-7～FR-9；AC-7～AC-9；R-2/R-12/R-13/R-14 |
 | T-04 | 在 Orchestrator/Worker 间保留 AgentEvent；去重不占持久 seq；通过确认 enqueue 到既有 DurableEventBus 完成 Outbox 调度。 | `events/{envelope,outbox}.py`、`platform_services/events.py`、`agent_runtime/repository.py`、`orchestration/orchestrator.py`、`agent_runtime/worker.py`、`backend/tests/test_execution_{events,outbox}.py`（新） | T-03 | 并发去重、Adapter 本地 vs Run seq、提交/发布前后崩溃、直接写入发布、内部 replay 排除、bus 幂等 | FR-11、FR-12；AC-11、AC-12；R-3/R-4 |
 | T-05 | 新增 SSE 保留命名空间信封元数据与保留下界 400/409；既有字段、`id=seq`、瞬时 delta、终态语义不变；清理仅在显式启用时运行。 | `events/replay.py`、`agent_runtime/repository.py`、`applications/customer_service/runtime_routes.py`、`backend/tests/test_execution_sse.py`（新） | T-04 | 超过 200 条重连、丢 NOTIFY、非法/过旧游标、终态追赶、既有 HTTP/SSE 用例 | FR-13；AC-13；R-10/R-15 |
 | T-06 | 幂等持久化终态/原生 usage，支持修正链与可重建聚合；增加有界分类 parser 诊断，不替换既有 Codex 错误行为。 | `events/{usage,diagnostics}.py`、`orchestration/execution_lifecycle.py`、`agent_runtime/{repository,worker}.py`、`adapters/{react,codex}/*`、`backend/tests/test_execution_{usage,diagnostics}.py`（新） | T-04 | 重复/旧 epoch/修正/缺失 usage；malformed/unknown/oversized/率限/canary；既有 Codex mapper 用例 | FR-14、FR-15；AC-14、AC-15；R-8 |
-| T-07 | 新增 0069、Execution Vault/Broker、管理员元数据/轮换/吊销 API、grant 绑定/TTL、审计、统一脱敏与泄露处置；无 Secret 回读 API，运行时缺密钥不自动创建。 | `backend/migrations/versions/0069_execution_credential_security.py`（新）、`credentials/{models,vault,broker,repository}.py`、`security/redaction.py`、`applications/customer_service/{execution_credential_routes.py,application.py}`、`backend/tests/test_execution_{credentials,redaction,migration}.py` | T-03 | 密文/AAD/绑定/吊销/过期/跨 Run；路由租户/角色；Secret 扫描；PG 迁移 | FR-1～FR-3；AC-1～AC-3；R-11 |
+| T-07 | 新增 0071、Execution Vault/Broker、管理员元数据/轮换/吊销 API、grant 绑定/TTL、审计、统一脱敏与泄露处置；无 Secret 回读 API，运行时缺密钥不自动创建。 | `backend/migrations/versions/0071_execution_credential.py`（新）、`credentials/{models,vault,broker,repository}.py`、`security/redaction.py`、`applications/customer_service/{execution_credential_routes.py,application.py}`、`backend/tests/test_execution_{credentials,redaction,migration}.py` | T-03 | 密文/AAD/绑定/吊销/过期/跨 Run；路由租户/角色；Secret 扫描；PG 迁移 | FR-1～FR-3；AC-1～AC-3；R-11 |
 | T-08 | 扩展现有沙箱 launch 端口，实现真实 Docker 强 Provider、默认拒绝网络/受管 allowlist proxy、cgroup 限制、最小挂载与授权产物路径；Local 保持非强。 | `host/{sandbox_provider,docker_sandbox_provider,network_policy,egress_proxy,process_runner,runtime_host,resource_manager}.py`（新建/修改）、`workspace/execution_workdir.py`、`backend/tests/test_execution_sandbox.py`（新） | T-07 | 所有环境跑纯策略/support；专用环境跑真实 Linux Docker 逃逸、egress、挂载、fork/内存/磁盘与残留测试 | FR-4～FR-6；AC-4～AC-6；R-7 |
 | T-09 | 集成 Worker 丢失、确认取消/超时、可重入清理、副作用感知重试、grant/network/Workdir 清理，以及独立 Run/Host 配额释放。 | `reliability/{recovery,retry}.py`、`agent_runtime/{repository,worker}.py`、`orchestration/orchestrator.py`、`host/{runtime_host,process_supervisor,process_registry}.py`、`workspace/workspace_manager.py`、`backend/tests/test_execution_recovery.py`（新） | T-06、T-08 | SIGKILL/heartbeat/迟到结果；正常/hang/清理失败；启动前 vs 模糊重试；终态/最终事件/配额对账 | FR-8～FR-10；AC-8～AC-10；R-2/R-13 |
 | T-10 | 完成组合/部署接线、准入前启动恢复、Outbox/保留循环、安全关闭、指标告警与无 Secret 示例；保持生产 React selector 与 Stage B 锁定。 | `applications/platform_runtime/runtime_composition.py`、`backend/.env.example`、`deploy/production/.env.example`、`deploy/{quickstart,production}/compose.yaml`、settings/composition 测试 | T-09 | off 状态构造 diff、启动/关闭顺序、env 覆盖/默认值、Secret 扫描、架构门禁 | FR-16；AC-16；R-5/R-6/R-12 |
@@ -40,7 +40,7 @@
 
 **现实**：`0067_merge_heads.py:22–23` 是单一 head，连接 `0066_hosted_web` 与 `0059_execution_runtime_host`；0056/0057 已占用。
 
-**裁定**：revision 标识使用 `0068_execution_fencing`（文件 `0068_execution_fencing_event_outbox.py`；`down_revision="0067_merge_heads"`）与 `0069_execution_credential`（`down_revision="0068_execution_fencing"`）。标识必须适配 `alembic_version.version_num VARCHAR(32)`（R-16）。T-02 动态重验；如有变化，先新增 R-n 并同步 01/03/04/05/08 再实施。
+**裁定**：revision 标识使用 `0070_execution_fencing`（文件 `0070_execution_fencing_event_outbox.py`；`down_revision="0067_merge_heads"`）与 `0071_execution_credential`（`down_revision="0070_execution_fencing"`）。标识必须适配 `alembic_version.version_num VARCHAR(32)`（R-16）。T-02 动态重验；如有变化，先新增 R-n 并同步 01/03/04/05/08 再实施。
 
 ### R-2 — Host、监管、资源与 Workspace 已存在
 
@@ -64,7 +64,7 @@
 
 **现实**：`tool_gateway/replay.py:80–119` 直接递增 event_seq 并插入；seed 也直接写入；`platform_services/events.py:117–327` 已有基于 `memory_tasks` 的至少一次 durable bus。
 
-**裁定**：0068 增加数据库事件身份默认值、面向可发布类型的 AFTER-INSERT Outbox 触发器及灰度水位对账；内部 `tool.replay` 有身份和 Fencing，但绝不向扩展订阅者发布；T-03 为 tool replay 加 Fencing；T-04 给既有 bus 增加确认 enqueue 端口；不新建第二 Event Store 或外部 broker。
+**裁定**：0070 增加数据库事件身份默认值、面向可发布类型的 AFTER-INSERT Outbox 触发器及灰度水位对账；内部 `tool.replay` 有身份和 Fencing，但绝不向扩展订阅者发布；T-03 为 tool replay 加 Fencing；T-04 给既有 bus 增加确认 enqueue 端口；不新建第二 Event Store 或外部 broker。
 
 ### R-5 — 上游验收前置尚未满足（真实需求冲突）
 
@@ -159,9 +159,9 @@
 
 **文档：** R-1 与 01/03 把完整迁移名当作 revision 标识。
 
-**现实：** ``alembic_version.version_num`` 为 ``VARCHAR(32)``；``0068_execution_fencing_event_outbox`` 长 36，规划的 ``0069_execution_credential_security`` 长 33，升级时会截断/失败。
+**现实：** ``alembic_version.version_num`` 为 ``VARCHAR(32)``；``0070_execution_fencing_event_outbox`` 长 36，规划的 ``0071_execution_credential`` 长 33，升级时会截断/失败。
 
-**裁定：** 保留描述性文件名，revision 标识改用 ``0068_execution_fencing`` 与 ``0069_execution_credential``（均不超过 32）。0069 的 ``down_revision`` 为 ``0068_execution_fencing``。任务表中的文件名保持不变，仅标识字符串变化。
+**裁定：** 保留描述性文件名，revision 标识改用 ``0070_execution_fencing`` 与 ``0071_execution_credential``（均不超过 32）。0071 的 ``down_revision`` 为 ``0070_execution_fencing``。任务表中的文件名保持不变，仅标识字符串变化。
 
 
 ### R-17 — 受管 allowlist egress proxy 属于外部部署依赖
@@ -193,6 +193,15 @@
 **现实（`7c2373c`）：**（1）Docker allowlist 使用不受限 `--network=bridge` 加建议性 proxy 环境变量，并非真实网络边界；（2）在线 Worker 仍调用 `repository.reap()`，在未确认 cleanup 的情况下终态取消/失败过期 Run；（3）`RecoveryCoordinator` 在 `apply_recovery` 递增 epoch 之前执行 cleanup，导致 cleanup 运行在过期 ownership 下。
 
 **裁定（同属协调第 1 轮，不计新一轮）：**（1）受管 allowlist 必须落实真实网络边界（internal 容器网络 + 受管 egress proxy，proxy 不可用时显式拒绝）；默认拒绝保持 `--network=none`。（2）在线 Worker reaper 路径必须使用已确认的 RecoveryCoordinator，未确认取消不得报告 cancelled。（3）recovery 必须先 fence/接管过期 claim（新 epoch），再在新 ownership 下执行 cleanup。这些是生产修复而非测试债；不变更 FR/AC 或硬门禁。
+
+### R-20 — 集成分支前进并与 0068/0069 迁移号冲突
+
+**文档：** 08 R-1/R-16 在规划号与其他分支冲突后，将阶段 6 revision 定为 `0070_execution_fencing` / `0071_execution_credential`。
+
+**现实（PR #142 CI）：** `integration` 合入了自己的 `0068_open_application_archive` 与 `0069_open_app_unique_name`，两者都接在 `0067_merge_heads` 之后。PR 合并结果因此出现双 head，`alembic upgrade head` 在任何测试执行前即报 “Multiple head revisions are present”。
+
+**裁定：** 将最新 `integration` 合入阶段 6 分支，并把阶段 6 revision 顺延为 `0070_execution_fencing`（文件 `0070_execution_fencing_event_outbox.py`，`down_revision="0069_open_app_unique_name"`）与 `0071_execution_credential`（文件 `0071_execution_credential.py`，`down_revision="0070_execution_fencing"`）。开放平台 0068/0069 现为历史迁移，不得修改。revision 标识仍满足 `VARCHAR(32)`。测试与 01/03/04/05/06/07 已同步；不变更 FR/AC、安全门禁或验收结论。
+
 
 ## 3. 聚焦回归复用（未变化不得全量重跑）
 

@@ -1,4 +1,4 @@
-"""Phase 6 T-02: migration 0068 expansion, backfill, Outbox, usage, downgrade.
+"""Phase 6 T-02: migration 0070 expansion, backfill, Outbox, usage, downgrade.
 
 The static tests pin the actual single head (0067_merge_heads), the additive
 schema contract, the deterministic event identity formula, and a downgrade that
@@ -23,8 +23,8 @@ from alembic.script import ScriptDirectory
 from test_ticket_migrations import migrate, query
 
 BACKEND = Path(__file__).resolve().parents[1]
-REVISION = "0068_execution_fencing"
-PREVIOUS_REVISION = "0067_merge_heads"
+REVISION = "0070_execution_fencing"
+PREVIOUS_REVISION = "0069_open_app_unique_name"
 
 OWNERSHIP_OPERATIONS = (
     "snapshot",
@@ -165,7 +165,7 @@ def _seed_legacy_event(url, run_id, seq, event_type="run.started", data="{}"):
     )
 
 
-def test_0068_revision_chain_is_a_single_head_on_0067():
+def test_0070_revision_chain_is_a_single_head_on_integration_head():
     migration = _migration_module()
     scripts = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
 
@@ -176,7 +176,7 @@ def test_0068_revision_chain_is_a_single_head_on_0067():
     assert len(scripts.get_heads()) == 1, scripts.get_heads()
 
 
-def test_0068_upgrade_contract_is_additive_expand_only(monkeypatch):
+def test_0070_upgrade_contract_is_additive_expand_only(monkeypatch):
     migration = _migration_module()
     recorder = _OperationRecorder()
     monkeypatch.setattr(migration, "op", recorder)
@@ -229,7 +229,7 @@ def test_0068_upgrade_contract_is_additive_expand_only(monkeypatch):
     assert "runtime_event_outbox_watermark" in joined and "now()" in joined
 
 
-def test_0068_downgrade_refuses_populated_data_before_dropping(monkeypatch):
+def test_0070_downgrade_refuses_populated_data_before_dropping(monkeypatch):
     migration = _migration_module()
     recorder = _OperationRecorder()
     monkeypatch.setattr(migration, "op", recorder)
@@ -257,7 +257,7 @@ def test_0068_downgrade_refuses_populated_data_before_dropping(monkeypatch):
 
 
 @pytest.mark.postgres
-def test_0068_chain_backfill_outbox_usage_and_data_preserving_downgrade(migration_database):
+def test_0070_chain_backfill_outbox_usage_and_data_preserving_downgrade(migration_database):
     url = migration_database
     migrate(url, PREVIOUS_REVISION)
 
@@ -274,8 +274,8 @@ def test_0068_chain_backfill_outbox_usage_and_data_preserving_downgrade(migratio
     assert result.returncode == 0
     # Repeat upgrade is a no-op and does not duplicate identity or sequence.
     assert migrate(url, "head").returncode == 0
-    assert elapsed < 60, f"0068 upgrade exceeded the lock/duration budget: {elapsed:.2f}s"
-    print(f"0068 populated upgrade duration: {elapsed:.3f}s")
+    assert elapsed < 60, f"0070 upgrade exceeded the lock/duration budget: {elapsed:.2f}s"
+    print(f"0070 populated upgrade duration: {elapsed:.3f}s")
 
     head = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads()[0]
     assert query(url, "SELECT version_num FROM alembic_version")[0][0] == head

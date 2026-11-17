@@ -1,8 +1,8 @@
 """Phase 6 reliability/event foundation: fencing, event identity, Outbox, usage.
 
-Revalidated head before implementation: ``0067_merge_heads`` is the only head
+Revalidated head before implementation: ``0069_open_app_unique_name`` is the integration head
 (08 R-1), so this revision joins that merge point. The revision identifier is
-``0068_execution_fencing`` because ``alembic_version.version_num`` is
+``0070_execution_fencing`` because ``alembic_version.version_num`` is
 ``VARCHAR(32)`` (08 R-16); the filename keeps the descriptive task name. The upgrade is expand ->
 deterministic backfill -> validate -> read/write switch:
 
@@ -28,8 +28,8 @@ not routine rollback (03 §4.5/§10.6).
 
 from alembic import op
 
-revision = "0068_execution_fencing"
-down_revision = "0067_merge_heads"
+revision = "0070_execution_fencing"
+down_revision = "0069_open_app_unique_name"
 branch_labels = None
 depends_on = None
 
@@ -243,7 +243,7 @@ def downgrade() -> None:
                OR EXISTS (SELECT 1 FROM runtime_usage_ledger)
                OR EXISTS (SELECT 1 FROM runtime_event_outbox)
                OR EXISTS (SELECT 1 FROM execution_fencing_denials) THEN
-                RAISE EXCEPTION 'execution 0068 downgrade refused:'
+                RAISE EXCEPTION 'execution 0070 downgrade refused:'
                     ' export event, usage, outbox and fencing data first';
             END IF;
         END

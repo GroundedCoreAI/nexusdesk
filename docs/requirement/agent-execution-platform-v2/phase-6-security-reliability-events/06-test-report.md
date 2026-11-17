@@ -12,7 +12,7 @@ Scope followed all 57 rows in 04, plus Phase 0 P0-I4 disposition, R-18/R-19 prod
 | Environment | Exact configuration | Use |
 |---|---|---|
 | Host | Darwin 27.0.0 arm64; `uv run` Python 3.12.13 | pytest, ruff, architecture gate |
-| PostgreSQL | Existing `nexusdesk-phase6-pg`, PostgreSQL 17.11/pgvector, `127.0.0.1:55432/phase6`, head `0069_execution_credential`; role has CREATEDB | PG integration and uniquely named disposable migration databases |
+| PostgreSQL | Existing `nexusdesk-phase6-pg`, PostgreSQL 17.11/pgvector, `127.0.0.1:55432/phase6`, head `0071_execution_credential`; role has CREATEDB | PG integration and uniquely named disposable migration databases |
 | Docker | Docker 29.9.2, Linux/aarch64, `alpine:latest` arm64 | Real container, internal-network/proxy, Secret-channel and resource drills |
 | Models/engines | Controlled adapters/orchestrators and existing DemoModel/Codex Host tests | Deterministic behavior; no production Codex routing claim |
 | CI | No PR/push requested; no CI run exists | Full final backend/frontend suite remains CI-owned |
@@ -28,7 +28,7 @@ No pre-existing container or volume was stopped/deleted. Tests created only disp
 | Consolidated affected Phase 6 + runtime + Codex scope | **260 passed, 37 warnings, 0 failed/skipped in 36.90s** | Appendix A-2 |
 | Post-format T-12 additions | **5 passed in 1.67s** | Appendix A-3 |
 | Controlled Resume-equivalent grant reauthorization | **1 passed in 0.52s** | Appendix A-4 |
-| Populated migration/rollback duration rerun | **3 passed in 6.61s; 0068 upgrade 0.374s** | Appendix A-5 |
+| Populated migration/rollback duration rerun | **3 passed in 6.61s; 0070 upgrade 0.376s** | Appendix A-5 |
 | `uv run ruff check src tests` | All checks passed | Appendix A-1 |
 | New-file format checks | Passed | Appendix A-1 |
 | Architecture gate | Passed | Appendix A-1 |
@@ -91,8 +91,8 @@ All locations are under `backend/tests/`. “PG” means the environment above; 
 | P6-IT-19 | `test_execution_t12_matrix.py::test_sse_subscribe_terminal_race_delivers_final_event`; cursor 400/409 tests | **pass** — final event observed across subscribe/finish race |
 | P6-IT-20 | `test_execution_t12_worker_usage.py::test_worker_persists_adapter_native_usage_and_terminal_usage`; usage correction/old-epoch tests | **pass** — actual Worker path persists native 7 and terminal 8 separately, without recount |
 | P6-IT-21 | `test_execution_t12_additional.py::test_continuous_diagnostics_are_bounded_redacted_and_trigger_disclosure`; diagnostics mapper tests | **pass** — 20 failures limited to 3, 17 suppressed, redacted, disclosure audit Secret-free |
-| P6-IT-22 | `test_execution_migration.py::test_0068_chain_backfill_outbox_usage_and_data_preserving_downgrade` | **pending_env** — real small populated upgrade/backfill/direct writer passes (0.374s); representative replica lock budget absent |
-| P6-IT-23 | `test_execution_credentials_migration.py::test_0069_chain_versions_grants_and_data_preserving_downgrade`, `::test_0069_empty_downgrade_succeeds` | **pass** — populated protection and empty downgrade |
+| P6-IT-22 | `test_execution_migration.py::test_0070_chain_backfill_outbox_usage_and_data_preserving_downgrade` | **pending_env** — real small populated upgrade/backfill/direct writer passes (0.376s); representative replica lock budget absent |
+| P6-IT-23 | `test_execution_credentials_migration.py::test_0071_chain_versions_grants_and_data_preserving_downgrade`, `::test_0071_empty_downgrade_succeeds` | **pass** — populated protection and empty downgrade |
 | P6-IT-24 | Composition/settings/invariants plus consolidated React/Codex/API/SSE regressions | **pending_upstream** — affected code is green; Phase 0 zero-diff and full Phase 5 Stage A prerequisites remain, CI absent |
 | P6-IT-25 | Controlled fault tests and real resource drills | **pending_env** — no real mixed SIGKILL + network loss + disk full + hang reconciliation run |
 
@@ -100,8 +100,8 @@ All locations are under `backend/tests/`. “PG” means the environment above; 
 
 | ID | Evidence | Environment | Verdict |
 |---|---|---|---|
-| P6-CM-01 | `test_execution_phase6_invariants.py::test_single_migration_head_and_revision_lengths`; both migration chain tests | Local/PG | **pass** — single `0069_execution_credential`, IDs <=32, additive historical protection |
-| P6-CM-02 | 0068 populated deterministic backfill/repeat upgrade | Small local PG | **pending_env** — representative populated-replica lock evidence not measured |
+| P6-CM-01 | `test_execution_phase6_invariants.py::test_single_migration_head_and_revision_lengths`; both migration chain tests | Local/PG | **pass** — single `0071_execution_credential`, IDs <=32, additive historical protection |
+| P6-CM-02 | 0070 populated deterministic backfill/repeat upgrade | Small local PG | **pending_env** — representative populated-replica lock evidence not measured |
 | P6-CM-03 | R18 boundary canaries, audit tests, deployment/migration Secret scans, real child no-echo | PG/Docker | **pass** — controlled ordinary outputs/audit contain no canary/grant token |
 | P6-CM-04 | Settings/invariants and direct secure-default read | Local | **pass** — verified disabled-state C12 gate; untrusted=false, sandbox/default-deny=true |
 | P6-CM-05 | Credential tenant/route tests, fencing, Outbox tenant scope, reused Workdir isolation | PG/reuse | **pass** — controlled tenant/Workspace isolation; real attacks remain IT-04–06 |
@@ -149,10 +149,10 @@ No known open code defect remains in the executed scope. Warnings were existing 
 
 ### 8.2 Migration and rollback
 
-- Actual chain from `0067_merge_heads` through `0068_execution_fencing` to `0069_execution_credential` succeeded on disposable PG databases.
+- Actual chain from `0067_merge_heads` through the merged open-platform migrations `0068_open_application_archive` and `0069_open_app_unique_name`, then `0070_execution_fencing` and `0071_execution_credential`, succeeded on disposable PG databases.
 - Deterministic historical event IDs, no historical Outbox flood, old-shaped direct-writer trigger, `tool.replay` exclusion, source-unique usage and populated-downgrade guards passed.
-- 0068 small populated upgrade duration: **0.374s**. This is not a representative lock-time percentile or production-replica measurement.
-- 0069 populated downgrade refused data destruction; empty downgrade succeeded.
+- 0070 small populated upgrade duration: **0.376s**. This is not a representative lock-time percentile or production-replica measurement.
+- 0071 populated downgrade refused data destruction; empty downgrade succeeded.
 
 ### 8.3 M1–M3 equivalents
 
@@ -246,10 +246,25 @@ uv run pytest tests/test_execution_t12_resume_grant.py -q
 
 ```text
 uv run pytest \
-  tests/test_execution_migration.py::test_0068_chain_backfill_outbox_usage_and_data_preserving_downgrade \
-  tests/test_execution_credentials_migration.py::test_0069_chain_versions_grants_and_data_preserving_downgrade \
-  tests/test_execution_credentials_migration.py::test_0069_empty_downgrade_succeeds -q -s
+  tests/test_execution_migration.py::test_0070_chain_backfill_outbox_usage_and_data_preserving_downgrade \
+  tests/test_execution_credentials_migration.py::test_0071_chain_versions_grants_and_data_preserving_downgrade \
+  tests/test_execution_credentials_migration.py::test_0071_empty_downgrade_succeeds -q -s
 
-0068 populated upgrade duration: 0.374s
+0070 populated upgrade duration: 0.376s
 3 passed, 1 warning in 6.61s
 ```
+
+## 10. Post-report CI compatibility and R-20 renumbering
+
+PR #142's first CI run exposed baseline-suite incompatibilities, not Phase 6 code failures. Commit `fc3245e` restored the legacy call shapes (omitting redundant `cleanup_confirmed=True`/empty usage), extended the replay port with optional Fencing evidence, and updated baseline tests for the reviewed additive contracts. The `integration` branch had also merged its own `0068`/`0069`, so the PR merge result had two Alembic heads; the Phase 6 migrations were renumbered to `0070_execution_fencing` / `0071_execution_credential` after `0069_open_app_unique_name` (08 R-20), with tests and docs synchronized.
+
+Re-verification after the merge and renumbering, on a fresh disposable PostgreSQL database migrated to head `0071_execution_credential`:
+
+```text
+unit lane:            2323 passed, 6 skipped
+affected postgres:     418 passed, 1 skipped (execution/runtime/replay/open-platform/Codex-Host scope)
+migration evidence:      3 passed; 0070 populated upgrade 0.376s
+ruff check / architecture gate: passed
+```
+
+All previously recorded row verdicts are unchanged; no new failed code row exists. The `pending_env`, `pending_upstream`, `not_measured` and CI items above remain open for the same reasons.

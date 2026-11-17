@@ -24,7 +24,7 @@ P6 = REPO / "docs/requirement/agent-execution-platform-v2/phase-6-security-relia
 
 def test_single_migration_head_and_revision_lengths():
     heads = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads()
-    assert heads == ["0069_execution_credential"]
+    assert heads == ["0071_execution_credential"]
     assert all(len(head) <= 32 for head in heads)
 
 
@@ -72,7 +72,7 @@ def test_deployment_and_migration_artifacts_are_secret_free():
         REPO / "deploy/production/.env.example",
         REPO / "deploy/production/compose.yaml",
         REPO / "deploy/quickstart/compose.yaml",
-        BACKEND / "migrations/versions/0069_execution_credential.py",
+        BACKEND / "migrations/versions/0071_execution_credential.py",
         P6 / "03-technical-design.en.md",
     ]
     markers = (
