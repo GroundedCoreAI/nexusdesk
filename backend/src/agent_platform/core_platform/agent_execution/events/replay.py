@@ -43,7 +43,7 @@ def retention_gap(cursor: int, floor: int) -> bool:
     return floor > 0 and cursor < floor
 
 
-def sse_payload(row: Mapping[str, object]) -> dict[str, JsonValue]:
+def sse_payload(row: Mapping[str, object], *, redactor=None) -> dict[str, JsonValue]:
     """Keep every stored business key and append only reserved metadata.
 
     A stored ``_execution`` key (untrusted or historical) is replaced by the
@@ -51,7 +51,13 @@ def sse_payload(row: Mapping[str, object]) -> dict[str, JsonValue]:
     forge the reserved object through event payload content.
     """
     data = row.get("data")
-    payload: dict[str, JsonValue] = deepcopy(data) if isinstance(data, dict) else {}
+    if redactor is not None:
+        # R-18(b): redact at the real SSE emission seam, not just the helper.
+        payload: dict[str, JsonValue] = (
+            redactor.redact_structure(data) if isinstance(data, dict) else {}
+        )
+    else:
+        payload = deepcopy(data) if isinstance(data, dict) else {}
     event_id = row.get("event_id")
     payload["_execution"] = {
         "event_id": None if event_id is None else str(event_id),

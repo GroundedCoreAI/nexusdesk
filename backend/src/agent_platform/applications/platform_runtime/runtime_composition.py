@@ -67,6 +67,9 @@ from agent_platform.core_platform.agent_execution.contracts.instructions import 
     REACT_INSTRUCTION_PROVIDER_VERSION,
 )
 from agent_platform.core_platform.agent_execution.contracts.snapshots import SNAPSHOT_COLUMNS
+from agent_platform.core_platform.agent_execution.credentials.broker import (
+    ExecutionCredentialBroker,
+)
 from agent_platform.core_platform.agent_execution.credentials.repository import (
     ExecutionCredentialRepository,
 )
@@ -118,6 +121,7 @@ from agent_platform.core_platform.agent_execution.registry import (
 from agent_platform.core_platform.agent_execution.reliability.recovery import (
     RecoveryCoordinator,
 )
+from agent_platform.core_platform.agent_execution.security.redaction import SecretRedactor
 from agent_platform.core_platform.agent_execution.workspace.workspace_manager import (
     ExecutionWorkspaceManager,
 )
@@ -995,6 +999,8 @@ def _build_execution_runtime_subsystem(
     clock: Callable[[], float] | None = None,
     repository: RunRepository | None = None,
     event_bus=None,
+    execution_broker=None,
+    execution_redactor=None,
 ) -> ExecutionRuntimeSubsystem | None:
     """Assemble the Phase 4 runtime from FR-10 settings without starting it.
 
@@ -1068,6 +1074,7 @@ def _build_execution_runtime_subsystem(
         sandbox_provider_id=sandbox_provider_id,
         resource_manager=resources,
         workspace_manager=workspace,
+        credential_broker=execution_broker,
         clock=shared_clock,
         alert_sink=alert_sink,
     )
@@ -1080,6 +1087,7 @@ def _build_execution_runtime_subsystem(
                 batch_size=settings.execution_outbox_batch_size,
                 poll_seconds=settings.execution_outbox_poll_seconds,
                 tenant_id=settings.tenant_id,
+                redactor=execution_redactor,
             )
         else:
             # Persistence/trigger/security stay on; publication stays pending
@@ -1136,6 +1144,7 @@ class RuntimeServices:
     execution_runtime: ExecutionRuntimeSubsystem | None = None
     # T-07 admin credential lifecycle repository (Secret-free metadata API).
     execution_credentials: ExecutionCredentialRepository | None = None
+    execution_redactor: SecretRedactor | None = None
 
 
 @asynccontextmanager
@@ -1332,11 +1341,22 @@ async def runtime_services(
             )
             # T-07: the admin lifecycle repository exists even when the key is
             # absent; encrypting fails closed at request time, never auto-creates.
-            execution_credentials = ExecutionCredentialRepository(
-                engine, ExecutionCredentialVault(settings.execution_credential_key_file)
+            execution_vault = ExecutionCredentialVault(settings.execution_credential_key_file)
+            execution_credentials = ExecutionCredentialRepository(engine, execution_vault)
+            execution_broker = ExecutionCredentialBroker(
+                engine,
+                execution_vault,
+                repository=execution_credentials,
+                grant_ttl_seconds=settings.execution_credential_grant_ttl_seconds,
             )
+            execution_redactor = SecretRedactor()
             execution_runtime = _build_execution_runtime_subsystem(
-                settings, engine, repository=repository, event_bus=platform.event_bus
+                settings,
+                engine,
+                repository=repository,
+                event_bus=platform.event_bus,
+                execution_broker=execution_broker,
+                execution_redactor=execution_redactor,
             )
             orchestrator = _build_execution_orchestrator(
                 factory,
@@ -1416,6 +1436,7 @@ async def runtime_services(
                 execution_subsystem=subsystem,
                 execution_runtime=execution_runtime,
                 execution_credentials=execution_credentials,
+                execution_redactor=execution_redactor,
             )
     finally:
         # R-46 close order: this subsystem first (a warm round may still be

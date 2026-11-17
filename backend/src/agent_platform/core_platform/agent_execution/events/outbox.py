@@ -39,7 +39,7 @@ class _PendingRow:
     trace_id: str | None
     tenant_id: str
 
-    def envelope(self) -> EventEnvelope:
+    def envelope(self, *, redactor=None) -> EventEnvelope:
         correlation: UUID | None = None
         if self.trace_id is not None:
             try:
@@ -53,7 +53,7 @@ class _PendingRow:
             tenant_id=self.tenant_id,
             aggregate_type="runtime_run",
             aggregate_id=str(self.run_id),
-            payload=self.data,
+            payload=self.data if redactor is None else redactor.redact_structure(self.data),
             correlation_id=correlation,
             idempotency_key=str(self.event_id),
         )
@@ -70,6 +70,7 @@ class OutboxDispatcher:
         batch_size: int = 100,
         poll_seconds: float = 1.0,
         tenant_id: str | None = None,
+        redactor=None,
     ) -> None:
         if batch_size < 1:
             raise ValueError("Outbox batch size must be positive")
@@ -82,6 +83,7 @@ class OutboxDispatcher:
         # Optional tenant scoping for sharded deployments and controlled tests;
         # the production default publishes every tenant.
         self._tenant_id = tenant_id
+        self._redactor = redactor
 
     async def dispatch_once(self) -> int:
         """Publish one bounded batch; returns rows transitioned to published.
@@ -129,7 +131,7 @@ class OutboxDispatcher:
                 tenant_id=row["tenant_id"],
             )
             try:
-                accepted = await self._publisher.enqueue(pending.envelope())
+                accepted = await self._publisher.enqueue(self._envelope_for(pending))
             except Exception as exc:  # noqa: BLE001 - publisher isolation; type only.
                 await self._mark_failed(pending, type(exc).__name__)
                 continue
@@ -152,6 +154,10 @@ class OutboxDispatcher:
                 ),
                 params,
             )
+
+    def _envelope_for(self, pending: _PendingRow) -> EventEnvelope:
+        """Build the publish envelope, redacting Secrets at the real seam."""
+        return pending.envelope(redactor=self._redactor)
 
     async def reconcile(self) -> int:
         """Restore missing publishable Outbox rows at/after the rollout watermark."""

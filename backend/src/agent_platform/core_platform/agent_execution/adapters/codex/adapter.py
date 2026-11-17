@@ -166,6 +166,8 @@ class CodexCliAdapter:
         resource_policy: ResourcePolicy,
         history: Sequence[Mapping[str, object]] = (),
         ownership: object | None = None,
+        credential_broker: object | None = None,
+        credential_ref: object | None = None,
         clock: object | None = None,
         id_factory: object | None = None,
     ) -> None:
@@ -173,6 +175,10 @@ class CodexCliAdapter:
         # Internal Fencing evidence captured from the claimed ExecutionContext;
         # never serialized into the public handle or request.
         self._ownership = ownership
+        # R-18(a): the Host consumes the grant before spawn; the adapter passes
+        # the credential reference and audience so the Host binds it to this Run.
+        self._credential_broker = credential_broker
+        self._credential_ref = credential_ref
         self._config = config
         self._gate = gate
         self._root = workdir_root

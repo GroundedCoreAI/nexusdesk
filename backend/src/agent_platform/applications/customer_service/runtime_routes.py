@@ -110,6 +110,7 @@ async def stream_events(
             "event_replay_gap",
             headers={"X-Event-Retention-Floor": str(floor)},
         )
+    redactor = getattr(request.app.state.runtime, "execution_redactor", None)
     listener = request.app.state.runtime.listener
 
     async def stream():
@@ -125,7 +126,7 @@ async def stream_events(
                     cursor = event["seq"]
                     if event["type"] == "tool.replay":
                         continue
-                    payload = json.dumps(sse_payload(event), ensure_ascii=False)
+                    payload = json.dumps(sse_payload(event, redactor=redactor), ensure_ascii=False)
                     yield f"id: {cursor}\nevent: {event['type']}\ndata: {payload}\n\n"
                 if run["status"] in TERMINAL and cursor >= run["event_seq"]:
                     return

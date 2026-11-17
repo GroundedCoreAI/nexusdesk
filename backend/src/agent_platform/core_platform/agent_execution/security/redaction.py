@@ -99,8 +99,9 @@ class SecretRedactor:
 class DisclosureResponse:
     """FR-3 disclosure response: revoke affected credentials, close admission."""
 
-    def __init__(self, repository) -> None:
+    def __init__(self, repository, host=None) -> None:
         self._repository = repository
+        self._host = host
         self.admission_closed = False
 
     async def handle_disclosure(
@@ -112,6 +113,9 @@ class DisclosureResponse:
         disclosed Secret.
         """
         self.admission_closed = True
+        if self._host is not None:
+            # Close the real Host admission gate, not just a bookkeeping flag.
+            self._host._admitting = False
         await self._repository.revoke(credential_ref=credential_ref, tenant_id=tenant_id)
         await self._repository.audit(
             tenant_id=tenant_id,

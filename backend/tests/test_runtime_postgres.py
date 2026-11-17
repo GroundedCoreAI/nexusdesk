@@ -976,21 +976,26 @@ async def test_p0_it_07_internal_sse_hides_terminal_tool_replay_and_advances_cur
         repo = app.state.runtime.repository
         row = await submit(repo, settings)
         owner = uuid4()
-        await repo.claim(owner, 30, settings.tenant_id)
+        claimed = await repo.claim(owner, 30, settings.tenant_id)
+        # Insert the replay while the Run is live (the legitimate case), then
+        # finish. The SSE contract still hides the replay and advances cursor.
+        terminal_before = (await repo.get(row["id"], settings.tenant_id))["event_seq"]
+        key = f"runtime:{row['id']}:" + "a" * 64
+        await DurableToolReplayCache(repo.engine).put(
+            key, {"marker": replay_marker}, owner=owner, lease_epoch=claimed["lease_epoch"]
+        )
         await repo.finish(row["id"], owner, "completed", output="done", history=[])
         terminal_seq = (await repo.get(row["id"], settings.tenant_id))["event_seq"]
-        key = f"runtime:{row['id']}:" + "a" * 64
-        await DurableToolReplayCache(repo.engine).put(key, {"marker": replay_marker})
-        final = await repo.get(row["id"], settings.tenant_id)
-        assert final["event_seq"] == terminal_seq + 1
-        stored = await repo.events(row["id"], settings.tenant_id, terminal_seq)
+        stored = await repo.events(row["id"], settings.tenant_id, terminal_before)
         assert [(event["seq"], event["type"]) for event in stored] == [
-            (terminal_seq + 1, "tool.replay")
+            (terminal_before + 1, "tool.replay"),
+            (terminal_before + 2, "run.completed"),
         ]
 
         full = await client.get(f"/api/v1/runs/{row['id']}/events")
         assert full.status_code == 200
-        assert sse_ids(full.text) == [1, 2, 3]
+        # SSE hides the replay row (seq 3) but keeps run.completed (seq 4).
+        assert sse_ids(full.text) == [1, 2, 4]
         assert "event: run.completed" in full.text
         assert "tool.replay" not in full.text
         assert replay_marker not in full.text
