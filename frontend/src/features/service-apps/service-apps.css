@@ -1655,6 +1655,18 @@
 
 .module-service-apps .sa-delivery-mode > span:not(.sa-delivery-dot) { flex: 1; color: #4a5060; }
 
+.module-service-apps .sa-delivery-hosted {
+  flex: 1;
+  min-width: 0;
+  color: var(--sa-accent);
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.module-service-apps .sa-delivery-hosted:hover { color: var(--sa-accent); opacity: 0.85; text-decoration: underline; }
+
 .module-service-apps .sa-delivery-mode em {
   color: var(--sa-muted);
   font-size: 10px;

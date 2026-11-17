@@ -226,16 +226,16 @@ class Enterprise:
     async def hosted(self, c, key, lock=False):
         """Resolve a public page by its link segment, or fail as not found.
 
-        An unknown key, a disabled page and a disabled application are reported
-        identically so the public endpoint cannot be used to probe which links
-        exist.
+        An unknown key, a disabled page, an archived application and a disabled
+        application are reported identically so the public endpoint cannot be
+        used to probe which links exist.
         """
 
         row = await one(
             c,
             """SELECT e.*,a.name AS app_name,a.enabled AS app_enabled
             FROM open_embed_configs e JOIN open_applications a ON a.id=e.app_id
-            WHERE e.hosted_key=:k AND a.tenant_id=:t""" + (" FOR UPDATE OF e" if lock else ""),
+            WHERE e.hosted_key=:k AND a.tenant_id=:t AND NOT a.archived""" + (" FOR UPDATE OF e" if lock else ""),
             k=key,
             t=self.tenant,
         )
@@ -247,7 +247,8 @@ class Enterprise:
         app = await self.s.application(c, self.tenant, app_id)
         conf = await one(c, "SELECT * FROM open_embed_configs WHERE app_id=:a", a=app_id)
         if (
-            not app["enabled"]
+            app["archived"]
+            or not app["enabled"]
             or not conf
             or not conf["enabled"]
             or parent_origin not in conf["origins"]

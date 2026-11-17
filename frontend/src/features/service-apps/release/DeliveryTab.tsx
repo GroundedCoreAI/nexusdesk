@@ -265,9 +265,15 @@ export function DeliveryTab({
                             <div className="sa-delivery-mode">
                                 <DeliveryDot on={primaryOpenApp.hosted}/>
                                 <span>{say('公开链接')}</span>
-                                <em>{primaryOpenApp.hosted
-                                    ? `/h/${primaryOpenApp.hosted_key ?? '…'}`
-                                    : say('未开通')}</em>
+                                {primaryOpenApp.hosted
+                                    ? <a
+                                        className="sa-delivery-hosted"
+                                        href={`/h/${primaryOpenApp.hosted_key ?? ''}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        title={`${window.location.origin}/h/${primaryOpenApp.hosted_key ?? ''}`}
+                                    >{`${window.location.origin}/h/${primaryOpenApp.hosted_key ?? '…'}`}</a>
+                                    : <em>{say('未开通')}</em>}
                             </div>
                         </div>
                         <div className="sa-delivery-card-foot">
