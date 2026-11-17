@@ -1547,7 +1547,7 @@ SELECT o.id,o.name,o.enabled,x.version_pin,
          WHERE k.app_id=o.id AND k.revoked_at IS NULL
            AND (k.expires_at IS NULL OR k.expires_at>now())) AS active_keys
 FROM open_application_targets x
-JOIN open_applications o ON o.id=x.app_id AND o.tenant_id=:tenant
+JOIN open_applications o ON o.id=x.app_id AND o.tenant_id=:tenant AND NOT o.archived
 LEFT JOIN open_embed_configs e ON e.app_id=o.id
 WHERE x.target_kind='service_application' AND x.target_id=:application
 ORDER BY o.created_at DESC,o.id
