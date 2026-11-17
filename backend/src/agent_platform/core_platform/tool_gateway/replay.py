@@ -36,7 +36,17 @@ class ProcessToolReplayCache:
             self._items.move_to_end(idempotency_key)
             return dict(result)
 
-    async def put(self, idempotency_key: str, result: dict[str, object]) -> None:
+    async def put(
+        self,
+        idempotency_key: str,
+        result: dict[str, object],
+        *,
+        owner=None,
+        lease_epoch: int | None = None,
+    ) -> None:
+        # This cache is process-local and owns no durable Run row, so the
+        # Fencing evidence is accepted for port compatibility but not enforced.
+        # ``DurableToolReplayCache`` is the implementation that enforces it.
         async with self._lock:
             self._items[idempotency_key] = dict(result)
             self._items.move_to_end(idempotency_key)

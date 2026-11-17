@@ -402,7 +402,12 @@ async def test_worker_legacy_positional_and_keyword_construction_stays_compatibl
         WorkerOrchestrator(),
     )
 
-    assert list(inspect.signature(RuntimeWorker).parameters)[-1] == "orchestrator"
+    # Phase 6 T-09 appends the optional cleanup-confirmation seam; the legacy
+    # ``orchestrator`` parameter keeps its position and semantics.
+    assert list(inspect.signature(RuntimeWorker).parameters)[-2:] == [
+        "orchestrator",
+        "cleanup_confirmation",
+    ]
     assert positional.memory is memory and positional.orchestrator is None
     assert keyword.memory is memory and keyword.orchestrator is None
     assert with_orchestrator.memory is memory
@@ -545,9 +550,11 @@ async def test_worker_on_completed_outcome_preserves_memory_row_history_and_drop
                 "reinforce": {"memory-item": 2},
                 "injected": {"items": 1},
             },
+            # Phase 6 FR-14: terminal usage is forwarded to the ownership-checked
+            # source-unique ledger; it is no longer dropped at the Worker boundary.
+            "usage": {"private": "not-for-repository"},
         },
     )
-    assert "usage" not in repository.finished[0][3]
 
 
 def _assert_finite_duration_ms(message):
@@ -1133,7 +1140,21 @@ async def test_p2_it05_internal_sse_replay_delta_cursor_and_hidden_replay_parity
     assert '"text": "transient"' in frames
     delta_frame = next(frame for frame in frames.split("\n\n") if "model.delta" in frame)
     assert "id:" not in delta_frame
-    assert frames.rstrip().endswith('event: run.completed\ndata: {"output": "done"}')
+    # R-15: every legacy data field is preserved; the only permitted wire
+    # addition is the reserved additive ``_execution`` metadata object.
+    terminal_frame = frames.rstrip().split("\n\n")[-1].splitlines()
+    assert terminal_frame[0] == "id: 4"
+    assert terminal_frame[1] == "event: run.completed"
+    data_line = next(line for line in terminal_frame if line.startswith("data: "))
+    terminal_payload = json.loads(data_line.removeprefix("data: "))
+    assert terminal_payload["output"] == "done"
+    assert set(terminal_payload) - {"output"} == {"_execution"}
+    assert set(terminal_payload["_execution"]) == {
+        "event_id",
+        "schema_version",
+        "source",
+        "trace_id",
+    }
     assert listener.unsubscribed
 
     replay_repository = _SSERepository(events)

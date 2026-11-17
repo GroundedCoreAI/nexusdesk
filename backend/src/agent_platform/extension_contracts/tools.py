@@ -123,8 +123,20 @@ class ToolReplayPort(Protocol):
     async def get(self, idempotency_key: str) -> dict[str, object] | None:
         """Return a previously completed result, if available."""
 
-    async def put(self, idempotency_key: str, result: dict[str, object]) -> None:
-        """Store a completed result for deterministic replay."""
+    async def put(
+        self,
+        idempotency_key: str,
+        result: dict[str, object],
+        *,
+        owner=None,
+        lease_epoch: int | None = None,
+    ) -> None:
+        """Store a completed result for deterministic replay.
+
+        ``owner``/``lease_epoch`` carry the Run's Fencing evidence when the
+        implementation persists into shared storage. In-process implementations
+        may accept and ignore them; durable implementations must enforce them.
+        """
 
 
 class ToolHandler(Protocol):

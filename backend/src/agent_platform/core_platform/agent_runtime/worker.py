@@ -200,6 +200,10 @@ class RuntimeWorker:
                 execution = asyncio.create_task(self.orchestrator.execute(context, event_sink))
                 watcher = asyncio.create_task(monitor(execution))
                 outcome = await execution
+                # Unknown/absent usage stays unknown: omit the keyword instead
+                # of writing an empty ledger entry, and keep the legacy call
+                # shape byte-identical when the Adapter reported no usage.
+                usage_kwargs = {"usage": outcome.usage} if outcome.usage else {}
                 if outcome.status == "completed":
                     await self.repository.finish(
                         row["id"],
@@ -209,7 +213,7 @@ class RuntimeWorker:
                         history=outcome.history,
                         completion=self._memory_context(row, outcome.dropped),
                         **epoch_kwargs,
-                        usage=outcome.usage,
+                        **usage_kwargs,
                     )
                 else:
                     await self.repository.finish(
@@ -218,7 +222,7 @@ class RuntimeWorker:
                         outcome.status,
                         error=outcome.legacy_error_code,
                         **epoch_kwargs,
-                        usage=outcome.usage,
+                        **usage_kwargs,
                     )
                 self._log_orchestrator_terminal(row, outcome.status, started_at)
             else:
@@ -266,12 +270,15 @@ class RuntimeWorker:
             )
             if orchestrator_enabled:
                 self._log_orchestrator_terminal(row, status, started_at)
+            # ``finish`` defaults to a confirmed cleanup; only an unconfirmed
+            # result needs to be passed so the existing call shape (and its
+            # Phase 2/3 compatibility evidence) stays unchanged.
             await self.repository.finish(
                 row["id"],
                 self.owner,
                 status,
                 error=error,
-                cleanup_confirmed=cleanup_confirmed,
+                **({} if cleanup_confirmed else {"cleanup_confirmed": False}),
                 **epoch_kwargs,
             )
         except RuntimeFault as exc:
@@ -294,7 +301,7 @@ class RuntimeWorker:
                 self.owner,
                 "failed",
                 error="run_timeout" if cleanup_confirmed else "cleanup_failed",
-                cleanup_confirmed=cleanup_confirmed,
+                **({} if cleanup_confirmed else {"cleanup_confirmed": False}),
                 **epoch_kwargs,
             )
         except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
@@ -372,9 +379,7 @@ class RuntimeWorker:
                 wake.clear()
                 try:
                     if self.cleanup_confirmation is not None:
-                        await self._reap_expired(
-                            self.settings.tenant_id, self.cleanup_confirmation
-                        )
+                        await self._reap_expired(self.settings.tenant_id, self.cleanup_confirmation)
                     else:
                         await self.repository.reap(self.settings.tenant_id)
                     while len(self.tasks) < self.settings.worker_concurrency:
