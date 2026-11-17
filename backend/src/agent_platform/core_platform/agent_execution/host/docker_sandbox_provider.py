@@ -212,14 +212,21 @@ class DockerSandboxProvider:
             artifacts = Path(artifact_dir).resolve()
             argv += ["--mount", f"type=bind,source={artifacts},target=/artifacts"]
         if self._network_policy.rules and self._proxy_endpoint is not None:
-            # The proxy is the only egress route on the internal network; these
-            # are the managed endpoint coordinates, not advisory hints on an
-            # open bridge. NO_PROXY excludes loopback/metadata explicitly.
+            # The proxy is the only egress route on the internal network. The
+            # host gateway mapping lets the container reach the managed proxy
+            # endpoint; NO_PROXY excludes loopback/metadata explicitly.
+            argv += ["--add-host", "host.docker.internal:host-gateway"]
             for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
                 environment.append((name, self._proxy_endpoint.url))
             environment += [("NO_PROXY", "127.0.0.1,localhost,169.254.169.254")]
         for key, value in spec.environment.items():
             environment.append((key, value))
+        # R2-B: forward every explicitly planned child-environment key into the
+        # container with `docker run --env KEY`. The CLI reads the value from
+        # its own controlled environment (supplied by ProcessRunner via env=),
+        # so Secret values never appear in argv or logs.
+        for key, _value in environment:
+            argv += ["--env", key]
         argv += ["--workdir", "/workspace", self._image]
         argv += list(spec.argv)
         return SandboxLaunchPlan(

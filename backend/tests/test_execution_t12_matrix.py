@@ -287,7 +287,7 @@ async def test_outbox_after_enqueue_crash_is_idempotent_on_rescan(repo):
 
 
 async def test_sse_subscribe_terminal_race_delivers_final_event(repo):
-    repository, tenant, engine, settings = repo
+    repository, tenant, _engine, settings = repo
     owner = uuid4()
     claimed = await _claim(repository, tenant, owner)
     run_id = claimed["id"]
