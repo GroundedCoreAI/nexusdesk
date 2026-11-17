@@ -129,22 +129,28 @@ async def applications(
     q: str = Query(default="", max_length=100),
     page: int = Query(default=1, ge=1),
     enabled: bool | None = None,
+    archived: bool = Query(default=False),
 ):
     async with engine(request).connect() as c:
         rows = await many(
             c,
-            "SELECT * FROM open_applications WHERE tenant_id=:t AND name ILIKE :q AND (CAST(:enabled AS boolean) IS NULL OR enabled=:enabled) ORDER BY created_at DESC,id LIMIT 20 OFFSET :off",
+            """SELECT * FROM open_applications WHERE tenant_id=:t AND name ILIKE :q
+            AND (CAST(:enabled AS boolean) IS NULL OR enabled=:enabled) AND archived=:archived
+            ORDER BY created_at DESC,id LIMIT 20 OFFSET :off""",
             t=user.tenant,
             q="%" + q + "%",
             enabled=enabled,
+            archived=archived,
             off=(page - 1) * 20,
         )
         total = await one(
             c,
-            "SELECT count(*) AS n FROM open_applications WHERE tenant_id=:t AND name ILIKE :q AND (CAST(:enabled AS boolean) IS NULL OR enabled=:enabled)",
+            """SELECT count(*) AS n FROM open_applications WHERE tenant_id=:t AND name ILIKE :q
+            AND (CAST(:enabled AS boolean) IS NULL OR enabled=:enabled) AND archived=:archived""",
             t=user.tenant,
             q="%" + q + "%",
             enabled=enabled,
+            archived=archived,
         )
         # One target row per application is enough for list cards; resolve the
         # readable identity of bound Service Applications in a single query.
@@ -185,6 +191,8 @@ async def create_application(body: ApplicationInput, request: Request, user: Adm
 async def application(app_id: UUID, request: Request, user: Reader):
     async with engine(request).connect() as c:
         row = await service(request).application(c, user.tenant, app_id)
+        if row["archived"]:
+            raise DomainError("application_not_found", 404)
         return {**row, "target": await service(request).target(c, row)}
 
 
@@ -223,6 +231,42 @@ async def service_application_releases(application_id: UUID, request: Request, u
 @management.put("/applications/{app_id}")
 async def update_application(app_id: UUID, body: ApplicationUpdate, request: Request, user: Admin):
     return await service(request).save(user.tenant, user.actor, body, app_id)
+
+
+@management.delete("/applications/{app_id}")
+async def delete_application(
+    app_id: UUID,
+    request: Request,
+    user: Admin,
+    confirm: bool = Query(default=False),
+    purge: bool = Query(default=False),
+):
+    """Soft-archive one open-platform application, or purge it permanently.
+
+    Without ``purge``: ``confirm=false`` is a read-only impact preview for the
+    archive dialog (active keys, embed / hosted switches, request volume,
+    bindings); ``confirm=true`` archives — every active API key is revoked
+    immediately, embed / hosted / webhook configuration is kept for a possible
+    restore, and the open API answers 404 from then on.
+
+    With ``purge=true``: only archived applications can be purged, and the
+    application plus every cascading child row (keys, sessions, runs, request
+    logs, webhooks, embed / hosted config) is physically deleted. Requires
+    ``confirm=true``; ``confirm=false`` returns the purge impact counts.
+    """
+
+    if purge:
+        if not confirm:
+            return await service(request).purge_impact(user.tenant, app_id)
+        return await service(request).purge(user.tenant, user.actor, app_id)
+    if not confirm:
+        return await service(request).archive_impact(user.tenant, app_id)
+    return await service(request).archive(user.tenant, user.actor, app_id)
+
+
+@management.post("/applications/{app_id}/restore", status_code=200)
+async def restore_application(app_id: UUID, request: Request, user: Admin):
+    return await service(request).restore(user.tenant, user.actor, app_id)
 
 
 @management.get("/applications/{app_id}/keys")

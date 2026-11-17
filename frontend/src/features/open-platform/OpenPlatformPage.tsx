@@ -1,9 +1,9 @@
 import {consoleTheme} from '../../styles/theme';
 import { useEffect, useState } from 'react';
-import { Alert, App, Button, Card, Checkbox, ConfigProvider, Empty, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography } from 'antd';
-import { ApiOutlined, ArrowLeftOutlined, ArrowRightOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, App, Button, Card, Checkbox, ConfigProvider, Dropdown, Empty, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography } from 'antd';
+import { ApiOutlined, ArrowLeftOutlined, ArrowRightOutlined, DeleteOutlined, MoreOutlined, PlusOutlined, ReloadOutlined, UndoOutlined } from '@ant-design/icons';
 import { t, dateTime } from '../../i18n';
-import { patch, post, put } from '../../shared/api/client';
+import { api, patch, post, put } from '../../shared/api/client';
 import { useAccess, useResource } from '../../shared/components/ui';
 import { IntegrationDocs, Debugger } from './Integration';
 import {Integrations,WebhookPanel,appBody} from './Enterprise';
@@ -13,7 +13,9 @@ import { ChannelsPage } from '../channels/ChannelsPage';
 
 export const ROOT='/open-platform/applications';
 export interface AppTarget { target_kind:'agent'|'service_application'; target_id:string; version_pin:number|null; key?:string|null; name?:string|null; status?:string|null; published_version?:number|null; version?:number|null; pinned?:boolean|null }
-export interface Application { id:string;name:string;description:string;enabled:boolean;agent_ids:string[];rpm:number;max_concurrency:number;revision:number;created_at:string;agent_versions?:Record<string,number>;knowledge_base_ids?:string[];target?:AppTarget|null }
+export interface Application { id:string;name:string;description:string;enabled:boolean;agent_ids:string[];rpm:number;max_concurrency:number;revision:number;created_at:string;archived?:boolean;agent_versions?:Record<string,number>;knowledge_base_ids?:string[];target?:AppTarget|null }
+interface ArchiveImpact { name:string;active_keys:number;embed_enabled:boolean;hosted_enabled:boolean;requests_30d:number;service_applications:number }
+interface PurgeImpact { name:string;keys:number;request_logs:number;sessions:number;runs:number;webhooks:number;service_applications:number }
 export interface ServiceAppOption { id:string;application_key:string;name:string;status:string;published_version:number;agent_id?:string|null;agent_name?:string|null }
 interface Agent { id:string;name:string;published_version:number }
 interface Key { id:string;prefix:string;active:boolean;created_at:string;expires_at:string|null;revoked_at:string|null }
@@ -47,7 +49,7 @@ function Editor({value,agents,preset,close,saved}:{value:Application|null;agents
       const payload=subject
         ?{...base,...values,agent_ids:chosen?.agent_id?[chosen.agent_id]:[],agent_versions:{},service_application_id:subject,service_application_version:pin||null}
         :{...base,...values,agent_versions:Object.fromEntries(Object.entries(value?.agent_versions||{}).filter(([id])=>(values.agent_ids||[]).includes(id))),service_application_id:null,service_application_version:null};
-      const result=value?await put<Application>(`${ROOT}/${value.id}`,payload):await post<Application>(ROOT,payload);saved(result);}catch(e){setError(errorOf(e));}finally{setBusy(false);}}}>
+      const result=value?await put<Application>(`${ROOT}/${value.id}`,payload):await post<Application>(ROOT,payload);saved(result);}catch(e){const msg=errorOf(e);setError(msg.includes('application_name_taken')?t('应用名称已存在，请换一个名称'):msg);}finally{setBusy(false);}}}>
       {locked&&<Alert showIcon type="info" style={{marginBottom:16}} title={t('从服务应用创建：绑定关系已锁定')} description={t('技能、连接、规则与知识随该服务应用的发布版本生效；如需改为仅授权 Agent，请在开放平台单独创建。')}/>}
       <Form.Item name="name" label={t('应用名称')} rules={[{required:true,whitespace:true}]}><Input maxLength={100} showCount/></Form.Item>
       <Form.Item name="description" label={t('描述')}><Input.TextArea rows={3} maxLength={1000}/></Form.Item>
@@ -118,7 +120,7 @@ function Logs({app}:{app:Application}) {
 }
 
 function ApplicationWorkspace({route,onNavigate}:{route:string;onNavigate:(path:string)=>void}) {
-  const {admin}=useAccess();
+  const {admin}=useAccess();const {message}=App.useApp();
   // ``route`` carries the hash path plus its query string, so split once here:
   // the delivery tab deep-links into "create an application bound to this
   // service application and version", and the id must not swallow the query.
@@ -128,19 +130,25 @@ function ApplicationWorkspace({route,onNavigate}:{route:string;onNavigate:(path:
   const presetSubject=params.get('service_application_id')||'';
   const presetVersion=Number(params.get('application_version')||'')||undefined;
   const [page,setPage]=useState(1);const [status,setStatus]=useState('all');const [q,setQ]=useState('');const [editing,setEditing]=useState<{value:Application|null;preset?:{subject?:string;version?:number}}|null>(null);
+  const [deleting,setDeleting]=useState<{app:Application;impact:ArchiveImpact|null;confirm:string}|null>(null);const [archiving,setArchiving]=useState(false);const [purging,setPurging]=useState<{app:Application;impact:PurgeImpact|null;confirm:string}|null>(null);
   useEffect(()=>{
     if(params.get('create')!=='1'||appId||!admin)return;
     setEditing(current=>current??{value:null,preset:presetSubject?{subject:presetSubject,version:presetVersion}:undefined});
   },[admin,appId,presetSubject,presetVersion,query]);
-  const catalog=useResource<{items:Application[];total:number}>(!appId?`${ROOT}?page=${page}&q=${encodeURIComponent(q)}${status!=='all'?'&enabled='+(status==='enabled'): ""}`:null);
+  const catalog=useResource<{items:Application[];total:number}>(!appId?`${ROOT}?page=${page}&q=${encodeURIComponent(q)}${status==='archived'?'&archived=true':status!=='all'?'&enabled='+(status==='enabled'):"&archived=false"}`:null);
   const detail=useResource<Application>(appId?`${ROOT}/${appId}`:null);const agents=useResource<Agent[]>('/open-platform/agents');
   const app=detail.data;const error=catalog.error||detail.error||agents.error;
+  const openDelete=(a:Application)=>{setDeleting({app:a,impact:null,confirm:''});api<ArchiveImpact>(`${ROOT}/${a.id}`,{method:'DELETE'}).then(impact=>setDeleting(s=>s&&s.app.id===a.id?{...s,impact}:s)).catch(e=>{setDeleting(null);message.error(errorOf(e));});};
+  const confirmDelete=async()=>{if(!deleting)return;setArchiving(true);try{await api<void>(`${ROOT}/${deleting.app.id}?confirm=true`,{method:'DELETE'});setDeleting(null);catalog.refresh();message.success(t('应用已删除'));}catch(e){message.error(errorOf(e));}finally{setArchiving(false);}};
+  const restoreApp=async(a:Application)=>{try{await post(`${ROOT}/${a.id}/restore`);catalog.refresh();message.success(t('应用已恢复'));}catch(e){message.error(errorOf(e));}};
+  const openPurge=(a:Application)=>{setPurging({app:a,impact:null,confirm:''});api<PurgeImpact>(`${ROOT}/${a.id}?purge=true`,{method:'DELETE'}).then(impact=>setPurging(s=>s&&s.app.id===a.id?{...s,impact}:s)).catch(e=>{setPurging(null);message.error(errorOf(e));});};
+  const confirmPurge=async()=>{if(!purging)return;setArchiving(true);try{await api<void>(`${ROOT}/${purging.app.id}?confirm=true&purge=true`,{method:'DELETE'});setPurging(null);catalog.refresh();message.success(t('应用已彻底删除'));}catch(e){message.error(errorOf(e));}finally{setArchiving(false);}};
   return <ConfigProvider theme={consoleTheme}><div className="op-workspace">
     {error&&<Alert type="error" showIcon title={error} action={<Button onClick={()=>{catalog.refresh();detail.refresh();agents.refresh();}}>{t('重试')}</Button>}/>}
-    {!appId?<div className="catalog-layout"><aside className="catalog-filter"><h3>{t('企业应用')}</h3><p>{t('状态')}</p><Space wrap size={6}>{[{value:'all',label:t('全部')},{value:'enabled',label:t('已启用')},{value:'disabled',label:t('已停用')}].map(item=><Button size="small" key={item.value} type={status===item.value?'primary':'default'} onClick={()=>{setStatus(item.value);setPage(1);}}>{item.label}</Button>)}</Space><div className="catalog-help"><p>{t('将 Agent 接入企业业务系统，独立管理授权、密钥与调用记录。')}</p><Button type="link" disabled={!admin} onClick={()=>onNavigate('/open-platform/identity')}>{t('企业身份与 SSO')} →</Button></div></aside><div className="catalog-content">
+    {!appId?<div className="catalog-layout"><aside className="catalog-filter"><h3>{t('企业应用')}</h3><p>{t('状态')}</p><Space wrap size={6}>{[{value:'all',label:t('全部')},{value:'enabled',label:t('已启用')},{value:'disabled',label:t('已停用')},{value:'archived',label:t('已归档')}].map(item=><Button size="small" key={item.value} type={status===item.value?'primary':'default'} onClick={()=>{setStatus(item.value);setPage(1);}}>{item.label}</Button>)}</Space><div className="catalog-help"><p>{t('将 Agent 接入企业业务系统，独立管理授权、密钥与调用记录。')}</p><Button type="link" disabled={!admin} onClick={()=>onNavigate('/open-platform/identity')}>{t('企业身份与 SSO')} →</Button></div></aside><div className="catalog-content">
       <div className="catalog-toolbar"><Input.Search aria-label={t('搜索应用名称')} placeholder={t('搜索应用名称')} allowClear onSearch={v=>{setQ(v);setPage(1);}}/><Button aria-label={t('创建应用')} type="primary" icon={<PlusOutlined aria-hidden/>} disabled={!admin} onClick={()=>setEditing({value:null})}>{t('创建应用')}</Button></div>
       <p className="op-muted">{t('共 {{count}} 个应用',{count:catalog.data?.total||0})}</p>
-      {catalog.loading?<Spin/>:catalog.data?.items.length?<div className="op-grid">{catalog.data.items.map(a=><Card key={a.id} className="op-app-card"><div className="op-card-top"><div className="op-icon"><ApiOutlined/></div><div><h3>{a.name}</h3></div><span className={'catalog-state'+(a.enabled?' enabled':'')}>{a.enabled?t('已启用'):t('已停用')}</span></div><p className="op-description">{a.description||t('暂无描述')}</p><div className="op-card-footer"><span>{a.target?.target_kind==='service_application'?t('交付：{{name}}',{name:a.target.name||a.target.key||''}):t('授权 {{count}} 个 Agent',{count:a.agent_ids.length})}</span><Button type="link" icon={<ArrowRightOutlined/>} onClick={()=>onNavigate(`/open-platform/${a.id}/settings`)}>{t('管理')}</Button></div></Card>)}</div>:<Empty description={t('创建第一个应用，开始企业集成。')}/>}
+      {catalog.loading?<Spin/>:catalog.data?.items.length?<div className="op-grid">{catalog.data.items.map(a=><Card key={a.id} className="op-app-card"><div className="op-card-top"><div className="op-icon"><ApiOutlined/></div><div><h3>{a.name}</h3></div><span className={'catalog-state'+(a.archived?'':a.enabled?' enabled':'')}>{a.archived?t('已归档'):a.enabled?t('已启用'):t('已停用')}</span></div><p className="op-description">{a.description||t('暂无描述')}</p><div className="op-card-footer"><span>{a.target?.target_kind==='service_application'?t('交付：{{name}}',{name:a.target.name||a.target.key||''}):t('授权 {{count}} 个 Agent',{count:a.agent_ids.length})}</span>{a.archived?(admin&&<Space size={0}><Button type="link" icon={<UndoOutlined/>} onClick={()=>void restoreApp(a)}>{t('恢复')}</Button><Dropdown menu={{items:[{key:'purge',danger:true,icon:<DeleteOutlined/>,label:t('彻底删除'),onClick:()=>openPurge(a)}]}} trigger={['click']}><Button type="text" size="small" aria-label={t('更多操作')} icon={<MoreOutlined/>}/></Dropdown></Space>):<Space size={0}><Button type="link" icon={<ArrowRightOutlined/>} onClick={()=>onNavigate(`/open-platform/${a.id}/settings`)}>{t('管理')}</Button>{admin&&<Dropdown menu={{items:[{key:'delete',danger:true,icon:<DeleteOutlined/>,label:t('删除应用'),onClick:()=>openDelete(a)}]}} trigger={['click']}><Button type="text" size="small" aria-label={t('更多操作')} icon={<MoreOutlined/>}/></Dropdown>}</Space>}</div></Card>)}</div>:<Empty description={status==='archived'?t('没有已归档的应用'):t('创建第一个应用，开始企业集成。')}/>}
       <Pagination current={page} pageSize={20} total={catalog.data?.total||0} onChange={setPage} showSizeChanger={false}/></div></div>:detail.loading?<Spin/>:app?<>
       <div className="op-heading"><Space><Button icon={<ArrowLeftOutlined/>} aria-label={t('返回应用列表')} onClick={()=>onNavigate('/open-platform')}/><div><h2>{app.name}</h2><Typography.Text type="secondary" copyable>App ID: {app.id}</Typography.Text></div></Space><Tag color={app.enabled?'success':'default'}>{app.enabled?t('已启用'):t('已停用')}</Tag></div>
       <Tabs destroyOnHidden activeKey={tab} onChange={key=>onNavigate(`/open-platform/${app.id}/${key}`)} items={[{key:'settings',label:t('应用配置')},{key:'integrations',label:t('集成配置')},{key:'channels',label:t('客服渠道')},{key:'embed',label:t('聊天页面')},{key:'webhook',label:t('Webhook 回调')},{key:'keys',label:t('应用密钥')},{key:'docs',label:t('接入文档')},{key:'debug',label:t('在线调试')},{key:'logs',label:t('调用日志')}]} />
@@ -158,6 +166,31 @@ function ApplicationWorkspace({route,onNavigate}:{route:string;onNavigate:(path:
       {tab==='embed'&&<EmbedSettings app={app}/>}{tab==='integrations'&&<Integrations key={`${app.id}:${app.revision}`} app={app} agents={agents.data||[]} saved={detail.refresh}/>}{tab==='channels'&&<AppChannels key={app.id} app={app} onNavigate={onNavigate}/>}{tab==='webhook'&&<WebhookPanel key={app.id} app={app}/>}{tab==='keys'&&<Keys key={app.id} app={app}/>}{tab==='docs'&&<IntegrationDocs app={app}/ >}{tab==='debug'&&<Debugger key={app.id} app={app} agents={agents.data||[]}/ >}{tab==='logs'&&<Logs key={app.id} app={app}/>}
     </>:null}
     {editing&&<Editor value={editing.value} preset={editing.preset} agents={agents.data||[]} close={()=>setEditing(null)} saved={a=>{setEditing(null);catalog.refresh();detail.refresh();onNavigate(`/open-platform/${a.id}/settings`);}}/>}
+    {deleting&&(()=>{const impact=deleting.impact;const needName=!!impact&&(impact.active_keys>0||impact.hosted_enabled);const ok=!!impact&&(!needName||deleting.confirm===deleting.app.name);return <Modal open width={480} title={t('删除应用')} okText={t('删除')} okButtonProps={{danger:true,disabled:!ok}} confirmLoading={archiving} onCancel={()=>setDeleting(null)} onOk={()=>void confirmDelete()}>
+      <Alert showIcon type="warning" title={t('删除后应用立即停止对外服务')} description={t('API 密钥立即吊销；iframe 嵌入、公开链接与 Webhook 将返回 404。配置会保留，可在“已归档”列表恢复。')}/>
+      <div className="op-impact-name"><span>{t('应用名称')}</span><Typography.Text copyable>{deleting.app.name}</Typography.Text></div>
+      <ul className="op-impact">
+        <li>{impact?t('有效密钥：{{count}} 个（将被吊销）',{count:impact.active_keys}):t('加载中')}</li>
+        <li>{impact?(impact.hosted_enabled?t('公开链接：已开通（将停止访问）'):t('公开链接：未开通')):t('加载中')}</li>
+        <li>{impact?(impact.embed_enabled?t('iframe 嵌入：已开通（将停止访问）'):t('iframe 嵌入：未开通')):t('加载中')}</li>
+        <li>{impact?t('近 30 天请求：{{count}} 次',{count:impact.requests_30d}):t('加载中')}</li>
+        <li>{impact?t('绑定服务应用：{{count}} 个',{count:impact.service_applications}):t('加载中')}</li>
+      </ul>
+      {needName&&<Form layout="vertical"><Form.Item label={t('输入应用名以确认删除')} required><Input value={deleting.confirm} onChange={e=>setDeleting({...deleting,confirm:e.target.value})} placeholder={deleting.app.name}/></Form.Item></Form>}
+      {impact&&<p className="op-muted">{t('归档后可随时恢复；恢复不会重新启用已吊销的密钥。')}</p>}
+    </Modal>;})()}
+    {purging&&(()=>{const impact=purging.impact;const ok=!!impact&&purging.confirm===purging.app.name;return <Modal open width={480} title={t('彻底删除')} okText={t('彻底删除')} okButtonProps={{danger:true,disabled:!ok}} confirmLoading={archiving} onCancel={()=>setPurging(null)} onOk={()=>void confirmPurge()}>
+      <Alert showIcon type="error" title={t('此操作不可恢复')} description={t('将永久删除该应用及其全部数据：密钥、会话、运行记录、请求日志、Webhook 与嵌入配置将一并删除，且无法恢复。')}/>
+      <div className="op-impact-name"><span>{t('应用名称')}</span><Typography.Text copyable>{purging.app.name}</Typography.Text></div>
+      <ul className="op-impact">
+        <li>{impact?t('API 密钥：{{count}} 条记录',{count:impact.keys}):t('加载中')}</li>
+        <li>{impact?t('请求日志：{{count}} 条记录',{count:impact.request_logs}):t('加载中')}</li>
+        <li>{impact?t('会话：{{count}} 个，运行：{{count2}} 次',{count:impact.sessions,count2:impact.runs}):t('加载中')}</li>
+        <li>{impact?t('Webhook：{{count}} 个（将一并删除）',{count:impact.webhooks}):t('加载中')}</li>
+        <li>{impact?t('绑定服务应用：{{count}} 个（绑定关系将解除）',{count:impact.service_applications}):t('加载中')}</li>
+      </ul>
+      <Form layout="vertical"><Form.Item label={t('输入应用名以确认彻底删除')} required><Input value={purging.confirm} onChange={e=>setPurging({...purging,confirm:e.target.value})} placeholder={purging.app.name}/></Form.Item></Form>
+    </Modal>;})()}
   </div></ConfigProvider>;
 }
 
