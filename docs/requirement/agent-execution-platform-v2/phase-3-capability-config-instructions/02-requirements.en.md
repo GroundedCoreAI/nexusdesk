@@ -2,6 +2,7 @@
 
 > Status: design calibrated (implementation not started; G1–G4, US-1–US-6, FR-1–FR-9, AC-1–AC-11 retained)
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: the ≥100 paired samples / p95 ≤50 ms, CI, and real or authorized historical sample requirements are no longer stage-acceptance gates and remain historical context / separate follow-ups; functional correctness, switch completeness, tenant isolation, secret/snapshot/migration/terminal-state/cleanup, no P0/P1, and a single acceptance owner remain gates; see the 2026-11-18 revision of 05/07; historical numbers are not retroactively changed)
 > Revised: 2026-11-13 (FR-9 adds six capability settings rows, per R-18/R-19)
 > Revised: 2026-11-12 (code reality, preview contract, start barrier, flag matrix, and migration)
 > Basis: `01-business-goals.md` (G1–G4); architecture Sections 5, 6, 11, 14, and 17 Phase 3

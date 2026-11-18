@@ -2,6 +2,7 @@
 
 > Status: Approved scope baseline for direct-continue development; not implemented or accepted; a blocking phase before untrusted multi-tenant code execution
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: performance/capacity/p50/p95/Outbox lag/recovery time/migration-lock budget, matched pairs, sample counts, report latency, CI evidence, real or authorized historical samples/baselines, and multi-sample data volume are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; functional correctness, security/reliability/event semantics, switch completeness, tenant isolation, Secret handling, data integrity, migration, terminal-state semantics, fault containment/cleanup, no P0/P1, and a single acceptance-owner record remain gates)
 > Revised: 2026-11-16 (development entry authorized without inventing upstream acceptance; migration IDs corrected after code audit)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 3, 7–10, 12–13, 17 (Phase 6), 18.2/18.4/18.6, and 19–22; see `03-technical-design.en.md` for the current-state audit
 

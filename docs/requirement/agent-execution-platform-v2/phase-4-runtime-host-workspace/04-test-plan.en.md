@@ -6,6 +6,7 @@
 > Revised: 2026-11-14 (08 R-1/R-3/R-5: migration renumbered `0054`→`0059_execution_runtime_host` after revalidating head `0058_agent_execution_metadata`; new §2.1 registers the normative macOS-development-subset versus `pending_env` mapping for the current darwin execution host; test-file naming follows `test_agent_execution_phase4_*`)
 > Revised: 2026-11-14 (coordination rulings 08 R-11/R-12: P4-IT-13 gains the same-Run concurrent-prepare convergence expectation; P4-IT-15/P4-IT-21 assert latest-successful-observation disk accounting — over-quota observations persisted with a structured excess alert and a final re-observation before deletion)
 > Revised: 2026-11-14 (coordination rulings 08 R-13/R-14: §2.1 registers probe-gated macOS `RLIMIT_AS` applicability and the platform-independent resource-excess evidence contract)
+> Revised: 2026-11-18 (scope-limited acceptance: the §6 "pending Phase 0 compatibility/performance blocks the promise", the §7 exit clause "unavailable-environment items block their enablement promise", and the P2 "supervision-overhead deviation" are no longer stage exit gates and are kept as records only; see 05 §6.1)
 > Basis: `02-requirements.md` (FR-1–FR-10, AC-1–AC-12), `03-technical-design.md` (Host, process groups, recovery, Workdir, resource matrix, and rollback)
 
 ## 1. Test Scope and Principles

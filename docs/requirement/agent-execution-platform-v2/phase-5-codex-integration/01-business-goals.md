@@ -2,6 +2,7 @@
 
 > 状态：待评审（仅规划，未实施；当前代码无 Codex 支持）
 > 创建：2026-11-02
+> 修订：2026-11-18（范围受限验收：成功指标中"待 Phase 0 建立基线"与 p50/p95、启动时延为历史上下文，不作为阶段验收门禁；见 05 §6.1。Stage B 仍锁定）
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 3.2、4、5、7~10、12~13、17（Phase 5）、19~22 节；现状核查见 `03-technical-design.md`
 
 > 阶段：Phase 5（Stage A：CLI Exec；Stage B：App-Server，严格串行解锁）

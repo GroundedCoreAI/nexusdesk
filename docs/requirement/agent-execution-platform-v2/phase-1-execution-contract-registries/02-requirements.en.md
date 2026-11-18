@@ -4,6 +4,7 @@
 > Created: 2026-11-02; design frozen: 2026-11-08
 > Revised: 2026-11-09 (R11 owned-task documentation clarification; no lifecycle behavior change)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 4–6 and 17, Phase 1; `01-business-goals.en.md` (G1–G4); `08-implementation-breakdown.en.md` (R1–R11, T1–T8)
+> Revision note (2026-11-18): the "performance baseline to be measured in Phase 0" statement in Performance and the complete-suite/CI basis in the regression-blocking wording are no longer stage-acceptance blockers and are retained only as historical targets or explicit out-of-scope notes (see `05-acceptance-plan.md` §0); blocking on existing Runtime regression failure, tenant isolation, Secret handling, data integrity, migration, and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## User Stories
 

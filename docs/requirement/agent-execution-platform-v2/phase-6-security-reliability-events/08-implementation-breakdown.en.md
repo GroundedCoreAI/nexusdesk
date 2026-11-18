@@ -2,6 +2,7 @@
 
 > Status: Approved implementation baseline for development/testing; no task is implemented by this document and no acceptance result is implied.
 > Created: 2026-11-16
+> Revised: 2026-11-18 (scope-limited acceptance revision: R-5/R-15 Phase 0 zero diff and real/measured baselines, performance/lock metrics, sample/paired/report-latency data, and full CI evidence are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; R-9 real capabilities are a separate high-risk-enablement/capability prerequisite. Historical rulings and evidence numbers in this document are unchanged; only their stage-gate status is interpreted per the 2026-11-18 revision of 05/07)
 > Basis: `01`–`05`, architecture Sections 7–10/12/17–22, and first-hand inspection of backend code/tests at branch `feat/agent-execution-platform-v2-phase6`, baseline `7772a32324f2eb6bb2c5de141baed4350aa53715`.
 > Constraints: Direct-continue authorization applies to the approved scope. Preserve the modular monolith, Run=one attempt, existing queue/Host/Workspace/event contracts, and all security/data/real-environment hard gates. Maximum five coordinated rework rounds; further unresolved hard-gate disagreement stays blocked, while only genuinely non-core P2/P3 work may be negotiated for follow-up.
 

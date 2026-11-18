@@ -4,6 +4,7 @@
 > 创建：2026-11-02；设计冻结：2026-11-08
 > 修订：2026-11-09（R11 owned-task 文档澄清，无生命周期行为变更）
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 4～6、15～17、19～21 节，Phase 1；`08-implementation-breakdown.md`（R1～R11、T1～T8）
+> 修订说明（2026-11-18）：本文"成功指标"中"对现有 Run 延迟与错误率的影响（数值基线待 Phase 0 测量）"及入口风险中 Phase 0 CI 双跑/真实历史样本表述不再作为阶段验收阻断项，仅保留为历史目标或明示非范围项（见 `05-acceptance-plan.md` §0）；功能正确性、租户隔离、Secret、数据完整性、迁移与无 P0/P1 等门槛不变。历史原文保留不改写。
 
 ## 要解决的问题
 

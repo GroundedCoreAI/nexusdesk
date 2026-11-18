@@ -1,6 +1,7 @@
 # Phase 5 - Codex Integration Implementation Breakdown
 
 > Status: implementation baseline (2026-11-13); reality rulings updated after implementation (2026-11-14); round-5 addition R18/T10 closes the prompt-delivery blocker
+> Revised 2026-11-18 (scope-limited acceptance): the Stage B gate tied to P5-IT-18 (§1, line 22), the "no mock-only unlock" wording, and CI/real-binary/Phase 0-baseline/perf `pending_env` notes are reclassified — P5-IT-18 remains the separate high-risk Stage B unlock condition and CI/perf/baseline items are historical context, not stage-acceptance blockers (05 §6.1). Stage B stays locked; all measured facts and rulings are unchanged.
 > Basis: `01`-`05`, and inspection of the Phase 1-4 execution contracts and runtime host.
 > Scope rule: implement the smallest Stage A/B seams that fit the existing contracts; do not replace the worker or runtime host.
 

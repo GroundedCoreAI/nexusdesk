@@ -3,8 +3,9 @@
 > Status: Deferred (early-stage project; planning is retained, but implementation, testing, and acceptance are not starting)
 > Deferral decision: 2026-11-07; FR-1~FR-11 are tracked as lowest-priority P4 GitHub issues (#110~#120), indexed under “Deferral and Requirement Tracking” in `02-requirements.en.md`
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: business/performance baselines, CI evidence, sample/paired/report-latency data, and real or authorized historical samples are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; the phase stays deferred, and after reactivation it is decided only by its own functional/switch evidence. The dependency on accepted capabilities is a functional dependency only and excludes baseline/performance/CI comparative prerequisites)
 > Basis: `docs/architecture/agent-execution-platform-v2.md` §17 Phase 7, §18, §19, and §22; code and Alembic migration review performed on 2026-11-02
-> Phase: Phase 7 (advanced capabilities, lowest priority P4; depends on accepted Phase 0~6 capabilities)
+> Phase: Phase 7 (advanced capabilities, lowest priority P4; depends on accepted Phase 0~6 functional capabilities; baselines/performance/CI are out of scope)
 > Estimated effort: Estimate the 9 independent small-PR slices separately; no Big Bang overall schedule commitment
 > Dependencies: Phase 0 baseline and regression evidence, Phase 1~2 common execution contracts and orchestrator, Phase 3 capabilities/instructions, Phase 4 Workspace/Runtime Host, and Phase 6 security/event governance; a slice with unmet dependencies must not launch
 

@@ -1,7 +1,8 @@
 # Phase 3 · Capability, Configuration and Instructions — Acceptance Report
 
-> Status: **conditionally passed** (the ceiling is set by C11 `not_measured` in 05 §5; the veto-grade gates C1–C4 and C9 were re-confirmed item by item in person; the full CI run and upstream gaps block defined release scopes)
+> Status: **historical conclusion "conditionally passed"** (that ceiling was set at the time by the old C11 `not_measured` and unexecuted CI; veto-grade gates C1–C4 and C9 were re-confirmed item by item). Under the 2026-11-18 revision, performance/CI are no longer stage-acceptance gates or a verdict ceiling, and the functional exit and switch/rollback criteria are met; historical numbers and conclusions are not retroactively changed
 > Created: 2026-11-13 (the actual date on which this acceptance was executed and concluded)
+> Revised: 2026-11-18 (scope-limited acceptance revision: the old performance C11 `not_measured`, CI provenance / final-PR-head run/URL, real or authorized historical samples, and multi-sample requirements are no longer stage-acceptance gates, no longer cap the verdict, and are no longer a standalone fail criterion; they remain historical context or separate follow-ups. C11 is now a switch-completeness/rollback functional gate whose criteria are in §5 C11 (functional) and A10/C9, with evidence satisfied. Functional correctness A1–A11, C1–C10, tenant isolation, secret handling, snapshot/data integrity, migration, terminal-state semantics, side effects/cleanup, no P0/P1, and a single acceptance-owner record remain gates; high-risk flag enablement stays separate. The #127/#128 boundary stays deferred, not complete)
 > Acceptance owner: acceptance sub-agent (last link of the four-role Phase 3 flow, also absorbing the final-review duty; single conclusion)
 > Executor: acceptance sub-agent + coordinator (environment preparation, target-SHA evidence runs, follow-up checks and evidence assembly were performed by this role; this is not developer self-verification)
 > Basis: `05-acceptance-plan.md` (A1–A11, C1–C11, M1–M3, §2 development entry / final release gate, §6 conclusion definitions), `02-requirements.md` (AC-1–AC-11), `04-test-plan.md` (P3 numbering, §2 skip attribution rules, §6.1, §6.2 C11, §7 exit), `06-test-report.md` (number→evidence mapping, the nine boundaries in §6, §4 C11, §9 exit marks), `08-implementation-breakdown.md` (§1 rules, §2 rulings R-1–R-52, §5)
@@ -14,7 +15,9 @@ This round follows the lightweight responsibility model of 05 §1: acceptance ow
 
 Evidence uses a degraded-but-recheckable scheme: each A/C criterion first cites the number→case mapping of 06 §3 (format `06 §3.x row / suite::case`), and every veto-grade gate plus every point that can be re-run at low cost was executed again at the target SHA (the V-series in §2.4 is this report's own evidence). 06 collected evidence at HEAD `37b08f8` plus 44 uncommitted work-tree entries; at the time of this acceptance that work tree had been fully committed (`b1df324`, `e1807f7`, `69a48a1`), so this report re-runs at the target SHA to confirm that 06's numbers still hold, and both must be cited together.
 
-**Conclusion ceiling**: 05 §5 defines C11 as "must pass; insufficient/unmeasured = `not_measured` or `pending_env`, must not pass", 05 §6 lists "no valid C11 measurement" as one of the **fail** criteria, and 05 §2 states that "conditionally passed cannot cover any veto gate or C11". C11 is `not_measured` this round (§5, #129), so the conclusion **can neither be a pass nor be handled as a fail** (this unmeasured state is an evidence gap the maintainer explicitly deferred on 2026-11-13 and tracked as an independent follow-up issue, not a failed measurement); the ceiling is therefore **conditionally passed**, with conditions in §7.
+**Conclusion ceiling (historical)**: 05 §5 originally defined C11 as "must pass; insufficient/unmeasured = `not_measured` or `pending_env`, must not pass", 05 §6 originally listed "no valid C11 measurement" as one of the **fail** criteria, and 05 §2 originally stated that "conditionally passed cannot cover any veto gate or C11". The old C11 was `not_measured` this round (§5, #129), so the ceiling was **conditionally passed**, with conditions in §7.
+
+> **2026-11-18 revision (supersedes the above ceiling)**: the performance-only C11 wording, CI provenance / final-PR-head run, real or authorized historical samples, and multi-sample requirements are no longer stage-acceptance gates, no longer cap the verdict, and are no longer a standalone fail criterion; they are historical context or separate follow-ups only. C11 is now a switch-completeness/rollback functional gate (05 §5, §6) whose evidence is satisfied by A10/C9 and no longer depends on any performance sampling. The historical "conclusion ceiling" explanation is retained as a record but no longer limits this stage's conclusion: the functional exit and switch/rollback criteria are met, there is no P0/P1, and the veto-grade gates are satisfied. Historical numbers and conclusions are not retroactively changed.
 
 ## 2. Target SHA, Environments, and Precondition Check
 
@@ -43,7 +46,7 @@ Evidence uses a degraded-but-recheckable scheme: each A/C criterion first cites 
 | Test role | Reuses 06 E22 measured `rolcreatedb=true`, `rolsuper=true`; skip attribution follows 04 §2 mechanisms (V03 counts identical to 06 §5) | §5 skip judgement |
 | Frontend toolchain | node v25.6.1; Vite dev server at `127.0.0.1:5173` (`reuseExistingServer`) | M1–M3 equivalent evidence, C8 |
 | Credentials | Only from the mode-0600 file `/tmp/nexusdesk-phase3-pg.env` outside the repository (4 variable names); this report and repository files contain no connection string or password literal (§10) | All PG evidence |
-| CI | **None**: no push, no PR, no CI run this round (V17) | §2.3 unmet precondition, condition ⑤ |
+| CI | **None**: no push, no PR, no CI run this round (V17); non-gate since 2026-11-18 | Historical context; no longer a §2.3 entry gate or verdict ceiling |
 
 ### 2.3 Preconditions for entering A/C acceptance (05 §2)
 
@@ -52,11 +55,11 @@ Evidence uses a degraded-but-recheckable scheme: each A/C criterion first cites 
 | T2–T9 complete | Met | 08 §4 task table marks T2–T9 已完成 (T4/T5/T9 conditionally passed; their conditions are folded into this report's condition list) |
 | A real 06 exists and P3-UT/IT/CM all pass | Met (UT/IT all pass; CM with boundaries) | 06 §3.1/§3.2 all pass; 06 §3.3 carries six rows with a boundary/destination; 06 §9 states the P3-CM exit as "not satisfied (unmet items exist)", of which the format item was closed by 06 §11.1 and re-verified at the target SHA (V05) |
 | No P0/P1 | Met (as observed this round) | V01/V02 zero failures; 06 §7; the only observed failure this round was a non-Phase-3 timing-sensitive case provoked by concurrent self-runs (V19, §6 F-10) |
-| Full CI results available at the target SHA | **Not met** | V17 shows no CI run and no PR; this round substitutes target-SHA local full evidence (non-PG 1975 + PG 500 + three frontend gates + 37 Playwright), which **is not CI**; recorded as condition ⑤ |
+| Full CI results available at the target SHA | Historical context (non-gate since 2026-11-18) | V17 shows no CI run and no PR; this round substitutes target-SHA local full evidence. Availability of full CI results is no longer a stage-acceptance entry gate or verdict ceiling — historical context / separate-process follow-up only |
 | Migration chain dynamically re-verified at implementation time | Met | V08/V09 (head and `down_revision` re-read consistently at the target SHA) |
 | At least two dedicated tenants / independent scopes | Met | 04 §2 data conventions; cross-tenant evidence at 06 §3.3 P3-CM-04 row (re-run by V02) |
 | Evidence completed a sensitive-information scan | Met | §10 (zero repository hits for the password and connection-string literals) |
-| C11 measured with ≥100 valid paired samples and meeting the target | **Not met** | `not_measured` (§5 C11, 06 §4, #129); per 05 §2 a missing environment keeps `pending_env` and cannot pass |
+| C11 measured with ≥100 valid paired samples and meeting the target | Historical context (non-gate since 2026-11-18) | The old C11 performance wording `not_measured` (§5, 06 §4, #129) is retired; C11 is now a switch-completeness/rollback functional gate satisfied by the A10/C9 evidence, no longer depending on paired samples |
 
 ### 2.4 Evidence actually executed this round (target SHA `69a48a1`)
 
@@ -134,7 +137,8 @@ Per 05 §4/§6 and the streamlined small-team flow, no separate UAT round or sig
 | C8 | Four languages complete, Effective read-only, preview exposes no internal snapshot and authorizes no Run (must pass) | V12 (`Verified 2075 translations`) + V10 (37 cases including four-locale parameterization) + V16 (the four run-side codes keyed in all four dictionaries) + 06 §3.4 `P3-FE-10c/12/13/17/18` rows + the 06 §3.2 P3-IT-17 row on the preview whitelist/OpenAPI; the out-of-scope unkeyed `model_not_configured` sentence is excluded per R-38 (06 §3.5.1, §7) | **satisfied** |
 | C9 | Dual flags and application rollback succeed with no downgrade; non-React never silently degrades (`runtime.for_run` always 0); the Run side uses only the four pre-existing public codes with no untranslated code, lease loss keeps `worker_lost`, and no degradation to `execution_error` (veto) | 06 §3.2 P3-IT-13/22 rows (four-state matrix, `WIRE::test_worker_reads_each_rollout_flag_once_and_fixes_the_path`, `WIRE::test_the_four_run_side_codes_stay_out_of_the_adapter_error_map`) + 06 §3.3 P3-CM-09 row + V09 (nullable columns) + V16 (four codes in four languages); additionally verified at the target SHA: at base `3969258` the four literals existed only in Phase 3 planning documents and in HEAD they became source plus i18n keys ("pre-existing" means contract-pre-existing, see §9 D-6) | **satisfied (veto gate confirmed in person; the real rollback is still condition ③)** — application-level / deployment-binary rollback evidence belongs to #128; satisfaction here covers only the code and test surface |
 | C10 | Migration dynamically re-verified, exactly five columns and no history rewritten; no Phase 4/5/6 scope creep (must pass) | V08/V09 (head and `down_revision`, exactly five `ADD COLUMN ... JSONB NULL`) + 06 §3.3 P3-CM-01/10 rows (`LTA::test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact`) + V07 (architecture gate passed); no Host/Workdir/Sandbox/Codex implementation (only denylist keys and placeholder fields) | **satisfied** |
-| C11 | Real paired resolver/admission baseline, caches warmed then warm-up discarded, ≥100 valid interleaved paired samples in the same environment and load, raw data retained, paired-delta p95 ≤50 ms, excluding external models (must pass) | 06 §4: no `backend/tests/test_agent_execution_phase3_performance.py` (re-confirmed absent at this same HEAD), **0** valid samples, p95 **not computed**, the six R-18 values not frozen for collection; the collection wording of 04 §6.2; V01/V02 contain no C11 sampling node | **not satisfied — `not_measured`** (per 05 §5 must not pass; condition ① #129) |
+| C11 (functional, since 2026-11-18) | Switch completeness and rollback: default off preserves the original Phase 2 path; explicit on reaches the Phase 3 entry; the `phase3=on + orchestrator=off` mismatch fails closed with `runtime.for_run` always 0; non-React fails explicitly with no silent degradation; a claimed row keeps a fixed path; neither rollout flag nor tuning enters the fingerprint; rollback needs no downgrade | 06 §3.2 P3-IT-12/13/22 rows (`WIRE::test_on_with_orchestrator_off_refuses_the_legacy_path_completely`, `WIRE::test_the_misconfigured_state_boots_and_still_refuses_runs`, `ORCH::test_runtime_fingerprint_excludes_both_rollout_flags_and_the_phase3_tuning_family`) + the P3-UT-26 row; V08/V09 (five nullable columns, no downgrade); four-state flags 200 at the target SHA (V14 collection and §3 A10) | **satisfied (veto-grade functional gate)** — A10/C9 confirmed item by item; does not depend on any performance sampling |
+| C11 (old performance wording, retired) | Historical: resolver/admission paired baseline, ≥100 valid interleaved paired samples, paired-delta p95 ≤50 ms, excluding external models | 06 §4: no `backend/tests/test_agent_execution_phase3_performance.py`, **0** valid samples, p95 **not computed**, six R-18 values not frozen; 04 §6.2 wording; V01/V02 contain no sampling node | **historical context (non-gate)**: the `not_measured` record is retained and #129 becomes a separate follow-up; since 2026-11-18 it no longer caps the verdict or counts as a fail item, and historical numbers are not retroactively changed |
 
 **No skip / `pending_env` / `not_measured` was written as passing**: the 28 skips of 06 §5 in four mechanisms (24 opt-in migration-database variable, 2 alternative databases without the embedding column, 1 real-Milvus opt-in, 1 seeded-quickstart opt-in) reproduce identically in V03 and all remain `pending_env`; the quickstart one leads to condition ③.
 
@@ -159,27 +163,29 @@ Review-round work labels (`D-*`, `F-*`, `M*`) do not enter documents per 08 §1 
 
 No P0 (escalation, cross-tenant, secret leakage, unauthorized `Adapter.start`, data loss) and no P1 (legacy configuration incompatibility, wrong Effective, missing snapshots, Provider regression, flag/non-React refusal failure): based on zero failures in V01/V02 at the target SHA, 06 §7, the "no P0/P1" row of 06 §9, and the evidence chains personally confirmed for C1–C5 in §5.
 
-## 7. Condition List (everything that caps the conclusion at "conditionally passed")
+## 7. Condition List (historical conditions behind the "conditionally passed" ceiling; see the note below after the 2026-11-18 revision)
 
 | # | Condition | Owner | Deadline | Destination issue |
 |---|---|---|---|---|
-| ① | Real C11 resolver/admission paired measurement (≥100 valid interleaved pairs, p95 ≤50 ms, raw data appended to the 06 report, the six R-18 settings and SHA frozen before sampling) | Coordinator (backend lane) | Before 2026-11-20; no release or deployment until closed | **#129** (OPEN; 05 §5/§6 state that an unmeasured C11 cannot pass — **this item alone sets the ceiling**) |
+| ① | Historical real C11 resolver/admission paired measurement (≥100 valid interleaved pairs, p95 ≤50 ms, raw data appended to 06, six R-18 settings and SHA frozen before sampling) | Coordinator (backend lane) | Historical deadline 2026-11-20 | **#129** (OPEN; the old performance wording is retired — since 2026-11-18 it is a separate follow-up and **no longer sets this stage's verdict ceiling**) |
 | ② | Close the hardening batch item by item: F-01 (#130 item 1, off-state five-column PG direct read), F-02 (item 2, 422 truncation falsifiability), F-03 (item 3, `uuid_parsing` fragment), F-04 (item 4, comment ruling-number overflow), F-05 (item 5, instruction matrix minors), F-06 (item 6, migration fixture asymmetry), F-07 (item 7, i18n whitelisted sentence), F-08 (item 9, MemoryInjection PG end-to-end) | Coordinator (backend + frontend lanes, assigned per item) | Before 2026-11-27 | **#130** (OPEN; item numbers as in the left column) |
 | ③ | T12 example seed and T13 fresh-quickstart wiring (default off / on / application rollback on a real stack, plus the real-stack UI replay); afterwards append only an appendix to the existing 06/07 reports without rewriting these conclusions | Maintainer scheduling (backend + deployment + frontend lanes) | #127: before 2026-11-27; #128: before 2026-12-04 (depends on #127) | **#127 / #128** (both OPEN; moved out of this phase by 08 R-39; they close the real-stack meaning of M3/A9/A10/A11) |
-| ④ | Close the upstream gaps within their promised scope or explicitly block it: Phase 0 formal acceptance incomplete (its 07 records `pending_env` plus `pending_signoff` for five signoff classes and states "no conditional pass, Phase 1 not released"); Phase 1 formal acceptance incomplete (CI, real historical samples, final overall package review, Adapter-representative human UAT and four signoffs `pending`); Phase 2 is **conditionally passed** (production performance, CI/real deployment, human UAT/signoff, persistent evidence not closed). **"Code merged" may not be used as a substitute** | Maintainer + each phase's acceptance owner | Must be closed before this phase enters release or deployment; otherwise block the matching scopes in §8 | No single issue (phase-level evidence gaps; destinations are the residual lists of the Phase 0/1/2 reports 07, to be closed by the coordinator in follow-up issues or the next phase's 07) |
-| ⑤ | The 8 commits of this round are unpushed, absent from main/integration, and full CI never ran at the target SHA (V17/V18). Follow the repository workflow: local commit (done) → push and open a PR → obtain a green full CI run at the target SHA; if CI disagrees with these local numbers, CI prevails and 07 is reissued | Coordinator | Immediately (precondition for this phase reaching integration) | No new issue (destination is the dev-workflow PR/CI process; no release/deployment before condition ⑤ closes) |
+| ④ | Close the upstream gaps within their promised scope or explicitly block it: the formal-acceptance status of Phase 0, Phase 1 and Phase 2. **"Code merged" may not be used as a substitute**. 2026-11-18 revision: this condition is now a historical record / separate follow-up of phase-level evidence gaps, not a stage-acceptance functional gate; downstream phases may proceed on this stage's functional conclusion, while high-risk flag enablement and external deployment still need each phase's own approval and release | Maintainer + each phase's acceptance owner | Historical deadline (phase-level evidence gaps) | No single issue (destinations are the residual lists of the Phase 0/1/2 reports 07) |
+| ⑤ | Historical: the 8 commits of this round are unpushed, absent from main/integration, and full CI never ran at the target SHA (V17/V18). 2026-11-18 revision: CI provenance / final-PR-head CI run/URL is no longer a stage-acceptance gate or verdict ceiling; this becomes a separate dev-workflow process follow-up and does not block this stage's functional conclusion | Coordinator (dev-workflow process) | No stage deadline | No new issue (destination is the dev-workflow PR/CI process) |
 
-## 8. Final Release Gate and Blocked Scopes (05 §2)
+> **2026-11-18 condition-list effect**: conditions ① and ⑤ were the historical "verdict ceiling" conditions; they are now retained as records and separate follow-ups and no longer cap this stage's conclusion. ② (#130 hardening), ③ (#127/#128 seed/quickstart deferral), and ④ (phase-level evidence gaps) remain registered by their own nature, with #127/#128 **staying deferred, not complete**. Functional correctness, switch completeness/rollback, veto-grade gates and no P0/P1 are satisfied and form the basis of this stage's conclusion.
+
+## 8. Final Release Gate and Blocked Scopes (05 §2, 2026-11-18 revision)
 
 | Release scope | This round | Basis |
 |---|---|---|
-| Merging Phase 3 code into integration/main (both flags default to `false`, behaviour unchanged) | **May proceed** (with condition ⑤ closed as precondition) | V01/V02/V04/V05/V07 all green; C9/A10 prove the off path preserves the original Phase 2 behaviour |
-| Production release / external deployment | **Blocked** | C11 `not_measured` (condition ①) + no CI at the target SHA (condition ⑤) + upstream gaps (condition ④) |
-| Turning `execution_phase3_enabled` on in a real environment | **Blocked** | Condition ① (C11 presumes a warmed real path), condition ③ (real off/on/rollback and real-stack UI in #128), condition ④ |
-| demo/quickstart shipping Phase 3 example data | **Not accepted** (explicitly deferred) | 05 §6 scope adjustment (R-39); destination #127/#128; may not be written as completed |
-| Starting Phase 4 work (design/implementation in parallel) | **May proceed**, but must carry conditions ①②③⑤ of this report | The functional core evidence is sufficient with no P0/P1; the upstream gate is not waived |
+| Merging Phase 3 code into integration/main (both flags default to `false`, behaviour unchanged) | **May proceed** | V01/V02/V04/V05/V07 all green; C9/A10 prove the off path preserves the original Phase 2 behaviour. CI provenance / final-PR-head run is no longer a stage gate (separate dev-workflow process) |
+| Production release / external deployment | **Per each phase's own release process; this stage's functional criteria are not a blocker** | The old "Blocked" basis (C11 `not_measured`, no CI, condition ④) is no longer a stage gate (conditions ①/⑤ retired); upstream phase-level gaps and high-risk flag enablement still need their own approval and are outside this stage's functional gate |
+| Turning `execution_phase3_enabled` on in a real environment (high-risk flag) | **Blocked; a separate security and operations approval record is required** | This is high-risk capability enablement, separate from phase acceptance; the switch/rollback functional gate is satisfied, but enablement authorization needs independent approval (see the real-stack boundary in §7 ③ and the enablement note) |
+| demo/quickstart shipping Phase 3 example data | **Not accepted** (explicitly deferred) | 05 §6 scope adjustment (R-39); destination #127/#128; **stays deferred, may not be written as completed** |
+| Starting Phase 4 work (design/implementation in parallel) | **May proceed**, carrying this stage's residuals (#127/#128/#130 deferrals/hardening) | The functional core evidence is sufficient with no P0/P1; high-risk enablement and upstream approvals are not waived |
 
-The 05 §2 wording "merged code cannot replace this evidence; conditional pass cannot cover any veto gate or C11" is implemented line by line this round: satisfaction of C1–C4 and C9 each carries a personally confirmed evidence chain (§5), C11's non-satisfaction is listed separately as condition ①, was never merged into a veto item, and was never offset by "already merged".
+The historical 05 §2 wording "merged code cannot replace this evidence; conditional pass cannot cover any veto gate or C11" was implemented line by line: satisfaction of C1–C4 and C9 each carries a personally confirmed evidence chain (§5). 2026-11-18 revision: the old C11 performance wording is no longer a "veto or capping" item; C11 is now a switch-completeness/rollback functional gate, which is satisfied. Historical numbers and conclusions are not retroactively changed.
 
 ## 9. Document Traceability Final Review (numbering consistency, bilingual parity, ruling coverage, and findings)
 
@@ -205,6 +211,8 @@ The 05 §2 wording "merged code cannot replace this evidence; conditional pass c
 | 06-test-report | 338 / 338 | 19 / 19 | 208 / 208 | 146 / 146, shared 146 |
 | 08-implementation-breakdown | 247 / 247 | 19 / 19 | 69 / 69 | 109 / 105, shared 105 (the four zh-only numeric tokens are the `FR-4:65` line citation and the `0,`/`1,`/`16,` list markers — typographic, not criterion numbers) |
 | 07-acceptance-report (this report) | 258 / 258 | 20 / 20 | 162 / 162 | 139 / 139, shared 139 (no one-sided numbers) |
+
+> **2026-11-18 structure note**: the line counts above are a 2026-11-13 evidence-time snapshot. The 2026-11-18 scope-limited revision **symmetrically** added revision notes, the C11 functional-gate rows, and retired-wording annotations to the zh and en files of 05/06/07; both languages' line counts changed in step, so symmetry is preserved. Historical numbers are not retroactively changed, so the table retains its original values as a historical record rather than a current line-count assertion.
 
 ### 9.3 Inconsistencies found this round (registered only, nothing modified)
 
@@ -234,25 +242,53 @@ The 05 §2 wording "merged code cannot replace this evidence; conditional pass c
 
 | Destination | State | Content | Related commits / SHA range |
 |---|---|---|---|
-| **#129** | OPEN | Real C11 performance measurement (condition ①, sets the ceiling) | Affects the performance promise of all capability/wiring work in `4318042..69a48a1` |
+| **#129** | OPEN (separate follow-up, non-gate) | Old C11 real performance measurement; since 2026-11-18 it no longer sets this stage's ceiling or blocks the conclusion | Affects the historical performance promise of all capability/wiring work in `4318042..69a48a1` |
 | **#130** | OPEN | Nine hardening items (condition ②, item numbers per §7 and §6 F-01–F-08) | `4318042..69a48a1` (item 9 concerns the P3-IT-09 criterion) |
 | **#127** | OPEN | T12 low-sensitivity idempotent example seed (condition ③) | Must follow the real 06/07 (this document is 07) |
 | **#128** | OPEN | T13 fresh-quickstart wiring + real off/on/rollback + real-stack UI replay (condition ③) | Depends on #127; afterwards append only an appendix to 06/07 |
-| Condition ④ | Phase-level gaps | Phase 0/1 formal acceptance incomplete, Phase 2 conditionally passed (production performance, CI/real deployment, human UAT/signoff, persistent evidence) | Blocks the three release scopes in §8 (production release, real flag enablement, example data); does not block merging |
-| Condition ⑤ | Process gap | 8 commits unpushed, no PR, full CI never run at the target SHA | `origin/integration` tip = `3969258`; `origin/main` tip = `5437e03`; this round's HEAD = `69a48a1` |
+| Condition ④ | Phase-level gaps (historical record / separate follow-up, not a stage gate) | Phase 0/1 formal acceptance incomplete, Phase 2 historical conclusion | Handled by each phase's own release process; no longer blocks this stage's functional conclusion |
+| Condition ⑤ | Process gap (separate dev-workflow process, not a stage gate) | 8 commits unpushed, no PR, full CI never run at the target SHA; CI provenance / final-PR-head run is no longer a stage-acceptance gate | `origin/integration` tip = `3969258`; `origin/main` tip = `5437e03`; this round's HEAD = `69a48a1` |
 | F-10 | Destination undecided | Non-Phase-3 timing-sensitive case flake under concurrent evidence runs (V19) | Belongs to none of #127–#130; handed to the coordinator |
 | D-1–D-8 | Documentation/wording register | See §9.3 | Closed by the coordinator in the next documentation commit; 07 modifies nothing in 04/05/06/08 |
 
-## 12. Conclusion (against the 05 §6 conclusion definitions)
+## 12. Conclusion (against the 05 §6 conclusion definitions, 2026-11-18 revision)
 
-| Conclusion tier (05 §6 wording) | Reached this round | Reason |
-|---|---|---|
-| Pass (A1–A11 and C1–C11 all pass; M1–M3 complete or equivalent; no P0/P1; rollback evidence complete; final release gate unblocked) | **No** | C11 `not_measured`; the real rollback and real-stack replay not executed; no CI at the target SHA; the upstream gate blocks |
-| Conditionally passed (limited to non-hard-gate P2/P3 that do not affect security, compatibility, snapshots, C11 or rollback, each with owner/deadline and explained by the acceptance owner; veto items excluded) | **Yes (this report's conclusion)** | A1–A11 all decided pass (five of them with an evidence boundary and tied to a condition); C1–C10 satisfied; C11 plus conditions ①–⑤ each carry owner/deadline/destination (§7); no veto gate is covered by "conditional" |
-| Fail (any AC or hard gate failing, missing real baseline making compatibility undecidable, escalation/cross-tenant/leakage/silent non-React degradation, or no valid C11 measurement) | **No (but the boundary is extremely narrow and must be read as stated)** | The clause "no valid C11 measurement" is **literally met** here; this round treats it, per the explicit rule of 05 §2 (a missing environment stays `pending_env` and cannot pass) and the maintainer's deferral registered as #129, as a ceiling constraint ("cannot pass") rather than a verdict of implementation failure. The compatibility baseline is not missing (V01/V02 plus the 06 §8 regression) and escalation / cross-tenant / leakage / silent degradation are all zero (§5 C1/C3/C4/C9). **This interpretation changes none of the release blocks in §8** |
+> The "historical" column below records the 2026-11-13 original reading; the "2026-11-18 reading" column records the scope-limited revision. Historical numbers and conclusions are not retroactively changed; performance/CI/historical samples no longer cap the verdict or count as a standalone fail item.
+
+| Conclusion tier (05 §6) | Historical (2026-11-13) | 2026-11-18 reading | Reason |
+|---|---|---|---|
+| Pass (A1–A11 and C1–C11 all pass; M1–M3 complete or equivalent; no P0/P1; rollback evidence complete; final release gate unblocked) | Not reached | **Reached (this stage's functional conclusion)** | C11 is now the switch-completeness/rollback functional gate (satisfied by A10/C9); the old `not_measured`, unexecuted CI and upstream phase-level gaps are no longer this stage's functional gates or blockers; A1–A11 all pass, C1–C11 satisfied, no P0/P1, switch/migration rollback evidence complete |
+| Conditionally passed (limited to non-hard-gate P2/P3 not affecting security, compatibility, snapshots, switch/rollback, each with owner/deadline; veto items excluded) | Reached (historical conclusion) | No longer the ceiling | Historical conditions ①/⑤ (old C11 performance, CI) are retired; #127/#128/#130 deferrals/hardening remain separate follow-ups and do not cap the functional conclusion; no veto item was covered by "conditional" |
+| Fail (any AC or hard gate failing, missing real baseline, escalation/cross-tenant/leakage/silent non-React degradation, or broken switch/rollback) | Not reached | **Not reached** | Compatibility baseline is not missing (V01/V02 + 06 §8 regression), escalation/cross-tenant/leakage/silent degradation all zero (§5 C1/C3/C4/C9); the switch/rollback functional gate is satisfied. The old "no valid C11 measurement" literal fail clause is retired with the performance wording |
 
 | Acceptance owner | Executor | Date | Target SHA | Conclusion | Evidence / residual |
 |---|---|---|---|---|---|
-| Acceptance sub-agent (last link of the four-role flow, including the final review) | Acceptance sub-agent + coordinator (one role executing, not a human signoff) | 2026-11-13 | `69a48a1` (`4318042`…`69a48a1`, 8 unpushed commits, §2.1) | **Conditionally passed** | Evidence: §2.4 V01–V19 (target-SHA runs) + the 06 §3 number→case mapping; residual: §11 (#127/#128/#129/#130 + conditions ④⑤ + F-10 + D-1–D-8) |
+| Acceptance sub-agent (last link of the four-role flow, including the final review) | Acceptance sub-agent + coordinator (one role executing, not a human signoff) | 2026-11-13; revised 2026-11-18 | `69a48a1` (`4318042`…`69a48a1`, 8 unpushed commits, §2.1) | **Historical "conditionally passed"; functional-exit criteria met under the 2026-11-18 revision** | Evidence: §2.4 V01–V19 (target-SHA runs) + the 06 §3 number→case mapping; residual: §11 (#127/#128 deferrals, #130 hardening, #129 separate performance follow-up, conditions ④⑤ historical, F-10, D-1–D-8) |
 
-**Signoff note**: this round creates no multi-role UAT or signoff flow (05 §1 and the repository's streamlined convention); the single record above is the phase's only conclusion, and developer/agent self-verification is not human acceptance or an independent audit. Until condition ① closes, this phase may not enter release or external deployment, and `execution_phase3_enabled` may not be turned on in a real environment.
+**Signoff note**: this round creates no multi-role UAT or signoff flow (05 §1 and the repository's streamlined convention); the single acceptance-owner record above is the phase's only conclusion, and developer/agent self-verification is not human acceptance or an independent audit. 2026-11-18 revision: historical conditions ① (performance) and ⑤ (CI) no longer cap this stage's functional conclusion; #127/#128 stay deferred, not complete; turning the high-risk flag `execution_phase3_enabled` on in a real environment requires a separate security and operations approval record and stays separate from phase acceptance.
+
+
+---
+
+## 2026-11-18 scope-limited acceptance execution addendum (phases 0-3)
+
+Per the 2026-11-18 revision of `09-acceptance-execution-runbook.md`, a scope-limited phases 0-3
+acceptance run was executed on the governed shared production Linux host at target SHA
+`5170e140f10b117549cf54ba400131f5d7f95f69`. Performance, CI provenance, real/authorized historical
+samples and large-sample data-volume requirements are out of stage scope; the kept gates are functional
+correctness, switch completeness, tenant isolation, Secret handling, data integrity, migration,
+terminal-state semantics, side effects/cleanup, no open P0/P1, and a single acceptance-owner record.
+
+Result: 13 lanes, all exit 0; 5,464 JUnit tests with **0 failures / 0 errors** and 55 declared skips;
+the dedicated switch-completeness lane `d9-switch-completeness` passed 913 tests, supported by a
+read-only default-off inspection of the running production stack.
+Verdict: **PASS (scope-limited)**. The single acceptance owner (JackChow) confirmed and signed this
+phase on 2026-11-18 (see the authoritative record `../11-scope-limited-acceptance-record-20261118.md`
+§7); no signature item remains outstanding. High-risk capability enablement still requires a separate
+approval and is not authorized here.
+
+Authoritative record: `../11-scope-limited-acceptance-record-20261118.md`; evidence package
+`20261118T125822Z.tar.gz`, SHA256
+`109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23`.
+Historical conclusions and numbers above are not retroactively modified; this addendum only records
+the current scope-limited conclusion.

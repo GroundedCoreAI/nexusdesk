@@ -1,7 +1,8 @@
 # Phase 2 · React Provider and Execution Orchestrator — Test Report
 
-> Status: Completed (local functional exit passed; production performance submetric `pending_env`)
+> Status: Completed (local functional exit passed; performance/CI are historical context, not acceptance gates)
 > Created: 2026-11-11
+> Revised: 2026-11-18 (scope-limited acceptance revision: performance/p95/matched pairs/sample counts and CI run/URL are no longer stage-acceptance exit gates. The "performance `pending_env` caps T9 at conditional" and "full CI not executed" statements in §8 R-01, §9 and §10 are retained only as historical context / separate follow-ups and no longer cap the functional-exit verdict; historical test numbers are not retroactively changed)
 > Basis: `04-test-plan.md` (P2-UT-01–24, P2-IT-01–20, P2-CM-01–08), `05-acceptance-plan.md`, `03-technical-design.md`, `08-implementation-breakdown.md` (R15/R16, T8)
 > Executed by: T8 formal test execution agent; date: 2026-11-11
 
@@ -141,7 +142,7 @@ These are historical records from earlier review/implementation steps. This run 
 
 | # | Severity | Description | Disposition |
 |---|---|---|---|
-| R-01 | Environment pending | Real external-model/tool production performance was not measured; the test-double ratio is neither a production target nor regression conclusion | Only the performance submetric remains `pending_env`; T9 can be conditional at most and must obtain real same-environment matched-pair evidence under 05 §4 |
+| R-01 | Historical context / retired gate (formerly environment pending) | Real external-model/tool production performance was not measured; the test-double ratio is neither a production target nor regression conclusion | 2026-11-18 revision: performance `pending_env` is no longer an exit gate and no longer caps T9; if measurement is still desired, track as a separate follow-up; historical numbers not retroactively changed |
 | R-02 | P2/pre-existing baseline | Whole-`src` format check found 32 files needing formatting; their overlap with Phase 2 changes is zero, and all 12 Phase 2 source files passed | Do not reformat out of scope in T8; handle in a separate baseline-format cleanup. This report must not be read as whole-tree format success |
 | R-03 | Environment limitation | The raw worktree contains four pre-existing ignored legacy roots, `modules/apps/integrations/platform`, causing the raw architecture gate to fail | A clean source export excluding only those four roots passed; no user files were deleted. A clean CI checkout remains authoritative, but CI was not run |
 | R-04 | Pending T9 | No production canary, deployment traces/metrics, real external-model performance, human UAT, or sign-off | Remains unexecuted and is not fabricated in 06; T9/the relevant environment tasks must supply evidence |
@@ -152,10 +153,11 @@ These are historical records from earlier review/implementation steps. This run 
 - **Not executed**. This run created no commit, push, or PR, so there is no CI run, head SHA, or URL.
 - Local affected tests and static checks do not replace CI full unit/postgres/frontend results.
 - This report does not claim full pytest, production deployment, production performance, human UAT, or formal acceptance.
+- **2026-11-18 revision**: CI provenance / final-PR-head CI run/URL is no longer a stage-acceptance exit gate or verdict ceiling; the above is historical context / a separate process follow-up only.
 
 ## 10. Exit Conclusion
 
-**Local functional exit passed; production performance submetric `pending_env`.** Every P2-UT-01–24, P2-IT-01–20, and P2-CM-01–08 row has fresh evidence from this run; all functional primary cases passed, and CM08 evidence integrity/measurement boundaries passed. The two Memory skips are alternate-environment cases and do not count as passes. This conclusion permits entry into T9 but is not complete Phase 2 acceptance; without production performance evidence, T9 can be conditional at most.
+**Local functional exit passed; performance/CI are historical context (non-gates since 2026-11-18).** Every P2-UT-01–24, P2-IT-01–20, and P2-CM-01–08 row has fresh evidence from this run; all functional primary cases passed, with sufficient switch-completeness and rollback evidence. The two Memory skips are alternate-environment cases and do not count as passes. This conclusion permits entry into T9; the historical facts of production-performance `pending_env` and unexecuted CI no longer cap T9 or the functional-exit verdict, and historical test numbers are not retroactively changed.
 
 ## Appendix A Local Output and Evidence Snapshots
 

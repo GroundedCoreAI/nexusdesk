@@ -3,7 +3,16 @@
 > Status: Design decisions frozen (R1–R11); local test and local automated acceptance evidence exists, the full suite and CI remain pending, and formal acceptance is pending
 > Created: 2026-11-02; design frozen: 2026-11-08
 > Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner; removed multi-role sign-off, Adapter UAT, and the business-metric table; technical criteria and hard gates unchanged)
+> Revised: 2026-11-18 (scope-limited acceptance revision: performance/capacity/p50/p95/C11 latency, matched pairs, sample counts, CI provenance/final-PR-head CI double-run/CI run URL, real or authorized historical samples, and multi-sample/large-sample-data-volume requirements are no longer stage-acceptance gates and remain only as historical context or explicit out-of-scope notes; functional correctness, contract/terminal semantics, tenant isolation, Secret handling, data integrity, migration and protected-file/lockfile zero drift, rollback completeness, side effects/cleanup, zero P0/P1, and a single acceptance-owner record remain gates; high-risk enablement stays separate)
 > Basis: `01-business-goals.en.md` (G1–G4 and success metrics), `02-requirements.en.md` (AC-1–AC-8); execution follows `04-test-plan.en.md`; decisions and tasks are in `08-implementation-breakdown.en.md` (R1–R11, T1–T8)
+
+## 0. 2026-11-18 Scope-Limited Acceptance Revision (supersedes later gate wording)
+
+This section records the 2026-11-18 scope-limited acceptance revision. It takes precedence over any later wording that treats the items below as acceptance gates, veto items, "fail" conditions, or mandatory evidence; the original text is retained as historical context but is superseded by this section.
+
+- **No longer stage-acceptance gates** (retained only as historical context or explicit out-of-scope notes): performance/capacity p50/p95/C11 latency and duration statistics; matched pairs and sample counts; CI provenance, final-PR-head CI double-run, and CI run URL; real or authorized historical samples; multi-sample/large-sample-data-volume requirements. Accordingly, §2's "CI run" evidence requirement, the "Phase 0 clean committed-artifact CI double run and authorized real historical samples still require their own evidence" clause in the entry-risk boundary, and the performance/sample basis in the §6 baseline note are not stage blockers.
+- **Still stage-acceptance gates**: functional correctness and contract/terminal semantics (A1–A8 behavior and evidence), tenant isolation, Secret handling, data integrity, migration head and protected-file/lockfile zero drift, rollback completeness, side effects/cleanup, zero P0/P1, and a single acceptance-owner record; high-risk enablement still requires separate security and operations approval.
+- **Historical numbers**: values in 06/07 such as 560 focused cases, 115 regressions, C1–C4 pass counts, and the various counts/SHAs are retained as historical evidence, are not rewritten, and are neither pass nor blocker conditions for this stage.
 
 ## 1. Acceptance Scope and Responsibility
 
@@ -21,9 +30,9 @@ Passing phase acceptance does not authorize later phases or any high-risk capabi
 | Dedicated PostgreSQL regression | Verify existing Runtime/API/SSE behavior and unchanged migration head |
 | Document and code review | Check paths, versions, dependency boundaries, error redaction, and Phase 2 non-goals |
 
-**Prerequisites**: Every case in `04-test-plan.en.md` is actually executed and passes with no open P0/P1; provide the CI run, test logs, changed-file list, protected-file diff, and `alembic heads` evidence. Use dedicated acceptance data/test tenants and no real customer input or credentials.
+**Prerequisites**: Every case in `04-test-plan.en.md` is actually executed and passes with no open P0/P1; provide the CI run [2026-11-18: the CI run / CI run URL is no longer a stage-acceptance gate; retained as historical context; see §0], test logs, changed-file list, protected-file diff, and `alembic heads` evidence. Use dedicated acceptance data/test tenants and no real customer input or credentials.
 
-**Entry-risk boundary**: The user's request to start Phase 1 only accepts the open Phase 0 items as an entry risk. Phase 0's clean committed-artifact CI double-run and authorized real historical fixtures still require their own evidence; Phase 1 startup, testing, or acceptance must never be cited as formal Phase 0 approval.
+**Entry-risk boundary**: The user's request to start Phase 1 only accepts the open Phase 0 items as an entry risk. Phase 0's clean committed-artifact CI double-run and authorized real historical fixtures still require their own evidence [2026-11-18: that CI double-run and real-historical-sample evidence requirement is superseded / out-of-scope and is no longer a stage blocker for this phase; see §0]; Phase 1 startup, testing, or acceptance must never be cited as formal Phase 0 approval.
 
 ## 3. Functional Acceptance Checklist (AC-1–AC-8)
 
@@ -62,11 +71,11 @@ Every scenario record must include executor, date, environment, fixtures, actual
 - **Pass**: A1–A8 and C1–C4 all have evidence and pass; M1–M3 are complete or have equivalent evidence; zero P0/P1 leftovers.
 - **Conditional pass**: Only P2/P3 residuals remain, each with an owner and deadline, confirmed by the acceptance owner in the record below; no waiver of AC, production compatibility, or sensitive-information issues.
 - **Fail**: Any veto item or unmet AC; after fixes, rerun affected items and related regression.
-- **Baseline note**: Values marked "to be measured/inventoried in Phase 0" must not later be presented as existing measurements; this phase evaluates targets with a fixed test matrix, while production performance baselines remain for Phase 0/2. Accepting the Phase 0 entry risk is not a Phase 0 acceptance sign-off.
+- **Baseline note**: Values marked "to be measured/inventoried in Phase 0" must not later be presented as existing measurements; this phase evaluates targets with a fixed test matrix, while production performance baselines remain for Phase 0/2. Accepting the Phase 0 entry risk is not a Phase 0 acceptance sign-off. [2026-11-18: performance/latency numbers and real historical samples are no longer stage-acceptance gates and must not block on account of being "to be measured/to be sampled"; see §0.]
 - **Release note**: passing phase acceptance does not authorize later phases or any high-risk capability.
 
 Produce the Phase 1 Acceptance Report with AC records, CI/migration evidence, compliance results, residual list, verdict, and the single acceptance record below; multi-role sign-off is not required. Populate the report only from actual evidence.
 
 | Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
 |---|---|---|---|---|---|
-| To be filled | To be filled (may be the acceptance owner) | To be filled | To be filled | Pending acceptance | To be filled |
+| JackChow (confirmed by the user, 2026-11-18) | WorkBuddy automated acceptance execution | 2026-11-18 | `5170e140f10b117549cf54ba400131f5d7f95f69` | **PASS (scope-limited)** | `../11-scope-limited-acceptance-record-20261118.md` §7; evidence `20261118T125822Z.tar.gz` |

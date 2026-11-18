@@ -2,6 +2,7 @@
 
 > 状态：本地 T2～T11 与 R17 live 验证已完成，R18 生产修复及聚焦验证已完成，详见 06/07 及相应附录；R18 最小 live on/off 已完成；总体仍有条件通过
 > 创建：2026-11-02
+> 修订：2026-11-18（范围限定验收修订：§末"功能出口与性能子指标分离"中的性能 ≥30 matched pairs/p95/CI 与 pending_env 封顶口径自本日起不作为阶段验收门禁，保留为历史上下文；功能正确性、开关完整性、租户隔离、Secret/快照/迁移/终态/清理、无 P0/P1 与单一验收负责人仍为门禁；详见 05/07 的 2026-11-18 修订，历史数字不追溯修改）
 > 修订：2026-11-12（R18：Worker 终态日志必须晚于正常 finish 成功；当前状态统一）
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 4～7、12、14～17、19、21 节；Phase 0 `baseline/run-lifecycle-events.md`；Phase 1 `backend/tests/agent_execution/adapter_contract_suite.py`；`02-requirements.md`（FR-1～FR-6、AC-1～AC-9）；`08-implementation-breakdown.md`（R1～R18、T1～T11）；backend 基线 `0a6c4b5`
 

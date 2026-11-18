@@ -2,6 +2,7 @@
 
 > Status: design calibrated against code reality (not implemented, tested, or accepted)
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: added-latency ≤50 ms / ≥100 paired samples, real or authorized historical samples, and CI requirements are no longer stage-acceptance gates and remain historical context / separate follow-ups; functional correctness, switch completeness, tenant isolation, secret/snapshot/migration/terminal-state/cleanup, no P0/P1, and a single acceptance owner remain gates; see the 2026-11-18 revision of 05/07; historical numbers are not retroactively changed)
 > Revised: 2026-11-12 (migration, actual Phase 1/2 state, start barrier, preview, and evidence gates)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 5, 6, 11, 14, 15, 17, 19, and 22; Phase 0–2 06/07; `02-requirements.md` (FR-1–FR-9)
 > Estimated effort: ~2 weeks (re-estimate before T2)

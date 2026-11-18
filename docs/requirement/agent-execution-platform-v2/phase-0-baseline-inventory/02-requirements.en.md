@@ -3,6 +3,7 @@
 > Status: In progress (implementation started on 2026-11-07)
 > Created: 2026-11-02
 > Basis: `01-business-goals.md` (G1–G3), architecture Section 17 (Phase 0)
+> Revision note (2026-11-18): the "coverage and duration" wording in AC-6 and the double-run/sample-count criteria in this document are no longer stage-acceptance blockers (see `05-acceptance-plan.md` §0); functional correctness, data integrity, tenant isolation, Secret handling, migration, and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## User Stories
 

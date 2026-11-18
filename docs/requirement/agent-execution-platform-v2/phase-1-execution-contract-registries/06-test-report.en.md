@@ -4,6 +4,7 @@
 > Created: 2026-11-08
 > Basis: `04-test-plan.md` (P1-UT-01～12, P1-IT-01～11, P1-CM-01～06), `02-requirements.md` (FR/AC), `08-implementation-breakdown.md` (T2～T6, R1～R11)
 > Executed by: independent T7 executor; execution coverage: 2026-11-08～2026-11-09; final current-tree rerun: 2026-11-09
+> Revised: 2026-11-18 (scope-limited acceptance revision: wherever this document treats a CI run / CI link, a performance or latency numeric baseline, or the complete suite / large-sample or real historical samples as acceptance exit evidence or a blocker, that item is no longer a stage-acceptance blocker and remains only as historical context or an explicit out-of-scope note; all test numbers and historical records are unchanged. Items that remain gates are in `05-acceptance-plan.md` §0)
 
 ## 1. Test Scope and Environment
 
@@ -153,7 +154,7 @@ D-01～D-06 come from historical T2～T6 implementation/spec/quality reviews and
 
 | # | Severity | Description | Disposition (suggested owner / next evidence) |
 |---|---|---|---|
-| R-01 | P1 downstream testing | The complete local suite and GitHub Actions CI were not run and there is no run URL; these selected tests do not prove every other existing module or full frontend/all-suite compatibility | **Owner: subsequent commit/PR and CI maintainers**. Obtain full CI results and a run URL through a later authorized submission flow, adding any necessary regressions; this report does not initiate commit, push, or PR |
+| R-01 | P1 downstream testing [2026-11-18: CI run URL / CI-provenance portion superseded / out-of-scope, no longer a stage-acceptance blocker; 05 §0] | The complete local suite and GitHub Actions CI were not run and there is no run URL; these selected tests do not prove every other existing module or full frontend/all-suite compatibility | **Owner: subsequent commit/PR and CI maintainers**. Obtain full CI results and a run URL through a later authorized submission flow, adding any necessary regressions; this report does not initiate commit, push, or PR |
 | R-02 | P2 local environment | Raw `check_architecture.py` still exits 1 and reports only the four pre-existing ignored legacy roots `modules/apps/integrations/platform`; the identical clean-source shadow gate passes. The raw command must not be called green, and ignored artifacts must not be deleted merely to obtain a green result | **Owner: repository/architecture-gate maintainers**. Recheck using a clean checkout or raw CI logs; retain both raw exit 1 and clean-shadow pass evidence before deciding on a non-destructive local ignored-artifact cleanup strategy |
 | R-03 | P1 acceptance entry | The Phase 0 formal acceptance-entry risk remains open; Phase 1 implementation and testing do not constitute Phase 0 approval | **Owner: Phase 0 acceptance owner**. Provide formal acceptance/signoff evidence and confirm the entry before Phase 1 formal acceptance proceeds; satisfying the Phase 1 local test exit does not approve an earlier phase |
 | R-04 | P1 formal acceptance | Bilingual `07-acceptance-report.md` / `07-acceptance-report.en.md` now exist and record local automated A1～A8 and C1～C4 engineering evidence; formal human acceptance, Adapter-representative UAT, role signatures, and final overall package review remain unapproved/incomplete. Local 29/29 passage and the existence of 07 do not automatically become business/formal acceptance | **Owner: Phase 1 acceptance owner and final package-review owner**. Use 07 as input to complete the final overall package review, human UAT, formal acceptance, and signatures with independent evidence; T7 does not perform that role |
@@ -161,8 +162,8 @@ D-01～D-06 come from historical T2～T6 implementation/spec/quality reviews and
 ## 9. CI Evidence
 
 - PR: **not created (T7 explicitly performs no commit/push/PR)**.
-- CI run: **PENDING; not run; no URL, head SHA, or conclusion=success claim**.
-- Complete local `uv run pytest`: **PENDING; not run**.
+- CI run: **PENDING; not run; no URL, head SHA, or conclusion=success claim**. [2026-11-18: the CI run URL / CI provenance is no longer a stage-acceptance gate and remains only as historical context; §0]
+- Complete local `uv run pytest`: **PENDING; not run**. [2026-11-18: the complete-suite / large-sample basis is no longer a stage-acceptance gate; §0]
 - Local conclusion: F current-tree focused/static execution, T6 historical artifacts, and the final independent Docker PostgreSQL rerun jointly cover all 29 P1-UT/IT/CM rows. Local test evidence for AC-1～8 is reproducibly green, with 115 passed and 0 skipped across the deduplicated selected affected regressions. The locally approved scope and exit evidence in `04-test-plan.md` §7 are **satisfied**.
 - Downstream boundary: the full suite and Frontend/Backend CI jobs were not verified. Bilingual 07 reports now contain local automated engineering evidence, but the final overall package review, formal Phase 1 human acceptance, UAT, and signatures remain incomplete. This report does not claim CI success, Phase 0 entry approval, final overall package approval, or formal Phase 1 acceptance.
 

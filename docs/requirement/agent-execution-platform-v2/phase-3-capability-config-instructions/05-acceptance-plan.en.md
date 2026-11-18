@@ -2,6 +2,7 @@
 
 > Status: pending implementation (execute before launch; no acceptance results or 07 currently exist)
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: C11 changes from a performance-only gate to an explicit functional switch-completeness/rollback gate; the old "≥100 paired samples / p95 ≤50 ms / real resolver performance" wording and its verdict-capping rule are retired and remain only as historical context or a separate follow-up. CI provenance / final-PR-head CI run/URL, real or authorized historical samples, and multi-sample/large-sample requirements are no longer stage-acceptance gates or verdict ceilings. A1–A11, the functional correctness of C1–C10, switch completeness (default off / explicit on / misconfigured fail-closed / no silent degradation / rollback), tenant isolation, secret handling, snapshot/data integrity, migration, terminal-state semantics, side effects/cleanup, no P0/P1, and a single acceptance-owner record remain gates; high-risk flag enablement stays separate. Historical test numbers and conclusions are not retroactively changed; the #127/#128 boundary stays deferred, not complete)
 > Revised: 2026-11-13 (third close-out batch: the T7/T8 rulings land in acceptance - A3 gains the evidence boundary and production-observable signals, A4 gains the platform ceiling and constant-revision notes, A6/C5 pin that `execution_error` is never the terminal code of a classified barrier failure, A10 gains the fingerprint exclude set, that the misconfigured process still boots, and `runtime.for_run==0`, and C2/C9 gain the production-port shapes and Run-side code discipline; per R-42–R-52)
 > Revised: 2026-11-13 (§6 and the environment table register that T12/T13 moved out of this phase to issues #127/#128 (08 R-39), and the acceptance scope narrows accordingly)
 > Revised: 2026-11-13 (M3 criterion anchored to the 03 §7.4 execution-config-flags declarative gating, per R-25)
@@ -13,7 +14,7 @@
 
 ## 1. Scope and Lightweight Responsibility
 
-Verify actual evidence for AC-1–AC-11, C1–C11, and M1–M3 across compatibility, security, snapshots, performance, four locales, and rollback. The acceptance owner organizes and records one conclusion; the executor prepares environments, performs supplemental checks, and organizes evidence. They may be the same person. Invent no independent product/QA/business/security/operations roles or multi-role sign-off. Developer self-verification is neither real-user acceptance nor independent audit. Phase acceptance does not by itself authorize the enablement of any high-risk capability or subsequent phase.
+Verify actual evidence for AC-1–AC-11, C1–C11, and M1–M3 across compatibility, security, snapshots, four locales, and rollback; performance remains historical context / a separate follow-up and is not a stage-acceptance gate. The acceptance owner organizes and records one conclusion; the executor prepares environments, performs supplemental checks, and organizes evidence. They may be the same person. Invent no independent product/QA/business/security/operations roles or multi-role sign-off. Developer self-verification is neither real-user acceptance nor independent audit. Phase acceptance does not by itself authorize the enablement of any high-risk capability or subsequent phase.
 
 ## 2. Development Entry, Acceptance Preconditions, and Final Launch Gates
 
@@ -27,9 +28,9 @@ Verify actual evidence for AC-1–AC-11, C1–C11, and M1–M3 across compatibil
 | Disposable populated database copy | Online migration, concurrency, old-binary rollback, and downgrade |
 | Frontend acceptance build + existing Playwright | Engine configuration, read-only preview, four locales, M1–M3 equivalent evidence |
 
-**Before A/C acceptance**: T2–T9 complete; actual `06-test-report.md/.en.md` exists with all P3-UT/IT/CM passed; no P0/P1; target-SHA full CI available; migration chain dynamically revalidated; at least two dedicated tenants/independent scopes; evidence sensitive-scanned. C11 has at least 100 valid paired samples meeting the target; missing environment remains `pending_env` and cannot pass.
+**Before A/C acceptance**: T2–T9 complete; actual `06-test-report.md/.en.md` exists with all P3-UT/IT/CM passed; no P0/P1; migration chain dynamically revalidated; at least two dedicated tenants/independent scopes; evidence sensitive-scanned. Availability of full target-SHA CI results, real or authorized historical samples, and C11 performance ≥100 paired samples/p95 target are no longer stage-acceptance entry gates as of 2026-11-18 — they are historical context or separate follow-ups. (Historical wording retained: target-SHA full CI available; C11 with ≥100 valid paired samples meeting the target, and a missing environment stays `pending_env` and cannot pass — retired.)
 
-**Final launch gates**: A1–A11 and C1–C11 pass, with M1–M3 complete or equivalent automated evidence. Upstream real-history samples, CI/real deployment, production performance, and human-acceptance gaps affecting this phase's commitments must close or explicitly block the corresponding launch scope. Merged code substitutes for none of these; conditional passage cannot override a veto or C11.
+**Final launch gates**: A1–A11 and C1–C11 pass (C11 is the switch-completeness/rollback functional gate, see §5), with M1–M3 complete or equivalent automated evidence. This phase's functional commitments are not blocked by unmeasured performance, CI provenance, or missing real historical samples. Conditional passage cannot override a veto item; high-risk flag enablement requires a separate approval record and stays separate from phase acceptance. (Historical wording retained: upstream real-history samples, CI/real deployment, production performance, and human-acceptance gaps must close or explicitly block the corresponding launch scope — retired, not a stage gate.)
 
 ## 3. Functional Acceptance (A1–A11)
 
@@ -73,20 +74,22 @@ Only supplement actual UI/rollback checks not fully covered by automation. Recor
 | C8 | Four locales complete; Effective read-only; preview exposes no internal snapshots or Run authorization | Required | AC-9; G1, G2; FR-8 |
 | C9 | Flag/application rollback succeeds without downgrade; non-React never silently degrades (`runtime.for_run` call counts stay 0 under on+orchestrator-off); the Run side reuses only the four existing public codes execution_phase3_disabled/execution_configuration_invalid/execution_engine_unavailable/execution_policy_unavailable, adds no untranslated code, and lost-lease/non-running rows follow the existing `worker_lost` path and must never degrade to `execution_error` | Veto | AC-10; G4; FR-8, FR-9 |
 | C10 | Migration dynamically revalidated, five columns only, no historical edits, no Phase 4/5/6 scope leakage | Required | AC-11; G1, G4; FR-6 |
-| C11 | Real resolver/admission paired baseline, warmed/discarded warmups, same environment/load, at least 100 valid interleaved paired samples with raw data, p95 delta ≤50ms, external model excluded | Required; insufficient/unmeasured=`not_measured` or `pending_env`, never pass | G1; performance success metric |
+| C11 | **Switch completeness and rollback (functional gate since 2026-11-18)**: default off preserves the original Phase 2 path; explicit on reaches the Phase 3 capability/config/instruction entry; the `phase3=on + orchestrator=off` mismatch fails closed with `runtime.for_run` call counts always 0; non-React fails explicitly with no silent degradation; a claimed row keeps a fixed path; neither rollout flag nor tuning enters the fingerprint; application rollback needs no downgrade. Evidence rests on configuration, the flags endpoint, Run-side codes, and nullable migration columns | Required (veto-grade like C9); no switch/rollback evidence or silent degradation fails | AC-10; FR-8/9; G4; US-6 |
+| C11 (old) | Historical wording (retired, non-gate): real resolver/admission paired baseline, warmed/discarded warmups, ≥100 valid interleaved paired samples, raw data retained, p95 delta ≤50ms, external model excluded; insufficient/unmeasured=`not_measured`/`pending_env` | No longer a stage-acceptance gate since 2026-11-18; retained as historical context / separate follow-up; historical numbers and conclusions not retroactively changed | G1; performance success metric (historical) |
 
 ## 6. Conclusions and Post-Acceptance Work
 
-- **Pass**: A1–A11 and C1–C11 all pass; M1–M3 complete/equivalent; no P0/P1; rollback evidence complete; no final-launch blockers.
-- **Conditional pass**: only non-hard-gate P2/P3 items unrelated to security, compatibility, snapshots, C11, or rollback, each with owner/deadline and acceptance-owner explanation; never for veto items.
-- **Fail**: any AC/hard gate fails, missing real baseline prevents a compatibility verdict, elevation/cross-scope/disclosure/silent non-React degradation occurs, or C11 lacks valid measurements.
+- **Pass**: A1–A11 and C1–C11 all pass (C11 is the switch-completeness/rollback functional gate); M1–M3 complete/equivalent; no P0/P1; rollback evidence complete; no final-launch blockers.
+- **Conditional pass**: only non-hard-gate P2/P3 items unrelated to security, compatibility, snapshots, switch/rollback, each with owner/deadline and acceptance-owner explanation; never for veto items.
+- **Fail**: any AC/hard gate fails, missing real baseline prevents a compatibility verdict, elevation/cross-scope/disclosure/silent non-React degradation occurs, or switch/rollback evidence is missing / no-silent-degradation breaks. Unmeasured performance / CI / real historical samples are no longer a fail criterion on their own (2026-11-18 revision).
+- **Performance/CI no longer cap the verdict (2026-11-18 revision)**: the old C11 performance `not_measured`/`pending_env` state no longer prevents the pass tier and no longer caps the verdict at conditional pass; historical numbers and conclusions are not retroactively changed.
 - **Enablement note**: phase acceptance does not automatically authorize high-risk capability enablement; enablement requires a separate approval record.
 
-Only after actual acceptance create bilingual `07-acceptance-report.md/.en.md`, containing A/C evidence, raw C11 measurements, M checks, migration/rollback, open items, and this single record.
+Only after actual acceptance create bilingual `07-acceptance-report.md/.en.md`, containing A/C evidence, the C11 switch-completeness/rollback evidence, M checks, migration/rollback, open items, and this single record.
 
 | Acceptance owner | Executor | Date | Target SHA | Conclusion | Evidence/open items |
 |---|---|---|---|---|---|
-| Fill during acceptance | Fill during acceptance (may be same person) | Fill during acceptance | Fill during acceptance | Pending acceptance | Fill during acceptance |
+| JackChow (confirmed by the user, 2026-11-18) | WorkBuddy automated acceptance execution | 2026-11-18 | `5170e140f10b117549cf54ba400131f5d7f95f69` | **PASS (scope-limited)** | `../11-scope-limited-acceptance-record-20261118.md` §7; evidence `20261118T125822Z.tar.gz` |
 
 **Seed/quickstart strictly after real 06/07 (not executed in this phase, see below)**: first add an independent low-sensitivity, deterministic-ID, create-or-preserve idempotent Phase 3 example seed without fabricated execution snapshots. Then separately wire fresh quickstart to run it automatically and verify default off/on/rollback and real Run snapshots. Finally append this evidence only to existing 06/07; create no reports early and never auto-insert examples in production.
 

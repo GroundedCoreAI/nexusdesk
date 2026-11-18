@@ -3,6 +3,7 @@
 > Status: In progress (baseline construction started on 2026-11-07)
 > Created: 2026-11-02
 > Basis: `02-requirements.md` (FR-1–FR-6, AC-1–AC-6), `03-technical-design.md` (no migration, actual state machine, compatibility fixtures, two-run baseline)
+> Revision note (2026-11-18): the "two-run, coverage, duration, clean CI twice" wording in the environment table, P0-IT-10/P0-CM-05, and the exit criteria is no longer a stage-acceptance blocker and is retained only as historical context or an explicit out-of-scope note (see `05-acceptance-plan.md` §0); functional correctness, data integrity, tenant isolation, Secret handling, migration, and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## 1. Test Scope and Principles
 

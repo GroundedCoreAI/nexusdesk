@@ -1,7 +1,8 @@
 # Phase 3 · Capabilities, Configuration and Instructions — Test Report
 
-> Status: completed (this round is evidence from actual execution; C11 = `not_measured`; the scoped `ruff format` check shows 3 real deviations in this phase's own files; this report issues no phase conclusion — that belongs to 07)
+> Status: completed (this round is evidence from actual execution; the old C11 performance = `not_measured`, historical context / non-gate since 2026-11-18; the scoped `ruff format` check shows 3 real deviations in this phase's own files; this report issues no phase conclusion — that belongs to 07)
 > Created: 2026-11-13
+> Revised: 2026-11-18 (scope-limited acceptance revision: the old C11 `not_measured`/performance paired samples and unexecuted CI in §3.5 item 2, §4, §9 and §10 are no longer stage-acceptance exit gates or a verdict ceiling as of this date — historical context / separate follow-ups only. C11 is now a switch-completeness/rollback functional gate whose test surface is §3.2 P3-IT-12/13/22 and P3-UT-26. Historical test numbers are not retroactively changed)
 > Executed by: the T10 test-execution agent (independent evidence collection, no code changes, no adjudication; this report does not pre-write the 07 conclusion)
 > Basis: `04-test-plan.en.md`/`04-test-plan.md` (P3-UT-01–28, P3-IT-01–22, P3-CM-01–10, the §6.1 P3-FE registry, §7 exit criteria), `05-acceptance-plan.md` (A1–A11 / C1–C11 / M1–M3 — acceptance itself is not executed here), `03-technical-design.md`, `08-implementation-breakdown.md` (§1 rules, §5, R-37/R-38/R-39)
 > Numbering read timestamp: this report maps against the working-tree content of `04-test-plan.md` read at **2026-11-13 21:00 CST** (that revision already contains P3-UT-27/28 and P3-IT-21/22; file mtime `2026-11-13 21:00:20 +0800`). 04 (together with 08/03/05/README) was being revised in parallel by a separate documentation lane while this round executed; if numbers or their criteria change after that moment, the mapping stays as recorded here and the figures in this report must not be retroactively edited.
@@ -192,11 +193,13 @@ Aliases (all paths relative to the repository root):
 ### 3.5 Numbers that cannot be written as "passed"
 
 1. **P3-CM-08**: its own criteria (typecheck, `check:i18n`, build, the 37 Playwright cases, read-only Effective) all pass as measured, but the unkeyed `model_not_configured` sentence is a **pre-existing defect outside Phase 3 scope**; per 08 R-38/§5 it is excluded from this item's pass/fail and is registered in §7.
-2. **C11 (hard gate in 05 §5)**: **no carrying case at all**, `not_measured`, see §4; the `backend/tests/test_agent_execution_phase3_performance.py` required by 04 §6.2 does not exist in this working tree.
+2. **C11 old performance wording (historical hard gate in 05 §5, retired 2026-11-18)**: the performance sampling has **no carrying case at all**, `not_measured`, see §4; the `backend/tests/test_agent_execution_phase3_performance.py` required by 04 §6.2 does not exist in this working tree. This is historical context / a separate follow-up, not a stage-acceptance gate; C11 is now a switch-completeness/rollback functional gate (§3.2 P3-IT-12/13/22 and P3-UT-26 have passed).
 3. **P3-IT-09 / P3-IT-15 / P3-IT-20 / P3-CM-03 / P3-CM-09 / P3-CM-10**: the core criteria have carrying cases, but each has at least one sub-criterion with no dedicated case or a restricted form; this is written into the "Boundary / follow-up" column of §3.2/§3.3 and expanded in §6. These numbers must not be cited as "fully covered by their whole criterion".
 4. **P3-FE-10b**: the number is in the 04 §6.1 list (one of the declared 25) but is **absent from every judgement group** (none of M1/M2/M3/P3-CM-08/P3-CM-05/"preview creates no Run" includes 10b). It passed as executed; §6.8 registers it as a grouping gap and this report does not invent an owner group for it.
 
-## 4. C11 — `not_measured` (facts only)
+## 4. C11 — `not_measured` (historical facts; historical context / non-gate since 2026-11-18)
+
+> 2026-11-18 revision: the old C11 performance `not_measured` registered here is no longer a stage-acceptance exit gate, no longer caps the verdict, and is no longer a standalone fail item as of this date. C11 is now a switch-completeness/rollback functional gate whose test surface is §3.2 P3-IT-12/13/22 and P3-UT-26 (all passed). The table below is retained as a historical record and historical numbers are not retroactively changed; if real performance measurement is still desired it may be tracked as a separate follow-up (#129).
 
 | Item | Measured fact |
 |---|---|
@@ -270,15 +273,15 @@ Regression surface actually executed (node counts taken from E13–E22; the same
 | Privilege escalation / cross-tenant = 0 | **Satisfied (over the tested surface)** | the forgery matrix, cross-tenant 404 and the audit's absence of body/field values/secrets are asserted by the cases listed in §3.1/§3.2/§3.3; real-stack and production surfaces are out of this round (§6.2, §10) |
 | Snapshots and audit meet their criteria | **Satisfied (composite evidence) + boundary** | write-once barrier, refusal matrix, replay, immutability and the direct audit query all passed; boundaries are §6.1 (off-state direct-read gap, #130-1) and §6.4 (unfalsifiable 422 truncation, #130-2) |
 | Dual-switch diff conforms | **Satisfied (over the tested surface)** | the four-state matrix and off/on field-level parity are carried by WIRE/PREV/ORCH cases (§3.2 P3-IT-12/13/22); real deployment-shaped rollback → #128 |
-| C11 validly measured and met | **Not satisfied (`not_measured`)** | §4; follow-up #129; the effect of that unmeasured state on the phase conclusion is decided by 07 under 05 §5/§6 |
-| Environment gaps block their go-live commitments | **Facts registered** | this round's gaps: C11 (#129), seed/quickstart (#127/#128), 24 migration opt-in skips, 2 embedding alternative-environment skips, 1 Milvus opt-in skip; their go-live meaning belongs to 07 |
-| Full pytest executed by CI | **Not executed** | §10: no push/PR this round, hence no CI run or URL; E01/E02 are local selections and are not CI |
+| C11 validly measured and met (old performance wording, retired) | Historical context (non-gate) | The §4 `not_measured` no longer serves as an exit gate or verdict ceiling since 2026-11-18; C11 is now a switch-completeness/rollback functional gate (§3.2 P3-IT-12/13/22, P3-UT-26 passed); #129 becomes a separate follow-up |
+| Environment gaps block their go-live commitments | Facts registered (historical context) | this round's gaps: C11 performance (#129, separate follow-up), seed/quickstart (#127/#128, deferred not complete), 24 migration opt-in skips, 2 embedding alternative-environment skips, 1 Milvus opt-in skip; since 2026-11-18 these do not block this stage's functional conclusion |
+| Full pytest executed by CI | Historical context (non-gate) | no push/PR this round, hence no CI run or URL; since 2026-11-18 CI provenance / final-PR-head run is no longer a stage-acceptance exit gate, only a separate-process follow-up |
 
 ## 10. Items not executed and not inferable
 
-1. **CI not executed**: no commit, no push and no PR this round, therefore no CI run, no CI head SHA and no URL; E01/E02/E25/E27–E30 are local executions only. Local results cannot replace CI's full unit/postgres/frontend outcome.
-2. **Seed and fresh quickstart not executed**: moved out of this phase per 08 R-39 (#127/#128).
-3. **No production-like performance and no real external model run**: C11 `not_measured` (§4).
+1. **CI not executed**: no commit, no push and no PR this round, therefore no CI run, no CI head SHA and no URL; E01/E02/E25/E27–E30 are local executions only. Since 2026-11-18 CI provenance / final-PR-head run is no longer a stage-acceptance gate or verdict ceiling — only a separate-process follow-up.
+2. **Seed and fresh quickstart not executed**: moved out of this phase per 08 R-39 (#127/#128); the boundary stays deferred, not complete.
+3. **No production-like performance and no real external model run**: old C11 performance `not_measured` (§4), historical context / separate follow-up since 2026-11-18, not a stage-acceptance gate.
 4. **No human M1–M3 acceptance and no sign-off**: 05 §4 manual checks belong to 07; this round provides only equivalent automated evidence (§3.4).
 5. **No code, test or other documentation was modified**: this round adds only these two bilingual 06 files; no 07 was created and no historical conclusion was rewritten.
 6. **No Phase 4/5/6 evidence**: P3-CM-10 is a boundary check against scope creep, evidenced here by the architecture gate and by absence in the code; no Phase 4+ conclusion is produced.

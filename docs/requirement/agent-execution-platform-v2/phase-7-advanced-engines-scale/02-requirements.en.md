@@ -3,8 +3,9 @@
 > Status: Deferred (early-stage project; FR/AC remain deferred requirement contracts and are not entering implementation, testing, or acceptance)
 > Deferral decision: 2026-11-07; FR-1~FR-11 are tracked as lowest-priority P4 issues under “Deferral and Requirement Tracking” below
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: current performance and behavioral baselines, CI evidence, sample/paired/report-latency data, and real or authorized historical samples are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; the phase stays deferred, and after reactivation ACs are decided only by functional/switch evidence with comparative baseline items out of scope)
 > Basis: `01-business-goals.en.md` (G1~G11), architecture §17 Phase 7, §18 continuous backlog, §19 quality gates, and §22 architecture acceptance; current-code findings are in `03-technical-design.en.md`
-> Baseline statement: Current performance and behavioral baselines are unmeasured pending Phase 0; targets here are not current test results
+> Baseline statement (2026-11-18 revision): current performance and behavioral baselines are unmeasured pending Phase 0 and are out of scope for stage acceptance; targets here are not current test results
 
 ## Deferral and Requirement Tracking
 

@@ -3,9 +3,10 @@
 > Status: Deferred (early-stage project; this test plan is not being executed, no cases have run, and none may be recorded as passed)
 > Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; run applicable cases only after the phase is reactivated and the corresponding slice is developed
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: current behavioral/coverage/performance/capacity baselines, CI evidence, sample/paired/report-latency data, and real or authorized historical samples are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; the phase stays deferred, and after reactivation the test exit is decided only by functional/switch evidence, with comparative baseline items out of scope and no longer requiring prior citation of accepted Phase 0 data)
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements; phase remains deferred)
 > Basis: `02-requirements.en.md` (FR-1~FR-11, AC-1~AC-22), `03-technical-design.en.md` (S7-01~S7-09, planned migrations, and core flows), architecture §19 and §22
-> Baseline statement: Current behavioral, coverage, performance, and capacity baselines are unmeasured pending Phase 0; every comparative test must first cite accepted Phase 0 data
+> Baseline statement (2026-11-18 revision): current behavioral, coverage, performance, and capacity baselines are unmeasured pending Phase 0 and out of scope for stage acceptance; comparative tests no longer require prior citation of accepted Phase 0 data as a stage gate
 
 ## 1. Test Scope and Principles
 

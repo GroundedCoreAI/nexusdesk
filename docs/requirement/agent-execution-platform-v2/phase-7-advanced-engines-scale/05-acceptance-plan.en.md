@@ -3,10 +3,11 @@
 > Status: Deferred (early-stage project; acceptance is not starting, and this document is neither launch approval nor an acceptance result)
 > Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; acceptance runs independently per slice only after the phase is reactivated
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: performance/capacity/p95, matched pairs, sample counts, report latency, CI provenance/final-PR-head CI runs and URLs, real or authorized historical samples/business and performance baselines, and multi-sample/large-sample-data-volume requirements are no longer stage-acceptance gates or prerequisites and remain only as historical context or separate high-risk-enablement/production-rollout prerequisites; stage acceptance is supported only by the phase's own functional-correctness and switch-completeness evidence. C11 removes the baseline/performance/CI prerequisites and marks them out of scope; slices without their own functional/switch evidence remain deferred and are neither passed nor failed by out-of-scope items. High-risk enablement and production rollout stay separate)
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off; phase remains deferred)
 > Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner, phase acceptance separated from high-risk capability enablement; technical criteria and hard gates unchanged)
 > Basis: `01-business-goals.en.md` (G1~G11 and success metrics), `02-requirements.en.md` (AC-1~AC-22), `03-technical-design.en.md` (S7-01~S7-09), and `04-test-plan.en.md` (P7-UT/IT/CM)
-> Baseline statement: Business and performance baselines are unmeasured pending Phase 0; comparative metrics without baselines remain pending and cannot pass
+> Baseline statement (2026-11-18 revision): business and performance baselines, historical samples, and CI evidence are outside current stage acceptance; comparative metrics without baselines are out-of-scope notes and no longer blocking `pending`, nor can they pass. Functional correctness and switch completeness are still judged on the phase's own evidence.
 
 ## 1. Acceptance Scope and Responsibility
 
@@ -24,8 +25,8 @@ After the phase is reactivated, verify applicable ACs, reauthorization, no dupli
 
 **Common prerequisites**:
 
-1. Phase 0 baselines are accepted and the slice's Phase 1~6 dependencies have acceptance evidence. A missing dependency makes the slice `blocked_dependency`; mocks cannot substitute for production launch acceptance.
-2. All applicable UT/IT/CM cases in `04-test-plan.en.md` pass with no open P0/P1. Skips do not count as passes and have retest plans.
+1. The slice's Phase 1~6 dependencies have functional acceptance evidence (2026-11-18 revision: Phase 0 baseline sign-off and business/performance baselines are out of scope and are no longer stage prerequisites). A missing functional dependency makes the slice `blocked_dependency`; mocks cannot substitute for production launch acceptance, which is a separate high-risk-enablement/production-rollout approval.
+2. All applicable functional UT/IT/CM cases in `04-test-plan.en.md` pass with no open P0/P1. Skips do not count as passes and have retest plans. Performance/capacity/sample-count/CI skips or pendings are out-of-scope notes and do not block the stage.
 3. Current migration head is rechecked; statements that 0058+ are planning numbers are replaced by real migration information, with upgrade/old-code compatibility/rollback evidence.
 4. Acceptance uses at least two dedicated tenants and separate business/workspace data, never production customer data. Fake Secrets are identifiable and real credentials remain with authorized staff.
 5. Actual slice launch scope, thresholds, canary tenants, monitoring, capacity, and rollback owner are frozen. Vendor or advanced capabilities outside that scope are not covered by this acceptance.
@@ -50,7 +51,7 @@ After the phase is reactivated, verify applicable ACs, reauthorization, no dupli
 | A13 | S7-06; AC-13; G7/US-7/FR-7 | Report the same Engine event twice and an Engine aggregate overlapping a gateway model call | Records are idempotent; overlap is informational, totals do not double count, and source/Execution/model correlations are complete |
 | A14 | S7-06; AC-14; G7/US-7/FR-7 | Create unpriced usage and two-currency records, then query as another tenant | Unknown is not zero and counts are accurate; currencies remain separate; no cross-tenant data/existence leak |
 | A15 | S7-07; AC-15; G8/US-8/FR-8 | Concurrently submit, claim, finish, cancel, and reap through multiple API/Worker processes at limit boundaries | Global/tenant queued/running never exceed hard limits; 429 is stable, release is accurate, and no deadlock/stale count occurs |
-| A16 | S7-07; AC-16; G8/US-8/FR-8 | Keep one tenant saturated, submit intermittently from a light tenant, and create/resume waiting Runs | Light tenant progresses every batch with P95≤2× same-environment idle baseline; waiting uses no running quota and recovery readmits |
+| A16 | S7-07; AC-16; G8/US-8/FR-8 | Keep one tenant saturated, submit intermittently from a light tenant, and create/resume waiting Runs | Light tenant progresses every batch (fair-scheduling semantics hold); waiting uses no running quota and recovery readmits. P95/idle-baseline comparison is an out-of-scope performance note (2026-11-18 revision) and is not a stage criterion |
 | A17 | S7-08; AC-17; G9/US-9/FR-9 | Publish a shared Skill and execute under two test-Engine layouts, then tamper and reference cross-tenant | Valid version/hash is pinned and read-only; conversion is deterministic; tampering/unauthorized access fails before startup without path leaks |
 | A18 | S7-08; AC-18; G9/US-9/FR-9 | Write small/large Artifacts and test valid download, path escape, unauthorized/expired download, scanning, and cleanup | Valid content/hash/size are correct; dangerous/unauthorized/expired access fails; scan/cleanup outcomes are truthful and failures retry/alert |
 | A19 | S7-09; AC-19; G10/US-10/FR-10 | Publish a Profile, verify its execution snapshot, and inject consecutive health failures to threshold | Resource/egress/Secret references follow the version; closed→open occurs; candidate is skipped or fails explicitly without wider Effective |
@@ -60,7 +61,7 @@ After the phase is reactivated, verify applicable ACs, reauthorization, no dupli
 
 Every scenario record includes executor, date, environment/version, applicable slice and flag, prerequisite data, actual result, verdict, test-run link, and screenshot/log/read-only database evidence. Items that cannot execute locally are marked `pending_env` with required environment and proposed reviewer; they cannot be omitted or marked passed.
 
-**Evidence reuse**: A1–A22 directly reference the corresponding UT/IT/CM, CI, multiprocess, capacity, reporting, and storage evidence in the slice's `06-test-report.md` wherever possible instead of manually repeating the full suite. Contract, authorization, recovery, usage, quota, fairness, Skill/Artifact, health, and rollback criteria are assessed directly from their A/C evidence without a second business-metric acceptance round; comparative items without baselines remain `pending` and cannot pass.
+**Evidence reuse**: A1–A22 directly reference the corresponding UT/IT/CM, multiprocess, reporting, and storage functional evidence in the slice's `06-test-report.md` wherever possible instead of manually repeating the full suite. Contract, authorization, recovery, usage, quota, fairness, Skill/Artifact, health, and rollback criteria are assessed directly from their A/C evidence without a second business-metric acceptance round. 2026-11-18 revision: CI, performance/capacity, sample-count, and baseline evidence are outside current stage acceptance; comparative items without baselines are out-of-scope notes and are no longer blocking `pending`, nor can they pass.
 
 ## 4. Key Manual Checks
 
@@ -88,7 +89,7 @@ Perform only checks relevant to the current slice that automation does not fully
 | C8 | Multi-Worker quota is atomic/fail-closed; fairness cursor is not process-local; waiting uses no running quota | Must pass | FR-8; AC-15, AC-16; architecture §18.2 |
 | C9 | All nine flags default false; per-slice rollback needs no down migration and authorized history remains readable/cleanable | Must pass | FR-11; AC-21, AC-22 |
 | C10 | New Engines do not change Worker core, new Protocols do not pollute the common Engine contract, and Adapter evidence is complete | Must pass | FR-1; AC-1, AC-2; architecture §19 and §22 decoupling/extensibility |
-| C11 | Phase 0 baselines, applicable tests, performance samples, and CI evidence are complete; skip/pending is not presented as passed | Must pass | G11; AC-21, AC-22; architecture §17 Phase 0 and §19.4 |
+| C11 | The slice's applicable functional and switch-completeness evidence is complete (default off / explicit on / off / on / rollback / explicit dependency validation / no silent fallback), and skip/pending is not presented as functional pass. 2026-11-18 revision: Phase 0 baselines, performance/capacity samples, sample counts, report latency, and CI evidence are no longer prerequisites for this item and are explicitly out of scope for current stage acceptance; they cannot pass or fail this item. A slice without its own functional/switch evidence remains deferred, decided only by that evidence | Must pass | G11; AC-21, AC-22; architecture §17 Phase 0 and §19.4 |
 | C12 | Actual launch scope is confirmed per slice in its single acceptance record; no vendor delivery is promised and multiple core capabilities are not combined into a Big Bang PR | Must pass | G1, G11; AC-1, AC-22; architecture §17 Phase 7 and §19.4 |
 
 ## 6. Slice-by-Slice Acceptance Evidence Requirements
@@ -111,11 +112,11 @@ Every slice also executes all applicable C1~C12. A21/A22 are shared release gate
 
 - **Single-slice pass**: All applicable A/C criteria pass; relevant M items are complete, have equivalent automated evidence, or are explicitly `not_applicable`; no P0/P1 remains; canary, rollback, monitoring, and evidence are complete.
 - **Single-slice conditional pass**: only non-hard-gate P2/P3 residuals remain, each with owner, deadline, impact, and an explanation from the acceptance owner in the record below; security, tenancy, side-effect, usage/double-charge, and other hard gates all pass, and canary scope is explicitly limited.
-- **Fail**: any veto or A/C criterion fails, a Phase dependency/baseline is missing, rollback fails, or pending/skip is recorded as passed. Reverify affected A/C and regressions after fixes.
+- **Fail**: any veto or A/C functional/switch criterion fails, a functional dependency is missing, rollback fails, or a functional pending/skip is recorded as passed. A missing baseline/performance sample/CI is an out-of-scope note under the 2026-11-18 revision and does not constitute a fail. Reverify affected A/C and regressions after fixes.
 - **Phase 7 overall pass**: every slice in the final approved scope has an independent pass record. One slice's decision or a vendor Adapter count cannot establish overall success. Lightweight acceptance does not change the current deferred status.
 - **Enablement note**: phase or single-slice acceptance does not automatically authorize high-risk capability enablement; enablement requires a separate approval record.
 
-Each slice produces a “Phase 7 / S7-xx Acceptance Report” with scope and flag, A/C evidence links, key manual checks, necessary raw performance/lock/EXPLAIN data, migration/CI/canary/rollback evidence, residuals, and the single record below; multi-role signatures are not required.
+Each slice produces a “Phase 7 / S7-xx Acceptance Report” with scope and flag, A/C evidence links, key manual checks, migration/canary/rollback functional evidence, residuals, and the single record below; multi-role signatures are not required. Raw performance/lock/EXPLAIN data and CI evidence, if retained, are historical context or explicit out-of-scope notes (2026-11-18 revision) and are not pass criteria.
 
 | Slice/flag | Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
 |---|---|---|---|---|---|---|

@@ -3,6 +3,7 @@
 > Status: Pending implementation (execute after this phase is developed; not currently executed or passed)
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence and remove multi-role sign-off requirements)
+> Revised: 2026-11-18 (scope-limited acceptance: the §7 exit clauses "P5-IT-18 completion before Stage B unlock" as a phase exit, "mark performance/compatibility diff as exit blockers when the Phase 0 baseline is absent", and "no unapproved skips in real-Codex environment items" are no longer phase exit gates; P5-IT-18 is retained only as the separate Stage B unlock condition and Stage B stays locked. See 05 §6.1)
 > Basis: `02-requirements.md` (FR-1–FR-12, AC-1–AC-12), `03-technical-design.md` (Stages A/B, RuntimeHost, Sessions, planned migration 0055)
 
 ## 1. Test Scope and Principles

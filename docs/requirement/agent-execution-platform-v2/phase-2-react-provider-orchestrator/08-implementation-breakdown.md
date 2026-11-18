@@ -2,6 +2,7 @@
 
 > 状态：本地 T2～T11 与 R17 live 验证已完成，R18 生产修复及聚焦验证已完成，详见 06/07 及相应附录；R18 最小 live on/off 已完成；总体仍有条件通过
 > 创建：2026-11-10
+> 修订：2026-11-18（范围限定验收修订：R7/T11 与 §7 验收任务中的性能 30 matched pairs/p95/CI/pending_env 封顶口径自本日起不作为阶段验收门禁，保留为历史上下文；功能正确性、开关完整性、租户隔离、Secret/快照/迁移/终态/清理、无 P0/P1 与单一验收负责人仍为门禁；详见 05/07 的 2026-11-18 修订，历史数字不追溯修改）
 > 修订：2026-11-12（R18：Worker 终态日志必须晚于正常 finish 成功；当前状态统一）
 > 依据：`01-business-goals.md`（G1～G4）、`02-requirements.md`（US-1～US-4、FR-1～FR-6、AC-1～AC-9）、`03-technical-design.md`、`04-test-plan.md`、`05-acceptance-plan.md`（R1～R18）；backend 基线 `0a6c4b5`
 

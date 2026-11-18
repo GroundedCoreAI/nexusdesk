@@ -1,7 +1,8 @@
 # Phase 2 · React Provider 与执行编排器 — 验收方案
 
-> 状态：本地 T2～T11 与 R17 live 验证已完成，R18 生产修复及聚焦验证已完成，详见 06/07 及相应附录；R18 最小 live on/off 已完成；总体仍有条件通过
+> 状态：本地 T2～T11 与 R17 live 验证已完成，R18 生产修复及聚焦验证已完成，详见 06/07 及相应附录；R18 最小 live on/off 已完成；总体满足功能出口判据（历史结论"有条件通过"仅由已废止的性能/CI 门禁造成，见 2026-11-18 修订）
 > 创建：2026-11-02
+> 修订：2026-11-18（范围限定验收修订：性能/容量/p50/p95 延迟、matched pairs 与 ≤5% 阈值、样本数、CI provenance/最终 PR head CI run/URL、真实或授权历史样本、多样本/大样本量要求不再作为阶段验收门禁，仅保留为历史上下文或明确超范围说明；§4 性能测量改述为开关完整性/回滚证据节，C5 不再以未测性能封顶结论；功能正确性（A1～A9）、开关完整性（默认 off/显式 on/off/on/回滚/无静默 fallback）、租户隔离、Secret 处理、快照/数据完整性、迁移、终态语义、副作用/清理、无 P0/P1 与单一验收负责人记录仍为门禁；高风险开关启用另附独立审批。历史测试数字与结论不追溯修改，被取代的门禁仅作标注）
 > 修订：2026-11-17（统一为最小核心团队验收标准：单一验收负责人；移除多角色职责/签字、业务指标大表与独立 UAT；技术判据与硬门槛不变）
 > 修订：2026-11-12（R18 与当前状态统一；设计期内容保留为历史计划）
 > 依据：`01-business-goals.md`（G1～G4）、`02-requirements.md`（US-1～US-4、FR-1～FR-6、AC-1～AC-9）、`03-technical-design.md`、`04-test-plan.md`、`08-implementation-breakdown.md`（R1～R18、T8～T11）
@@ -96,20 +97,19 @@
 
 - **溯源**：AC-9；FR-4/6；G3/G4；R1/R4/R11/R15；P2-CM-01～08、P2-IT-05/06/19/20。
 - **步骤**：动态执行 heads/空库 upgrade/current 和迁移目录前后比较；审查 ORM、公共 HTTP/SSE 路由、schema、状态码、错误体及前端 diff；检查 Phase 1 保护面、跨租户、公共错误/字段、日志/trace/metrics；逐项核对受影响测试、CI 与人工证据，并复核 A4 的 R15 实际路由响应。
-- **通过判据**：无新增/修改迁移、ORM、公共 schema 或前端；公共 API 路由、schema、状态码和错误体零变化，R15 既有的内部手工 header 400、内部 typed after 422、Open typed after/header 422 不得互换或改写；当次 heads 与基线动态一致、目录零漂移、存量行兼容；run_id 仅日志/trace，metrics 标签低基数，无 nil/秘密/input/config/history/raw stack；Phase 1 DTO/Registry/LocalTest、Repository/hooks 和 API 行为不变；每条测试/A/C 证据可定位。P2 功能 UT/IT/CM 必须全过，CM08 证据诚信/测量边界可独立通过；真实性能子指标不足为 pending_env，不否定功能出口但 T9 最多有条件通过。
+- **通过判据**：无新增/修改迁移、ORM、公共 schema 或前端；公共 API 路由、schema、状态码和错误体零变化，R15 既有的内部手工 header 400、内部 typed after 422、Open typed after/header 422 不得互换或改写；当次 heads 与基线动态一致、目录零漂移、存量行兼容；run_id 仅日志/trace，metrics 标签低基数，无 nil/秘密/input/config/history/raw stack；Phase 1 DTO/Registry/LocalTest、Repository/hooks 和 API 行为不变；每条测试/A/C 证据可定位。P2 功能 UT/IT/CM 必须全过；功能出口与开关/回滚证据满足即达本阶段判据，未测性能不否定功能出口、也不封顶验收结论（2026-11-18 修订）。
 - **证据**：只读命令输出、版本目录清单/哈希、公开路由/schema/状态码/错误体及前端 diff、A4 三类非法游标边界与合法 max/strict replay 的实际 ASGI/FastAPI 路由记录、跨租户与观测样本、实际测试和 CI 链接；本地未跑全量不得写成全量通过。
 
-## 4. 性能测量（唯一放行相关指标）
+## 4. 开关完整性与回滚证据（放行相关证据）
 
-回复/工具/Memory 对等、事件/SSE/终态兼容、取消/超时/Lease 收敛、回滚可恢复性等正确性指标均由 A1～A9 与 C1～C5 的判据和证据证明，不另设业务指标验收轮次；验收后示例按 A8 验收后附录执行。唯一可能改变放行决策的额外指标是端到端性能，判据与采样口径如下：
+回复/工具/Memory 对等、事件/SSE/终态兼容、取消/超时/Lease 收敛等正确性指标均由 A1～A9 与 C1～C5 的判据和证据证明，不另设业务指标验收轮次；验收后示例按 A8 验收后附录执行。阶段验收唯一相关的额外证据是**开关完整性与回滚可恢复性**，本节据 A8 主场景给出收口口径：
 
-- **目标**：在真实等价外部环境按可复现方法成对采样，新路径 nearest-rank p95 端到端延迟增幅 ≤5%；首 token、原始 paired overhead、错误率独立报告。canonical diff 不能替代性能，test double 仅作功能证据。
-- **采样口径**：每个固定场景至少采集 30 个有效 matched pairs，每对为同一输入的 legacy-off 与 orchestrator-on 各一次；先执行 5 组 matched warm-up pairs 预热，明确标记且不计入 30 对样本；失败/异常样本不得静默剔除，错误率单独记录。
-- **等价环境与顺序**：同一主机/容器资源、同一脚本、同一真实模型与 Profile、工具配置、数据和依赖版本；off/on 交替或平衡顺序，保存顺序、环境非敏感标识和原始样本，避免路径与时间/缓存趋势混淆。
-- **p95 算法**：old/new 端到端样本各自升序排序，采用 nearest-rank，取 1-based 第 `ceil(0.95 × N)` 个值；N=30 取第 29 个；目标 `p95(new) <= p95(old) * 1.05`，不得换插值算法或只报均值。
-- **独立指标**：保存每对原始 old/new end-to-end、paired delta/ratio、Adapter 原始开销、首 token 与错误率；paired overhead 与 p95 分开展示，canonical diff 不得替代或隐藏原始时延。
-- **外部时延边界**：真实外部模型/工具时延包含在 end-to-end 口径中，不得扣除以掩盖回归；Adapter 内部开销可另报用于定位，但不得替代端到端目标。
-- **环境不足**：test double、mock/demo 模型和 MockTransport 只能证明功能/测量方法，不能宣称生产性能。无真实外部模型/工具或等价环境时性能子指标记 `pending_env`；功能测试与 CM08 证据诚信可独立通过，但 T9 最多"有条件通过/待补性能证据"，不能写完全通过。
+- **默认 off**：默认启动只走 legacy 路径，fingerprint 不含开关位；存量 queued/running/terminal 行行为与基线一致。
+- **显式 on**：显式开启后只走 Orchestrator 路径，on 失败 fail fast，**不得静默 fallback** 到 legacy，也不得借开启触发迁移、数据修复或客户端改动。
+- **off/on/混合与回滚**：off API/on Worker 与混合 legacy/orchestrator Workers 不共享/重领 row、terminal 不改写；全部 off 后新 Run 全 legacy，在途按取消/Lease 收敛；混合与回滚证据以配置、进程、路径、fingerprint、存量行与回滚记录为准。
+- **收口**：上述开关/回滚判据满足即构成 A8/C 项的放行证据，不以任何性能采样或 CI 属性作为附加门禁。
+
+> **2026-11-18 历史口径（已废止门禁，非阻塞）**：本节原以端到端性能为"唯一放行相关指标"，规定同环境 30 matched pairs、5 组 warm-up 不计样本、nearest-rank p95 增幅 ≤5%、首 token/paired overhead/错误率独立报告，环境不足则性能子指标 `pending_env` 并把 T9 封顶为"有条件通过/待补性能证据"。该口径及 06/07 中的对应采样记录仅保留为历史上下文，**自 2026-11-18 起不再作为阶段验收或放行门禁，也不再封顶结论**；历史测试数字与结论不追溯修改。真实等价环境下的性能测量如有需要，可另立独立跟进项，不在本阶段验收范围内。
 
 ## 5. 合规核对
 
@@ -119,7 +119,7 @@
 | C2 | 身份、多租户与敏感信息 | R16 私有 Execution UUID 规范化有完整证据：精确 stdlib 原对象、UUID 子类受控转换、两侧 `==` 值相等、公共 Request 精确 stdlib UUID、真实 asyncpg 链与 Context/RuntimeFactory 原 row 保留；伪造输入和恶意普通异常仅安全静态 `INVALID_REQUEST`，控制流重抛，原 row.id 不改写。快照 Agent UUID 严格、nil 仅限内部 Request 且不泄漏/查询；跨租户不可达；公共错误/Result/日志/指标不含秘密、原始异常、history/Outcome/Context | AC-1/4/5/9、R2/R4/R16、P2-UT-01、P2-IT-18/20、P2-CM-03/04 |
 | C3 | 双 emit、事件所有权与结构化交付语义 | Context 无 emit，worker_emit 仅 Worker/Orchestrator，runtime_emit 仅私有 Runtime 链；普通业务事件经公共流后开放透传，run.* 仅 Repository、tool.replay 仅 DurableToolReplayCache、delta 仅 Notifier，伪造事件不到 worker_emit；React 首发 gate/no-stream、ack identity/exactly-once/abort 有独立证据，公共 suite 25 函数逐项裁定，LocalTest claim 前入队/terminal 丢弃/yield=delivery 不变 | AC-3/4、R3/R5/R6、P2-UT-03/05/09/17～21 |
 | C4 | 配置、发布与依赖治理 | 默认 off、启动生效、fingerprint 排除、on fail fast、混合 Workers/回滚可证；Core 无反向应用依赖，无第二套 ReAct/新服务 | AC-3/8、R3/R8/R9、P2-CM-02/06 |
-| C5 | 生命周期、功能/性能出口与证据诚信 | T8 才创建双语 06、T9 才创建双语 07；每条测试和 A/C 有实际结果，功能 UT/IT/CM 全过，CM08 证据诚信/测量边界独立通过；本地/CI/人工分开，性能 pending_env 如实且 T9 最多有条件通过；T10/T11 在验收后且只追加附录，失败重开 | AC-8/9、R11/R12、04 全部主/附录用例 |
+| C5 | 生命周期、功能/开关出口与证据诚信 | T8 才创建双语 06、T9 才创建双语 07；每条测试和 A/C 有实际结果，功能 UT/IT/CM 全过，A8 的开关完整性（默认 off/显式 on/off/on/回滚/无静默 fallback）与回滚证据可独立通过；本地/CI/人工分开记录但 CI/性能不作为验收门禁；T10/T11 在验收后且只追加附录，失败重开。历史口径中的"性能 pending_env 封顶 T9"已于 2026-11-18 废止，仅作历史上下文 | AC-8/9、R11/R12、04 全部主/附录用例 |
 
 ## 6. 通过标准、遗留与验收记录
 
@@ -128,8 +128,8 @@
 - **通过**：A1～A9 的**主场景**及 C1～C5 全部有证据并满足判据；T8 主测试出口已满足，无开放 P0/P1。
 - **有条件通过**：仅非硬门禁 P2 遗留，有 owner、期限、影响范围，由验收负责人在下表确认；P3 记录排期；安全、兼容、敏感信息不得豁免。
 - **不通过**：任一 A/C 主场景或 C 项判据未达，或把 pending/skip 写成通过；修复后重验受影响项及回归。
-- 性能若未达到真实外部环境测量条件，仅性能子指标标 `pending_env`；这不否定已全绿的功能 UT/IT/CM 与 CM08 证据诚信/测量边界，但 T9 总体最多"有条件通过/待补性能证据"，不能写完全通过。
-- 验收负责人记录结论、日期、提交、证据链接和遗留项；代码合入或 CI green 本身不能替代验收结论。
+- **性能/CI 不再封顶结论（2026-11-18 修订）**：未测性能、缺少 CI run/URL 或真实历史样本仅为历史上下文或独立跟进项，不否定已全绿的功能 UT/IT/CM、开关完整性与回滚证据，也不将 T9 封顶为"有条件通过/待补性能证据"。原封顶规则已废止，历史结论数字不追溯修改。
+- 验收负责人记录结论、日期、目标 SHA、证据链接和遗留项；代码合入或 CI green 本身不能替代验收结论。
 - **放行说明**：阶段通过不构成后续阶段或高风险能力的启用授权。
 
 ### 6.2 验收后附录（T11）
@@ -140,4 +140,4 @@ T10/T11 不反向提前成为 T9 的预置条件；其实际结果必须补入 0
 
 | 验收负责人 | 执行人 | 日期 | 目标 SHA | 结论 | 证据/遗留 |
 |---|---|---|---|---|---|
-| 待填写 | 待填写（可与验收负责人相同） | 待填写 | 待填写 | 待验收 | 待填写 |
+| JackChow（用户本人确认，2026-11-18） | WorkBuddy 自动化验收执行 | 2026-11-18 | `5170e140f10b117549cf54ba400131f5d7f95f69` | **通过（范围限定 / PASS scope-limited）** | `../11-scope-limited-acceptance-record-20261118.md` §7；证据包 `20261118T125822Z.tar.gz` |

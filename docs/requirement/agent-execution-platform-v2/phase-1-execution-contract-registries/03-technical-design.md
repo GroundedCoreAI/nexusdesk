@@ -4,12 +4,13 @@
 > 创建：2026-11-02；设计冻结：2026-11-08
 > 修订：2026-11-09（R11 owned-task 文档澄清，无生命周期行为变更）；2026-11-10（补录 Phase 0 冻结的生产 Adapter 精确身份，无设计或行为变更）
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 4～6、15～17、19 节，Phase 1；`02-requirements.md`（FR-1～FR-6、AC-1～AC-8）；`08-implementation-breakdown.md`（R1～R11、T1～T8）
+> 修订说明（2026-11-18）：本文"已接受的入口风险"中 Phase 0 干净已提交产物 CI 双跑、经授权真实历史样本与人工签字表述不再作为阶段验收阻断项，仅保留为历史背景或明示非范围项（见 `05-acceptance-plan.md` §0）；功能正确性、租户隔离、Secret、数据完整性、迁移与无 P0/P1 等门槛不变。历史原文保留不改写。
 
 ## 现状核查与改动总览
 
 实施入口固定为 `4dfcfb41e9cbb799753986c2d76134514bbd19be`：`core_platform/agent_execution` 尚不存在，Alembic head 为 `0057_industry_pack_runtime`。`RuntimeEngine.run()`、`RuntimeWorker`、`RuntimeFactory` 与 `RunRepository` 继续承担现有 ReAct/Run 路径；`extension_contracts/runtime.py` 继续作为 Run/业务端口边界。以下 `agent_execution` 路径均为**拟新增**，本文不代表已经实现或通过测试。
 
-用户已明确要求启动 Phase 1，因此 Phase 0 的干净已提交产物 CI 双跑、经授权真实历史样本和人工签字仍开放被列为**已接受的入口风险**，不构成 Phase 0 正式验收或放行。
+用户已明确要求启动 Phase 1，因此 Phase 0 的干净已提交产物 CI 双跑、经授权真实历史样本和人工签字仍开放被列为**已接受的入口风险**，不构成 Phase 0 正式验收或放行。【2026-11-18：其中 CI 双跑与真实历史样本已依 05 §0 修订，不再作为阶段验收门槛；历史原文保留。】
 
 | 层 | 文件 | 改动 |
 |---|---|---|

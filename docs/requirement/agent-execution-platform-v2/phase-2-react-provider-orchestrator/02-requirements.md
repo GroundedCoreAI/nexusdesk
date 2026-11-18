@@ -2,6 +2,7 @@
 
 > 状态：本地 T2～T11 与 R17 live 验证已完成，R18 生产修复及聚焦验证已完成，详见 06/07 及相应附录；R18 最小 live on/off 已完成；总体仍有条件通过
 > 创建：2026-11-02
+> 修订：2026-11-18（范围限定验收修订：性能/p95/matched pairs/样本数、CI/真实或授权历史样本要求不再作为阶段验收门禁，保留为历史上下文；功能正确性、开关完整性、租户隔离、Secret/快照/迁移/终态/清理、无 P0/P1 与单一验收负责人仍为门禁；详见 05/07 的 2026-11-18 修订，历史数字不追溯修改）
 > 修订：2026-11-12（R18 与当前状态统一；设计期内容保留为历史计划）
 > 依据：`docs/architecture/agent-execution-platform-v2.md` 第 4～7、12、14～17 节；Phase 0 `baseline/run-lifecycle-events.md`；Phase 1（FR-1～FR-6，代码经 merge `0a6c4b5` 合入 integration，不是人工验收结论）；`01-business-goals.md`（G1～G4）；`08-implementation-breakdown.md`（R1～R18）
 

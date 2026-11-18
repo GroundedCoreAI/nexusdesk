@@ -3,8 +3,9 @@
 > Status: Deferred (early-stage project; the target design is backlog reference only and is not entering implementation)
 > Deferral decision: 2026-11-07; see “Deferral and Requirement Tracking” in `02-requirements.en.md` for the FR-1~FR-11 P4 issues; do not start development or migrations from this design before rescheduling
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: behavioral/performance baselines, CI evidence, sample/paired/report-latency data, and real or authorized historical samples are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; the phase stays deferred, and after reactivation it is decided only by its own functional/switch evidence. Migration-head rechecking remains a functional/data-integrity gate and is not waived by baseline out-of-scope status)
 > Basis: `01-business-goals.en.md` (G1~G11), `02-requirements.en.md` (FR-1~FR-11, AC-1~AC-22), architecture §4~19 and §22, and current-code review
-> Baseline statement: The latest reviewed migration head is `0052_memory_tasks_tenant_index`; behavioral/performance baselines are unmeasured pending Phase 0. Every `0058+` identifier here is a planning number; recheck head, renumber, and set real dependencies before implementation
+> Baseline statement (2026-11-18 revision): the latest reviewed migration head is `0052_memory_tasks_tenant_index`; behavioral/performance baselines are unmeasured pending Phase 0 and out of scope for stage acceptance. Every `0058+` identifier here is a planning number; recheck head, renumber, and set real dependencies before implementation
 > Constraint: This document defines logical models, flows, and file-level plans only, not implementation code or executable migrations
 
 ## Change Overview

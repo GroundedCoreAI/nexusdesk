@@ -4,6 +4,7 @@
 > Created: 2026-11-08
 > Basis: `04-test-plan.en.md` (P0-UT-01–10, P0-IT-01–10, P0-CM-01–05), `02-requirements.en.md` (FR-1–FR-6, AC-1–AC-6), `baseline/regression-baseline.en.md`
 > Execution: Historical uncommitted-tree Run 1 / Run 2 completed on UTC 2026-11-07; the subsequent independent local Docker/pgvector double run of committed artifact `4dfcfb41e9cbb799753986c2d76134514bbd19be` completed on UTC 2026-11-09; documentation was backfilled on 2026-11-10 without rerunning or replacing any historical round
+> Revised: 2026-11-18 (scope-limited acceptance revision: wherever this document treats a CI run / CI double-run / CI link, a performance or duration baseline, or real or authorized historical samples as an "evidence gate / independent gate / acceptance prerequisite," that item is no longer a stage-acceptance blocker and remains only as historical context or an explicit out-of-scope note; all test numbers and historical records are unchanged. Items that remain gates are in `05-acceptance-plan.md` §0)
 
 ## 1. Test Scope and Environment
 
@@ -113,7 +114,7 @@ P0-UT-09/10 tooling regressions now include seven added nodes: `test_summary_cla
 
 ## 7. Defects Found During Formal Execution
 
-Neither the historical corrected formal runs nor the subsequent committed-artifact Docker formal runs **exposed a new P0/P1 implementation defect**. This statement describes only the formal rounds' actual results; it does not remove CI, real-sample, or human-acceptance evidence gates and does not establish a final open P0/P1 count before later acceptance review. The following tooling-gate defects are retained separately from the production-implementation failure rate:
+Neither the historical corrected formal runs nor the subsequent committed-artifact Docker formal runs **exposed a new P0/P1 implementation defect**. This statement describes only the formal rounds' actual results; it does not remove CI, real-sample, or human-acceptance evidence gates and does not establish a final open P0/P1 count before later acceptance review. The following tooling-gate defects are retained separately from the production-implementation failure rate: [2026-11-18: the "CI and real-sample evidence gates" in this sentence are revised per 05 §0 and are no longer stage-acceptance gates; the "human acceptance" convention follows a single acceptance-owner record. Historical text retained.]
 
 | ID | Discovery point | Actual defect and impact | Fix, reviews, and regression | Current disposition |
 |---|---|---|---|---|
@@ -130,8 +131,8 @@ Rejected/failed attempts in the subsequent Docker harness likewise do not count 
 
 | ID | Severity / status | Actual boundary and disposition |
 |---|---|---|
-| P0-I1 | `pending_env` | Tested commit `4dfcfb41e9cbb799753986c2d76134514bbd19be` exists and is pushed, but clean GitHub Actions CI double-run artifacts and links for the final PR head do not yet exist; engineering lead + QA must supply them before Phase 1 entry review. Subsequent documentation backfill is outside the tested SHA, and local Docker runs do not replace CI AC-4 |
-| P0-I2 | `pending_env` | No authorized, sanitized real historical drafts and published snapshots with a provenance inventory were supplied; current fixtures are synthetic field shapes only. Agent-config and security representatives must supply samples or record a formal scope decision |
+| P0-I1 | `pending_env` [2026-11-18: superseded / out-of-scope, no longer a stage-acceptance blocker; §9, 05 §0] | Tested commit `4dfcfb41e9cbb799753986c2d76134514bbd19be` exists and is pushed, but clean GitHub Actions CI double-run artifacts and links for the final PR head do not yet exist; engineering lead + QA must supply them before Phase 1 entry review. Subsequent documentation backfill is outside the tested SHA, and local Docker runs do not replace CI AC-4 |
+| P0-I2 | `pending_env` [2026-11-18: superseded / out-of-scope, no longer a stage-acceptance blocker; 05 §0] | No authorized, sanitized real historical drafts and published snapshots with a provenance inventory were supplied; current fixtures are synthetic field shapes only. Agent-config and security representatives must supply samples or record a formal scope decision |
 | P0-I3 | P2 / open | The open-platform stream comment says no token delta although visible-text deltas are emitted; open-platform backend owner to resolve before Phase 2 |
 | P0-I4 | P2 / open | A specialized `tool.replay` can consume seq after terminal state; the dedicated SSE test proves payload hiding and cursor advancement, but the security/behavior boundary is unfixed and unadjudicated, due no later than the Phase 6 security gate |
 | P0-I5 | P3 / open | Existing `seed_memory_*` full-format-check differences remain with the owning script maintainers; no unrelated bulk formatting is mixed into Phase 0 |
@@ -142,11 +143,11 @@ Rejected/failed attempts in the subsequent Docker harness likewise do not count 
 
 - Existing CI run <https://github.com/GroundedCoreAI/nexusdesk/actions/runs/42227604191> is only single-run supporting evidence for the base backend, at head `16aed12eb095f29bed5c536b5fcbf68e510136c4`; it contains none of the new Phase 0 tests, coverage, JUnit artifacts, or double-run comparison.
 - The tested implementation/baseline commit `4dfcfb41e9cbb799753986c2d76134514bbd19be` has been created and pushed, and §2.2's local Docker double run used that exact SHA. The subsequent documentation-only backfill will create a later PR head outside that SHA, and no PR had been created as of this documentation backfill on 2026-11-10. Formal clean GitHub Actions CI double-run evidence and links for the final PR head remain `pending_env`; this report claims no new CI success and does not substitute Docker for CI.
-- This is not `07-acceptance-report.en.md`, contains no human signoff, and does not turn local test success into unrestricted acceptance of all AC-1–AC-6. Complete Phase 0 acceptance and Phase 1 entry still require the evidence gates in §8 and subsequent human acceptance.
+- This is not `07-acceptance-report.en.md`, contains no human signoff, and does not turn local test success into unrestricted acceptance of all AC-1–AC-6. Complete Phase 0 acceptance and Phase 1 entry still require the evidence gates in §8 and subsequent human acceptance. [2026-11-18: the CI/real-sample items in §8 are superseded / out-of-scope and are no longer stage-acceptance gates; see 05 §0.]
 
 ## 10. Conclusion
 
-**Both the historical uncommitted-tree double run and the subsequent local Docker double run of exact commit `4dfcfb41e9cbb799753986c2d76134514bbd19be` passed 310-node comparison and zero-XPASS audits; complete Phase 0 acceptance / Phase 1 entry not yet approved.** Subsequent documentation backfill is outside the tested SHA; clean CI on the final PR head, real samples, and human signoff remain independent gates.
+**Both the historical uncommitted-tree double run and the subsequent local Docker double run of exact commit `4dfcfb41e9cbb799753986c2d76134514bbd19be` passed 310-node comparison and zero-XPASS audits; complete Phase 0 acceptance / Phase 1 entry not yet approved.** Subsequent documentation backfill is outside the tested SHA; clean CI on the final PR head, real samples, and human signoff remain independent gates. [2026-11-18: "clean CI" and "real samples" are revised per 05 §0 and are no longer stage-acceptance blockers; historical text and test numbers are retained.]
 
 ## Appendix A Historical Formal Artifact Index (2026-11-07 uncommitted tree)
 

@@ -5,6 +5,7 @@
 > Revised: 2026-11-09 (R11 owned-task documentation clarification; no lifecycle behavior change)
 > Basis: all Chinese and English documents `01` through `05`, independent design review, and current-code inspection (backend @ `4dfcfb41e9cbb799753986c2d76134514bbd19be`)
 > Constraints: isolated document/code implementation; no production wiring, API/SSE, Settings, migration, frontend, deploy, external Engine, or credential changes; run affected checks locally and leave the full suite to CI under repository convention; never report an unrun check as passed
+> Revision note (2026-11-18): the Phase 0 CI double-run and real historical samples in §1's accepted entry risk, the "full suite left to CI" constraint, and the test/CI/real-sample evidence requirement in the "evidence hard boundary" section are no longer stage-acceptance blockers and are retained only as historical context or explicit out-of-scope notes (see `05-acceptance-plan.md` §0); functional correctness, contract/terminal semantics, tenant isolation, Secret handling, data integrity, migration, and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## 1. Implementation Entry and Accepted Risk
 

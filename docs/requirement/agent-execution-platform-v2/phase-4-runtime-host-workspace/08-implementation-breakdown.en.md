@@ -5,6 +5,7 @@
 > Basis: `01-business-goals.en.md`, `02-requirements.en.md`, `03-technical-design.en.md`, `04-test-plan.en.md`, `05-acceptance-plan.en.md`, plus a code-reality review of branch `feat/agent-execution-platform-v2-phase4` (cut from completed Phase 3 at `c63fd4a`)
 > Baseline facts: actual Alembic head is `0058_agent_execution_metadata` (down_revision `0057_industry_pack_runtime`); Phase 3 acceptance closed **conditionally passed** (see R-2); this development host is macOS (darwin) with Docker available for PostgreSQL (R-3)
 > Working constraints: main workspace only, no git worktrees; RED before GREEN; never prewrite outcomes; 06/07 exist only after real execution; no push/PR from this flow
+> Revised 2026-11-18 (scope-limited acceptance): the "pending_env blocks its enablement promise" wording in rule 4, R-2/R-3, §5, §8/§8.1, and the Phase 0 supervision-overhead item are reclassified as historical context / explicit out-of-scope notes, not stage-acceptance blockers (05 §6.1). All measured facts and the core/concession split are unchanged; high-risk enablement stays separate.
 
 ## 1. Implementation Rules
 
