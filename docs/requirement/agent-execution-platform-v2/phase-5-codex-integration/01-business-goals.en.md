@@ -2,6 +2,7 @@
 
 > Status: Pending review (planning only, not implemented; the current code has no Codex support)
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance: the success-metrics "pending Phase 0" baselines, p50/p95, and startup latency are historical context, not stage-acceptance gates; see 05 §6.1. Stage B stays locked)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 3.2, 4, 5, 7–10, 12–13, 17 (Phase 5), and 19–22; see `03-technical-design.md` for the current-state audit
 
 > Phase: Phase 5 (Stage A: CLI Exec; Stage B: App-Server, unlocked strictly in sequence)

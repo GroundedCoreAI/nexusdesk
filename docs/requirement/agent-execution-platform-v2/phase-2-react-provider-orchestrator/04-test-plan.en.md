@@ -2,6 +2,7 @@
 
 > Status: Local T2–T11 and R17 live validation are complete, as are the R18 production remediation and focused validation; see 06/07 and their appendices. Minimal R18 live on/off revalidation is complete; the overall result remains conditionally passed
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: the performance ≥30 matched pairs/p95/CI/pending_env capping wording in P2-CM-08 and the §7 T8 exit is no longer a stage-acceptance gate and remains historical context; functional UT/IT/CM, switch completeness/rollback, tenant isolation, secret/snapshot/migration/terminal-state/cleanup, and no P0/P1 remain gates; see the 2026-11-18 revision of 05/07; historical numbers are not retroactively changed)
 > Revised: 2026-11-12 (R18 and current-status alignment; design-phase content remains a historical plan)
 > Basis: `02-requirements.md` (FR-1–FR-6, AC-1–AC-9), `03-technical-design.md` (design corresponding to R1–R12), `08-implementation-breakdown.md` (R13/R14/R15/R16/R17/R18 and T6/T8/T11)
 

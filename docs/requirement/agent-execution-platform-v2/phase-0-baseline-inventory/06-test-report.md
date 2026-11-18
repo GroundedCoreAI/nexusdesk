@@ -4,6 +4,7 @@
 > 创建：2026-11-08
 > 依据：`04-test-plan.md`（P0-UT-01～10、P0-IT-01～10、P0-CM-01～05）、`02-requirements.md`（FR-1～FR-6、AC-1～AC-6）、`baseline/regression-baseline.md`
 > 执行：历史未提交树 Run 1 / Run 2 于 UTC 2026-11-07 完成；已提交产物 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 的独立本地 Docker/pgvector 双跑于 UTC 2026-11-09 完成；2026-11-10 仅回填文档，未重跑或替换任何历史轮次
+> 修订：2026-11-18（范围限定验收修订：本文凡把 CI run/CI 双跑/CI 链接、性能或耗时基线、真实或经授权历史样本写成"证据门槛/独立门槛/验收前置"之处，均不再作为阶段验收阻断项，仅保留为历史背景或明示非范围项；所有测试数值与历史记录不改写。仍为门槛的见 `05-acceptance-plan.md` §0）
 
 ## 1. 测试范围与环境
 
@@ -113,7 +114,7 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 
 ## 7. 正式执行中发现的缺陷
 
-历史修正双跑与后续 committed-artifact Docker 正式双跑**均未暴露新的 P0/P1 实现缺陷**。这句话只描述正式轮次实际结果，不消除 CI、真实样本或人工验收证据门槛，也不给出未经后续验收核定的最终 P0/P1 开放数量。以下工具门禁缺陷单独保留，不混入生产实现失败率：
+历史修正双跑与后续 committed-artifact Docker 正式双跑**均未暴露新的 P0/P1 实现缺陷**。这句话只描述正式轮次实际结果，不消除 CI、真实样本或人工验收证据门槛，也不给出未经后续验收核定的最终 P0/P1 开放数量。以下工具门禁缺陷单独保留，不混入生产实现失败率：【2026-11-18：原句中的"CI、真实样本证据门槛"依 05 §0 修订，不再作为阶段验收门槛；"人工验收"口径按单一验收负责人记录执行。历史原文保留。】
 
 | ID | 发现环节 | 实际缺陷与影响 | 修复、评审与回归 | 当前处置 |
 |---|---|---|---|---|
@@ -130,8 +131,8 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 
 | ID | 级别 / 状态 | 实际边界与处置 |
 |---|---|---|
-| P0-I1 | `pending_env` | 被测提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 已存在并推送，但最终 PR head 的干净 GitHub Actions CI 双跑、原始 artifact 与链接尚不存在；研发负责人 + QA 在 Phase 1 入口评审前补证。后续文档回填不在被测 SHA 内，本地 Docker 双跑不替代 CI AC-4 |
-| P0-I2 | `pending_env` | 未提供经授权、脱敏的真实历史草稿和已发布快照及来源清单；现有 fixture 仅为合成字段形状。Agent 配置代表 + 安全代表须补样或形成正式范围裁定 |
+| P0-I1 | `pending_env`【2026-11-18：superseded / 非范围，不再是阶段验收阻断项；§9、05 §0】 | 被测提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 已存在并推送，但最终 PR head 的干净 GitHub Actions CI 双跑、原始 artifact 与链接尚不存在；研发负责人 + QA 在 Phase 1 入口评审前补证。后续文档回填不在被测 SHA 内，本地 Docker 双跑不替代 CI AC-4 |
+| P0-I2 | `pending_env`【2026-11-18：superseded / 非范围，不再是阶段验收阻断项；05 §0】 | 未提供经授权、脱敏的真实历史草稿和已发布快照及来源清单；现有 fixture 仅为合成字段形状。Agent 配置代表 + 安全代表须补样或形成正式范围裁定 |
 | P0-I3 | P2 / open | 开放平台 stream 注释称无 token delta，实际会输出可见文本 delta；开放平台后端 owner 在 Phase 2 前处置 |
 | P0-I4 | P2 / open | 专用 `tool.replay` 可在终态后消耗 seq；专门 SSE 测试已证明 payload 隐藏与游标推进，但安全/行为边界未修复或裁定，最迟 Phase 6 安全门槛前处理 |
 | P0-I5 | P3 / open | 既有 `seed_memory_*` 全量格式检查差异保留给对应脚本 owner；不在 Phase 0 混入无关批量格式化 |
@@ -142,11 +143,11 @@ P0-UT-09/10 的工具回归现包含 7 个新增节点：`test_summary_classifie
 
 - 既有 CI run <https://github.com/GroundedCoreAI/nexusdesk/actions/runs/42227604191> 仅是 base 现状后端单次支持证据，head 为 `16aed12eb095f29bed5c536b5fcbf68e510136c4`；不包含本阶段新增测试、覆盖率、JUnit artifact 或双跑比较。
 - 被测实现/基线提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 已创建并推送，§2.2 的本地 Docker 双跑正是基于该精确 SHA；但后续文档专用回填会形成不在该 SHA 内的新 PR head，且截至 2026-11-10 本次文档回填时尚未创建 PR。最终 PR head 的正式干净 GitHub Actions CI 双跑及链接保持 `pending_env`，本报告没有声称任何新 CI 成功，也不以 Docker 替代 CI。
-- 本报告不是 `07-acceptance-report.md`，没有人工签字，也不把本地测试通过改写成 AC-1～AC-6 全部无限制验收通过。Phase 0 完整验收和 Phase 1 入口仍须完成 §8 证据门槛与后续人工验收。
+- 本报告不是 `07-acceptance-report.md`，没有人工签字，也不把本地测试通过改写成 AC-1～AC-6 全部无限制验收通过。Phase 0 完整验收和 Phase 1 入口仍须完成 §8 证据门槛与后续人工验收。【2026-11-18：§8 中 CI/真实样本项已 superseded / 非范围，不再作为阶段验收门槛；见 05 §0。】
 
 ## 10. 结论
 
-**历史未提交树双跑与后续精确提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 的本地 Docker 双跑均通过 310 节点比较及零 XPASS 审计；完整 Phase 0 验收 / Phase 1 入口尚未批准。** 后续文档回填不在被测 SHA 内，最终 PR head 的干净 CI、真实样本和人工签字仍是独立门槛。
+**历史未提交树双跑与后续精确提交 `4dfcfb41e9cbb799753986c2d76134514bbd19be` 的本地 Docker 双跑均通过 310 节点比较及零 XPASS 审计；完整 Phase 0 验收 / Phase 1 入口尚未批准。** 后续文档回填不在被测 SHA 内，最终 PR head 的干净 CI、真实样本和人工签字仍是独立门槛。【2026-11-18：其中"干净 CI"与"真实样本"依 05 §0 修订，不再是阶段验收阻断项；历史原文与测试数值保留。】
 
 ## 附录 A 历史正式产物索引（2026-11-07 未提交树）
 

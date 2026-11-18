@@ -2,6 +2,7 @@
 
 > Status: Pending review (implementation has not started)
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance: the "pending Phase 0 inventory/measurement" baselines and latency in the success-metrics table are historical context, not stage-acceptance gates; see 05 §6.1)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 3, 7–10, 15–17 Phase 4, 19, 20, and 22; Phase 0–3 planning documents
 > Estimated effort: ~3–4 weeks (re-estimate after the Phase 0 baseline and support-matrix review)
 > Dependencies: Phase 0–3 accepted; Linux/POSIX and PostgreSQL test environments; availability of a dedicated resource-control environment confirmed

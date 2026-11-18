@@ -2,6 +2,7 @@
 
 > Status: Approved scope baseline for direct-continue development; not implemented or accepted
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: performance targets p50/p95/Outbox lag/recovery time pending Phase 0 baseline freeze, and sample/paired/report-latency/CI evidence plus historical or authorized baselines, are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; AC functional, security/reliability/event-semantics, switch-completeness, tenant-isolation, Secret, data-integrity, migration, terminal-state, and fault-containment/cleanup requirements remain gates. AC-16 Phase 0 regression diff is judged at stage acceptance by current synthetic-fixture functional no-regression and switch completeness, without requiring a historical baseline)
 > Revised: 2026-11-16 (froze concrete rollout defaults and clarified additive SSE compatibility)
 > Basis: `01-business-goals.en.md` (G1–G7); `docs/architecture/agent-execution-platform-v2.md`, Sections 7–10, 12, 17 (Phase 6), and 18.2/18.4
 

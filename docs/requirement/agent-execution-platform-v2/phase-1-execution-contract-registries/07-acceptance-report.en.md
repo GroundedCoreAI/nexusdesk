@@ -4,6 +4,18 @@
 > Created/finalized: 2026-11-09
 > Basis: `05-acceptance-plan.md` (A1～A8, business metrics, C1～C4), `06-test-report.md` (29/29 planned rows passed)
 > Executed by: local automation agent (not human signoff); execution coverage: 2026-11-08 to 2026-11-09
+> Revised: 2026-11-18 (scope-limited acceptance revision: the CI run URL / CI double-run, performance/latency numeric baseline, real historical samples, and sample-count items listed in §0 below are marked superseded / out-of-scope and are no longer stage-acceptance blockers; all historical execution records and test numbers are preserved unchanged; the items that remain gates are functional correctness/contract and terminal semantics, tenant isolation, Secret handling, data integrity, migration and protected-file/lockfile zero drift, rollback, side effects/cleanup, zero P0/P1, and a single acceptance-owner record)
+
+## 0. 2026-11-18 Scope-Limited Acceptance Revision (supersedes later gate wording)
+
+This section records the 2026-11-18 scope-limited acceptance revision. It takes precedence over any later wording that treats the items below as acceptance gates, veto items, "fail" conditions, blockers, or mandatory evidence. The related historical text, execution records, and test numbers are all preserved and are not rewritten; however, the items below are no longer stage-acceptance blockers as of this revision.
+
+- **No longer stage-acceptance gates** (retained only as historical context or explicit out-of-scope notes): performance/capacity p50/p95/C11 latency and duration statistics (including the numeric baseline in §4 item 5, "Impact on existing Run latency and error rate"); matched pairs and sample counts; CI provenance, final-PR-head CI double-run, and CI run URL; real or authorized historical samples; multi-sample/large-sample-data-volume requirements. Accordingly:
+  - **L-01's "complete local suite / GitHub Actions CI has no run URL"**: the CI run URL / CI-provenance portion is marked **superseded / out-of-scope** and is no longer a stage-acceptance blocker; functional cases within the defined test matrix are still judged under A1–A8.
+  - **L-03's "Phase 0 clean committed-artifact CI double-run, authorized real historical samples"**: that CI double-run and real-sample evidence requirement is marked **superseded / out-of-scope** and is no longer a stage blocker for this phase.
+- **Still stage-acceptance gates**: functional correctness and contract/terminal semantics (A1–A8 behavior and evidence), tenant isolation, Secret handling, data integrity, migration head and protected-file/lockfile zero drift, rollback completeness, side effects/cleanup, zero P0/P1, and a single acceptance-owner record; high-risk enablement still requires separate security and operations approval.
+- **Acceptance-record convention**: per `05-acceptance-plan.md`, the stage conclusion is recorded by a single acceptance owner; the §7 historical multi-role signature table is a leftover convention from before 2026-11-17, retained as historical context and not a stage-acceptance blocker.
+- **Historical numbers**: values such as 560 focused cases, 115 regressions, A1–A8 pass counts, C1–C4 pass counts, and the various counts/SHAs are historical evidence, are not rewritten, and are neither pass nor blocker conditions for this stage because of this revision.
 
 ## 1. Acceptance Organization and Scope
 
@@ -13,7 +25,7 @@ This is a **local automated engineering acceptance round**, not human approval b
 
 **Prerequisite check**: the refreshed `06-test-report.md` records all 23 UT/IT and 6 CM rows passing (29/29), incorporates the R6 implementation fixes and R11/05 documentation clarifications, and closes both D-07 and D-08. Independent R6/R11 spec review and scoped quality review are both **APPROVED**. The current T8 preflight compared the current tree against the final-T7 manifest `/tmp/nexusdesk-t7-final-evidence.DynKi0/source-test-sha256.log` and measured all 25 implementation/test module SHA-256 hashes as identical (**25/25, 0 mismatches**), with evidence in `E/preflight-t7-source-hashes.*`. No known open implementation P0/P1 remains in the reviewed local scope; the full suite, CI, Phase 0 entry, final overall package review, and formal human acceptance remain downstream blockers. Every scenario uses fixed synthetic execution/tenant/agent IDs, scripted events, and a synthetic `secret-marker`; no real customer input, real credential, or external Engine was used.
 
-**Conclusion boundary**: “PASS” below means only that local automated engineering evidence satisfies the corresponding acceptance step. It does not mean CI succeeded, the Adapter representative completed UAT, any role signed, or Phase 1 formally passed. This round also does not replace Phase 0's clean committed-artifact CI double-run, authorized real historical samples, or human signoffs.
+**Conclusion boundary**: “PASS” below means only that local automated engineering evidence satisfies the corresponding acceptance step. It does not mean CI succeeded, the Adapter representative completed UAT, any role signed, or Phase 1 formally passed. This round also does not replace Phase 0's clean committed-artifact CI double-run, authorized real historical samples, or human signoffs. [2026-11-18: the "CI double-run" and "authorized real historical samples" are marked superseded / out-of-scope per §0 and are no longer stage-acceptance gates; this historical text is retained.]
 
 ## 2. Acceptance Environment
 
@@ -22,7 +34,7 @@ This is a **local automated engineering acceptance round**, not human approval b
 | Local pure Python / static checks | Darwin 27.0.0 x86_64; Python 3.11.9; uv 0.11.3; working-tree baseline `4dfcfb41e9cbb799753986c2d76134514bbd19be`; no model, network, or external Engine | A1～A8 focused/static checks; C1～C4; four engineering hard metrics |
 | Independent Docker PostgreSQL | Previously authorized dedicated `pgvector/pgvector:pg17` database; the existing temporary env was only sourced safely and was never read, printed, or copied; the container was not stopped or removed | A8 actual execution of 28 `runtime_postgres` + 6 `open_platform` regressions and `alembic current` |
 | Current clean-source architecture shadow | Rebuilt from current tracked + nonignored source files in the T8 evidence directory; recorded separately from the raw working-tree command | A8 architecture gate |
-| GitHub Actions / complete local suite | Not run; no CI run URL; reserved for a later authorized submission/PR and CI by repository convention | `pending_env`, see L-01 |
+| GitHub Actions / complete local suite | Not run; no CI run URL; reserved for a later authorized submission/PR and CI by repository convention | `pending_env`, see L-01 [2026-11-18: CI run URL / CI provenance superseded / out-of-scope, no longer a stage blocker; §0] |
 | Human acceptance and signatures | Product, QA, engineering lead, and Adapter representative did not sign in this round | `pending`, see L-04 |
 
 **Evidence root**: `E` below denotes `/tmp/nexusdesk-t8-final-evidence.zLvvpZ`. Every formal primary command has matching `.command`, `.log`, and `.exit` files. Temporary logs are not versioned; this report embeds command, count, and disposition summaries. CI is uniformly **PENDING with no URL**; every row references local logs rather than CI evidence.
@@ -50,7 +62,7 @@ Node abbreviations: `C=tests/test_agent_execution_contracts.py`, `R=tests/test_a
 | Valid/invalid combination resolution correctness | 100% valid success and invalid rejection in the fixed matrix | **PASS (measured; hard metric)** | A6's complete 174 nodes and A5's fresh/exact selections actually cover independent Engine/Protocol, two versions, disabled, unknown, incompatible, duplicate, factory/identity/signature/awaitable, and other fixed valid/invalid outcomes. The four R6 nodes additionally verify each same-factory second registration across Engine/Protocol/version as `configuration_error/duplicate_adapter`, with the first registration still resolvable, the second unresolvable, and no partial registration; distinct factories that compare equal through custom equality are not falsely rejected. Every row produced the expected instance or stable error precedence without fallback. **100% of fixed parameterized outcomes matched expectations**; this is not extrapolated to undefined combinations. Evidence: `E/a6-registry-complete.*`, `E/a6-r6-four-selected.*` |
 | LocalTestAdapter deterministic scenario pass rate | 100% in both prescribed runs with no pending task | **PASS (measured; hard metric)** | Two consecutive complete runs in the same environment: **58/58 + 58/58 = 100% in each run**, 0 skipped; common cleanup and specific adversarial cases assert no Adapter-owned/test-created pending task. Evidence: `E/a7-localtest-complete-run1.*`, `run2.*` |
 | Public-contract/Worker modifications for the new Adapter | 0 | **PASS (measured; hard metric)** | **0 modifications.** On the approved T2/T3 public baseline, the second-Adapter scope contains only independent probe helper/test files; A5's 45 Probe cases and structural node prove non-inheritance/no delegation. Protected diff and C2/C3 prove existing public-contract ports and Worker unchanged. Evidence: `E/a5-independent-probe-and-freshness.*`, `E/a8-protected-paths-zero-diff.*`, `E/c2-existing-contracts-zero-diff.*` |
-| Impact on existing Run latency and error rate | Zero production behavior diff and no added execution overhead | **PASS (this phase's zero-wiring/zero-diff target); numeric baseline remains Phase 0/2** | The new path is not connected to production composition roots, protected production diff=0, and 115 selected existing regressions passed; therefore this phase adds no production execution path or overhead. **No latency/error-rate number was measured or invented**; the numeric production baseline remains for Phase 0/2 as planned |
+| Impact on existing Run latency and error rate | Zero production behavior diff and no added execution overhead | **PASS (this phase's zero-wiring/zero-diff target); numeric baseline remains Phase 0/2** [2026-11-18: the latency/error-rate numeric baseline is no longer a stage-acceptance gate and is not a blocker; §0] | The new path is not connected to production composition roots, protected production diff=0, and 115 selected existing regressions passed; therefore this phase adds no production execution path or overhead. **No latency/error-rate number was measured or invented**; the numeric production baseline remains for Phase 0/2 as planned |
 
 ## 5. Compliance Checks
 
@@ -65,20 +77,20 @@ Node abbreviations: `C=tests/test_agent_execution_contracts.py`, `R=tests/test_a
 
 | # | Severity | Item | Suggested owner | Suggested deadline | Next required evidence |
 |---|---|---|---|---|---|
-| L-01 | P1 downstream testing / `pending_env` | Complete local suite and GitHub Actions Backend/Frontend CI were not run and there is no run URL; 115 selected regressions do not prove full compatibility | Subsequent commit/PR and CI maintainers; QA review | Before formal signoff; suggested immediately after the next authorized commit/PR (target suggestion 2026-11-10) | Full CI group results and run URL after an authorized commit/PR, plus any necessary added regressions; this report does not initiate commit/push/PR |
+| L-01 | P1 downstream testing / `pending_env` [2026-11-18: CI run URL / CI-provenance portion superseded / out-of-scope, no longer a stage blocker; §0] | Complete local suite and GitHub Actions Backend/Frontend CI were not run and there is no run URL; 115 selected regressions do not prove full compatibility | Subsequent commit/PR and CI maintainers; QA review | Before formal signoff; suggested immediately after the next authorized commit/PR (target suggestion 2026-11-10) | Full CI group results and run URL after an authorized commit/PR, plus any necessary added regressions; this report does not initiate commit/push/PR |
 | L-02 | P2 local environment | The corrected raw architecture command exits 1 solely for four pre-existing ignored legacy roots; the current clean-source shadow passes, and these must not be conflated | Repository/architecture-gate maintainers | Recheck before formal signoff; suggested 2026-11-10 | Clean-checkout or CI raw logs while retaining both raw exit 1 and clean pass evidence; ignored artifacts must not be deleted merely to obtain green |
-| L-03 | P1 acceptance entry / `pending` | Phase 0 clean committed-artifact CI double-run, authorized real historical samples, and human signoffs remain open; Phase 1 local execution does not approve Phase 0 | Phase 0 acceptance owner and Product owner | Before Phase 1 formal acceptance completes; suggested review 2026-11-10 | Phase 0 formal acceptance record, double-run CI evidence, sample authorization, and signatures |
+| L-03 | P1 acceptance entry / `pending` [2026-11-18: the "Phase 0 CI double-run" and "authorized real historical samples" are superseded / out-of-scope and no longer a stage blocker for this phase; §0] | Phase 0 clean committed-artifact CI double-run, authorized real historical samples, and human signoffs remain open; Phase 1 local execution does not approve Phase 0 | Phase 0 acceptance owner and Product owner | Before Phase 1 formal acceptance completes; suggested review 2026-11-10 | Phase 0 formal acceptance record, double-run CI evidence, sample authorization, and signatures |
 | L-04 | P1 formal acceptance / `pending` | Independent R6/R11 spec review and scoped quality review are complete and both **APPROVED**; within this item only final overall package review, Adapter-representative human UAT, and the four Product/QA/engineering/Adapter signatures remain `pending`; local automation is not human approval | Phase 1 acceptance owner; final package review owner; Product, QA, engineering lead, and Adapter representative | After final overall package review, human UAT, and L-01 closure, before formal release; suggested 2026-11-11 | Final overall package review conclusion, second-Adapter human UAT record, and all four signatures/dates in this report; formal passage must not be claimed while any remains incomplete |
 
-**Local defect status**: this round's A/C commands found no new implementation failure, and no known open implementation P0/P1 remains in the reviewed local scope. L-01/L-03/L-04 are formal acceptance blockers and L-02 is a retained local-environment residual; they are neither rewritten as local engineering-case failures nor waived.
+**Local defect status**: this round's A/C commands found no new implementation failure, and no known open implementation P0/P1 remains in the reviewed local scope. L-01/L-03/L-04 are formal acceptance blockers and L-02 is a retained local-environment residual; they are neither rewritten as local engineering-case failures nor waived. [2026-11-18: L-01's CI run URL / CI-provenance portion and L-03's CI double-run/real-historical-sample portion are superseded / out-of-scope per §0 and are no longer stage blockers; the above historical status text is retained.]
 
 ## 7. Conclusion and Signatures
 
 **Conclusion: not yet passed / acceptance incomplete.**
 
 - All A1～A8 **local automated engineering evidence is PASS**; C1～C4 **PASS within their stated scopes**; the first four engineering hard metrics **PASS**. The fifth meets this phase's zero-production-wiring/zero-diff target, with its numeric baseline reserved for Phase 0/2.
-- Formal passage is incomplete **not because local engineering cases failed**. Independent R6/R11 spec review and scoped quality review are APPROVED, but full-suite/CI evidence is absent, the Phase 0 entry risk remains open, final overall package review and Adapter-representative human UAT are incomplete, and all four required human signoffs are `pending`. Therefore this report does not claim “passed,” “conditionally passed,” “approved,” or formal Phase 1 acceptance.
-- Local 560 focused cases, 115 selected regressions, and static evidence support downstream independent review but cannot replace CI, human acceptance, or signatures. CI status: **PENDING, no run URL**; complete local pytest: **PENDING, not run**.
+- Formal passage is incomplete **not because local engineering cases failed**. Independent R6/R11 spec review and scoped quality review are APPROVED, but full-suite/CI evidence is absent, the Phase 0 entry risk remains open, final overall package review and Adapter-representative human UAT are incomplete, and all four required human signoffs are `pending`. Therefore this report does not claim “passed,” “conditionally passed,” “approved,” or formal Phase 1 acceptance. [2026-11-18: the "full-suite/CI evidence is absent" portion is not a stage-acceptance gate; see §0. Functional correctness, contract/terminal semantics, tenant isolation, Secret handling, data integrity, migration and lockfile zero drift, rollback, cleanup, zero P0/P1, and a single acceptance-owner record remain gates.]
+- Local 560 focused cases, 115 selected regressions, and static evidence support downstream independent review but cannot replace CI, human acceptance, or signatures. CI status: **PENDING, no run URL**; complete local pytest: **PENDING, not run**. [2026-11-18: the CI status is no longer a stage-acceptance blocker; §0.]
 
 | Role | Name | Date | Conclusion | Signature |
 |---|---|---|---|---|
@@ -86,6 +98,8 @@ Node abbreviations: `C=tests/test_agent_execution_contracts.py`, `R=tests/test_a
 | QA | To be completed | To be completed | **pending** | **pending / unsigned** |
 | Engineering lead | To be completed | To be completed | **pending** | **pending / unsigned** |
 | Adapter representative | To be completed | To be completed | **pending (human UAT incomplete)** | **pending / unsigned** |
+
+> **2026-11-18 scope-limited revision**: per `05-acceptance-plan.md`, the acceptance-record convention is a single acceptance owner; the multi-role signature table above is a leftover from the pre-2026-11-17 convention, retained as historical context and not a blocker for this scope-limited acceptance. Functional correctness, contract/terminal semantics, tenant isolation, Secret handling, data integrity, migration and lockfile zero drift, rollback, cleanup, and zero P0/P1 across A1–A8/C1–C4 remain gates.
 
 ## 8. Revision-Round Revalidation Record
 
@@ -98,3 +112,29 @@ The following original-T8 items were evidence-wrapper invocation issues, not pro
 ### 8.2 Key Deduplicated Evidence
 
 `E/metrics-focused-four-file.*` is the current four-file **560 passed** deduplicated cross-check (283 + 174 + 58 + 45). Each A/C row also has its own current command; the combined command does not replace scenario-specific evidence. The four nodes in `E/a6-r6-four-selected.*` are already included in Registry 174 and focused 560 and serve only as explicit rechecks, not additional coverage. T8 did not run the complete local pytest suite and did not create a PR or CI run.
+
+
+---
+
+## 2026-11-18 scope-limited acceptance execution addendum (phases 0-3)
+
+Per the 2026-11-18 revision of `09-acceptance-execution-runbook.md`, a scope-limited phases 0-3
+acceptance run was executed on the governed shared production Linux host at target SHA
+`5170e140f10b117549cf54ba400131f5d7f95f69`. Performance, CI provenance, real/authorized historical
+samples and large-sample data-volume requirements are out of stage scope; the kept gates are functional
+correctness, switch completeness, tenant isolation, Secret handling, data integrity, migration,
+terminal-state semantics, side effects/cleanup, no open P0/P1, and a single acceptance-owner record.
+
+Result: 13 lanes, all exit 0; 5,464 JUnit tests with **0 failures / 0 errors** and 55 declared skips;
+the dedicated switch-completeness lane `d9-switch-completeness` passed 913 tests, supported by a
+read-only default-off inspection of the running production stack.
+Verdict: **PASS (scope-limited)**. The single acceptance owner (JackChow) confirmed and signed this
+phase on 2026-11-18 (see the authoritative record `../11-scope-limited-acceptance-record-20261118.md`
+§7); no signature item remains outstanding. High-risk capability enablement still requires a separate
+approval and is not authorized here.
+
+Authoritative record: `../11-scope-limited-acceptance-record-20261118.md`; evidence package
+`20261118T125822Z.tar.gz`, SHA256
+`109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23`.
+Historical conclusions and numbers above are not retroactively modified; this addendum only records
+the current scope-limited conclusion.

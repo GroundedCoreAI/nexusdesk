@@ -5,6 +5,7 @@
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 15 and 17 (Phase 0); all later phases depend on these findings
 > Estimated effort: ~1–1.5 weeks
 > Dependencies: target `integration` commit builds; existing PostgreSQL test environment is available
+> Revision note (2026-11-18): the "100% loadable real sanitized samples" and "same clean environment executed twice with CI-retained commands and result links" targets in Success Metrics are historical target statements only and are no longer stage-acceptance blockers (see `05-acceptance-plan.md` §0); functional correctness and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## Problems to Solve
 

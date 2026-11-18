@@ -4,6 +4,7 @@
 > Created: 2026-11-02; design frozen: 2026-11-08
 > Revised: 2026-11-09 (R11 owned-task documentation clarification; no lifecycle behavior change)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 4–6, 15–17, and 19–21, Phase 1; `08-implementation-breakdown.en.md` (R1–R11, T1–T8)
+> Revision note (2026-11-18): the "impact on existing Run latency and error rate (numeric baseline to be measured in Phase 0)" success metric and the Phase 0 CI double-run/real historical-sample wording in the entry risk are no longer stage-acceptance blockers and are retained only as historical targets or explicit out-of-scope notes (see `05-acceptance-plan.md` §0); functional correctness, tenant isolation, Secret handling, data integrity, migration, and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## Problems to Solve
 

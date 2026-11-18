@@ -4,6 +4,18 @@
 > 创建/定稿：2026-11-09
 > 依据：`05-acceptance-plan.md`（A1～A8、业务指标、C1～C4）、`06-test-report.md`（29/29 计划行通过）
 > 执行：local automation agent (not human signoff)；执行覆盖：2026-11-08 至 2026-11-09
+> 修订：2026-11-18（范围限定验收修订：以下 §0 所列 CI run URL/CI 双跑、性能/延迟数值基线、真实历史样本与样本计数项被标记为 superseded / 非范围项，不再是阶段验收阻断项；历史执行记录与测试数值一律保留不改写；仍为门槛的是功能正确性/契约与终态语义、租户隔离、Secret、数据完整性、迁移与锁文件零漂移、回滚、副作用/清理、无 P0/P1 与单一验收负责人记录）
+
+## 0. 2026-11-18 范围限定验收修订说明（取代后文相关门槛表述）
+
+本节为 2026-11-18 范围限定验收修订，优先于后文任何把下列项目写成验收门槛、否决项、"不通过"条件、阻断项或必备证据的表述。相关历史原文、执行记录与测试数值均保留，不作改写；但下列项目自本次修订起不再作为阶段验收阻断项。
+
+- **不再作为阶段验收门槛（保留为历史背景或明示非范围项）**：性能/容量 p50/p95/C11 延迟与耗时统计（含 §4 第 5 项"对现有 Run 延迟与错误率影响"的数值基线）；配对样本（matched pairs）与样本计数；CI 溯源、最终 PR head 的 CI 双跑、CI run URL；真实或经授权历史样本；多样本/大样本数据量要求。据此：
+  - **L-01 中"完整本地套件/GitHub Actions CI 无 run URL"**：CI run URL / CI 溯源部分标记为 **superseded / 非范围项**，不再是阶段验收阻断项；已定义测试矩阵内的功能用例仍按 A1～A8 判定。
+  - **L-03 中"Phase 0 干净已提交产物 CI 双跑、经授权真实历史样本"**：该 CI 双跑与真实样本证据要求标记为 **superseded / 非范围项**，不再是本阶段阻断项。
+- **仍为阶段验收门槛**：功能正确性与契约/终态语义（A1～A8 的行为与证据）、租户隔离、Secret 处理、数据完整性、迁移 head 与保护文件/锁文件零漂移、回滚完整、副作用/清理、无 P0/P1，以及单一验收负责人记录；高风险能力启用仍须独立安全与运维批准。
+- **验收记录口径**：按 `05-acceptance-plan.md`，阶段结论由单一验收负责人记录；§7 历史多角色签字表仅为 2026-11-17 之前口径的遗留，作历史背景保留，不作为阶段验收阻断项。
+- **历史数值**：560 focused、115 回归、A1～A8 通过数、C1～C4 通过数与各类计数/SHA 等数值为历史证据，不改写，也不因本节修订而被当作本阶段的通过或阻断条件。
 
 ## 1. 验收组织与范围说明
 
@@ -13,7 +25,7 @@
 
 **前置条件核对**：最终刷新的 `06-test-report.md` 记录 23 条 UT/IT 与 6 条 CM 全部通过（29/29），并已纳入 R6 实现修复及 R11/05 文档澄清，D-07/D-08 均关闭；R6/R11 独立 spec review 与 scoped quality review 均为 **APPROVED**。当前 T8 预检以 final-T7 清单 `/tmp/nexusdesk-t7-final-evidence.DynKi0/source-test-sha256.log` 为基准，实测 25 个实现/测试模块 SHA-256 与当前树全部一致（**25/25，0 mismatch**），证据为 `E/preflight-t7-source-hashes.*`。本地已审阅实现范围无已知开放 P0/P1 缺陷；完整套件、CI、Phase 0 入口、最终总体包评审与正式人工验收仍是下游阻断项。所有场景使用固定合成 execution/tenant/agent ID、脚本事件和合成 `secret-marker`，不使用真实客户输入、真实凭据或外部 Engine。
 
-**结论边界**：下文的“PASS”仅指本地自动化工程证据满足相应验收步骤；它不表示 CI 成功、Adapter 代表已完成 UAT、任何角色已签字或 Phase 1 已正式通过。Phase 0 的干净已提交产物 CI 双跑、经授权真实历史样本和人工签字也未由本轮替代。
+**结论边界**：下文的“PASS”仅指本地自动化工程证据满足相应验收步骤；它不表示 CI 成功、Adapter 代表已完成 UAT、任何角色已签字或 Phase 1 已正式通过。Phase 0 的干净已提交产物 CI 双跑、经授权真实历史样本和人工签字也未由本轮替代。【2026-11-18：其中"CI 双跑"与"经授权真实历史样本"已依 §0 标记为 superseded / 非范围项，不再是阶段验收门槛；本条历史原文保留。】
 
 ## 2. 验收环境
 
@@ -22,7 +34,7 @@
 | 本机纯 Python / 静态检查 | Darwin 27.0.0 x86_64；Python 3.11.9；uv 0.11.3；工作树基线 `4dfcfb41e9cbb799753986c2d76134514bbd19be`；无模型、网络或外部 Engine | A1～A8 的 focused/static；C1～C4；四项工程硬指标 |
 | 独立 Docker PostgreSQL | 已授权的 `pgvector/pgvector:pg17` 专用数据库；仅安全 source 既有临时 env，不读取、打印或复制其内容；容器未停止或删除 | A8 的 28 个 `runtime_postgres` + 6 个 `open_platform` 实际回归及 `alembic current` |
 | 当前 clean-source 架构 shadow | 从当前 tracked + nonignored 源文件重新构造于 T8 证据目录；与 raw 工作树命令分开记录 | A8 架构门禁 |
-| GitHub Actions / 完整本地套件 | 未运行、无 CI run URL；按仓库约定留待后续合法提交/PR 与 CI | `pending_env`，见 L-01 |
+| GitHub Actions / 完整本地套件 | 未运行、无 CI run URL；按仓库约定留待后续合法提交/PR 与 CI | `pending_env`，见 L-01【2026-11-18：CI run URL / CI 溯源已 superseded / 非范围，不再是阶段阻断项；§0】 |
 | 人工验收与签字 | 产品、QA、研发负责人、Adapter 开发代表均未在本轮签字 | `pending`，见 L-04 |
 
 **证据根目录**：下文 `E` 表示 `/tmp/nexusdesk-t8-final-evidence.zLvvpZ`。每个正式主命令均有同名 `.command`、`.log`、`.exit` 三件套；临时日志不入库，报告嵌入命令、计数与判定摘要。CI 统一为 **PENDING，无 URL**，每行引用均为本地日志而非 CI 证据。
@@ -50,7 +62,7 @@
 | 有效/无效组合解析正确率 | 固定矩阵有效成功率与无效拒绝率均 100% | **PASS（已测量，硬指标）** | A6 完整 174 节点与 A5 fresh/exact 选择实际覆盖独立 Engine/Protocol、两个版本、disabled、unknown、incompatible、duplicate、factory/identity/signature/awaitable 等固定有效/无效结果；R6 四节点还逐一验证同一 factory 跨 Engine/Protocol/version 的第二次注册均为 `configuration_error/duplicate_adapter`，首注册仍可解析、第二注册不可解析且无 partial registration，custom-eq 相等但身份不同的 factories 不误拒。每行均得到预期实例或稳定错误优先级，无 fallback。固定参数化结果 **100% 符合预期**，不外推为未定义组合。证据 `E/a6-registry-complete.*`、`E/a6-r6-four-selected.*` |
 | LocalTestAdapter 场景确定通过率 | 规定场景两轮均 100% 通过，无 pending task | **PASS（已测量，硬指标）** | 同一环境连续完整执行两轮：**58/58 + 58/58 = 两轮各 100%**，0 skipped；公共 cleanup 与专属对抗用例断言无 Adapter-owned/test-created pending task。证据 `E/a7-localtest-complete-run1.*`、`run2.*` |
 | 新 Adapter 对公共契约/Worker 修改次数 | 0 次 | **PASS（已测量，硬指标）** | **0 次。** 在已审定 T2/T3 公共基线上，第二 Adapter 范围仅为独立 probe helper/test；A5 的 45 个 Probe cases 和结构节点证明非继承/无 delegation；protected diff 与 C2/C3 证明公共契约既有端口及 Worker 未改。证据 `E/a5-independent-probe-and-freshness.*`、`E/a8-protected-paths-zero-diff.*`、`E/c2-existing-contracts-zero-diff.*` |
-| 对现有 Run 延迟与错误率影响 | 生产行为 diff 为 0，无新增执行开销 | **PASS（本阶段零接线/零 diff 目标）；数值基线待 Phase 0/2** | 新路径未接生产组合根，protected production diff=0，既有选定回归 115 passed，因此本阶段没有新增生产执行路径或开销。**未测量也不虚构延迟/错误率数值**；数值生产基线仍由 Phase 0/2 按计划取得 |
+| 对现有 Run 延迟与错误率影响 | 生产行为 diff 为 0，无新增执行开销 | **PASS（本阶段零接线/零 diff 目标）；数值基线待 Phase 0/2**【2026-11-18：延迟/错误率数值基线不再作为阶段验收门槛，不作为阻断项；§0】 | 新路径未接生产组合根，protected production diff=0，既有选定回归 115 passed，因此本阶段没有新增生产执行路径或开销。**未测量也不虚构延迟/错误率数值**；数值生产基线仍由 Phase 0/2 按计划取得 |
 
 ## 5. 合规核对
 
@@ -65,20 +77,20 @@
 
 | # | 级别 | 问题 | owner 建议 | 期限建议 | 下一份所需证据 |
 |---|---|---|---|---|---|
-| L-01 | P1 下游测试 / `pending_env` | 完整本地套件和 GitHub Actions Backend/Frontend CI 未运行，无 run URL；选定 115 回归不等于全量兼容证明 | 后续提交/PR 与 CI 维护者；QA 复核 | 正式签字前；建议下一合法提交/PR 后立即处理（目标建议 2026-11-10） | 合法提交/PR 后的完整 CI 分组结果、run URL、必要补充回归；不得由本报告启动提交/push/PR |
+| L-01 | P1 下游测试 / `pending_env`【2026-11-18：CI run URL / CI 溯源部分 superseded / 非范围，不再是阶段阻断项；§0】 | 完整本地套件和 GitHub Actions Backend/Frontend CI 未运行，无 run URL；选定 115 回归不等于全量兼容证明 | 后续提交/PR 与 CI 维护者；QA 复核 | 正式签字前；建议下一合法提交/PR 后立即处理（目标建议 2026-11-10） | 合法提交/PR 后的完整 CI 分组结果、run URL、必要补充回归；不得由本报告启动提交/push/PR |
 | L-02 | P2 本地环境 | raw 架构正确命令 exit 1，仅因四个预存 ignored legacy roots；当前 clean-source shadow 通过，两者不可混称 | 仓库/架构门禁维护者 | 正式签字前复核；建议 2026-11-10 | 干净 checkout 或 CI raw 日志，并保留 raw exit 1 与 clean pass 双证据；不得为求绿删除 ignored artifacts |
-| L-03 | P1 验收入口 / `pending` | Phase 0 干净已提交产物 CI 双跑、经授权真实历史样本与人工签字仍开放；Phase 1 本地执行不批准 Phase 0 | Phase 0 验收负责人、产品负责人 | Phase 1 正式验收完成前；建议 2026-11-10 复核 | Phase 0 正式验收记录、双跑 CI 证据、样本授权与签字 |
+| L-03 | P1 验收入口 / `pending`【2026-11-18：其中"Phase 0 CI 双跑"与"经授权真实历史样本"已 superseded / 非范围，不再是本阶段阻断项；§0】 | Phase 0 干净已提交产物 CI 双跑、经授权真实历史样本与人工签字仍开放；Phase 1 本地执行不批准 Phase 0 | Phase 0 验收负责人、产品负责人 | Phase 1 正式验收完成前；建议 2026-11-10 复核 | Phase 0 正式验收记录、双跑 CI 证据、样本授权与签字 |
 | L-04 | P1 正式验收 / `pending` | R6/R11 独立 spec review 与 scoped quality review 已完成且均为 **APPROVED**；本项只剩最终总体包评审、Adapter 代表人工 UAT 与产品/QA/研发/Adapter 四方签字为 `pending`；本地自动化不是人工批准 | Phase 1 验收负责人；最终包评审负责人；产品、QA、研发负责人、Adapter 开发代表 | 最终总体包评审、人工 UAT 及 L-01 闭环后、正式发布前；建议 2026-11-11 | 最终总体包评审结论、第二 Adapter 人工 UAT 记录、本报告四方签字与日期；任一未完成均不得称正式通过 |
 
-**本地缺陷状态**：本轮 A/C 命令未发现新的实现失败，已审阅本地范围无已知开放实现 P0/P1。L-01/L-03/L-04 是正式验收阻断项，L-02 是需保留的本地环境残留；它们不被改写为本地工程用例失败，也不被豁免。
+**本地缺陷状态**：本轮 A/C 命令未发现新的实现失败，已审阅本地范围无已知开放实现 P0/P1。L-01/L-03/L-04 是正式验收阻断项，L-02 是需保留的本地环境残留；它们不被改写为本地工程用例失败，也不被豁免。【2026-11-18：L-01 的 CI run URL / CI 溯源部分与 L-03 的 CI 双跑/真实历史样本部分已依 §0 superseded / 非范围，不再是阶段阻断项；上述历史状态原文保留。】
 
 ## 7. 结论与签字
 
 **结论：尚未通过 / 验收未完成（not yet passed / acceptance incomplete）。**
 
 - A1～A8 的**本地自动化工程证据全部 PASS**；C1～C4 在明确范围内 **PASS**；前四项工程硬指标 **PASS**，第五项满足本阶段零生产接线/零 diff 目标，数值基线留 Phase 0/2。
-- 未通过正式结论的原因**不是本地工程用例失败**：R6/R11 独立 spec review 与 scoped quality review 已 APPROVED，但完整套件/CI 尚无证据、Phase 0 入口风险未关闭、最终总体包评审与 Adapter 代表人工 UAT 未完成、四个 required human signoffs 均为 `pending`。因此不声称“通过”“有条件通过”“已批准”或正式 Phase 1 acceptance。
-- 本地 560 focused、115 选定回归及静态证据可支持下游独立评审，但不能替代 CI、人工验收或签字。CI 状态：**PENDING，无 run URL**；完整本地 pytest：**PENDING，未运行**。
+- 未通过正式结论的原因**不是本地工程用例失败**：R6/R11 独立 spec review 与 scoped quality review 已 APPROVED，但完整套件/CI 尚无证据、Phase 0 入口风险未关闭、最终总体包评审与 Adapter 代表人工 UAT 未完成、四个 required human signoffs 均为 `pending`。因此不声称“通过”“有条件通过”“已批准”或正式 Phase 1 acceptance。【2026-11-18：其中"完整套件/CI 尚无证据"不作为阶段验收门槛，见 §0；功能正确性、契约/终态语义、租户隔离、Secret、数据完整性、迁移与锁文件零漂移、回滚、清理、无 P0/P1 与单一验收记录仍为门槛。】
+- 本地 560 focused、115 选定回归及静态证据可支持下游独立评审，但不能替代 CI、人工验收或签字。CI 状态：**PENDING，无 run URL**；完整本地 pytest：**PENDING，未运行**。【2026-11-18：CI 状态不再作为阶段验收阻断项；§0。】
 
 | 角色 | 姓名 | 日期 | 结论 | 签字 |
 |---|---|---|---|---|
@@ -86,6 +98,8 @@
 | QA | 待填写 | 待填写 | **pending** | **pending / 待签** |
 | 研发负责人 | 待填写 | 待填写 | **pending** | **pending / 待签** |
 | Adapter 开发代表 | 待填写 | 待填写 | **pending（人工 UAT 未完成）** | **pending / 待签** |
+
+> **2026-11-18 范围限定修订**：按 `05-acceptance-plan.md`，阶段验收记录口径为单一验收负责人；上表多角色签字为 2026-11-17 之前口径的历史遗留，仅作背景保留，不作为本次范围限定验收的阻断项。A1～A8、C1～C4 中的功能正确性、契约/终态语义、租户隔离、Secret、数据完整性、迁移与锁文件零漂移、回滚、清理与无 P0/P1 仍为门槛。
 
 ## 8. 修订轮复验记录
 
@@ -98,3 +112,22 @@
 ### 8.2 关键去重证据
 
 `E/metrics-focused-four-file.*` 为当前四文件 **560 passed** 去重 cross-check（283 + 174 + 58 + 45）；各 A/C 行另有独立当前命令，不以该合并命令替代逐场景证据。`E/a6-r6-four-selected.*` 的 4 个节点已包含在 Registry 174 与 focused 560 中，只作显式复核，不重复累加。T8 没有运行完整本地 pytest，没有创建 PR 或 CI run。
+
+
+---
+
+## 2026-11-18 范围限定验收执行补记（阶段 0–3）
+
+依据 `09-acceptance-execution-runbook.md` 2026-11-18 修订，在受控共享生产 Linux 主机上以目标 SHA
+`5170e140f10b117549cf54ba400131f5d7f95f69` 执行阶段 0–3 范围限定验收。性能、CI provenance、真实/
+授权历史样本、多样本数据量已移出阶段门禁；保留门禁为功能正确性、开关完备性、租户隔离、Secret、
+数据完整性、迁移、终态语义、副作用/清理、无 P0/P1 与单一验收负责人记录。
+
+结果：13 个 lane 全部 exit 0；5,464 个 JUnit 用例，**0 failures / 0 errors**，55 个声明式 skip；
+其中开关完备性专项 `d9-switch-completeness` 913 tests 全绿，另有只读在线生产栈默认关闭核对。
+结论：**通过（范围限定 / PASS scope-limited）**；单一验收负责人 JackChow 已于 2026-11-18 确认签署本阶段验收（见权威记录 `../11-scope-limited-acceptance-record-20261118.md` §7），无未完成签署项。
+高风险能力启用仍须独立审批，未获本记录授权。
+
+权威记录：`../11-scope-limited-acceptance-record-20261118.md`；证据包 `20261118T125822Z.tar.gz`，
+SHA256 `109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23`。
+本文件上文历史结论与数值不追溯修改；本补记仅追加当前范围限定结论。

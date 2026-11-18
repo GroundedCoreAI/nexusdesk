@@ -2,6 +2,7 @@
 
 > Status: Local T2–T11 and R17 live validation are complete, as are the R18 production remediation and focused validation; see 06/07 and their appendices. Minimal R18 live on/off revalidation is complete; the overall result remains conditionally passed
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: the closing "functional exit vs. performance submetric" performance ≥30 matched pairs/p95/CI and pending_env capping wording is no longer a stage-acceptance gate and remains historical context; functional correctness, switch completeness, tenant isolation, secret/snapshot/migration/terminal-state/cleanup, no P0/P1, and a single acceptance owner remain gates; see the 2026-11-18 revision of 05/07; historical numbers are not retroactively changed)
 > Revised: 2026-11-12 (R18: Worker terminal logs follow successful normal finish; current-status alignment)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 4–7, 12, 14–17, 19, and 21; Phase 0 `baseline/run-lifecycle-events.md`; Phase 1 `backend/tests/agent_execution/adapter_contract_suite.py`; `02-requirements.md` (FR-1–FR-6, AC-1–AC-9); `08-implementation-breakdown.md` (R1–R18, T1–T11); backend baseline `0a6c4b5`
 

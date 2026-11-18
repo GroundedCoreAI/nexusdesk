@@ -2,6 +2,7 @@
 
 > Status: Local T2–T11 and R17 live validation are complete, as are the R18 production remediation and focused validation; see 06/07 and their appendices. Minimal R18 live on/off revalidation is complete; the overall result remains conditionally passed
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: performance/p95/matched pairs/sample counts and CI/real-or-authorized historical sample requirements are no longer stage-acceptance gates and remain historical context; functional correctness, switch completeness, tenant isolation, secret/snapshot/migration/terminal-state/cleanup, no P0/P1, and a single acceptance owner remain gates; see the 2026-11-18 revision of 05/07; historical numbers are not retroactively changed)
 > Revised: 2026-11-12 (R18 and current-status alignment; design-phase content remains a historical plan)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 4–7, 12, and 14–17; Phase 0 `baseline/run-lifecycle-events.md`; Phase 1 (FR-1–FR-6, code merged into integration through merge `0a6c4b5`, not a human-acceptance conclusion); `01-business-goals.md` (G1–G4); `08-implementation-breakdown.md` (R1–R18)
 

@@ -203,6 +203,8 @@ Per 04 §7/§2.1 and 05 C14 these rows keep their enablement promises blocked; n
 
 **Verdict: exit criteria MET for the macOS development subset, with the Linux-dependent rows honestly blocked (04 §7).** Clause by clause:
 
+> **Revision 2026-11-18 (scope-limited acceptance):** under `05-acceptance-plan.en.md` §6.1, CI provenance at the final PR head (the "CI evidence: pending" item below), the supervision-overhead / Phase 0 baseline comparison (P4-IT-30, p50/p95), and the reading that the nine `pending_env`/`not_measured` rows block every enablement promise are **no longer exit criteria for stage acceptance**. They remain recorded execution facts and historical context; this note changes no row, count, or verdict above and is not an acceptance conclusion.
+
 | 04 §7 clause | Status | Evidence |
 |---|---|---|
 | All P4-UT/IT/CM pass | **met** on every case measurable on this host: 57 full pass + 8 pass on their measured halves; the only non-pass rows are `pending_env`/`not_measured` (CM-07, IT-30 and the eight Linux halves), which 04 §7 explicitly treats as honest blocked states, *not* failures | §3–§5 tables, E02/E05/E17 |

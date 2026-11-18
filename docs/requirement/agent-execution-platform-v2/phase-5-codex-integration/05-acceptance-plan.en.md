@@ -4,6 +4,7 @@
 > Created: 2026-11-02
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence; remove standalone UAT, duplicate metrics, and multi-role sign-off)
 > Revised: 2026-11-17 (aligned to the minimal-core-team acceptance standard: single acceptance owner, phase acceptance separated from high-risk capability enablement; technical criteria and hard gates unchanged)
+> Revised: 2026-11-18 (scope-limited acceptance revision: startup/execution p50/p95, sample sizes, matched pairs, CI provenance and final-PR-head CI runs/URLs, real or authorized historical samples, multi-sample/large-sample data-volume requirements, a missing Phase 0 baseline, and controlled real-Codex release-environment `pending_env` items are no longer stage-acceptance gates and remain only as historical context or explicit out-of-scope notes; Stage B unlock conditions are retained separately. Retained gates are Stage A switch completeness, tenant isolation, Secret/credential handling, process cleanup, data integrity and migration, terminal-state semantics, no P0/P1, and a single acceptance-owner record; Stage B stays locked. See §6.1)
 > Basis: `01-business-goals.md` (G1–G6 and success metrics), `02-requirements.md` (AC-1–AC-12); test execution is governed by `04-test-plan.md`
 
 ## 1. Acceptance Scope and Responsibility
@@ -19,7 +20,7 @@ Unlock Stage B only after Stage A proves stable on controlled real Codex CLI, wi
 | PG migration and regression environment | Conditional Session migration, Run/event persistence, and React/SSE regressions. |
 | Quickstart (no real Secrets) | Verifies default-off, deployment placeholders, and React compatibility; does not substitute for real Codex acceptance. |
 
-**Prerequisites**: Phases 0–4 accepted; Phase 0 baseline completed; all applicable `04-test-plan.md` cases pass with no P0/P1; Stage B acceptance additionally requires P5-IT-18 and three consecutive pre-release regression evidence sets. Use at least two dedicated tenants and Workspaces isolated from other test data; real credentials are Secret-managed and revoked after acceptance.
+**Prerequisites**: Phases 0–4 accepted; all applicable `04-test-plan.md` cases pass with no P0/P1. Use at least two dedicated tenants and Workspaces isolated from other test data; real credentials are Secret-managed and revoked after acceptance. (Scope-limited revision 2026-11-18: the former "Phase 0 baseline completed" prerequisite is no longer a stage-acceptance gate, see §6.1; P5-IT-18 and three consecutive pre-release regressions remain a separate high-risk Stage B unlock condition and do not block Stage A / this phase's switch and functional acceptance; Stage B stays locked.)
 
 ## 3. Functional Acceptance Checklist (AC-1–AC-12)
 
@@ -63,20 +64,28 @@ Use these only to supplement common UI and error behavior that automation does n
 | C4 | Workspace traversal, symlinks, and cross-tenant access are denied, and Session Resume fully reauthorizes. | Veto item | FR-5, FR-10 |
 | C5 | CLI and App-Server share an Engine with independent Protocols; public APIs expose no private JSON-RPC protocol. | Must pass | FR-1, FR-7 |
 | C6 | Cancellation/timeout relies on real process and connection cleanup, and failures are not falsely reported as terminal success. | Must pass | FR-3 |
-| C7 | Stage B cannot merge/enable or advertise availability until P5-IT-18 covers at least 20 mixed scenarios with no P0/P1, three consecutive applicable regressions pass, and the acceptance owner confirms the unlock record. | Must pass | FR-1; G5 |
+| C7 | Stage B stays locked: App-Server cannot merge/enable or advertise availability without a separate unlock record confirmed by the acceptance owner (revision 2026-11-18: P5-IT-18's "at least 20 scenarios × three consecutive regressions" is a separate high-risk Stage B unlock condition and is no longer a gate for this phase's acceptance, see §6.1). | Must pass (Stage B locked; unlock requires separate approval) | FR-1; G5 |
 | C8 | Planned 0055 is added only when needed; head is rechecked before implementation, historical migrations remain unchanged, and rollback drops no tables. | Must pass | FR-8, FR-12 |
-| C9 | React, existing Run/API/SSE, and historical configuration have no regressions; an unmeasured Phase 0 baseline cannot pass. | Must pass | FR-12; G6 |
+| C9 | React, existing Run/API/SSE, and historical configuration have no regressions (revision 2026-11-18: the "unmeasured Phase 0 baseline cannot pass" clause is superseded; the Phase 0 baseline is historical context, see §6.1). | Must pass (functional regressions; a missing baseline does not block) | FR-12; G6 |
 | C10 | Tests/acceptance include adversarial and fault injection; every real-environment skip is pending_env with an owner. | Must pass | G1, G4, G6 |
 
-**Engineering measurement (not a separate business-acceptance round)**: Record startup/execution p50/p95, sample size, and environment for pinned versions and task sets to inform release-budget review. Record `not_measured` when unmeasured; never prefill targets or present an observational measurement as a pass.
+**Engineering measurement (not a separate business-acceptance round)**: Record startup/execution p50/p95, sample size, and environment for pinned versions and task sets to inform release-budget review. Record `not_measured` when unmeasured; never prefill targets or present an observational measurement as a pass. (Revision 2026-11-18: p50/p95, sample sizes, and similar are recording context, not stage-acceptance gates, see §6.1.)
 
 ## 6. Pass Criteria and Acceptance Record
 
-- **Stage A pass / Stage B unlock**: A1–A6, A11–A12, and Stage A-applicable C items pass, P5-IT-18 evidence is complete, no P0/P1 remains, and the acceptance owner confirms the unlock record; Stage B being locked does not constitute overall phase acceptance.
-- **Pass**: A1–A12 and C1–C10 all pass; M1–M2 are complete or have equivalent automated evidence; no P0/P1 remains, and no real-Codex environment item is `pending_env`.
+> Scope-limited revision 2026-11-18: this section is the authoritative statement of this revision and overrides any contrary wording in this document or in `06`/`07`/`08`; it rewrites no historical execution number or conclusion. The full gate reclassification is in §6.1.
+
+- **Stage A pass**: A1–A6, A11–A12, and the Stage-A-applicable C items all pass on switch completeness, functional correctness, tenant isolation, Secret/credential handling, cleanup, terminal-state, and data-integrity criteria, with no P0/P1 (P5-IT-18 multi-sample batch and controlled real-Codex release-environment evidence are no longer Stage A gates; Stage B unlock conditions are retained separately, see §6.1).
+- **Pass**: A1–A12 and C1–C10 all pass; M1–M2 are complete or have equivalent automated evidence; no P0/P1 remains (controlled real-Codex environment / sample-class `pending_env` no longer blocks stage acceptance, see §6.1).
 - **Conditional pass**: only non-security, non-Stage-gate, non-hard-gate P2/P3 residuals remain, each with owner/deadline and an explanation from the acceptance owner in the record below; every veto item still passes.
-- **Fail**: any veto item, Stage ordering, A/C criterion, or real-environment coverage fails; after fixes, rerun affected items and regressions.
-- **Enablement note**: phase acceptance does not automatically authorize high-risk capability enablement; enablement requires a separate approval record.
+- **Fail**: any veto item, A/C criterion, or switch/function/isolation/Secret/cleanup/migration/terminal-state gate fails (a missing Phase 0 baseline, unmeasured performance samples, absent CI, or incomplete real-environment coverage no longer alone cause a fail); after fixes, rerun affected items and regressions.
+- **Enablement note**: phase acceptance does not automatically authorize high-risk capability enablement; Stage B stays locked, and its unlock (including P5-IT-18 and the unlock record), production Codex routing, and untrusted multi-tenant enablement all require a separate approval record.
+
+### 6.1 2026-11-18 Scope-Limited Gate Reclassification
+
+- **No longer stage-acceptance blockers (retained only as historical context or explicit out-of-scope notes)**: startup/execution p50/p95, sample sizes, matched pairs, CI provenance and final-PR-head CI runs/URLs, real or authorized historical samples, multi-sample/large-sample data-volume requirements, a missing Phase 0 baseline (including "unmeasured baseline cannot pass"), controlled real-Codex release-environment `pending_env`, and the P5-IT-18 "at least 20 scenarios × three consecutive regressions" reading as a phase gate. These may be kept as records or as Stage B unlock conditions but no longer block Stage A / this phase's switch and functional acceptance.
+- **Still gates**: Stage A switch completeness (default off, explicit on, off/on/rollback, no silent fallback); Engine/Protocol registration and no private JSON-RPC on public APIs; real-process cancellation/timeout cleanup without false terminal success; tenant isolation and Workspace traversal/symlink/cross-tenant denial; no Secret/credential leakage and no visible host auth; CLI prompt delivered over stdin and absent from argv/logs/events; data integrity and migration (head revalidation, no table drop, no rewrite of historical Runs); error/usage terminal-state semantics; no P0/P1; a single acceptance-owner record.
+- **Stage B stays locked and separate**: App-Server transport, JSON-RPC end-to-end, Session persistence/Resume, and approvals/interactive input are unimplemented; Stage B unlock (including P5-IT-18 and the unlock record) is a high-risk enablement requiring separate approval and is never auto-unlocked by a phase pass. Production Codex routing and untrusted multi-tenancy are the same.
 
 Produce the Phase 5 Acceptance Report with the Stage A unlock record, A/C evidence links, key manual checks, engineering measurements, residuals, and the single record below; multi-role signatures are not required.
 

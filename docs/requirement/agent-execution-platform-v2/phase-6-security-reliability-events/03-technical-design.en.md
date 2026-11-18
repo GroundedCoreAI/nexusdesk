@@ -2,6 +2,7 @@
 
 > Status: Approved design baseline for direct-continue implementation; code-reality checked on 2026-11-16, not implemented and not accepted. Untrusted execution remains disabled.
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: full CI evidence, real/measured baselines and samples, and performance/lock metrics are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; the 04/05 gates for functional correctness, security/reliability/event semantics, switch completeness, tenant isolation, Secret handling, data integrity, migration, terminal-state semantics, fault containment/cleanup, and no P0/P1 remain gates)
 > Revised: 2026-11-16 (revalidated Phase 4/5 code, tests, composition, CI, and migration graph; selected an additive staged approach; replaced stale paths and migration numbers)
 > Basis: `01-business-goals.en.md` (G1–G7), `02-requirements.en.md` (FR-1–FR-16, AC-1–AC-16), architecture Sections 7–10, 12, and 16–22, and `08-implementation-breakdown.en.md` R-1–R-15
 

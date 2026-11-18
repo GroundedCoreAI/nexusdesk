@@ -4,12 +4,13 @@
 > Created: 2026-11-02; design frozen: 2026-11-08
 > Revised: 2026-11-09 (R11 owned-task documentation clarification; no lifecycle behavior change); 2026-11-10 (record the Phase 0 frozen production Adapter identity; no design or behavior change)
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 4–6, 15–17, and 19, Phase 1; `02-requirements.en.md` (FR-1–FR-6, AC-1–AC-8); `08-implementation-breakdown.en.md` (R1–R11, T1–T8)
+> Revision note (2026-11-18): the Phase 0 clean committed-artifact CI double-run, authorized real historical samples, and human signoff wording in "accepted entry risk" is no longer a stage-acceptance blocker and is retained only as historical context or an explicit out-of-scope note (see `05-acceptance-plan.md` §0); functional correctness, tenant isolation, Secret handling, data integrity, migration, and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## Current-State Review and Change Overview
 
 The implementation entry is fixed at `4dfcfb41e9cbb799753986c2d76134514bbd19be`: `core_platform/agent_execution` does not yet exist and the Alembic head is `0057_industry_pack_runtime`. `RuntimeEngine.run()`, `RuntimeWorker`, `RuntimeFactory`, and `RunRepository` continue to own the existing ReAct/Run path; `extension_contracts/runtime.py` remains the Run/business-port boundary. Every `agent_execution` path below is **proposed**; this document does not claim implementation or passing tests.
 
-The user explicitly requested that Phase 1 start. The still-open Phase 0 clean committed-artifact CI double-runs, authorized real historical samples, and human sign-offs are therefore recorded as an **accepted entry risk**, not as formal Phase 0 acceptance or approval.
+The user explicitly requested that Phase 1 start. The still-open Phase 0 clean committed-artifact CI double-runs, authorized real historical samples, and human sign-offs are therefore recorded as an **accepted entry risk**, not as formal Phase 0 acceptance or approval. [2026-11-18: the CI double-run and real historical samples are revised per 05 §0 and are no longer stage-acceptance gates; historical text retained.]
 
 | Layer | File | Change |
 |---|---|---|

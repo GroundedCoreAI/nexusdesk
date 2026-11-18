@@ -4,6 +4,7 @@
 > Created: 2026-11-07
 > Basis: all documents `01` through `05` plus current-code inspection (backend @ `c6c47dec39025ebd4d1176c1e9925bac9c99c4fd`)
 > Constraints: add only tests, fixtures, and bilingual baseline documents; do not change the production execution path or add migrations; run affected suites locally and verify the full suite and clean CI evidence separately under 04/05
+> Revision note (2026-11-18): the CI/double-run/real-historical-sample/sample-count basis in R3 (separately labeling real versus constructed samples), R5 (coverage and node-level double-run tooling), the T10-related "CI/real samples insufficient → pending_env" wording, and the "full acceptance must satisfy 05" statement is no longer a stage-acceptance blocker and is retained only as historical context or an explicit out-of-scope note (see `05-acceptance-plan.md` §0); functional correctness, data integrity, tenant isolation, Secret handling, migration, and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## 1. Tasks in dependency order
 

@@ -1,8 +1,9 @@
 # Phase 2 · React Provider 与执行编排器 — 验收报告
 
-> 状态：已完成本地自动化辅助验收（结论：**有条件通过**；生产性能、真实部署证据与人工签字未完成）
+> 状态：已完成本地自动化辅助验收（功能出口满足；历史结论"**有条件通过**"仅由已废止的性能/CI 门禁造成，2026-11-18 修订后这些项不再封顶验收结论）
 > 创建：2026-11-11
-> 依据：`05-acceptance-plan.md`（A1～A9、业务与性能指标、C1～C5）、`06-test-report.md`（本地功能出口通过，生产性能子指标 `pending_env`）
+> 修订：2026-11-18（范围限定验收修订：性能/p95/matched pairs/≤5%/样本数、CI run/URL、真实或授权历史样本、多样本要求自本日起不再作为阶段验收门禁或结论上限，仅保留为历史上下文或明确超范围说明；功能正确性 A1～A9、开关完整性（默认 off/显式 on/off/on/回滚/无静默 fallback）、租户隔离、Secret 处理、快照/数据完整性、迁移、终态语义、副作用/清理、无 P0/P1 与单一验收负责人记录仍为门禁；高风险开关启用另附独立审批。历史测试数字与结论不追溯修改，被取代的门禁项仅作标注）
+> 依据：`05-acceptance-plan.md`（A1～A9、开关完整性/回滚证据、C1～C5）、`06-test-report.md`（本地功能出口通过；性能/CI 为历史上下文）
 > 执行：独立子代理自动化辅助验收（非人工签字）；执行日期：2026-11-11
 
 ## 1. 验收组织与范围说明
@@ -23,12 +24,14 @@
 | 独立 Docker PostgreSQL | 既有专用 `pgvector/pgvector:pg17` 容器 `nexusdesk-phase2-t6b-pg17-2b1d85c1afb9`；受限 env 静默注入，未打印连接串 | A1/A2/A4/A6～A9 的真实 asyncpg、Memory、SSE、竞态、Lease、混合 Worker 与迁移 |
 | ASGI/FastAPI | `httpx.ASGITransport` 调用真实内部/Open 路由 | A4/A9、C1 的 400/422 矩阵、合法 max/strict replay、drain、delta、tool.replay 与脱敏 |
 | Compose 渲染 | quickstart 默认/on 与 production fixture 仅执行 `config` 并输出非敏感摘要；未启动服务 | A8/C4 的配置形状核对；不是 live quickstart 或生产部署 |
-| 性能样本 | 复用并独立复算 T8 本地 test-double JSON | 仅验证 05 §4 采样/计算方法；真实外部模型、工具和生产等价环境未提供 |
-| CI/生产/人工 | 未运行 CI，无 run URL；无生产 canary、部署 traces/metrics、人工 UAT 或签字 | `pending_env` / `pending`，见 L-01～L-04、L-08 |
+| 性能样本 | 复用并独立复算 T8 本地 test-double JSON | 历史上下文（2026-11-18 起非验收门禁）：仅为方法复算，不证明生产达标，也不封顶结论 |
+| CI/生产/人工 | 未运行 CI，无 run URL；无生产 canary、部署 traces/metrics、人工 UAT 或签字 | 历史上下文（2026-11-18 起 CI/性能非门禁）：不再构成结论上限；高风险开关启用仍须另附独立审批 |
 
 ## 3. 功能验收记录（A1～A9）
 
 执行人：独立子代理自动化辅助验收（非人工签字）；日期：2026-11-11。T9 新证据编号见附录 A；T8 证据编号沿用 `06-test-report.md` §2 与附录 A。
+
+> **2026-11-18 判定口径**：下表 A8/A9 的"CONDITIONAL"仅为历史记录，其条件是基于生产滚动重启/canary、`pending_env` 部署观测与 CI 未执行；这些项自 2026-11-18 起不再作为阶段验收门禁或结论上限。A8/A9 的本地功能、开关完整性、回滚与静态判据均满足，高风险开关启用另附独立审批。历史判定文字与数字不追溯修改。
 
 | # | 溯源、前置与实际操作 | 观察结果与独立判定 | 证据 |
 |---|---|---|---|
@@ -42,18 +45,21 @@
 | A8 | AC-8；FR-6；R9/R12。前置为默认 off、显式 on、off API/on Worker、混合 legacy/orchestrator owners 及存量 queued/running/terminal fixtures。本轮重跑 Settings/fingerprint/fail-fast、混合独占 claim 与全 off 回滚；另渲染 quickstart off/on 和 production compose | **CONDITIONAL — PASS(local controlled rollout)，生产滚动重启/canary 与 live quickstart 为 `pending_env`**。受控 PG 中 off 仅 legacy、on 仅 Orchestrator，flag 不进 fingerprint；off API/on Worker 不冲突，混合执行不共享/重领 row，terminal 不改写，全 off 后新 Run 仅 legacy，on 失败不 fallback。compose 渲染默认 false、显式 true、内嵌 Worker 与服务集合正确。未执行真实进程滚动重启、生产 canary 或 quickstart 栈，不预写 T10/T11 结果 | T9-E03、T9-E04、T9-E06～T9-E09；T8 E05/E09 |
 | A9 | AC-9；FR-4/6；R1/R4/R11/R15。复核保护面 diff、Phase 1 DTO/Registry/LocalTest、Repository/hooks、跨租户与低基数日志；动态执行 heads/current、重跑 IT19 和当前迁移源哈希对比，并复核 A4 实际路由 | **CONDITIONAL — PASS(local functional/static)，CI 与真实部署观测为 `pending_env`**。57/57 Python 迁移源文件零新增/删除/哈希变化，heads/current 均为当次 `0057_industry_pack_runtime (head)`；T8 临时空库 upgrade/current 已通过且临时库已删除。migration/ORM/public route/schema/frontend/Phase 1 保护路径零变更；公共状态码与错误体由实际路由复核。测试日志仅低基数 path/tuple/status/error/duration，run_id 不进 metrics，无私密/nil/history。未声称全量 pytest、CI 或生产 traces/metrics 通过 | T9-E02～T9-E04、T9-E11～T9-E13；T8 E10/E11/E13～E16 |
 
-## 4. 业务与性能指标逐项判定
+## 4. 开关完整性与功能指标逐项判定
 
 | 指标 | 目标与本轮数据 | 判定 |
 |---|---|---|
 | 回复/工具/Memory 对等 | A1/A2 串行稳定字段零非预期差异；并行按 call_id、局部偏序、模型轮及 multiset 对齐。canonicalize 仅 03 §7.3 的 event/timestamp/实例计时与指定 gateway/duration 字段，call_id、业务 ID、参数/结果、output/error/usage 未规范化 | **PASS(local controlled)** |
 | 事件/SSE/终态兼容 | A4 双 API 实际路由的每游标 replay、每 Run 连续 seq、瞬态 delta、隐藏 tool.replay cursor、终帧最后与唯一终态均符合 | **PASS(local controlled)** |
 | 取消/超时/Lease 收敛 | A6/A7 的受控竞态、两种提交顺序、错误分类、迟到保护与任务清理均符合；未把 watchdog 当功能耗时 | **PASS(local controlled)** |
-| 回滚可恢复性 | 受控 PG 全 off 后新 Run 仅 legacy，既有 terminal 不变，无迁移/修数/客户端变化；真实生产滚动重启未执行 | **PASS(local controlled)；生产验证 `pending_env`** |
-| 端到端性能 | T8 原始 JSON 本轮独立复算：5 warm-up pairs 不计样本，30 有效 matched pairs，0 errors，old-first/new-first=15/15，nearest-rank 取 N=30 第 29 项。old/new p95=0.007500/0.095542 ms，ratio=12.738933333333；首 token p95=0.000292/0.093625 ms，paired-delta p95=0.089209 ms，adapter-overhead p95=0.095542 ms，外部时延未扣除 | **方法复核通过；≤5% 子指标 `pending_env`**。这些是 test-double 微小延迟，既不证明生产达标，也不构成生产退化结论；须以真实模型/工具和等价环境重测 |
-| 验收后示例 | T10 专属幂等 seed、T11 live quickstart off/on/内嵌 Worker/双 SSE/回滚均未执行 | **pending_env / 未执行**；后续只追加附录，失败须重开 A8/C5 |
+| 默认 off | 受控 PG 默认启动仅 legacy 路径、flag 不进 fingerprint、存量行与基线一致；见 A8/T9-E03/E04 | **PASS(local controlled)** |
+| 显式 on 与无静默 fallback | 显式 on 仅 Orchestrator 路径，on 失败 fail fast 不静默回退 legacy，无迁移/修数/客户端改动；见 A8/A3 | **PASS(local controlled)** |
+| off/on/混合与回滚可恢复性 | 受控 PG off API/on Worker、混合 Workers 不共享/重领 row、terminal 不改写；全 off 后新 Run 仅 legacy，在途按取消/Lease 收敛，无迁移/修数/客户端变化；生产滚动重启/live quickstart 为历史上下文，非本阶段门禁 | **PASS(local controlled)** |
+| 验收后示例 | T10 专属幂等 seed、T11 live quickstart off/on/内嵌 Worker/双 SSE/回滚均未执行 | **延后/未执行**；后续只追加附录，失败须重开 A8/C5；此为 #127/#128 类延后边界，非"已完成" |
 
-canonical diff 只用于功能对等，原始延迟独立保存，未由 diff 隐藏或替代性能。本轮没有将 259 个补跑用例数解释为唯一覆盖率，也没有将其与 T8 的重叠计数相加。
+> **端到端性能（历史上下文，2026-11-18 起非门禁、非结论上限）**：T8 原始 JSON 本轮独立复算的记录为 5 warm-up pairs 不计样本、30 有效 matched pairs、0 errors、old-first/new-first=15/15、nearest-rank 取 N=30 第 29 项，old/new p95=0.007500/0.095542 ms、ratio=12.738933333333，首 token p95=0.000292/0.093625 ms、paired-delta p95=0.089209 ms、adapter-overhead p95=0.095542 ms，外部时延未扣除。原判定"≤5% 子指标 `pending_env`"自 2026-11-18 起**不再作为阶段验收或放行门禁，也不封顶结论**；这些是 test-double 微小延迟，既不证明生产达标也不构成生产退化结论。历史测试数字不追溯修改，如需真实等价环境测量可另立独立跟进项。
+
+canonical diff 只用于功能对等，原始延迟独立保存。本轮没有将 259 个补跑用例数解释为唯一覆盖率，也没有将其与 T8 的重叠计数相加。
 
 ## 5. 合规核对（C1～C5）
 
@@ -63,16 +69,16 @@ canonical diff 只用于功能对等，原始延迟独立保存，未由 diff �
 | C2 | 身份、多租户与敏感信息。重跑完整 R16 对抗与真实 asyncpg 链、伪造/nil 查询前拒绝、跨租户 Run/SSE、公共字段与安全错误；复核日志/metrics | **PASS(local controlled)**。精确 stdlib UUID/子类转换/两侧值相等/原 row 保留均符合；跨租户不可达，nil 不进入授权/查询/公共面，秘密、原始异常、history/Outcome/Context 不泄漏。证据 T9-E01～E04 |
 | C3 | 双 emit、事件所有权与结构化交付。核对 Context 无 emit、worker/runtime emit 方向、run.*/tool.replay/delta 唯一来源、伪造隔离、ack identity/exactly-once/abort、React no-stream 与 LocalTest 差异；复核 25 函数裁定 | **PASS(local controlled)**。普通业务事件只经公共流投递，Repository 仍是唯一终态写者；React 私有 ack 与 LocalTest yield=delivery 未混用，19 复用/6 私有替代有逐项清单。证据 T9-E01～E04，06 附录 C |
 | C4 | 配置、发布与依赖治理。重跑默认 off/on、fingerprint、fail-fast、Worker off/on 与混合回滚；渲染 compose、核对 rollout/quickstart 双语文档及 Core/Worker 依赖边界 | **CONDITIONAL — PASS(local controlled)，生产发布验证 `pending_env`**。默认 off、启动生效、on 不兜底、无第二套 ReAct/新服务；文档命令与双语 bash blocks 一致、相对链接有效。生产 canary/live quickstart 未执行。证据 T9-E03/E04/E06～E09 |
-| C5 | 生命周期、功能/性能出口与证据诚信。逐项检查 05 A/C 是否有独立结果，复核 T8 功能出口、CM08、性能原始样本、本地/CI/人工边界及 T10/T11 顺序。规格复审指出 A1/A2/A5 证据缺口后，本轮新增真实测试补证并保留旧日志，未篡改已批准 06；原四组命令、exit、精确参数展开与零交集另经 collect-only 复核。最终 A5 仅补 8 个畸形事件完整链与 1 个真实 Gateway fallback，未重跑其他套件 | **CONDITIONAL**。本地功能与 CM08 证据诚信通过；新增 42 个 A1/A2/A5 补证参数例及 20 个聚焦回归均通过，未改生产实现。性能/CI/真实部署/人工签字如实 pending；T10/T11 未执行且未预写通过。临时证据索引包含原四组 259 次与新增执行的精确命令/节点，无 CI URL 或持久 artifacts。证据 T9-E05、T9-E16～E22、L-01～L-04/L-08 |
+| C5 | 生命周期、功能/开关出口与证据诚信。逐项检查 05 A/C 是否有独立结果，复核 T8 功能出口、开关完整性与回滚证据、本地/CI/人工边界及 T10/T11 顺序。规格复审指出 A1/A2/A5 证据缺口后，本轮新增真实测试补证并保留旧日志，未篡改已批准 06；原四组命令、exit、精确参数展开与零交集另经 collect-only 复核。最终 A5 仅补 8 个畸形事件完整链与 1 个真实 Gateway fallback，未重跑其他套件 | **PASS(local controlled)**（2026-11-18 修订：不再因性能/CI 缺失判为 CONDITIONAL）。本地功能出口、开关完整性与回滚证据通过；新增 42 个 A1/A2/A5 补证参数例及 20 个聚焦回归均通过，未改生产实现。性能/CI/真实部署/人工签字为历史上下文或另立跟进项，不封顶结论；T10/T11 未执行且未预写通过。历史证据索引与计数不追溯修改。证据 T9-E05、T9-E16～E22 |
 
 ## 6. 遗留问题清单
 
-以下为环境、发布或证据遗留，不是本轮发现的本地功能失败；owner 均为角色建议，期限均为建议而非承诺。
+以下为环境、发布或证据遗留，不是本轮发现的本地功能失败；owner 均为角色建议，期限均为建议而非承诺。2026-11-18 修订：L-01/L-02 原为 P1 发布门禁，现已废止为非阻塞的历史上下文/独立跟进项，不再作为阶段验收或结论上限。
 
 | # | 级别 | 问题与影响 | owner 角色建议 | 期限建议 | 补证方法 |
 |---|---|---|---|---|---|
-| L-01 | P1 发布门禁 / `pending_env` | 真实外部模型/工具与生产等价环境性能未测，≤5% 目标未判定 | Runtime 维护者、QA、真实性能验收人 | 生产发布前；建议 2026-11-18 前完成首轮 | 按 05 §4 同环境同脚本执行 5 warm-up+至少 30 matched pairs，保存原始 e2e/首 token/overhead/errors，以 nearest-rank 独立复算 |
-| L-02 | P1 发布门禁 / `pending_env` | CI 未执行、无 run URL；真实部署 traces/metrics 与全量回归缺失，本地选择不能替代 | QA、发布负责人、CI 维护者 | 正式人工签字与生产发布前 | 在合法提交/PR 的干净检出运行完整 CI，保存 run URL、全量结果及部署低基数 traces/metrics；同时核对旧目录环境问题是否消失 |
+| L-01 | 历史上下文 / 已废止门禁（原 P1 `pending_env`） | 真实外部模型/工具与生产等价环境性能未测，≤5% 目标未判定；如需测量另立独立跟进项，不属本阶段门禁、不封顶结论 | Runtime 维护者、QA（独立跟进） | 非本阶段期限 | 历史方法为 05 §4 同环境同脚本 5 warm-up+≥30 matched pairs、nearest-rank 复算；仅作历史记录，不构成验收项 |
+| L-02 | 历史上下文 / 已废止门禁（原 P1 `pending_env`） | CI 未执行、无 run URL；真实部署 traces/metrics 与全量回归缺失；CI provenance/最终 PR head run 不再作为阶段验收门禁或结论上限 | QA、发布负责人、CI 维护者（独立流程） | 非本阶段期限 | 历史做法为在合法提交/PR 的干净检出运行完整 CI 并保存 run URL；仅作历史记录，不构成本阶段验收项 |
 | L-03 | P1 验收入口 / `pending_env` | 生产 canary、真实滚动重启/回滚、人工 UAT 与业务/QA/发布/安全签字未完成 | 发布负责人、Runtime 维护者、QA、产品/业务负责人、安全评审人 | 生产发布前 | 按 rollout runbook 执行默认 off→小组 on→混合 Worker→全 off，记录存量行、路径、终态与观测；人工体验后由各角色真实签字 |
 | L-04 | P2 后续验证 / `pending_env` | T10/T11 未执行，live quickstart 的 seed、off/on、内嵌 Worker、双 SSE 与回滚无证据 | Runtime 维护者、QA | T10 完成后、Phase 2 关闭前；建议 2026-11-20 前 | T10 新建专属幂等低敏 seed 后，由 T11 实际启动 quickstart 验证并仅向 06/07 追加附录；失败重开 A8/C5 |
 | L-05 | P3 替代环境 | Memory 六套件 2 个无 embedding 列降级节点 skip，未计通过；必需 PG17 主路径已通过 | Memory 维护者、QA | 下一次 Memory 回归或正式发布证据归档前 | 在独立无 embedding 列数据库执行两个精确节点，保留 skip 原因与新结果，不删除原记录 |
@@ -82,15 +88,17 @@ canonical diff 只用于功能对等，原始延迟独立保存，未由 diff �
 
 ## 7. 结论与签字
 
-**结论：有条件通过。**
+**结论：满足阶段验收功能出口判据（2026-11-18 修订）。** 历史报告结论为"有条件通过"，该上限仅由已废止的性能/CI 门禁造成；自 2026-11-18 起这些项不再作为阶段验收门禁或结论上限，历史数字与结论不追溯修改。
 
-- A1～A7 的本地受控功能验收通过；A8/A9 的本地功能与静态范围通过，但真实滚动部署、生产观测和 CI 未完成；C1～C3 本地合规通过，C4/C5 因发布与证据边界为有条件通过。
-- 本地功能出口、off/on canonical diff、错误/终态/事件对等、真实 PG 关键链与配置/迁移核对均满足 05；本轮没有发现产品功能失败，没有新增开放实现 P0/P1。
+- A1～A7 的本地受控功能验收通过；A8/A9 的本地功能、开关完整性、回滚与静态范围通过；C1～C5 本地合规通过（C4/C5 的历史"CONDITIONAL"仅因发布与性能/CI 证据边界，已废止）。
+- 本地功能出口、默认 off/显式 on/off/on/回滚/无静默 fallback、off/on canonical diff、错误/终态/事件对等、真实 PG 关键链与配置/迁移核对均满足 05；本轮没有发现产品功能失败，没有新增开放实现 P0/P1。
 - 对规格复审的 A1/A2/A5 缺口已新增 42 个真实链/真实 fallback 补证参数例并全部通过，另跑 20 个聚焦回归通过；最终仅补 8 个畸形事件完整链和 1 个 Gateway fallback。只修改验收测试与 T9 报告/临时证据，未改生产实现，旧日志和 fixture 校正记录均保留。
-- 真实等价环境 ≤5% 性能子指标、CI/真实部署 traces/metrics、生产 canary/人工 UAT 与签字、live quickstart T11 尚未完成，因此**不能写完全通过**。
-- T10/T11 尚未执行。T11 只能在后续实际完成后追加验收后附录；任何失败必须重开受影响项，不得追溯粉饰本报告。
+- 真实等价环境性能测量、CI run/URL、真实部署 traces/metrics、生产 canary/人工 UAT 与签字为历史上下文或另立跟进项，**不再阻止本阶段功能出口结论**，也不构成阶段验收门禁；高风险开关启用仍须另附独立安全与运维批准记录。
+- T10/T11 尚未执行，维持**延后**边界（不写成"已完成"）。T11 只能在后续实际完成后追加验收后附录；任何失败必须重开受影响项，不得追溯粉饰本报告。
 
-| 角色 | 签字/状态 | 结论 | 日期 | 备注 |
+> **验收记录口径**：权威记录为 `05-acceptance-plan.md` §6.3 的**单一验收负责人记录**。下方多角色签字表为 2026-11-17 精简前保留的历史模板，非本阶段验收门禁，各"pending"项不构成本阶段结论上限。
+
+| 角色 | 签字/状态（历史模板） | 结论 | 日期 | 备注 |
 |---|---|---|---|---|
 | 本地自动化执行者 | **独立子代理自动化辅助验收（非人工签字）** | 本地功能通过；总体有条件通过 | 2026-11-11 | 本报告及 T9 临时证据；不代表任何人类批准 |
 | 后端负责人 | **pending / 未签字** | 待人工验收 | 待填写 | 不得以 agent 输出代签 |
@@ -179,3 +187,22 @@ canonical diff 只用于功能对等，原始延迟独立保存，未由 diff �
 保留上述历史 pending，现追加最终代码实测：mirror 构建 app 与显式 on/off force-recreate 均 exit 0。on published Run `c8e390f2-18fa-4193-9f39-62bd79030563` completed，其 `path=orchestrator` 总数 **1**、completed **1**、failed **0**，`duration_ms=123.639` 有限非负且 tuple 正确；off published Run `53b29563-5933-4f4e-9a7b-deea3a087b18` completed，其 orchestrator/failed 均 **0**。旧 on Run 回滚后仍 completed 且完整 RunView 不变，最终三服务 healthy、显式 off。
 
 精确命令、exit、原始响应和日志计数见 [T11 证据](/Users/jackchow/.claude/jobs/a2066544/tmp/phase2-t11-evidence.md)、[R18 证据](/Users/jackchow/.claude/jobs/a2066544/tmp/phase2-final-fix-evidence.md) 与 `06-test-report` R18 闭环附录。本补证未运行 seed、Open、双 SSE 或旧全套，未签发 Key、未改生产；生产性能、CI、真实部署 canary、人类 UAT/签字与持久归档仍 pending，总体仍为**有条件通过**。
+
+
+---
+
+## 2026-11-18 范围限定验收执行补记（阶段 0–3）
+
+依据 `09-acceptance-execution-runbook.md` 2026-11-18 修订，在受控共享生产 Linux 主机上以目标 SHA
+`5170e140f10b117549cf54ba400131f5d7f95f69` 执行阶段 0–3 范围限定验收。性能、CI provenance、真实/
+授权历史样本、多样本数据量已移出阶段门禁；保留门禁为功能正确性、开关完备性、租户隔离、Secret、
+数据完整性、迁移、终态语义、副作用/清理、无 P0/P1 与单一验收负责人记录。
+
+结果：13 个 lane 全部 exit 0；5,464 个 JUnit 用例，**0 failures / 0 errors**，55 个声明式 skip；
+其中开关完备性专项 `d9-switch-completeness` 913 tests 全绿，另有只读在线生产栈默认关闭核对。
+结论：**通过（范围限定 / PASS scope-limited）**；单一验收负责人 JackChow 已于 2026-11-18 确认签署本阶段验收（见权威记录 `../11-scope-limited-acceptance-record-20261118.md` §7），无未完成签署项。
+高风险能力启用仍须独立审批，未获本记录授权。
+
+权威记录：`../11-scope-limited-acceptance-record-20261118.md`；证据包 `20261118T125822Z.tar.gz`，
+SHA256 `109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23`。
+本文件上文历史结论与数值不追溯修改；本补记仅追加当前范围限定结论。

@@ -1,6 +1,6 @@
 # Agent Execution Platform v2 — Remote Linux Acceptance Execution Runbook
 
-> Status: executable draft, created 2026-11-17. Not an acceptance report and not evidence by itself.
+> Status: executable draft, created 2026-11-17; revised 2026-11-18 to accept a governed shared production host for phases 0–3 non-destructive lanes; revised again 2026-11-18 to scope stage-acceptance gates to functional/switch/isolation/Secret/data/migration/terminal/side-effect criteria (performance/C11 latency, CI provenance, and historical-sample items are historical notes or out of stage scope, never blockers). Not an acceptance report and not evidence by itself.
 > Target: `GroundedCoreAI/nexusdesk`, branch `integration`, exact SHA pinned at execution time.
 > Authoritative inputs: `docs/requirement/agent-execution-platform-v2/phase-{3,4,5,6}-*/05-acceptance-plan*.md`,
 > their `06-test-report*.md`, `07-acceptance-report*.md`, and `08-implementation-breakdown*.md`.
@@ -14,27 +14,42 @@
 - **不要**把 `skip` / `pending_env` / `not_measured` 写成通过；不要为了变绿而删除断言或跳过门禁。
 - Phase D 是现在就能跑的用例；Phase E 需要先实现产品能力或新增测试（当前代码里没有 cgroup/quota 强制执行，
   Phase 4 的三个 full-acceptance 测试只是占位符）；Phase F/G 是证据与报告流程；Phase H 是清理。
-- 所有开关保持默认 `false`；破坏性演练只允许在一次性机器上做，执行前单独确认。
-- 如果目标机器是 arm64，而生产/CI 是 amd64，报告中必须写明架构差异；生产等价证据优先用 x86_64 云 VM。
+- 所有开关保持默认 `false`；阶段 0–3 的非破坏性自动化 lane 允许在**受控共享生产主机**上执行，前提是容器/端口/数据卷/证据目录全部 run-scoped，且不停机、不修改、不删除任何既有服务或数据。破坏性演练仍优先一次性主机；确需在共享机上做时必须变更审批、隔离范围、可回滚，并单独确认。
+- 共享生产机不是"一次性主机"：它是现阶段真实生产场景，**可以接受为阶段 0–3 功能证据环境**；但资源争用、cgroup/内核能力、同机服务必须在证据里如实记录，不能因此把 `pending_env` 写成 pass。
+- 如果目标机器是 arm64，而生产/CI 是 amd64，报告中必须写明架构差异；生产等价证据优先用 x86_64 生产/共享主机。
 
 ---
 
 ## 0. What this runbook can and cannot establish
 
-| Lane type | Can be established on a disposable Linux VM | Cannot be established here |
+| Lane type | Can be established on a Linux host (disposable VM or governed shared production host) | Cannot be established here |
 |---|---|---|
-| Existing automated suites (unit, PG, frontend, Docker drills) | Yes, with JUnit + logs + environment fingerprint | CI provenance at the final PR head unless the run is actually in CI |
+| Existing automated suites (unit, PG, frontend, Docker drills) | Yes, with JUnit + logs + environment fingerprint | No additional stage gate; CI provenance (final PR head / CI run URL) is out of phase 0–3 scope (2026-11-18) |
 | Phase 4 cgroup memory/PID/CPU hard limits | **Only after implementing enforcement** (currently probes only) | A green result by simply removing `skipif(True)` |
 | Phase 4 filesystem/project quota | **Only after implementing quota enforcement** (`probe_fs_quota()` currently returns `unsupported`) | Quota claims from per-file RLIMIT or accounting |
 | Phase 4 live mount-namespace experiments | Yes, via `unshare` on a real Linux kernel, after adding the drill | The current substituted-probe result presented as full support |
-| Phase 6 strong-sandbox / network / two-Worker faults | Partially: Docker and multi-process drills on one VM | True multi-host infrastructure faults and a dedicated adversarial host |
+| Phase 6 strong-sandbox / network / two-Worker faults | Partially: Docker and multi-process drills on one host | True multi-host infrastructure faults and a dedicated adversarial host |
 | Phase 6 representative production replica migration | Only with a sanitized, representative dump you provide | A synthetic small fixture presented as representative |
-| Phase 3 C11 performance | Yes, after adding the missing measurement harness | Production-equivalent performance from a shared VM |
+| Phase 3 C11 performance / latency sampling | Out of phase 0–3 stage scope (2026-11-18); no harness required for acceptance, historical note only | Not a stage gate; no production-equivalence claim needed for a phase pass |
 | Phase 5 real Codex / credentials / two tenants | Yes if the CLI is installed and authenticated | Real release-like credentials and Stage B Session/Resume (not implemented) |
-| Phase 0/1 human signoff, real historical samples, independent security approval | No | Cannot be simulated by any machine |
+| Phase 0/1 acceptance-owner conclusion, independent security approval | No | Cannot be simulated by any machine or by any shared-host run; real/authorized historical samples are out of phase 0–3 scope (2026-11-18) |
 
 **Hard rule:** a `07` conclusion is changed only by a new, evidence-bound acceptance record. This runbook
 appends evidence; it never rewrites an earlier conclusion.
+
+**Shared-host policy (revised 2026-11-18):** a shared production Linux host is accepted as the physical
+environment for phases 0–3 non-destructive lanes and for the frontend/migration/execution suites, because
+that is the real deployment scenario at this stage. Acceptance does **not** require a disposable host for
+those lanes. It does require: run-scoped containers, ports, volumes, paths and credentials; no change to
+co-tenant services; pre/post evidence that no existing service was stopped, restarted, reconfigured or
+deleted; and an explicit label that the host is shared. Destructive or host-level drills (E1–E5, D9,
+quota/mount/OOM/rollback) are the exception — they need an isolated disposable host, or written change
+approval plus a bounded, reversible scope on the shared host. Host sharing is an environment fact; it does
+not waive the kept gates (functional correctness, switch completeness, tenant isolation, Secret handling,
+data integrity, migration correctness, terminal-state semantics, side effects/cleanup, no open P0/P1, and
+one acceptance-owner record), nor substitute for the separate high-risk enablement approval. CI provenance,
+C11 performance/latency and historical-sample items are out of phase 0–3 stage scope under the 2026-11-18
+revision (historical notes only).
 
 ---
 
@@ -63,6 +78,9 @@ export PG_PASSWORD="$(openssl rand -hex 24)"
 export TEST_DATABASE_URL="postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/${PG_DB}"
 export AGENT_API_TOKEN="accept-$(openssl rand -hex 24)"
 export ACCEPT_ENV_FILE="${ACCEPT_ROOT}/accept.env"     # chmod 600, never committed
+export ACCEPT_COMPOSE_PROJECT="nd-accept-${RUN_ID}"     # run-scoped; isolate from co-tenant stacks
+export NEXUSDESK_PORT="18080"                            # avoid 8080 if already occupied
+export NEXUSDESK_MOCK_PORT="18010"                       # avoid 8010 if already occupied
 ```
 
 Record the exact SHA and refuse to proceed if it is not the intended target:
@@ -89,17 +107,24 @@ evidence on an uncommitted tree with no SHA.
 
 ## 2. Guardrails
 
-1. **Disposable host only.** No production database, no real customer data, no real API keys, no shared volumes.
+1. **Shared host accepted, with a hard isolation boundary.** A disposable VM is still preferred for
+   destructive drills, but phases 0–3 non-destructive lanes may run on a shared production host. Do not use
+   its production database, real customer data, real API keys, or shared volumes; run-scoped containers,
+   ports, paths and synthetic credentials only. Record the co-tenant services before and after.
 2. **Synthetic credentials only.** Generate them on the host; keep them in a mode-0600 file outside the repo
    (`$ACCEPT_ENV_FILE`); never commit or paste them into chat.
 3. **Default-off.** Do not flip `AGENT_EXECUTION_*` or `CODEX_*` switches for general testing. Controlled
-   off/on drills are allowed only in Phase D9 on the disposable stack and must be recorded as controlled trials.
+   off/on drills are allowed only in Phase D9 on an isolated run-scoped stack; on a shared host they also
+   require written change approval and non-conflicting ports, and must be recorded as controlled trials.
 4. **Destructive drills behind an explicit confirmation.** `CONFIRM_DESTRUCTIVE=1` is required for Phase E
-   operations (cgroup experiments, quota fill, SIGKILL, network loss, disk full, rollback).
+   operations (cgroup experiments, quota fill, SIGKILL, network loss, disk full, rollback). On a shared host
+   these drills need an additional written change approval, a bounded run-scoped target and a rollback path;
+   never touch co-tenant processes, data or volumes.
 5. **No gate laundering.** Do not convert `skip` to pass, do not delete assertions, do not present an
    approximation as a hard limit. See Appendix C.
 6. **Append-only reports.** Add dated appendices to the existing `06/07`; do not edit historical numbers.
-7. **Artifacts survive the VM.** Keep evidence outside `/tmp`; package it before destroying the VM.
+7. **Artifacts survive the session.** Keep evidence outside `/tmp`; package it before the SSH session ends
+   or the disposable VM is destroyed. On a shared host, never delete co-tenant artifacts to "clean up".
 8. **Architecture honesty.** x86_64 is production/CI-equivalent; arm64 results must be labelled.
 9. **High-risk enablement stays separate.** A phase acceptance record does not approve untrusted execution,
    production Codex routing, or Stage B.
@@ -118,7 +143,7 @@ evidence on an uncommitted tree with no SHA.
 | Kernel | cgroup v2 unified (`cgroup2fs`) | same | Phase 4 E1/E3 |
 | Filesystem | ext4/xfs root | plus one spare disk or loop support | Phase 4 E2 |
 | Network | apt/pip/npm/Docker/GitHub reachable | mirrors available | provisioning |
-| Lifecycle | disposable / snapshot available | fresh VM per round | destructive drills |
+| Lifecycle | disposable VM preferred for destructive drills; shared production host accepted for non-destructive lanes | fresh VM per round for destructive drills | destructive drills need isolation and a rollback path |
 
 Access options, in order of preference:
 
@@ -196,7 +221,10 @@ Save the preflight output into `$EVIDENCE_DIR` once the directory exists (Phase 
 
 ## 5. Phase B — Provisioning
 
-Run on the Linux host.
+Run on the Linux host. On a shared production host, do **not** install system packages, change Docker
+daemon state, or add users globally unless the host owner has explicitly approved it. Use preinstalled or
+user-local tools (`uv`, Node under `$HOME/.local`), record every substitution in `01-environment.txt`, and
+keep all writes under `$ACCEPT_ROOT`. The block below is the disposable-VM path.
 
 ```bash
 sudo apt-get update
@@ -283,7 +311,9 @@ Gate: exactly one head. If the head is not the expected single revision, stop an
 
 ## 6. Phase C — Baseline stack and default-off proof
 
-Controlled trial only; not an enablement.
+Controlled trial only; not an enablement. On a shared host, run this as a run-scoped project
+(`-p "$ACCEPT_COMPOSE_PROJECT"` with the variables from §1); never bring up or down a pre-existing
+`nexusdesk-quickstart` stack. If no isolated ports are available, keep this phase `pending_env`.
 
 ```bash
 cd "$REPO_DIR"
@@ -294,11 +324,11 @@ sh nexusdesk quickstart
 Record:
 
 ```bash
-docker compose -f deploy/quickstart/compose.yaml ps | tee "$EVIDENCE_DIR/02-stack-ps.log"
-docker compose -f deploy/quickstart/compose.yaml exec -T app env \
+docker compose -p "$ACCEPT_COMPOSE_PROJECT" -f deploy/quickstart/compose.yaml ps | tee "$EVIDENCE_DIR/02-stack-ps.log"
+docker compose -p "$ACCEPT_COMPOSE_PROJECT" -f deploy/quickstart/compose.yaml exec -T app env \
   | grep -E 'AGENT_EXECUTION_|CODEX_' | sort | tee "$EVIDENCE_DIR/02-flags.log"
-curl -ksS -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8080/ | tee "$EVIDENCE_DIR/02-root-status.txt"
-docker exec nexusdesk-quickstart-app-1 ls -la /data /data/execution 2>&1 \
+curl -ksS -o /dev/null -w '%{http_code}\n' "https://127.0.0.1:${NEXUSDESK_PORT}/" | tee "$EVIDENCE_DIR/02-root-status.txt"
+docker exec "${ACCEPT_COMPOSE_PROJECT}-app-1" ls -la /data /data/execution 2>&1 \
   | tee "$EVIDENCE_DIR/02-data-layout.log"
 ```
 
@@ -493,9 +523,14 @@ run_lane d8-migrations uv run pytest -q \
 
 Record `alembic heads`, `current`, and the disposable databases created/destroyed.
 
-### D9 — Controlled stack off/on/rollback drill (optional, disposable host only)
+### D9 — Controlled stack off/on/rollback drill (optional, isolated stack required)
 
 Only if this round's scope includes Phase 2/3/4 rollout evidence. Run with `CONFIRM_DESTRUCTIVE=1`.
+On a shared production host this drill is allowed only with written change approval, a project name and
+ports isolated from co-tenant stacks, and a pre/post no-touch check. If the existing quickstart already owns
+8080/8010, keep the drill `pending_env`; never stop or recreate that stack. If the Compose file's top-level
+`name:` prevents `-p` from taking effect on your Compose version, copy the compose file under
+`$ACCEPT_ROOT` and set a run-scoped `name:` there before starting.
 
 ```bash
 # Off (default): run a demo conversation; assert completed and no orchestrator path line.
@@ -511,7 +546,7 @@ services:
       AGENT_EXECUTION_RUNTIME_HOST_ID: "accept-host"
       AGENT_EXECUTION_RUNTIME_HOST_ENABLED: "true"
 YAML
-docker compose -f deploy/quickstart/compose.yaml \
+docker compose -p "$ACCEPT_COMPOSE_PROJECT" -f deploy/quickstart/compose.yaml \
   -f deploy/quickstart/compose.accept.override.yaml up -d --build --wait --wait-timeout 300
 # After the on run: remove the override, run `down` WITHOUT `-v` if you need to keep data,
 # force-recreate the off stack, and verify a new run completes on the legacy path.
@@ -520,6 +555,18 @@ rm -f deploy/quickstart/compose.accept.override.yaml
 
 Capture run IDs, status/output/error, event sequence/timestamps, container logs, and `/data/execution`
 before/after. This is a controlled trial; it is **not** production enablement.
+
+**Substitute when no pinned-SHA image is buildable (2026-11-18):** on a shared production host where
+DockerHub is unreachable, `node:22-alpine` is not cached, and the only cached quickstart image was built
+from an older commit, do **not** use that stale image as target-SHA evidence. Record the live Compose drill
+as `pending_env` and prove the gate at the pinned SHA with a dedicated automated switch-completeness lane
+(`tests/test_runtime_baseline.py`, `test_agent_execution_phase3_*flags/config/settings/wiring*`,
+`test_agent_execution_phase4_*settings/deployment/orchestration/runtime_host*`,
+`test_execution_orchestrator.py`, `test_execution_phase6_settings.py`, `test_execution_composition.py`,
+`test_agent_execution_registries.py`, `test_agent_config_execution_compat.py`), plus a read-only
+`docker inspect` default-off flag check on the running production stack. Record the image digest, its
+source commit and the commit distance to the pinned SHA in `01-environment.txt`; deployment lag is an
+environment fact, not a code defect and not a stage gate under the 2026-11-18 scope revision.
 
 ---
 
@@ -586,22 +633,23 @@ namespace (or a controlled drill that uses one), then assert:
 - A mount-point replacement race is denied and the sentinel is byte-identical.
 - Cleanup does not recurse outside the workdir.
 
-Run with `unshare -m` on the VM host and record `findmnt`/inode evidence. Until then, only the
-substituted-probe denial is measured; do not claim full mount support.
+Run with `unshare -m` on an isolated Linux host (disposable VM preferred; on a shared host only with
+written change approval) and record `findmnt`/inode evidence. Until then, only the substituted-probe denial
+is measured; do not claim full mount support.
 
 ### E4 — Deterministic OS PID-reuse corroboration (Phase 4 P4-IT-10 OS half)
 
 The decision-table tests exist (`test_decision_table_pid_reuse_gets_zero_signals`,
 `test_pid_reuse_substitute_forbids_signals`), but the real-OS experiment is absent. Implement a bounded
-drill on the VM: spawn a managed child, capture host/boot/start-token/digest, kill it, force PID
+drill on an isolated Linux host: spawn a managed child, capture host/boot/start-token/digest, kill it, force PID
 reuse (or simulate the identity table), and assert **zero signals** on any identity mismatch.
 Record the kernel method and why it is deterministic; otherwise keep `pending_env`.
 
 ### E5 — Production-image restart / stop-timeout / rollback (Phase 4 P4-IT-09/28/29 production faces)
 
-Use the production compose shape on the disposable VM, with the Host **off** by default and then a
+Use the production compose shape on an isolated host, with the Host **off** by default and then a
 controlled trial. Create a disposable `deploy/production/.env` from the example with **synthetic**
-credentials only; never copy a real production env file to the VM. Keep this file mode 0600 and outside
+credentials only; never copy a real production env file to the host. Keep this file mode 0600 and outside
 version control.
 
 - Build the production image; `docker compose up -d --wait`.
@@ -635,17 +683,23 @@ Procedure: restore the dump to a disposable DB; run `alembic upgrade head` with 
 `pg_locks` and long-running transactions; assert the backfill preserves historical IDs/order; run a
 protected downgrade on a copy; assert no data loss. Record the data scale and anonymization method.
 
-### E8 — Phase 3 C11 performance (issue #129)
+### E8 — Phase 3 C11 performance (issue #129) — OUT OF PHASE 0–3 STAGE SCOPE
 
+> **2026-11-18 scope revision:** C11 latency, p50/p95, matched pairs, sample counts, ≤5%/≤50 ms, and
+> multi-sample requirements are **not stage-acceptance gates** for phases 0–3. No measurement harness is
+> required to accept a phase, and a missing or `not_measured` C11 result never blocks a phase pass. This
+> lane is retained as a historical note / possible separate follow-up only.
+
+Historical harness description (kept for traceability; explicitly out of stage scope):
 No `test_agent_execution_phase3_performance.py` exists. Add a harness that:
 
 - Warms resolver/admission caches, then discards warm-up samples.
 - Runs at least 100 valid interleaved paired samples (alternating old/new) in the same environment/load.
-- Retains raw JSON; reports nearest-rank paired-delta p95; target ≤50ms; excludes external models.
+- Retains raw JSON; reports nearest-rank paired-delta p95; target ≤50 ms; excludes external models.
 - Freezes the six R-18 settings and the SHA before sampling.
 
-Only a measured, raw-data-backed result can pass C11; a local shared VM is still not production-equivalent,
-so record the environment and keep any production claim separate.
+If such a harness is run for context only, record the environment and load and keep any production claim
+separate; it must not affect a phase acceptance conclusion.
 
 ### E9 — Phase 5 Stage A 20-scenario / three-run batch (P5-IT-18)
 
@@ -725,7 +779,7 @@ any log that might contain environment details; never commit `.env`, credentials
 
 Update only by appending a dated appendix to the existing reports:
 
-- Phase 3: `phase-3-.../06-test-report*.md`, `07-acceptance-report*.md` (C11, #127–#130).
+- Phase 3: `phase-3-.../06-test-report*.md`, `07-acceptance-report*.md` (#127–#130; C11 performance out of stage scope since 2026-11-18).
 - Phase 4: `phase-4-.../06-test-report.en.md`, `07-acceptance-report.en.md` (#133–#136).
 - Phase 5: `phase-5-.../06-test-report.md`, `07-acceptance-report.md` (Stage A lanes).
 - Phase 6: `phase-6-.../06-test-report.md`, `07-acceptance-report.md` (L1–L8).
@@ -737,7 +791,7 @@ Appendix template:
 
 > This appendix adds executed evidence only. It does not rewrite earlier conclusions.
 
-Environment: <OS/kernel/arch/cgroup/docker/PG versions; disposable VM id>
+Environment: <OS/kernel/arch/cgroup/docker/PG versions; host id; shared or isolated>
 
 | Item | Command / drill | Result | Verdict | Evidence |
 |---|---|---|---|---|
@@ -752,7 +806,7 @@ Verdict rules:
 - `pending_env` when the required environment/data/authorization is absent.
 - `not_measured` when no valid measurement exists; never infer from a local observation.
 - Any failure reopens the affected A/C row; do not leave an older pass standing.
-- CI results at the final head supersede local numbers; if they disagree, CI prevails.
+- CI results, when present, are supporting/historical evidence only (2026-11-18); they do not gate phase acceptance or override an evidence-bound acceptance record. CI provenance / final-PR-head double-run is not required.
 
 Issue handling (only with your approval): update #133/#134/#136; create issues for Phase 6 L1–L8 and
 Phase 5 D9/D10/D23–D27 if they are still untracked. Keep the target SHA and evidence link in each issue.
@@ -761,27 +815,37 @@ Phase 5 D9/D10/D23–D27 if they are still untracked. Keep the target SHA and ev
 
 ## 11. Phase H — Cleanup
 
-Only on a disposable host. On a shared host, stop and ask before deleting anything.
+On a disposable host, the block below is safe as written. On a shared production host, delete **only**
+resources created by this run and verified by name (containers, networks, cgroups, loop mounts, env file);
+do not run a bare `docker compose down -v` against a pre-existing stack, and stop and ask before deleting
+anything ambiguous.
 
 ```bash
 cd "$REPO_DIR"
-docker compose -f deploy/quickstart/compose.yaml down -v || true
+# Only if a run-scoped acceptance stack was created in D9, and only that project.
+docker compose -p "$ACCEPT_COMPOSE_PROJECT" -f deploy/quickstart/compose.yaml down -v || true
 docker rm -f "$PG_CONTAINER" || true
-docker network ls --format '{{.Name}}' | grep -E '^nexus-egress-' | xargs -r docker network rm
+# Egress networks: remove only run-scoped names; on a shared host, stop and ask for anything else.
+docker network ls --format '{{.Name}}' \
+  | grep -E "^(${ACCEPT_COMPOSE_PROJECT}|${RUN_ID}).*nexus-egress|nexus-egress.*(${ACCEPT_COMPOSE_PROJECT}|${RUN_ID})" \
+  | xargs -r docker network rm
 
 # cgroups created by drills (names are run-scoped)
 sudo find /sys/fs/cgroup -maxdepth 2 -type d -name 'nd-accept-*' -print -exec rmdir {} \; 2>/dev/null || true
 
-# quota drill
+# quota drill — detach only this run's loop device; never detach all loop devices on a shared host.
 sudo umount "${ACCEPT_ROOT}/quota" 2>/dev/null || true
-sudo losetup -D 2>/dev/null || true
+LOOP_DEV="$(findmnt -n -o SOURCE --target "${ACCEPT_ROOT}/quota" 2>/dev/null || true)"
+case "$LOOP_DEV" in /dev/loop*) sudo losetup -d "$LOOP_DEV" 2>/dev/null || true ;; esac
 rm -f "${ACCEPT_ROOT}/quota.img"
 
 shred -u "$ACCEPT_ENV_FILE" 2>/dev/null || true
 ```
 
-Verify no residue: no `nexusdesk-quickstart`, `nd-accept-pg`, `nexus-egress-*`, loop mounts, or
-`nd-accept-*` cgroups. Confirm the evidence tarball exists and has a checksum before destroying the VM.
+Verify no residue: no run-scoped quickstart project (`$ACCEPT_COMPOSE_PROJECT`), no `$PG_CONTAINER`, no
+matching run-scoped egress networks, no loop mount under `$ACCEPT_ROOT`, and no `nd-accept-*` cgroups.
+Co-tenant services must still be running with their original configuration. Confirm the evidence tarball
+exists and has a checksum before the session ends or the disposable VM is destroyed.
 
 ---
 
@@ -789,7 +853,7 @@ Verify no residue: no `nexusdesk-quickstart`, `nd-accept-pg`, `nexus-egress-*`, 
 
 | Symptom | Cause / action |
 |---|---|
-| `/sys/fs/cgroup` read-only in a container | Run on the VM host, or use `--privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw` only for a probe; Docker Desktop LinuxKit is not the acceptance target for #133 |
+| `/sys/fs/cgroup` read-only in a container | Run on the isolated Linux host (disposable VM preferred; shared host needs written approval), or use `--privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw` only for a probe; Docker Desktop LinuxKit is not the acceptance target for #133 |
 | `docker: permission denied` | `sudo usermod -aG docker $USER`, reconnect SSH or `newgrp docker` |
 | `TEST_DATABASE_URL` tests skip | Set the URL; ensure the role has `CREATEDB`; do not count skips as passes |
 | Alembic multiple heads | Stop; record the revision files and do not stamp/upgrade blindly; resolve per the repo migration procedure |
@@ -798,7 +862,7 @@ Verify no residue: no `nexusdesk-quickstart`, `nd-accept-pg`, `nexus-egress-*`, 
 | Playwright missing browser deps | `npx playwright install --with-deps chromium` (needs sudo) |
 | Codex binary skips | Install the pinned CLI at `/usr/local/bin/codex` and authenticate; otherwise record `pending_env` |
 | Quota mount fails | Kernel/filesystem lacks project quota; use a dedicated ext4/xfs disk; record the failure, do not substitute accounting |
-| OOM kills the VM | Cap memory with `systemd-run --scope -p MemoryMax=...` or a container; keep destructive drills scoped |
+| OOM kills the host | Cap memory with `systemd-run --scope -p MemoryMax=...` or a container; keep destructive drills scoped; on a shared production host stop immediately and notify the owner |
 | arm64 results differ from CI | Record the arch; repeat on x86_64 before claiming production equivalence |
 
 ---
@@ -891,12 +955,12 @@ ssh "$ACCEPT_HOST" "MODE=preflight REPO_URL='$REPO_URL' TARGET_SHA='$TARGET_SHA'
 
 | Acceptance area | Rows | Lanes |
 |---|---|---|
-| Phase 3 capabilities/config/instructions | A1–A11, C1–C11 | D1–D4, D9; E8 for C11 |
+| Phase 3 capabilities/config/instructions | A1–A11, C1–C10 (C11 performance out of stage scope, 2026-11-18) | D1–D4, D9 |
 | Phase 4 Runtime Host/Workspace | A1–A12, C1–C14 | D1, D2, D7, D8, D9; E1–E5 |
 | Phase 5 Codex Stage A | A1–A6, A11–A12, C1–C5, C9–C10 | D1, D2, D6; E9–E10 |
 | Phase 5 Stage B | A7–A10, C7 | Not runnable: not implemented; keep locked |
 | Phase 6 security/reliability/events | A1–A16, C1–C12 | D1, D2, D5, D8; E6–E7, E11 |
-| Phase 0/1 upstream | A1–A6 / A1–A8 | Only CI and human/real-sample gates; not closable here |
+| Phase 0/1 upstream | A1–A6 / A1–A8 | Closable via kept gates plus one acceptance-owner record on the shared host; CI provenance and real/authorized historical samples are out of stage scope (2026-11-18) |
 
 Verdict mapping: a lane that only exercises controlled/deterministic doubles cannot upgrade a row whose
 acceptance criterion requires real provider/tenant/host evidence. Keep the row `partial` or `pending_env`.
@@ -911,11 +975,11 @@ acceptance criterion requires real provider/tenant/host evidence. Keep the row `
    excludes memory/PID/CPU groups. #133 stays open until a provider enforces and tests them.
 3. **Filesystem/project quota is not implemented.** `probe_fs_quota()` returns `unsupported`.
 4. **No live mount-namespace implementation exists in the provider.**
-5. **C11 has no measurement harness**; do not compute p95 from unrelated suite timings.
+5. **C11 performance is out of phase 0–3 stage scope (2026-11-18)**; p95/p50, matched pairs, sample counts and ≤5%/≤50 ms are historical notes only and never block a phase pass. Do not compute p95 from unrelated suite timings even for historical context.
 6. **Phase 5 P5-IT-18 (20 scenarios × 3 runs) has no harness**; do not present ad-hoc runs as it.
 7. **Phase 6 two-Worker SIGKILL/mixed-fault drills are absent**; PG-level tests are not a substitute.
 8. **Representative production-replica migration evidence requires your sanitized dump.**
-9. **Local VM performance is not production performance**; label the environment.
+9. **Performance/latency claims are out of phase 0–3 stage scope (2026-11-18)**; if reported for historical context only, label the host, co-tenancy and load and keep any production claim separate.
 10. **No phase is formally accepted by this runbook.** It produces evidence; the acceptance owner records
     the conclusion, and high-risk enablement needs a separate security/operations approval.
 11. **README/index status lines are historical**; update them only in a reviewed PR, not silently.
@@ -931,18 +995,23 @@ acceptance criterion requires real provider/tenant/host evidence. Keep the row `
 | Executor | <name/role; may be the same> |
 | Date (UTC) | <YYYY-MM-DD> |
 | Target SHA | <40-hex> |
-| Environment | <OS/kernel/arch/cgroup/docker/PG; disposable VM id> |
+| Environment | <OS/kernel/arch/cgroup/docker/PG; host id; shared or isolated; co-tenant note> |
 | Conclusion | pass / conditionally passed / not passed |
-| Evidence | <evidence dir / tarball / CI URL> |
+| Evidence | <evidence dir / tarball; CI URL optional, not a gate> |
 | Residuals | <L-n: level, owner, deadline> |
 | High-risk enablement | not requested / separate approval link (required if any flag is enabled) |
 ```
 
 **Conclusion rules**
 
-- `pass`: every applicable A/C row has executed evidence; no open P0/P1; real-environment gates closed;
-  rollback and default-off proven; performance/C11 measured where required.
+- `pass`: every applicable A/C row has executed evidence; no open P0/P1; switch completeness proven
+  (default off, explicit on, off/on/rollback matrix, no silent fallback, no flag leakage into public
+  surfaces/fingerprint); tenant isolation, Secret handling, data integrity, migration correctness,
+  terminal-state semantics and side effects/cleanup gates closed; one acceptance-owner record.
+  Performance/C11, CI provenance and historical-sample items are out of stage scope (2026-11-18).
 - `conditionally passed`: only non-hard-gate P2/P3 residuals with owner/deadline; never covers a veto
-  gate, an unmeasured hard metric, or an absent real-environment prerequisite.
-- `not passed`: any A/C failure, veto violation, missing required baseline/evidence, or unmeasured C11.
+  gate (functional/switch/isolation/Secret/data/migration/terminal/side-effect) or an absent kept-gate
+  prerequisite.
+- `not passed`: any A/C failure, veto-gate violation, or missing required evidence for a kept gate.
+  An unmeasured C11 result or absent CI/historical sample is not a valid reason for `not passed`.
 - High-risk enablement is never included in "phase pass"; it is a separate decision.

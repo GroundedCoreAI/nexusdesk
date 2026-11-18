@@ -2,6 +2,7 @@
 
 > Status: Approved test baseline; pending implementation and execution (not currently executed or passed)
 > Created: 2026-11-02
+> Revised: 2026-11-18 (scope-limited acceptance revision: P6-CM-10 performance/recovery baseline, p50/p95/Outbox lag/recovery/lock duration, sample/paired/report-latency data, CI evidence, and Phase 0 historical baselines are no longer stage-acceptance gates and remain only as historical context or high-risk-enablement/production-rollout prerequisites; the Phase 0 behavioral regression diff in the exit criteria is judged at stage acceptance by current synthetic-fixture functional no-regression and switch completeness. Functional correctness, security/reliability/event semantics, switch completeness, tenant isolation, Secret handling, data integrity, migration, terminal-state semantics, fault containment/cleanup, and no P0/P1 remain gates)
 > Revised: 2026-11-11 (lightweight small-team acceptance: reuse automated evidence while retaining independent approval for untrusted execution)
 > Revised: 2026-11-16 (code-checked migration IDs, direct-writer coverage, additive SSE compatibility, and focused regression reuse)
 > Basis: `02-requirements.en.md` (FR-1–FR-16, AC-1–AC-16), `03-technical-design.en.md` (planned migrations 0070/0071, Fencing, Outbox, Vault/Broker, Sandbox), `08-implementation-breakdown.en.md`

@@ -4,6 +4,7 @@
 > Created: 2026-11-02; design frozen: 2026-11-08
 > Revised: 2026-11-09 (R11 owned-task documentation clarification; no lifecycle behavior change)
 > Basis: `02-requirements.en.md` (FR-1–FR-6, AC-1–AC-8), `03-technical-design.en.md` (contract v1, exact registration resolution, LocalTestAdapter, no migration), `08-implementation-breakdown.en.md` (R1–R11, T1–T8)
+> Revision note (2026-11-18): the "complete suite run by CI under repository convention, unexecuted local or CI items must not be recorded as passed" exit criterion and the real-wait basis for timing cases in §7 are treated under the scope-limited revision — CI provenance and the complete suite are no longer stage-acceptance blockers and are retained only as historical context or an explicit out-of-scope note (see `05-acceptance-plan.md` §0); functional correctness, contract/terminal semantics, tenant isolation, Secret handling, data integrity, migration, and zero P0/P1 remain gates. Historical text is retained unchanged.
 
 ## 1. Test Scope and Principles
 

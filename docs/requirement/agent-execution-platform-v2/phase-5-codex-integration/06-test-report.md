@@ -250,6 +250,8 @@ Each P1 was re-run with its original reproduction command after the fix.
 
 No pull request was opened in this round (the coordination rules forbid committing/pushing). CI evidence is therefore absent; the local evidence in Appendix A is the only executed evidence and it covers the Codex lane plus a targeted Phase 2/3/4 regression, **not** the full suite.
 
+> **Revision 2026-11-18 (scope-limited acceptance):** under `05-acceptance-plan.md` §6.1, CI provenance at the final PR head (this section), the Phase 0 baseline diff (P5-IT-16 / R6 / L14), the startup/execution p50/p95 and sample-size items (R7 / L15), and the P5-IT-18 "20 scenarios × 3 runs" / stability-batch reading as a **stage-acceptance** exit criterion are no longer stage gates. CI runs and performance/baseline items remain recorded facts and historical context; P5-IT-18 stays unchanged as the separate high-risk Stage B unlock condition. This note changes no row, count, verdict, or conclusion above, keeps Stage B locked, and is not an acceptance conclusion.
+
 ## Appendix A — local execution snapshots (2026-11-14, working directory `backend/`)
 
 Every block below is a captured tail from the test sub-agent's independent re-execution unless marked "development round".

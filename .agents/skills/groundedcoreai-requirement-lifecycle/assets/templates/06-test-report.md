@@ -4,6 +4,7 @@
 > 创建：YYYY-MM-DD
 > 依据：`04-test-plan.md`（PN-UT-01~xx、PN-IT-01~xx、PN-CM-01~xx）、`02-requirements.md`（FR/AC）
 > 执行：<执行者>；日期：YYYY-MM-DD
+> 修订：2026-11-18（CI 证据与性能/历史样本项改为可选/范围外，非阶段验收门禁；保留逐条用例、缺陷、残留、隔离/Secret/数据/迁移/终态/副作用与无 P0/P1）
 
 ## 1. 测试范围与环境
 
@@ -23,7 +24,9 @@
 |---|---|---|
 | `uv run ruff check .` | <结果> | 附录 A-1 |
 | `uv run pytest -q` | <X passed, Y skipped> | 附录 A-2 |
-| CI Backend / Frontend job | <conclusion> | §CI 证据 |
+| CI Backend / Frontend job（可选，非门禁） | <conclusion> | §9 CI 证据（历史/可选） |
+
+> 性能/容量/p50/p95/配对样本/≤5%/≤50ms/真实历史样本为 2026-11-18 范围外项，不列入本报告的通过判据；如保留测量数据仅作历史记录。
 
 ## 3. 单元测试（PN-UT）逐条结果
 
@@ -61,10 +64,13 @@
 |---|---|---|---|
 | R1 | P2 | <描述与影响面> | <owner/期限/决策建议> |
 
-## 9. CI 证据
+## 9. CI 证据（可选，非阶段验收门禁）
 
-- PR：<链接>（head `<sha>`）
-- 通过 run：<链接>（conclusion=success）
+> 2026-11-18 范围修订：CI provenance、最终 PR head 双跑与 CI run URL 不再是阶段验收门禁。
+> 若已有 CI 记录可在此如实引用；没有也不构成 `pending_env`、阶段不通过或门禁缺口。
+
+- PR：<链接>（head `<sha>`）— 可选
+- run：<链接>（conclusion）— 可选
 - 核验方式与边界：<如何核验、哪些计数未能逐行复核——如实写>
 
 ## 附录 A 本地执行输出快照（YYYY-MM-DD，工作目录 `backend/`）

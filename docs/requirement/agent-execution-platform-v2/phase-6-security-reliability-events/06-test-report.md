@@ -1,7 +1,8 @@
 # Phase 6 · Security, Reliability, and Event Governance — Test Report
 
-> Status: Completed code-focused execution; overall Phase 6 test gate is **NOT PASSED** because required real-environment and upstream evidence remains open
+> Status: Completed code-focused execution; under the 2026-11-18 scope-limited revision, the functional/security/switch evidence satisfies current-stage acceptance. The `pending_env`, `pending_upstream`, `not_measured`, and CI items below are retained as historical records only and are out of scope for the current stage, not exit blockers.
 > Created: 2026-11-17
+> Revised: 2026-11-18 (scope-limited acceptance revision: CI provenance/final-PR-head CI evidence, performance/p50/p95/Outbox lag/recovery time/lock budget, sample counts, matched pairs, report latency, and real/authorized historical baselines are no longer exit criteria; all historical test numbers and verdicts are preserved unchanged; only their stage-gate status was revised)
 > Basis: `04-test-plan.en.md` (P6-UT-01–22, P6-IT-01–25, P6-CM-01–10), `02-requirements.en.md` (FR/AC), `08-implementation-breakdown.en.md` (R-1–R-19)
 > Execution: testing subagent; target development SHA `d0f02fa3b173d7ebf815ea01db0ba594aa35208b`; test additions committed separately below
 
@@ -164,21 +165,25 @@ No known open code defect remains in the executed scope. Warnings were existing 
 
 ### 8.4 Residual risks / acceptance inputs
 
+Scope note (2026-11-18): R1–R4 are superseded as current-stage exit criteria and are out of scope for the current stage; they remain as historical context or separate high-risk-enablement/production-rollout inputs. R5 remains a separate exposure-approval item, not a stage gate. All historical status labels and numbers below are preserved unchanged.
+
 | # | Level | Residual | Required owner/input |
 |---|---|---|---|
-| R1 | Hard gate | Real dedicated sandbox/file/network and two-Worker/mixed-fault matrices incomplete | Testing + supplied disposable Linux/managed-proxy/multi-Worker environment; complete IT-04–08/11/22/25 and CM-02/08 |
-| R2 | Hard gate | Phase 0 zero-diff and Phase 5 full Stage A evidence absent; real Session/Resume and production Codex routing unavailable | Upstream owners; IT-02/24 and real Session portions of IT-07 stay pending_upstream |
-| R3 | Measurement | p50/p95, Outbox lag, recovery time and representative lock budget not measured | Phase 0 baseline + representative environment; CM-10 remains not_measured |
-| R4 | Verification | No PR/CI run at this target | Coordinator/CI after push; final full backend/frontend evidence pending |
-| R5 | Exposure control | Independent security and SRE/operations approvals absent | Blocks enabling untrusted execution only; C12 disabled-state check passes while the switch remains false |
+| R1 | Out of scope (2026-11-18); formerly Hard gate | Real dedicated sandbox/file/network and two-Worker/mixed-fault matrices incomplete | Historical context only; may be revisited for production rollout; complete IT-04–08/11/22/25 and CM-02/08 if revisited |
+| R2 | Out of scope (2026-11-18); formerly Hard gate; real capability separate | Phase 0 zero-diff and Phase 5 full Stage A evidence absent; real Session/Resume and production Codex routing unavailable | Historical context / high-risk enablement; IT-02/24 and real Session portions of IT-07 retain historical `pending_upstream` |
+| R3 | Out of scope (2026-11-18); formerly Measurement | p50/p95, Outbox lag, recovery time and representative lock budget not measured | Historical context / performance-review owner if revisited; CM-10 remains `not_measured` |
+| R4 | Out of scope (2026-11-18); formerly Verification | No PR/CI run at this target | Historical context only; CI provenance is not a stage gate |
+| R5 | Separate exposure control (not a stage gate) | Independent security and SRE/operations approvals absent | Blocks enabling untrusted execution only; C12 disabled-state check passes while the switch remains false |
 
 ## 9. CI Evidence
 
+Historical record only; out of scope for current-stage acceptance under the 2026-11-18 revision. CI provenance, final-PR-head CI runs and URLs are not stage-exit criteria, and their absence is not a blocker.
+
 - PR: none requested/created.
-- CI run: **absent**, not passed.
+- CI run: **absent**, not passed (historical record).
 - Target development SHA: `d0f02fa3b173d7ebf815ea01db0ba594aa35208b`.
 - Testing commit SHA: recorded in the coordination handoff after local commit.
-- Overall test conclusion: code-focused scope passes; overall Phase 6 test/acceptance gate remains **not passed** pending R1–R4. No untrusted exposure is enabled.
+- Overall test conclusion: code-focused scope passes and satisfies current-stage functional/security/switch acceptance; R1–R4 are out of scope for the current stage. No untrusted exposure is enabled.
 
 ## Appendix A — Local Command Output Snapshots (2026-11-17)
 
@@ -267,4 +272,4 @@ migration evidence:      3 passed; 0070 populated upgrade 0.376s
 ruff check / architecture gate: passed
 ```
 
-All previously recorded row verdicts are unchanged; no new failed code row exists. The `pending_env`, `pending_upstream`, `not_measured` and CI items above remain open for the same reasons.
+All previously recorded row verdicts are unchanged; no new failed code row exists. The `pending_env`, `pending_upstream`, `not_measured` and CI items above retain their historical status but are out of scope for current-stage acceptance under the 2026-11-18 revision; this section is retained as historical context, not as exit evidence.

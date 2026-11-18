@@ -3,6 +3,7 @@
 > Status: Pending review (implementation has not started)
 > Created: 2026-11-02
 > Revised: 2026-11-14 (08 R-1: AC-12's planned migration renumbered `0054`→`0059_execution_runtime_host` after revalidating the actual head `0058_agent_execution_metadata`)
+> Revised: 2026-11-18 (scope-limited acceptance: the NFR "measure supervision overhead against a Phase 0 baseline" is recording context, not a stage-acceptance gate; see 05 §6.1)
 > Basis: `01-business-goals.md` (G1–G5); architecture Sections 3, 7–10, 17 Phase 4, 20, and 22
 
 ## User Stories

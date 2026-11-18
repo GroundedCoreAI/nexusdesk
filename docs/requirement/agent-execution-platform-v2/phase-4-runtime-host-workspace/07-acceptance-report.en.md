@@ -7,6 +7,7 @@
 > Executor: acceptance sub-agent (same role — low-cost read-only verification V01–V17 in §2.3 plus evidence assembly; the test suite was **not** re-executed, per 05 §3 "Evidence reuse" and 06 §10.1)
 > Target SHA: `e400cafe8e8f2673c069f3ac7f389a7aec95da51` (`e400caf`), 13 unpushed commits `6988fb9..e400caf` on the Phase 3 base `c63fd4a` (full list in §2.1). **Superseded by §9**: after CI found and the team fixed defect D-2, the reported target is `8e2dcf1` with CI green (run `43555155652`); §9 is an appendix and rewrites nothing above it
 > Discipline: `skip` / `pending_env` / `not_measured` are never written as passing; "conditionally passed" never covers a veto gate nor converts a blocked promise into an approved one; AC-5 and AC-9 are recorded as **partially proven** and are explicitly *not* claimed as fully proven; this report modifies no number in 06 and no line of 01–05.
+> Revision 2026-11-18: see §10 for the scope-limited gate reclassification. The historical conclusion and every number above are unchanged; §10 adds a policy note only, not new evidence or a new acceptance record.
 
 ## 1. Acceptance Scope, Responsibility, and Conclusion Ceiling
 
@@ -232,3 +233,19 @@ The single CI failure was **not** a local-number error to be reconciled: it was 
 ### 9.4 Re-stated decision
 
 **Conditionally passed** — unchanged, at target SHA `8e2dcf1` (superseding `e400caf` as the reported target), with CI green at that SHA, two P1 defects found and fixed (D-1 seed binding, D-2 Linux CPU attribution), no P0 and no open P1, and the nine Linux-only `pending_env` lanes still honestly blocking `execution_runtime_host_enabled=true` in any real environment (issue **#133**), plus L-2/L-3/L-5/L-7 as previously listed. The scopes explicitly **not** authorized by this report (§6) are unchanged.
+
+## 10. Scope-Limited Acceptance Revision — 2026-11-18
+
+> This is a dated revision note. It reclassifies which items are stage-acceptance gates; it rewrites no number, evidence row, or conclusion above, and it is not itself a new acceptance record. The conclusion remains the historical **conditionally passed** at `8e2dcf1`; under the runbook's append-only rule a new conclusion would require a new, evidence-bound acceptance record, which this note does not create.
+
+**Policy applied.** Per the 2026-11-18 scope-limited acceptance revision (see `05-acceptance-plan.en.md` §6.1), the following were removed as stage-acceptance gates. They remain in this report as historical context or explicit out-of-scope notes, never as blockers of a stage conclusion:
+
+- The nine `pending_env`/`not_measured` rows of 06 §8 / 08 §8.1 that made up the "conclusion ceiling" in §1, §7, §5 L-1/L-2 and §9.3: cgroup v2 `memory.max` and `pids.max` hard limits, filesystem/project quota total enforcement, per-Execution CPU group hard ceiling, live mount-namespace experiments, deterministic real-OS PID-reuse corroboration, the production-image container restart/stop-timeout/rollback faces, full support-matrix sign-off (P4-CM-07), and supervision overhead vs the Phase 0 baseline (P4-IT-30, including p50/p95, startup/event/recovery latency, and migration-lock budget). Their `pending_env`/`not_measured` labels and environment facts stand as measured history; they no longer block acceptance of the phase or any enablement-promise decision.
+- CI provenance and final-PR-head CI runs/URLs, including the "CI at the target SHA" element of §2.2, §5 L-6, V15/V16, §8, and §9 (runs `43544575078` / `43555155652`). Runs, green status, and the D-2 discovery remain recorded history; CI presence or absence is no longer a gate.
+- Real or authorized historical samples and multi-sample/large-sample data-volume requirements. The macOS-development-subset evidence boundary is still reported honestly, but is no longer a reason to withhold a stage conclusion.
+
+**Gates that remain** (all were satisfied on their measured faces above, with no P0/P1 and a single acceptance-owner record): functional correctness of A1–A12; Runtime Host/Workspace switch completeness — default off, explicit on, off/on/rollback, no silent fallback (C11/C12, V04–V07); tenant isolation and zero external file operations (C4, V11/V12); Secret/credential handling (C1/C7, V17); process/resource cleanup and terminal-state semantics with ineffective late results (C2/C3/C8); data integrity and migration — predecessor `0058` revalidated, additive-only `0059`, no downgrade (C10, V02/V08); and the no-approximation honesty principle (formerly C14's "block" clause, now an honesty gate only).
+
+**High-risk enablement stays separate.** This note does not authorize `execution_runtime_host_enabled=true`, untrusted multi-tenant execution, arbitrary commands/uploaded code, production engine routing, or any Phase 5/6 capability. Those remain blocked and require the separate independent security and operations approval described in §6, §7, and the acceptance-owner record. Stage B is out of scope for this phase and remains untouched.
+
+**Net effect on §1 / §6 / §7 readings.** The §1 conclusion ceiling, the §6 "Pass" tier's "complete Linux/... evidence" wording, and the §7 "Pass ... No" reasoning expressed the pre-revision gate set and are **superseded as gate logic** by `05` §6.1 and this section. They are retained verbatim as the historical decision record. All measured facts in them — zero veto violations, zero P0, D-1/D-2 fixed, 67 rows with no fail — are unchanged and continue to hold.

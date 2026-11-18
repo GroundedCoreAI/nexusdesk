@@ -4,6 +4,7 @@
 > 创建：2026-11-08
 > 依据：`04-test-plan.md`（P1-UT-01～12、P1-IT-01～11、P1-CM-01～06）、`02-requirements.md`（FR/AC）、`08-implementation-breakdown.md`（T2～T6、R1～R11）
 > 执行：T7 独立执行者；执行覆盖：2026-11-08～2026-11-09；最终当前树复跑：2026-11-09
+> 修订：2026-11-18（范围限定验收修订：本文凡把 CI run/CI 链接、性能或延迟数值基线、完整套件/大样本或真实历史样本写成验收出口证据或阻断项之处，均不再作为阶段验收阻断项，仅保留为历史背景或明示非范围项；所有测试数值与历史记录不改写。仍为门槛的见 `05-acceptance-plan.md` §0）
 
 ## 1. 测试范围与环境
 
@@ -153,7 +154,7 @@ D-01～D-06 来自 T2～T6 的历史实施/spec/quality review 与测试证据�
 
 | # | 级别 | 描述 | 处置（建议 owner / 下一份证据） |
 |---|---|---|---|
-| R-01 | P1 下游测试 | 完整本地套件和 GitHub Actions CI 均未执行，无 run URL；其他既有模块与前端/全量兼容性未由本次选定测试证明 | **Owner：后续提交/PR 与 CI 维护者**。在后续合法提交流程中取得全量 CI 结果及 run URL，并补充必要回归；本报告不启动提交、push 或 PR |
+| R-01 | P1 下游测试【2026-11-18：CI run URL / CI 溯源部分 superseded / 非范围，不再是阶段验收阻断项；05 §0】 | 完整本地套件和 GitHub Actions CI 均未执行，无 run URL；其他既有模块与前端/全量兼容性未由本次选定测试证明 | **Owner：后续提交/PR 与 CI 维护者**。在后续合法提交流程中取得全量 CI 结果及 run URL，并补充必要回归；本报告不启动提交、push 或 PR |
 | R-02 | P2 本地环境 | raw `check_architecture.py` 仍 exit 1，仅报告 `modules/apps/integrations/platform` 四个预先存在且被 ignore 的 legacy roots；clean-source identical shadow gate 通过。raw 命令不能写成绿色，也不能为求绿删除这些 ignored artifacts | **Owner：仓库/架构门禁维护者**。以干净 checkout 或 CI 原始日志复核；保留 raw exit 1 与 clean-shadow pass 两份证据，再决定本地 ignored artifacts 的无损清理策略 |
 | R-03 | P1 验收入口 | Phase 0 正式验收入口风险仍开放；Phase 1 的实现与测试工作不构成 Phase 0 批准 | **Owner：Phase 0 验收负责人**。提供正式验收记录/签署证据并确认入口后再推进 Phase 1 正式验收；Phase 1 本地测试出口已满足不等于此前阶段获批准 |
 | R-04 | P1 正式验收 | 双语 `07-acceptance-report.md` / `07-acceptance-report.en.md` 已形成，记录本地自动化 A1～A8 与 C1～C4 工程证据；但正式人工验收、Adapter 代表 UAT、各角色签字及最终总体包评审仍未批准/未完成。本地 29/29 与 07 的存在不自动转化为业务/正式验收通过 | **Owner：Phase 1 验收负责人与最终包评审负责人**。以 07 为输入完成最终总体包评审、人工 UAT、正式验收和签字，并保留独立证据；T7 不代行该职责 |
@@ -161,8 +162,8 @@ D-01～D-06 来自 T2～T6 的历史实施/spec/quality review 与测试证据�
 ## 9. CI 证据
 
 - PR：**未创建（T7 明确不执行 commit/push/PR）**。
-- CI run：**PENDING；未执行，无 URL、无 head SHA、无 conclusion=success 主张**。
-- 本地完整 `uv run pytest`：**PENDING；未执行**。
+- CI run：**PENDING；未执行，无 URL、无 head SHA、无 conclusion=success 主张**。【2026-11-18：CI run URL / CI 溯源不再作为阶段验收门槛，仅保留为历史背景；§0】
+- 本地完整 `uv run pytest`：**PENDING；未执行**。【2026-11-18：完整套件/大样本口径不再作为阶段验收门槛；§0】
 - 本地结论：F 当前树 focused/static 实测、T6 历史 artifacts 与独立 Docker PostgreSQL 最终复跑共同覆盖全部 29 个 P1-UT/IT/CM，AC-1～8 的本地测试证据均可复现通过，受影响选定去重回归 115 passed、0 skipped；`04-test-plan.md` §7 的本地批准范围与出口证据**已满足**。
 - 下游边界：完整套件、Frontend/Backend CI job 未验证；双语 07 已形成本地自动化工程证据，但最终总体包评审、正式 Phase 1 人工验收、UAT 与签字未完成。本报告不声称 CI 成功、Phase 0 入口已批准、最终总体包已获批准或 Phase 1 已正式接受。
 
