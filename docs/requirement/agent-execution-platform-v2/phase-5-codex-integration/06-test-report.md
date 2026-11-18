@@ -773,3 +773,10 @@ D-7 Documentation sync checked this round
 07-acceptance-report.md Blocker 1: "a deadline capped at 10 seconds and by the remaining process
   wall budget". No other "fixed 10s" wording remains in 03/06/07.
 ```
+
+
+---
+
+## 2026-11-18 远程执行结果补记（范围限定）
+
+本轮远程执行（run `20261118T150343Z`，SHA `80fac60`）结果：12 lane exit 0；6,103 tests / 0 failures / 0 errors / 62 declared skips；各 lane 明细与 JUnit XML 见权威记录 `../12-scope-limited-acceptance-record-20261118-phase4-6.md` 与证据包 `20261118T150343Z.tar.gz`。本段仅追加执行结果，不修改上文历史数字。E 类环境演练为 `pending_env`，按 2026-11-18 修订不阻断阶段验收。

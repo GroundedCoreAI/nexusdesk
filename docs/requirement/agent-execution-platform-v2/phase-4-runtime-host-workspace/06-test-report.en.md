@@ -409,3 +409,10 @@ $ uv run ruff check src/…/seed_memory_common.py          → All checks passed
 ```
 
 A-10 stack state left behind: the quickstart stack is **up and healthy** on fresh volumes (app/postgres/mock all healthy, `restarts=0`) and `nexusdesk-phase4-pg` is running as before, so the acceptance lane can inspect the live drill directly. Round 1's crash-looping app container was stopped at the time to end the restart loop; round 3 replaced that state entirely. The working tree remained clean throughout both rounds except this report file.
+
+
+---
+
+## 2026-11-18 remote execution results addendum (scope-limited)
+
+Remote run `20261118T150343Z` at SHA `80fac60`: 12 lanes exit 0; 6,103 tests / 0 failures / 0 errors / 62 declared skips. Per-lane counts and JUnit XML are in the authoritative record `../12-scope-limited-acceptance-record-20261118-phase4-6.md` and evidence package `20261118T150343Z.tar.gz`. This addendum appends results only; historical numbers above are unchanged. E-lane environment drills remain `pending_env` and are non-blocking under the 2026-11-18 revision.

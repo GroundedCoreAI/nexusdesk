@@ -91,4 +91,4 @@ Produce the Phase 5 Acceptance Report with the Stage A unlock record, A/C eviden
 
 | Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
 |---|---|---|---|---|---|
-| To be filled | To be filled (may be the acceptance owner) | To be filled | To be filled | Pending acceptance | To be filled |
+| JackChow (confirmed by the user, 2026-11-19 GMT+8) | WorkBuddy automated acceptance execution | 2026-11-18 | `80fac6056682a7835c61dab4678c5772b8689d1f` | **PASS (scope-limited)** | `../12-scope-limited-acceptance-record-20261118-phase4-6.md` §5; evidence `20261118T150343Z.tar.gz` |

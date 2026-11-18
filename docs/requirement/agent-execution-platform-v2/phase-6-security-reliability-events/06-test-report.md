@@ -273,3 +273,10 @@ ruff check / architecture gate: passed
 ```
 
 All previously recorded row verdicts are unchanged; no new failed code row exists. The `pending_env`, `pending_upstream`, `not_measured` and CI items above retain their historical status but are out of scope for current-stage acceptance under the 2026-11-18 revision; this section is retained as historical context, not as exit evidence.
+
+
+---
+
+## 2026-11-18 远程执行结果补记（范围限定）
+
+本轮远程执行（run `20261118T150343Z`，SHA `80fac60`）结果：12 lane exit 0；6,103 tests / 0 failures / 0 errors / 62 declared skips；各 lane 明细与 JUnit XML 见权威记录 `../12-scope-limited-acceptance-record-20261118-phase4-6.md` 与证据包 `20261118T150343Z.tar.gz`。本段仅追加执行结果，不修改上文历史数字。E 类环境演练为 `pending_env`，按 2026-11-18 修订不阻断阶段验收。

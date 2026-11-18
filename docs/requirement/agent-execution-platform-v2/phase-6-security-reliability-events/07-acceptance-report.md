@@ -146,3 +146,14 @@ Historical context only (out of scope for current stage acceptance under the 202
 PR #142's first CI run failed on baseline-suite compatibility, not on Phase 6 functionality. Commit `fc3245e` restored the legacy call shapes (omitting redundant `cleanup_confirmed=True`/empty usage), extended the replay port with optional Fencing evidence, and updated baseline tests for the reviewed additive contracts. `integration` had also merged its own `0068`/`0069`, so the PR merge result had two Alembic heads; the Phase 6 migrations were renumbered to `0070_execution_fencing` / `0071_execution_credential` after `0069_open_app_unique_name` (08 R-20), with tests and docs synchronized.
 
 Re-verification on a fresh disposable PostgreSQL database migrated to head `0071_execution_credential`: unit lane 2323 passed / 6 skipped; affected postgres scope 418 passed / 1 skipped; migration evidence 3 passed with a 0.376s populated 0070 upgrade; ruff and architecture gates passed. Every earlier A/C and test-row verdict is unchanged, and no new failed code row exists. The L1–L8 items retain their historical status but are out of scope for the current stage under the 2026-11-18 revision. The decision is **PASS (scope-limited)**.
+
+
+---
+
+## 2026-11-18 阶段 4–6 远程执行补记（范围限定）
+
+依据 `09-acceptance-execution-runbook.md` 与 `../12-scope-limited-acceptance-record-20261118-phase4-6.md`，在受控共享生产 Linux 主机以目标 SHA `80fac6056682a7835c61dab4678c5772b8689d1f` 执行本阶段远程验收。12 个 lane 全部 exit 0；6,103 JUnit tests，0 failures / 0 errors，62 个声明式 skip（无 `TEST_DATABASE_URL` 自跳过）。开关完备性专项 `d9-switch-456` 976 tests 全绿，代码级默认关闭核对通过；同机生产服务执行前后无变化。
+
+结论：**通过（范围限定 / PASS scope-limited）**；单一验收负责人 JackChow 已于 2026-11-19 00:36（GMT+8）确认签署本阶段验收（见权威记录 `../12-scope-limited-acceptance-record-20261118-phase4-6.md` §5），无未完成签署项。性能/CI provenance/历史样本/真实 Codex 发布环境等已按 2026-11-18 修订移出阶段门禁；高风险启用未请求、未授权。本补记仅追加证据，不改写上文历史结论与数字。
+
+权威记录：`../12-scope-limited-acceptance-record-20261118-phase4-6.md`；证据包 `20261118T150343Z.tar.gz`，SHA256 `bbc979e7d999a274fb689dbc458367dcca3c61610006c0339207ebe7e9e8050c`。
