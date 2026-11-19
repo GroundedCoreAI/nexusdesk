@@ -269,3 +269,33 @@ deployment fail-closed until P6 + the PR #147 switches are combined.
 3. **Scope tier**: quickstart demo-only vs. production multi-tenant (the latter additionally
    requires Phase 6's complete Broker + strong sandbox and is out of scope here).
 4. **Stage B**: confirm it stays excluded from this track (recommended).
+
+## 10. Owner decision record (2026-11-20, JackChow)
+
+All four items in §9 have been answered by the owner and are recorded below. This record
+settles the **scope of this enablement track only**; it is **not** the §4.5 security
+sign-off.
+
+1. **Design-baseline change: all reversals authorized** (the P1 gate is satisfied). The
+   §5 table entries R11/R13/R15/R16/R17 and coordinator C1/C4/C5 proceed under their
+   stated conditions and PR gates. The `05` veto items C1–C4, the architecture §10.2
+   "Never" list, and R13's "never `workspace_required=False`" clause are **not**
+   reversed.
+2. **Credential source: reuse the validated DeepSeek provider**. `deepseek-flash`,
+   `base_url=https://api.deepseek.com/v1`, `wire_api=responses` (`chat` was removed in
+   0.169.0, measured on the host). The key is demo-only. P6 must register it through
+   `/api/v1/execution-credentials` as a `credential_ref`; it must **not** mount the host
+   `~/.codex/.env` nor inject a deployment key into the app container environment.
+   Rotation/revocation is owned by the deployer (JackChow); new Executions must fail
+   closed after rotation or revocation.
+3. **Scope tier: quickstart demo only**. A single trusted tenant (`local`) plus narrow
+   read-only mounts. Production multi-tenant enablement is outside this track and needs
+   Phase 6 strong sandboxing (pinned image, daemon probe, egress allowlist) and separate
+   security/operations approval in a new design track.
+4. **Stage B: excluded**. `app_server` stays `enabled=False` with a throwing factory;
+   the Session table, Resume reauthorization, approval/interactive input, P5-IT-18 and
+   the separate unlock record are all outside this track.
+
+**Gate still open**: the five §4.5 security-review checklist items must be signed by a
+security owner before the P6 credential lane merges; the signatory is still to be
+designated. P0 (this design PR) must merge before P1 code starts.

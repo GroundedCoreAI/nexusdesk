@@ -244,3 +244,25 @@ fail-closed。
 3. **范围档位**：仅 quickstart 演示，还是生产多租户（后者还需 Phase 6 完整 Broker +
    强沙箱，不在本设计范围）。
 4. **Stage B**：确认排除在本轨道之外（建议）。
+
+## 10. 负责人决策记录（2026-11-20，JackChow）
+
+§9 四项已由负责人明确答复，记录如下。本记录只确定本启用轨道的范围，**不构成 §4.5
+的安全签字**。
+
+1. **设计基线变更：授权全部翻转**（P1 门禁已满足）。§5 表中 R11/R13/R15/R16/R17
+   与协调约束 C1/C4/C5 按所列条件与 PR 门禁执行；`05` 的一票否决项 C1–C4、架构
+   §10.2 "Never" 清单、以及 R13 的「绝不 `workspace_required=False`」条款均**不翻转**。
+2. **凭据来源：复用已验证的 DeepSeek**。`deepseek-flash`，`base_url=https://api.deepseek.com/v1`，
+   `wire_api=responses`（0.169.0 实测 `chat` 已移除）。key 仅用于 quickstart 演示；
+   P6 必须通过 `/api/v1/execution-credentials` 登记为 `credential_ref`，**不得**挂载
+   宿主 `~/.codex/.env`，也不得把部署 key 直接注入 app 容器环境。密钥轮换/吊销由部署方
+   （JackChow）负责；轮换或吊销后新 Execution 必须 fail closed。
+3. **范围档位：仅 quickstart 演示**。单可信租户 `local` + 窄只读挂载。生产多租户不在
+   本轨道授权内，须待 Phase 6 强沙箱（固定镜像 + daemon 探测 + egress allowlist）与
+   独立安全/运维审批后另起设计轨道。
+4. **Stage B：排除**。`app_server` 保持 `enabled=False`、factory 抛错；Session 表、
+   Resume 重鉴权、审批与交互输入、P5-IT-18 与独立解锁记录均不在本轨道。
+
+**仍未满足的门禁**：§4.5 安全评审清单（5 项）须在 P6 凭据 lane 合并前由安全负责人
+签字，签字人待指定；P0（本设计 PR）须先合并，P1 才开工。
