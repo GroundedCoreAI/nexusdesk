@@ -2,6 +2,10 @@
 
 > 状态：待评审（仅规划，未实施）
 > 创建：2026-11-02
+> 修订：2026-11-20 — Stage A 骨架已按 `08` fail-closed 裁决实施。把骨架变为按 Run 可选
+> Codex CLI engine 的独立启用轨道设计见 `09-stage-a-cli-engine-enablement-design.md`
+> （拟翻转裁决 `08` §3、PR 排期 `09` §6）。本文 FR-1~FR-12、AC-1~AC-12 与 `05` §5 的
+> C1–C4 一票否决项保留不变；启用轨道不改写、不豁免任何需求或否决项。
 > 依据：`01-business-goals.md`（G1~G6）；`docs/architecture/agent-execution-platform-v2.md` 第 4、5、8~10、12~13、17（Phase 5）节
 
 ## 用户故事
