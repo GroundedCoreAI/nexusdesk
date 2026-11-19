@@ -48,11 +48,40 @@ def test_quickstart_execution_defaults_are_off_and_rooted():
         "${AGENT_EXECUTION_RUNTIME_HOST_ENABLED:-false}"
     )
     assert env["AGENT_EXECUTION_WORKDIR_ROOT"] == "/data/execution"
-    # No host id on the default topology: the Runtime Host subsystem is not
-    # assembled at all (08 R-7), which keeps quickstart byte-identical.
-    assert "AGENT_EXECUTION_RUNTIME_HOST_ID" not in env
+    # No host id VALUE on the default topology: the Runtime Host subsystem is
+    # not assembled at all (08 R-7). The id is parameterized so a deployment
+    # can opt in, but the empty default keeps the default topology host-free;
+    # Settings rejects an empty id whenever the Host switch is on, so the two
+    # switches can never half-enable the subsystem.
+    assert env["AGENT_EXECUTION_RUNTIME_HOST_ID"] == (
+        "${AGENT_EXECUTION_RUNTIME_HOST_ID:-}"
+    )
     assert "app_data:/data" in quick["services"]["app"]["volumes"]
     assert quick["services"]["app"]["stop_grace_period"] == "45s"
+
+
+def test_quickstart_execution_switches_default_fail_closed():
+    """Parameterized opt-in switches must not change the default deployment.
+
+    Phase 3 editing entries, Phase 5 Codex registration and Stage B all stay
+    off/empty by default; Stage B (app-server) has no implementation in this
+    phase, so it must not even be offered as a compose switch (05 C3).
+    """
+    env = _quick()["services"]["app"]["environment"]
+    assert env["AGENT_EXECUTION_PHASE3_ENABLED"] == (
+        "${AGENT_EXECUTION_PHASE3_ENABLED:-false}"
+    )
+    assert env["AGENT_CODEX_CLI_ENABLED"] == "${AGENT_CODEX_CLI_ENABLED:-false}"
+    assert env["AGENT_CODEX_STAGE_A_VERIFIED"] == (
+        "${AGENT_CODEX_STAGE_A_VERIFIED:-false}"
+    )
+    assert env["AGENT_CODEX_ALLOWED_VERSIONS"] == (
+        "${AGENT_CODEX_ALLOWED_VERSIONS:-[]}"
+    )
+    assert env["AGENT_CODEX_TRUSTED_TENANTS"] == (
+        "${AGENT_CODEX_TRUSTED_TENANTS:-[]}"
+    )
+    assert "AGENT_CODEX_APP_SERVER_ENABLED" not in env
 
 
 def test_quickstart_default_windows_fit_the_stop_grace():
