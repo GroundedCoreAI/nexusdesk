@@ -57,6 +57,8 @@ The demo ships 9 industry case packs: 9 knowledge bases, 18 agent drafts and 36 
 - Filter the agent list with **Scope → Cases only**;
 - See [Industry examples](../guides/industry-examples.md) for details.
 
+Quickstart also generates a synthetic execution platform demo dataset on every start, covering phases 0-6: published/draft agents, three terminal Run states, event replay, config snapshots, a cleanup-failure sample, credential metadata and audit rows. See [Execution platform examples](../guides/execution-platform-examples.md).
+
 ## Optional execution path and rollback
 
 Run the commands in this section from the repository root. Quickstart has one embedded Worker (`AGENT_EMBEDDED_WORKER=true`) and uses the legacy execution path by default (`AGENT_EXECUTION_ORCHESTRATOR_ENABLED=false`), with no additional UI or service. The `app` service has its own healthcheck, but container status does not replace path-log and Run-terminal checks. For a controlled Orchestrator trial, explicitly opt in and recreate `app`:

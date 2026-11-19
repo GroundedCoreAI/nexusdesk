@@ -59,6 +59,8 @@ NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
 - 在 Agent 列表用「**范围 → 仅看案例**」筛选；
 - 详细说明见[行业案例](../guides/industry-examples.md)。
 
+Quickstart 还会在每次启动时自动生成一套覆盖执行平台阶段 0–6 的合成演示数据（发布/草稿 Agent、三种终态 Run、事件回放、配置快照、清理失败样本、凭据元数据与审计）。说明与人工演示步骤见[执行平台示例](../guides/execution-platform-examples.md)。
+
 ## 可选执行路径与回滚
 
 本章节命令均从仓库根目录执行。Quickstart 只有一个内嵌 Worker（`AGENT_EMBEDDED_WORKER=true`），默认使用 legacy 执行路径（`AGENT_EXECUTION_ORCHESTRATOR_ENABLED=false`），不会新增 UI 或服务。`app` 自身有 healthcheck，但容器状态不能替代路径日志与 Run 终态检查。如需受控体验 Orchestrator，显式开启并重建 `app`：

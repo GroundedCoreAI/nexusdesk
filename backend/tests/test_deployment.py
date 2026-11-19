@@ -75,6 +75,24 @@ def test_seed_industries_defaults_off_and_is_env_overridable(monkeypatch):
     )
 
 
+def test_quickstart_bootstrap_installs_execution_demo(monkeypatch):
+    """The phases 0-6 demo dataset is wired into quickstart, not production migrate."""
+
+    calls = []
+    monkeypatch.setattr(
+        bootstrap,
+        "subprocess",
+        SimpleNamespace(run=lambda command, check: calls.append((command, check))),
+    )
+    bootstrap.seed_execution_platform()
+    assert calls == [
+        (
+            [sys.executable, "-m", "agent_platform.applications.seed_execution_platform"],
+            True,
+        )
+    ]
+
+
 def test_service_application_examples_default_on_and_are_env_overridable(monkeypatch):
     """The v2 example catalog is independent from the optional industry cases."""
 
