@@ -176,3 +176,14 @@ This decision does **not** authorize enabling Codex, merging/enabling/advertisin
 **Stage B stays locked and separate.** This note does not unlock Stage B, authorize App-Server transport/JSON-RPC end-to-end/Session Resume/approvals, enable production Codex routing, register production trusted targets, open untrusted multi-tenancy, or claim credential/tenant isolation. Those remain out of scope and require the later controlled evidence plus any applicable independent security/operations approval, exactly as §8 and the acceptance-owner record state.
 
 **Net effect on §3 / §4 / §6 / §7 / §8 readings.** The many `partial` / `pending_env` / `not_measured` verdicts and the "scoped conditional pass" ceiling in those sections expressed the pre-revision gate set and are **superseded as gate logic** by `05` §6.1 and this section. They are retained verbatim as the historical decision record. All measured facts — real binary consumed the prompt and completed (V2), D21/D22 fixed, no open P0/P1, C1–C4 clean on the measured boundary, zero migrations — are unchanged and continue to hold.
+
+
+---
+
+## 2026-11-18 阶段 4–6 远程执行补记（范围限定）
+
+依据 `09-acceptance-execution-runbook.md` 与 `../12-scope-limited-acceptance-record-20261118-phase4-6.md`，在受控共享生产 Linux 主机以目标 SHA `80fac6056682a7835c61dab4678c5772b8689d1f` 执行本阶段远程验收。12 个 lane 全部 exit 0；6,103 JUnit tests，0 failures / 0 errors，62 个声明式 skip（无 `TEST_DATABASE_URL` 自跳过）。开关完备性专项 `d9-switch-456` 976 tests 全绿，代码级默认关闭核对通过；同机生产服务执行前后无变化。
+
+结论：**通过（范围限定 / PASS scope-limited）**；单一验收负责人 JackChow 已于 2026-11-19 00:36（GMT+8）确认签署本阶段验收（见权威记录 `../12-scope-limited-acceptance-record-20261118-phase4-6.md` §5），无未完成签署项。性能/CI provenance/历史样本/真实 Codex 发布环境等已按 2026-11-18 修订移出阶段门禁；高风险启用未请求、未授权。本补记仅追加证据，不改写上文历史结论与数字。
+
+权威记录：`../12-scope-limited-acceptance-record-20261118-phase4-6.md`；证据包 `20261118T150343Z.tar.gz`，SHA256 `bbc979e7d999a274fb689dbc458367dcca3c61610006c0339207ebe7e9e8050c`。

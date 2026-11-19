@@ -249,3 +249,14 @@ The single CI failure was **not** a local-number error to be reconciled: it was 
 **High-risk enablement stays separate.** This note does not authorize `execution_runtime_host_enabled=true`, untrusted multi-tenant execution, arbitrary commands/uploaded code, production engine routing, or any Phase 5/6 capability. Those remain blocked and require the separate independent security and operations approval described in §6, §7, and the acceptance-owner record. Stage B is out of scope for this phase and remains untouched.
 
 **Net effect on §1 / §6 / §7 readings.** The §1 conclusion ceiling, the §6 "Pass" tier's "complete Linux/... evidence" wording, and the §7 "Pass ... No" reasoning expressed the pre-revision gate set and are **superseded as gate logic** by `05` §6.1 and this section. They are retained verbatim as the historical decision record. All measured facts in them — zero veto violations, zero P0, D-1/D-2 fixed, 67 rows with no fail — are unchanged and continue to hold.
+
+
+---
+
+## 2026-11-18 phases 4-6 remote execution addendum (scope-limited)
+
+Per `09-acceptance-execution-runbook.md` and `../12-scope-limited-acceptance-record-20261118-phase4-6.md`, a scope-limited remote acceptance run was executed at target SHA `80fac6056682a7835c61dab4678c5772b8689d1f` on the governed shared production Linux host. 12 lanes, all exit 0; 6,103 JUnit tests with 0 failures / 0 errors and 62 declared skips (no `TEST_DATABASE_URL` self-skips). The switch-completeness lane `d9-switch-456` passed 976 tests, backed by a read-only code-default-off check; co-tenant services were unchanged before and after.
+
+Verdict: **PASS (scope-limited)**. The single acceptance owner (JackChow) confirmed and signed this phase at 2026-11-19 00:36 (GMT+8) (see the authoritative record `../12-scope-limited-acceptance-record-20261118-phase4-6.md` §5); no signature item remains outstanding. Performance, CI provenance, historical samples and real Codex release-environment items were removed as stage gates by the 2026-11-18 revision; high-risk enablement was not requested and is not authorized. This addendum adds evidence only; it does not rewrite the historical conclusions or numbers above.
+
+Authoritative record: `../12-scope-limited-acceptance-record-20261118-phase4-6.md`; evidence `20261118T150343Z.tar.gz`, SHA256 `bbc979e7d999a274fb689dbc458367dcca3c61610006c0339207ebe7e9e8050c`.
