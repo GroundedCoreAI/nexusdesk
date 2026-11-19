@@ -37,6 +37,14 @@ installs everything else.
 Use `https://localhost:8080` and the quickstart login. All data is under the
 configured tenant (`local` by default).
 
+> The quickstart deployment keeps the Phase 3 switches fail-closed, so the
+> agent form shows the read-only execution view only. To surface the
+> capability preview and narrowing entries, start the stack with both
+> `AGENT_EXECUTION_ORCHESTRATOR_ENABLED=true` and
+> `AGENT_EXECUTION_PHASE3_ENABLED=true` (the console warns when phase 3 is on
+> while the orchestrator is off). Runtime Host, Codex and Stage B stay off;
+> see deploy/README.md for their switch combinations.
+
 1. **Phase 0 — baseline.** Open the Agent list: one published agent execution platform demo
    agent and one draft. Inspect the three terminal Runs; each has one terminal
    event and no contradictory state.
