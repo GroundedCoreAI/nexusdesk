@@ -133,6 +133,17 @@ def seed_memory_demo():
     subprocess.run([sys.executable, "-m", "agent_platform.applications.seed_memory_acceptance"], check=True)
 
 
+def seed_execution_platform():
+    """Load the formal execution platform demo dataset (phases 0-6).
+
+    Quickstart only: production migrate never injects customer-facing examples.
+    The module is idempotent and preserves operator edits.
+    """
+    subprocess.run(
+        [sys.executable, "-m", "agent_platform.applications.seed_execution_platform"], check=True
+    )
+
+
 def seed_service_applications() -> bool:
     """Install immutable service application examples. Idempotent.
 
@@ -258,6 +269,7 @@ def main(mode):
     if settings.seed_industries:
         seed_industry_cases(settings)
     seed_memory_demo()
+    seed_execution_platform()
     authority = render_nginx_config(settings)
     print(
         "NexusDesk quickstart: https://localhost:8080 — local demonstration only\n"
