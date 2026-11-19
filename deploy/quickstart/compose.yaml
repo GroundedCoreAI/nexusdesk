@@ -48,6 +48,12 @@ services:
       AGENT_EMBEDDED_WORKER: "true"
       # Opt in explicitly for the embedded Worker; default remains legacy execution.
       AGENT_EXECUTION_ORCHESTRATOR_ENABLED: ${AGENT_EXECUTION_ORCHESTRATOR_ENABLED:-false}
+      # Phase 3 capability/config editing entries, snapshots and the preview
+      # endpoint. Enabling it requires the orchestrator switch too; phase3-on
+      # with orchestrator-off is a deployment misconfiguration the console
+      # warns about (03 §7.4, R-25). Both default to false so the console keeps
+      # the read-only execution view until a deployment opts in.
+      AGENT_EXECUTION_PHASE3_ENABLED: ${AGENT_EXECUTION_PHASE3_ENABLED:-false}
       # Phase 4 Runtime Host stays off by default (FR-10). The Host subsystem
       # assembles ONLY when a stable AGENT_EXECUTION_RUNTIME_HOST_ID is set for
       # the process that owns the execution root; quickstart leaves it unset,
@@ -70,7 +76,26 @@ services:
       AGENT_EXECUTION_EVENT_RETENTION_DAYS: ${AGENT_EXECUTION_EVENT_RETENTION_DAYS:-30}
       AGENT_EXECUTION_EVENT_CLEANUP_ENABLED: ${AGENT_EXECUTION_EVENT_CLEANUP_ENABLED:-false}
       AGENT_EXECUTION_PARSER_RAW_SAMPLE_ENABLED: ${AGENT_EXECUTION_PARSER_RAW_SAMPLE_ENABLED:-false}
-      # AGENT_EXECUTION_RUNTIME_HOST_ID: quickstart-runtime
+      # Phase 5 Codex stays fail-closed. The codex engine registration is only
+      # enabled when a deployment records the Stage A unlock decision and pins
+      # BOTH a trusted CLI version allowlist and a trusted tenant allowlist;
+      # either list empty means the registration stays disabled (05 §4). Stage B
+      # (app-server) has no implementation in this phase and remains hardwired
+      # off in the composition, so no switch is offered for it. A real codex
+      # execution additionally needs the CLI binary inside this image with
+      # AGENT_CODEX_PATH_ENV reaching it; the console in this phase has no
+      # codex selection entry, so these switches only change what the backend
+      # registry accepts.
+      AGENT_CODEX_CLI_ENABLED: ${AGENT_CODEX_CLI_ENABLED:-false}
+      AGENT_CODEX_STAGE_A_VERIFIED: ${AGENT_CODEX_STAGE_A_VERIFIED:-false}
+      AGENT_CODEX_ALLOWED_VERSIONS: "${AGENT_CODEX_ALLOWED_VERSIONS:-[]}"
+      AGENT_CODEX_TRUSTED_TENANTS: "${AGENT_CODEX_TRUSTED_TENANTS:-[]}"
+      AGENT_CODEX_PATH_ENV: ${AGENT_CODEX_PATH_ENV:-/usr/local/bin:/usr/bin:/bin}
+      # Runtime Host identity: empty by default so the Host subsystem never
+      # assembles (08 R-7). Set it together with the switch above, e.g.
+      # AGENT_EXECUTION_RUNTIME_HOST_ID=quickstart-runtime, as the deliberate
+      # trial path the comment above describes.
+      AGENT_EXECUTION_RUNTIME_HOST_ID: ${AGENT_EXECUTION_RUNTIME_HOST_ID:-}
       AGENT_WORKER_CONCURRENCY: "2"
       AGENT_DATABASE_POOL_SIZE: "5"
       AGENT_REQUIRE_PASSWORD_CHANGE: "false"

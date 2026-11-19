@@ -63,6 +63,17 @@ NEXUSDESK_TLS_HOSTS=192.168.1.50,nexusdesk.test sh nexusdesk quickstart
 
 重置会删除所有体验数据，只在明确需要清空时手动执行 `docker compose -f deploy/quickstart/compose.yaml down -v`。修改入口端口可设置 `NEXUSDESK_PORT`。本地 PostgreSQL 密码仅限隔离的体验网络，不能复用于生产。
 
+### 体验模式开启执行能力开关
+
+执行相关开关默认全部 fail-closed（关闭），控制台的「执行与能力」区块只读展示 Engine 三元组。要让「预览能力」按钮与能力收窄入口出现，必须同时打开两个开关（只开 Phase 3 不开编排器时控制台会提示部署配置错误）：
+
+```sh
+AGENT_EXECUTION_ORCHESTRATOR_ENABLED=true AGENT_EXECUTION_PHASE3_ENABLED=true \
+  docker compose -f deploy/quickstart/compose.yaml up -d postgres app
+```
+
+Phase 4 Runtime Host 与 Phase 5 Codex 是单独决策的高风险启用项，同样以变量提供、默认关闭：Runtime Host 需要 `AGENT_EXECUTION_RUNTIME_HOST_ENABLED=true` 加非空 `AGENT_EXECUTION_RUNTIME_HOST_ID`（如 `quickstart-runtime`）；Codex 引擎注册要求 `AGENT_CODEX_CLI_ENABLED=true`、`AGENT_CODEX_STAGE_A_VERIFIED=true`、`AGENT_CODEX_ALLOWED_VERSIONS='["0.169.0"]'` 与 `AGENT_CODEX_TRUSTED_TENANTS='["local"]'` 同时成立（版本与租户清单任一为空即保持禁用），且真实执行还要求镜像内装有 Codex CLI；本阶段控制台不提供 Codex 选择入口，这些开关只影响后端注册表。要让配置在 CD 重新部署后仍然生效，把上述变量写入 `deploy/quickstart/.env`（compose 每次都会从该目录自动读取）。
+
 ## 生产部署：复用外部中间件
 
 ```sh
