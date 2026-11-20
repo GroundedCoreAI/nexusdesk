@@ -44,6 +44,9 @@ from agent_platform.core_platform.agent_execution.adapters.codex.config import (
     CodexProtocol,
     CodexStageGate,
 )
+from agent_platform.core_platform.agent_execution.adapters.codex.home_config import (
+    CodexEngineHomeConfig,
+)
 from agent_platform.core_platform.agent_execution.capability.cache import CapabilityCache
 from agent_platform.core_platform.agent_execution.capability.ports import (
     TrustedDeploymentProbe,
@@ -585,6 +588,16 @@ def _codex_config(settings: Settings, protocol: CodexProtocol) -> CodexConfig:
     )
 
 
+def _codex_engine_home_config(settings: Settings) -> CodexEngineHomeConfig:
+    """Deployment-owned key-free provider metadata for the private CODEX_HOME."""
+    return CodexEngineHomeConfig(
+        model=settings.codex_model,
+        model_provider=settings.codex_model_provider,
+        base_url=settings.codex_model_base_url,
+        env_key=settings.codex_credential_env_key,
+    )
+
+
 def _codex_adapters(
     settings: Settings,
     runtime_host: RuntimeHost | None,
@@ -658,6 +671,7 @@ def _codex_adapters(
             gate=gate,
             workdir_root=settings.execution_workdir_root,
             resource_policy=_codex_resource_policy(settings),
+            engine_home_config=_codex_engine_home_config(settings),
             history=context.history,
             ownership=ownership,
         )

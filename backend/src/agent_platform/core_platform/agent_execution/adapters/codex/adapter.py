@@ -68,6 +68,7 @@ from .config import (
     CodexStageGate,
 )
 from .events import CodexEventMapper, CodexEventParser, parse_usage
+from .home_config import CodexEngineHomeConfig, write_private_engine_config
 
 ENGINE_ID = "codex"
 PROTOCOL_ID = "cli_exec"
@@ -169,6 +170,7 @@ class CodexCliAdapter:
         ownership: object | None = None,
         credential_broker: object | None = None,
         credential_ref: object | None = None,
+        engine_home_config: CodexEngineHomeConfig | None = None,
         clock: object | None = None,
         id_factory: object | None = None,
     ) -> None:
@@ -180,6 +182,7 @@ class CodexCliAdapter:
         # the credential reference and audience so the Host binds it to this Run.
         self._credential_broker = credential_broker
         self._credential_ref = credential_ref
+        self._engine_home_config = engine_home_config
         self._config = config
         self._gate = gate
         self._root = workdir_root
@@ -247,12 +250,16 @@ class CodexCliAdapter:
         relative = self._workdir_relative(request)
         working_dir = self._contained_workdir(relative)
         # G3 (08 R-13/C5, Phase 5 stage-A P3): create the per-Execution private
-        # CODEX_HOME scaffold inside the validated run workdir. P3 owns only the
-        # directory (0700, no-follow, no content); the key-free config.toml (P5)
-        # and the typed credential/env injection (P6) come later. A symlink or
+        # CODEX_HOME scaffold inside the validated run workdir. P5 optionally
+        # renders a key-free config.toml there and points the typed CODEX_HOME
+        # slot at it; P6 owns the typed credential/env injection. A symlink or
         # ownership fault here is a WORKSPACE_ERROR before any Host call.
         try:
             private_home = ensure_private_engine_home(working_dir)
+            engine_env = {"PATH": self._config.path_env}
+            if self._engine_home_config is not None:
+                write_private_engine_config(private_home, self._engine_home_config)
+                engine_env["CODEX_HOME"] = str(private_home)
         except WorkdirOperationError:
             raise _bounded_error(
                 ExecutionErrorCategory.WORKSPACE_ERROR, ExecutionErrorCode.WORKSPACE_ERROR
@@ -264,10 +271,10 @@ class CodexCliAdapter:
             argv=CODEX_CLI_FIXED_ARGV,
             # 08 R17: the Host starts targets with an empty environment, and the
             # installed CLI is a ``#!/usr/bin/env node`` launcher. Without PATH
-            # the kernel fails the exec itself (measured exit 127), so exactly
-            # one non-secret variable is supplied. No credential, proxy or host
-            # value has a field to travel in.
-            environment={"PATH": self._config.path_env},
+            # the kernel fails the exec itself (measured exit 127). PATH and
+            # CODEX_HOME are typed, non-secret slots; credentials/proxies/host
+            # values have no field to travel in.
+            environment=engine_env,
             # 08 R18: the prompt goes to the Host stdin channel, never argv.
             stdin_payload=payload,
             workdir_relative_path=relative,

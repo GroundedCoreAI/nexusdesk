@@ -25,6 +25,10 @@ CapabilityName = Literal[
     "workspace_required",
 ]
 
+# P5/P6: the closed set of variable NAMES the Codex lane may bind to a Broker
+# secret. It is deployment-owned, never client-controlled, and contains no value.
+CODEX_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset({"OPENAI_API_KEY", "DEEPSEEK_API_KEY"})
+
 _LEGACY_REACT_FIELDS = ("model_profile_id", "model_profile_version", "max_model_rounds")
 # The exact key set ``AgentConfig.normalize_execution`` consumes. It is repeated
 # here (and pinned by a parity test) because the projection may not import the

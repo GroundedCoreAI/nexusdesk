@@ -1,0 +1,11 @@
+# Key-free Codex CLI configuration template (Stage A P5/G6).
+# The backend renders the same shape into each Execution's private CODEX_HOME.
+# Replace only provider metadata; never write an API key value here.
+model = "__CODEX_MODEL__"
+model_provider = "__CODEX_MODEL_PROVIDER__"
+
+[model_providers.__CODEX_MODEL_PROVIDER__]
+name = "__CODEX_MODEL_PROVIDER__"
+base_url = "__CODEX_BASE_URL__"
+env_key = "__CODEX_ENV_KEY__"
+wire_api = "responses"

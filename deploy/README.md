@@ -72,7 +72,19 @@ AGENT_EXECUTION_ORCHESTRATOR_ENABLED=true AGENT_EXECUTION_PHASE3_ENABLED=true \
   docker compose -f deploy/quickstart/compose.yaml up -d postgres app
 ```
 
-Phase 4 Runtime Host 与 Phase 5 Codex 是单独决策的高风险启用项，同样以变量提供、默认关闭：Runtime Host 需要 `AGENT_EXECUTION_RUNTIME_HOST_ENABLED=true` 加非空 `AGENT_EXECUTION_RUNTIME_HOST_ID`（如 `quickstart-runtime`）；Codex 引擎注册要求 `AGENT_CODEX_CLI_ENABLED=true`、`AGENT_CODEX_STAGE_A_VERIFIED=true`、`AGENT_CODEX_ALLOWED_VERSIONS='["0.169.0"]'` 与 `AGENT_CODEX_TRUSTED_TENANTS='["local"]'` 同时成立（版本与租户清单任一为空即保持禁用），且真实执行还要求镜像内装有 Codex CLI；本阶段控制台不提供 Codex 选择入口，这些开关只影响后端注册表。要让配置在 CD 重新部署后仍然生效，把上述变量写入 `deploy/quickstart/.env`（compose 每次都会从该目录自动读取）。
+Phase 4 Runtime Host 与 Phase 5 Codex 是单独决策的高风险启用项，同样以变量提供、默认关闭：Runtime Host 需要 `AGENT_EXECUTION_RUNTIME_HOST_ENABLED=true` 加非空 `AGENT_EXECUTION_RUNTIME_HOST_ID`（如 `quickstart-runtime`）；Codex 引擎注册要求 `AGENT_CODEX_CLI_ENABLED=true`、`AGENT_CODEX_STAGE_A_VERIFIED=true`、`AGENT_CODEX_ALLOWED_VERSIONS='["0.169.0"]'` 与 `AGENT_CODEX_TRUSTED_TENANTS='["local"]'` 同时成立（版本与租户清单任一为空即保持禁用），且真实执行还要求镜像内装有 Codex CLI。本阶段控制台已提供 Codex Engine 选择与凭据引用输入，但凭据 lane（P6）仍需安全签字后才启用。
+
+P4/G4 的可信目标还需要绝对路径 `AGENT_CODEX_CLI_EXECUTABLE_PATH`（容器内路径，如 `/opt/nexusdesk/codex/bin/codex`）；未设置时注册表为空，任何 Codex Run 在 spawn 前被拒绝。P5/G6 的演示挂载只暴露两个显式目录，默认值是空目录 `deploy/quickstart/codex-empty`，不会挂载宿主 home：
+
+```sh
+NEXUSDESK_CODEX_BIN_DIR=/home/nexus/.npm-global/bin \
+NEXUSDESK_CODEX_NODE_DIR=/home/nexus/.nvm/versions/node/v22.23.5 \
+AGENT_CODEX_CLI_EXECUTABLE_PATH=/opt/nexusdesk/codex/bin/codex \
+AGENT_CODEX_PATH_ENV=/opt/nexusdesk/codex/node/bin:/opt/nexusdesk/codex/bin:/usr/local/bin:/usr/bin:/bin \
+  docker compose -f deploy/quickstart/compose.yaml up -d postgres app
+```
+
+`AGENT_CODEX_MODEL`、`AGENT_CODEX_MODEL_PROVIDER`、`AGENT_CODEX_MODEL_BASE_URL` 与 `AGENT_CODEX_CREDENTIAL_ENV_KEY` 只描述无密钥 provider 元数据；平台会在每次执行的私有 `CODEX_HOME` 中生成 `config.toml`，`env_key` 只是变量名。禁止挂载 `~/.codex`、`auth.json`、`~/.codex/.env` 或整个 `/home/nexus`，也不要把真实密钥写进 `.env` 或 compose。要让配置在 CD 重新部署后仍然生效，把上述变量写入 `deploy/quickstart/.env`（compose 每次都会从该目录自动读取）。
 
 ## 生产部署：复用外部中间件
 

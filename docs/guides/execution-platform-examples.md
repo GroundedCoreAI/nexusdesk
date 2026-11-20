@@ -80,6 +80,17 @@ configured tenant (`local` by default).
    Runs (all `published`), and the fencing-denial/usage tables — the seed adds
    no rows to either. High-risk switches remain off.
 
+## Optional Stage A CLI demo (P4/P5)
+
+The seeded walkthrough above remains synthetic. A real CLI turn is a separate,
+explicitly enabled quickstart demo: set all Stage A switches, an absolute
+`AGENT_CODEX_CLI_EXECUTABLE_PATH`, and the two narrow read-only mount sources
+(`NEXUSDESK_CODEX_BIN_DIR`, `NEXUSDESK_CODEX_NODE_DIR`). See `deploy/README.md`
+for the exact variable set. The platform writes a key-free `config.toml` into
+each Execution's private `CODEX_HOME`; `env_key` is a variable name, never a
+secret value. Host `~/.codex`, `auth.json`, `.env` and whole-home mounts stay
+forbidden. The credential lane (P6) and Stage B remain separate decisions.
+
 ## Boundaries
 
 This is customer-facing demonstration data, not acceptance evidence. It does
