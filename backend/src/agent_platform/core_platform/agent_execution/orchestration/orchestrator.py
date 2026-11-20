@@ -31,6 +31,7 @@ from ..contracts import (
 )
 from ..contracts.capabilities import NO_EXECUTION_RESTRICTIONS
 from ..contracts.config import ExecutionConfig
+from ..contracts.instructions import PreparedInstructions
 from ..host.runtime_host import RuntimeHost
 from ..instructions import resolve_instruction_provider
 from ..registry import AdapterRegistry
@@ -45,6 +46,7 @@ from .execution_context import (
     execution_config_from_context,
     execution_rollout_fault,
     published_agent_identity,
+    published_engine_selector,
     resolve_execution_capabilities,
     resolve_with_execution_context,
 )
@@ -70,6 +72,9 @@ _ENGINE_UNAVAILABLE_CODE = "execution_engine_unavailable"
 _CONFIG_INVALID_CODE = "execution_configuration_invalid"
 _POLICY_UNAVAILABLE_CODE = "execution_policy_unavailable"
 _PHASE3_DISABLED_CODE = "execution_phase3_disabled"
+# Engines without a Phase 3 formatter register this id; the barrier supplies a
+# typed empty payload rather than resolving the React provider by accident.
+_NO_INSTRUCTION_PROVIDER = "unavailable"
 # ``not_claimed``/``lease_lost`` are the existing lost-lease/cancellation
 # conditions and must never be reported as a configuration error (R-50/D5).
 _LOST_LEASE_CODE = "worker_lost"
@@ -221,12 +226,15 @@ class ExecutionOrchestrator:
         """True only when the Phase 4 Workdir/Host seams are both wired."""
         return self._workdir_provider is not None and self._runtime_host is not None
 
-    def _process_capable_selection(self) -> bool:
-        # The declared capability of the selected registration decides, never a
-        # settings value: React declares workspace_required=False and therefore
-        # keeps the byte-identical Phase 3 path even with the seams wired.
+    def _process_capable_selection(
+        self, selector: AdapterSelector | None = None
+    ) -> bool:
+        # The declared capability of this Run's selected registration decides,
+        # never a settings value: React declares workspace_required=False and
+        # therefore keeps the byte-identical Phase 3 path even with seams wired.
+        chosen = self._selector if selector is None else selector
         try:
-            descriptor = self._registry.metadata(*self._selector)
+            descriptor = self._registry.metadata(*chosen)
         except Exception:  # noqa: BLE001 - unresolvable metadata cannot enable paths.
             return False
         return descriptor.declared.workspace_required
@@ -236,30 +244,36 @@ class ExecutionOrchestrator:
         context: ExecutionContext,
         worker_emit: WorkerEmit,
     ) -> ExecutionOutcome:
+        # Derived once from the server-owned published snapshot. The deployment
+        # `self._selector` remains the ctor-visible default for tests/logging;
+        # only this Run's identity decides which registered descriptor executes.
+        run_selector = published_engine_selector(
+            context.row, deployment_selector=self._selector
+        )
         if self.phase3_enabled:
             # The Phase 3 barrier returns the adapter and request it resolved on
             # the prepared path, and it classifies every failure itself. The wide
             # ``except Exception`` below would otherwise degrade each classified
             # code to ``execution_error``, which is exactly the P3-IT-22/A6
             # evidence loss (R-45).
-            barrier = await self._phase3_barrier(context)
+            barrier = await self._phase3_barrier(context, run_selector)
             if isinstance(barrier, _BarrierFailure):
                 return barrier.outcome
             context, adapter, request = barrier.context, barrier.adapter, barrier.request
         else:
             try:
                 request = build_execution_request(context)
-                if self._selector != _PRODUCTION_SELECTOR:
+                if run_selector != _PRODUCTION_SELECTOR:
                     request = request.model_copy(
                         update={
-                            "engine_id": self._selector[0],
-                            "protocol_id": self._selector[1],
-                            "adapter_version": self._selector[2],
+                            "engine_id": run_selector[0],
+                            "protocol_id": run_selector[1],
+                            "adapter_version": run_selector[2],
                         }
                     )
                 adapter = resolve_with_execution_context(
                     context,
-                    lambda: self._registry.resolve(*self._selector),
+                    lambda: self._registry.resolve(*run_selector),
                 )
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit):
                 raise
@@ -267,7 +281,7 @@ class ExecutionOrchestrator:
                 return _failed_outcome(_safe_legacy_code(exception))
 
         workdir: WorkdirRecord | None = None
-        if self.execution_paths_enabled and self._process_capable_selection():
+        if self.execution_paths_enabled and self._process_capable_selection(run_selector):
             # 08 T13 fixed order: the Effective validation above has passed,
             # then Workdir prepare (ONE R-11 call), the Host admission state
             # as the support check, and activate before adapter.start. Every
@@ -401,7 +415,9 @@ class ExecutionOrchestrator:
                     )
             raise
 
-    async def _phase3_barrier(self, context: ExecutionContext) -> _BarrierSuccess | _BarrierFailure:
+    async def _phase3_barrier(
+        self, context: ExecutionContext, selector: AdapterSelector
+    ) -> _BarrierSuccess | _BarrierFailure:
         """Run the frozen D6 data flow and classify every failure explicitly.
 
         The order is fixed by 03 §5.3 and 08 R-51/R-52: rollout re-check, capability
@@ -417,12 +433,12 @@ class ExecutionOrchestrator:
                 context.row,
                 phase3_enabled=True,
                 orchestrator_enabled=True,
-                selector=self._selector,
+                selector=selector,
             )
             if code is not None:
                 raise _BarrierFault(code)
             execution_config = execution_config_from_context(context)
-            descriptor = self._registry.metadata(*self._selector)
+            descriptor = self._registry.metadata(*selector)
             agent_identity = published_agent_identity(context)
             resolution = await resolve_execution_capabilities(
                 self._capabilities,
@@ -431,7 +447,7 @@ class ExecutionOrchestrator:
             )
             if not resolution.startup_allowed:
                 raise _BarrierFault(_required_missing_code(resolution))
-            await self._assert_declared(context)
+            await self._assert_declared(context, selector)
             snapshots = build_capability_snapshots(
                 context.execution_id,
                 resolution,
@@ -475,14 +491,24 @@ class ExecutionOrchestrator:
                 summary_message=context.summary_message,
                 customer_memory=context.customer_memory,
             )
-            prepared = resolve_instruction_provider(
-                descriptor.instruction_provider_id, descriptor.provider_version
-            ).prepare(instruction)
+            if descriptor.instruction_provider_id == _NO_INSTRUCTION_PROVIDER:
+                # Codex descriptors deliberately register no React formatter.
+                # Supply a typed empty payload instead of borrowing React's
+                # provider (forbidden by P3-UT-19) or raising on "unavailable".
+                prepared = PreparedInstructions(
+                    provider_id=descriptor.instruction_provider_id,
+                    provider_version=descriptor.provider_version,
+                    payload={},
+                )
+            else:
+                prepared = resolve_instruction_provider(
+                    descriptor.instruction_provider_id, descriptor.provider_version
+                ).prepare(instruction)
             phase3_context = replace(context, prepared_instructions=prepared)
-            request = self._phase3_request(phase3_context, execution_config, resolution)
+            request = self._phase3_request(phase3_context, execution_config, resolution, selector)
             adapter = resolve_with_execution_context(
                 phase3_context,
-                lambda: self._registry.resolve(*self._selector),
+                lambda: self._registry.resolve(*selector),
             )
             return _BarrierSuccess(phase3_context, adapter, request)
         except (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit):
@@ -490,7 +516,9 @@ class ExecutionOrchestrator:
         except Exception as exception:  # noqa: BLE001 - the barrier classifies its own face.
             return _BarrierFailure(_failed_outcome(_classify_barrier_failure(exception)))
 
-    async def _assert_declared(self, context: ExecutionContext) -> None:
+    async def _assert_declared(
+        self, context: ExecutionContext, selector: AdapterSelector
+    ) -> None:
         """Compare an instance declaration against the registered declaration.
 
         This is the one genuinely reachable deployment-divergence signal in Phase 3
@@ -500,10 +528,10 @@ class ExecutionOrchestrator:
         resolution and before any snapshot write or ``adapter.start``, so divergence
         fails closed with ``Adapter.start`` at zero (03 §3.1).
         """
-        descriptor = self._registry.metadata(*self._selector)
+        descriptor = self._registry.metadata(*selector)
         instance = resolve_with_execution_context(
             context,
-            lambda: self._registry.resolve(*self._selector),
+            lambda: self._registry.resolve(*selector),
         )
         declared = await instance.get_capabilities()
         if declared != descriptor.declared:
@@ -514,6 +542,7 @@ class ExecutionOrchestrator:
         context: ExecutionContext,
         execution_config: ExecutionConfig,
         resolution: CapabilityResolution,
+        selector: AdapterSelector,
     ) -> ExecutionRequest:
         """Build the Phase 3 request: identity first, then the two projections.
 
@@ -524,12 +553,12 @@ class ExecutionOrchestrator:
         path because the barrier never runs there.
         """
         request = build_execution_request(context)
-        if self._selector != _PRODUCTION_SELECTOR:
+        if selector != _PRODUCTION_SELECTOR:
             request = request.model_copy(
                 update={
-                    "engine_id": self._selector[0],
-                    "protocol_id": self._selector[1],
-                    "adapter_version": self._selector[2],
+                    "engine_id": selector[0],
+                    "protocol_id": selector[1],
+                    "adapter_version": selector[2],
                 }
             )
         return request.model_copy(

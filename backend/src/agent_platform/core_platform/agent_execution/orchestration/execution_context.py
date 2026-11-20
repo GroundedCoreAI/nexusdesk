@@ -366,7 +366,20 @@ def execution_rollout_fault(
         # A non-boolean rollout value is a deployment defect, never a grant.
         return "execution_configuration_invalid"
     engine = _published_engine_identity(row)
-    if engine is not None and engine != tuple(selector):
+    if engine == _UNDETERMINABLE_ENGINE_TRIPLE:
+        # A published config whose engine cannot be read is never a valid
+        # per-Run selector, even with both switches on: fail closed with the
+        # availability code the gate has always used for that shape.
+        return "execution_engine_unavailable" if phase3_enabled else "execution_phase3_disabled"
+    effective_selector = tuple(selector)
+    if phase3_enabled and orchestrator_enabled:
+        # R11 reversal (09 §5): with both running switches on, the published
+        # engine identity is the selector. Off states still compare against the
+        # production registration, so a non-React draft cannot silently become
+        # active just because its descriptor exists. Registry metadata below /
+        # in the barrier is the authorization boundary for the chosen triple.
+        effective_selector = published_engine_selector(row, deployment_selector=selector)
+    if engine is not None and engine != effective_selector:
         return "execution_engine_unavailable" if phase3_enabled else "execution_phase3_disabled"
     if phase3_enabled and not orchestrator_enabled:
         # 03 §9.2 item 4: the misconfiguration fails closed for Runs while the
@@ -526,6 +539,24 @@ def _published_engine_identity(row: Mapping[str, object]) -> tuple[str, str, str
         execution.engine.protocol_id,
         execution.engine.adapter_version,
     )
+
+
+def published_engine_selector(
+    row: Mapping[str, object],
+    *,
+    deployment_selector: tuple[str, str, str] = PRODUCTION_ADAPTER_SELECTOR,
+) -> tuple[str, str, str]:
+    """The per-Run selector, derived only from the server-owned published snapshot.
+
+    A legacy no-snapshot row keeps the deployment selector (the injected
+    non-production selector used by controlled test adapters). A published
+    non-React engine always selects itself once the two running switches are on;
+    Registry metadata is what decides whether that triple is actually enabled.
+    """
+    published = _published_engine_identity(row)
+    if published == PRODUCTION_ADAPTER_SELECTOR and tuple(deployment_selector) != PRODUCTION_ADAPTER_SELECTOR:
+        return tuple(deployment_selector)
+    return published
 
 
 def _engine_block_triple(published: Mapping[str, object]) -> tuple[str, str, str] | None:
