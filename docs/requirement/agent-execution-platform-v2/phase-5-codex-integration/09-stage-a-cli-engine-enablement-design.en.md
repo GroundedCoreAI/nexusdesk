@@ -198,6 +198,10 @@ merges. This proposal does not constitute that sign-off.
 5. Adversarial cases from 05 C1/C2 and AC-6 (host-auth copy, Secret output, cross-tenant
    start) are re-run and pass with the lane enabled.
 
+The signed record is `10-stage-a-cli-credential-lane-security-signoff.md`: JackChow
+(the owner) signed item by item on 2026-11-20 (GMT+8) for the quickstart-demo credential
+lane only; Stage B, untrusted tenants and production multi-tenancy stay out of scope.
+
 ## 5. Proposed reversal of implementation rulings (for `08` §3)
 
 `08` §2 (R1–R18) is retained **verbatim** as the historical decision record (07 §9). The
@@ -298,9 +302,10 @@ sign-off.
    the Session table, Resume reauthorization, approval/interactive input, P5-IT-18 and
    the separate unlock record are all outside this track.
 
-**Gate still open**: the five §4.5 security-review checklist items must be signed before
-the P6 credential lane merges. The signatory is **JackChow (the owner, repository
-`git user.name`)**. Every prior signature on this track — the P0 design rulings and the
-single-owner phases 4–6 acceptance record — is also signed by JackChow; no separate
-product/QA/security roles are added. The signature must cite item-by-item evidence from
-the implemented lane and cannot be substituted by this design file.
+**Security gate satisfied**: the five §4.5 checklist items were signed item by item by
+**JackChow (the owner, repository `git user.name`)** after P6 implementation; evidence
+and scope are in `10-stage-a-cli-credential-lane-security-signoff.md`. Every prior
+signature on this track — the P0 design rulings and the single-owner phases 4–6
+acceptance record — is also signed by JackChow; no separate product/QA/security roles
+are added. The signature covers the quickstart-demo credential lane only; Stage B,
+untrusted tenants and production multi-tenancy stay locked.

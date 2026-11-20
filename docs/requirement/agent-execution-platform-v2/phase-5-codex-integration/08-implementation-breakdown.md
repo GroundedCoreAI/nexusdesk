@@ -227,10 +227,11 @@ default-off tests including `test_agent_execution_phase4_deployment.py` and
 `test_quickstart_execution_switches_default_fail_closed` from PR #147; add enabled-path
 assertions per stage) is in `09` §7.
 
-Status (2026-11-20): T11–T13 landed as PRs #149, #150 and #151; T14–T17 remain pending.
-Every signatory on this track is JackChow (the owner/user), including the security
-sign-off for `09` §4.5. That sign-off still requires item-by-item evidence from the
-implemented P6 lane before the credential lane may merge.
+Status (2026-11-20): T11–T13 landed as PRs #149, #150 and #151; T14–T16 are implemented
+in the P4–P6 PRs beginning with #152; T17 remains pending. Every signatory on this track is JackChow (the
+owner/user). The `09` §4.5 security sign-off for T16/P6 is recorded in
+`10-stage-a-cli-credential-lane-security-signoff.md` and is scoped to the quickstart
+demo credential lane.
 
 ### 3.6 Host-side independent verification (context, not acceptance evidence)
 
