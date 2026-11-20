@@ -2,6 +2,10 @@
 
 > 状态：待评审（仅规划，未实施；目标路径须在开发前按 Phase 1~4 实际产物重核）
 > 创建：2026-11-02
+> 修订：2026-11-20 — 本文所述 Stage A 骨架已按 `08` 的 fail-closed 裁决实施；把骨架变为
+> **按 Run 可选的 Codex CLI engine** 的独立启用轨道设计登记于
+> `09-stage-a-cli-engine-enablement-design.md`（英文权威 `...design.en.md`），拟翻转的
+> 实施裁决见 `08` §3。本文保留为规划基线，事实核查表不改写。
 > 依据：`01-business-goals.md`（G1~G6）、`02-requirements.md`（FR-1~FR-12、AC-1~AC-12）、架构第 4、8~10、12~13、16~17 节
 
 > 写本文前已核查现状代码、测试、迁移、凭据与 SSE 先例；修订时须在对应小节记录日期与原因。
@@ -162,3 +166,22 @@ Codex 是外部 Engine，模型选择、推理循环和工具执行由 Codex 原
 3. 先部署默认关闭代码，再对单个可信租户开启 CLI；通过 Stage A 门禁后才允许 App-Server 灰度，最后按需开启 Session。
 4. 回滚顺序为关闭 Session → 关闭 App-Server → 停止新 CLI Run → 按 Host 策略清理活动进程；保留新增表与历史事件，无需 down migration。
 5. 任一 Secret 泄露、跨租户访问、不可信租户误开放或孤儿进程失控均立即停止新执行并关闭开关；不得通过放宽沙箱/凭据策略恢复可用性。
+
+## Stage A CLI Engine 启用 — 附录指针（2026-11-20）
+
+> 仅为设计提案。本节是 `08` L147（改公共契约或门禁前须先更新 `03` 与 `08`）要求的指针；
+> 不新增任何 FR/AC/迁移编号，不改写上文事实核查表，因此 `.md`/`.en.md` 配对保持编号
+> 一致（R8）。
+
+Phase 5 已按 **fail-closed** 实施裁决（`08` R11/R13/R15/R16/R17）交付上文骨架：生产 Run
+不能选择或认证 Codex，发布路径用 React block 校验非 React engine，workspace 端口恒为
+`None`，可信目标表为空，Host 只给类型化 `PATH`。该状态是刻意为之，并作为历史记录保留
+（`07` §9、`12` 号范围受限记录）。
+
+把该骨架变为按 Run 可选 `codex/cli_exec/v1` engine 的**独立启用轨道**，设计见
+`09-stage-a-cli-engine-enablement-design.md`（英文权威 `09-...design.en.md`），拟翻转的
+实施裁决与后续任务表登记于 `08` §3。其凭据设计消费已存在的 Phase 6
+`ExecutionCredentialBroker` 接缝（`RuntimeHost.start(credential_ref=...)`、`secret_env`），
+通过每 Execution 私有 `CODEX_HOME` 与无密钥 `config.toml` 完成；明确否决挂载宿主
+`~/.codex`/`auth.json`、放宽 `ProcessSpec.environment`、用模型网关作凭据来源。
+`05` §5 一票否决项 C1–C4 与 Stage B 锁定不变。本附录不实施、也不授权 `09` 中任何内容。

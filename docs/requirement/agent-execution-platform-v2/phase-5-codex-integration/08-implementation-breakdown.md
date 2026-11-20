@@ -145,3 +145,93 @@ Delivery is bounded by the module constant `STDIN_DELIVERY_TIMEOUT_SECONDS = 10.
 
 
 Any implementation discovery that changes a file path, migration dependency, public contract, or gate updates this file and `03` before code changes. Coordination is limited to five rounds; after the fifth unresolved disagreement, retain the smallest fail-closed implementation and record the deferred item as a follow-up issue.
+
+## 3. Stage A CLI Engine Enablement — proposed ruling addendum (2026-11-20)
+
+> **Status: DESIGN PROPOSAL — not implemented, not authorized, not acceptance evidence.**
+> This section is the "follow-up issue" contemplated by the L147 coordination rule above:
+> it is a new enablement track, **not a sixth coordination round**. Section 1 (T1–T10)
+> and Section 2 (R1–R18) above, and every historical verdict/number in `05`, `06`, `07`
+> and `12`, are retained **verbatim** (`07` §9). Nothing below changes a runtime default,
+> flips a switch, merges code, or grants enablement/security approval. The authoritative
+> design is `09-stage-a-cli-engine-enablement-design.en.md` (Chinese mirror: `...design.md`).
+
+### 3.1 What Phase 5 shipped, and what is still locked
+
+Phase 5 shipped a fail-closed Stage A skeleton (typed `CodexConfig` + `CodexStageGate`, a
+registered `codex` Engine with two Protocols, `CodexCliAdapter` over `RuntimeHost`, bounded
+native-event/usage mapping, and the R18 stdin channel). It deliberately did **not** make
+Codex reachable from a production Run (§1 L141, R11/R13/R15/R16/R17). `07` §9 and the
+`12` scope-limited record keep those omissions as historical facts and explicitly do not
+authorize Codex enablement, production routing, or untrusted tenants. Six gates still
+separate "descriptor enabled" from "a Run actually executes and authenticates Codex";
+they are enumerated with verified code seams in `09` §3. This section registers the
+proposed reversals only.
+
+### 3.2 Numbering correction — two distinct "C" sets
+
+`08` §2 cites "coordinator C1/C2" (R10/R11), "(C5)" (R13) and "contradict C4" (R15).
+Those are **implementation-time coordination rulings** and are the object of §3.3 below.
+They are unrelated to the **compliance checks C1–C10** in `05` §5, where C1/C2/C3/C4 are
+**VETO items** (no plaintext Secret, no host `~/.codex/auth.json` copy, zero untrusted-tenant
+exposure, Workspace/cross-tenant denial). The veto items are **never reversed**; the
+credential design in `09` §4 is constrained by them and maps onto each one. Conflating the
+two sets would waive a security veto.
+
+### 3.3 Proposed reversal of engineering rulings (effective only per PR + sign-off)
+
+| Ruling / constraint | Original (fail-closed) | Proposed reversal | Condition / PR |
+|---|---|---|---|
+| R11 + coordinator C1 | Hard-wired production selector; "reaching Codex from a production Run is impossible today". | Per-Run resolution from the published engine identity; keep `react/native/v1` default and off-state byte-identity. | P2; G2; off/on/rollback. |
+| R13 + coordinator C5 | Accept `workspace_unavailable`; never `workspace_required=False`. | Wire a real `WorkspaceProvider`. The "never `workspace_required=False`" clause is **retained**. | P3; G3; C4 adversarial cases. |
+| R15 + coordinator C4 | Keep React-block-only `validate_config`; a Codex `ExecutionConfig` block "would contradict C4". | `ExecutionConfig.codex` + engine-dispatched validation + DTO/SDK/UI; coordinator C4 retires for this track. | P1; G1; public-contract change documented first (L147). |
+| R16 | `TrustedTargetRegistry(())` stays empty. | Register `CODEX_CLI_EXECUTABLE_ID` with fixed argv prefix + parameter grammar, bound to the Gate-6 mount. | P4; G4. |
+| R17 | `ProcessSpec.environment` carries exactly one typed `PATH`. | Keep the typed discipline; add one typed, allowlisted slot mapping the Broker-consumed Secret to `credential_env_key`. | P6; G5; `09` §4.5 security sign-off. |
+| coordinator C2 | "Do not modify the Host" (R10 context). | **No reversal needed**: `RuntimeHost.start(credential_ref=...)` and `secret_env` already exist (R-18(a), Phase 6). The lane consumes the existing seam; no Host rewrite. | P6. |
+
+R10/R18, R12, R14, R6, R7, R8, R9 and the **Stage B lock are unchanged**. R7 is narrowed
+only in that the enablement track consumes the now-existing Phase 6 Broker framework; it
+adds no new Phase 6 capability. Stage B (`app_server`) stays `enabled=False` and still
+requires `P5-IT-18` plus a separate unlock record (05 §6.1).
+
+### 3.4 Credential lane — the security-critical seam
+
+`CodexCliAdapter` currently stores `credential_broker`/`credential_ref` but never passes
+`credential_ref` to `_host.start()`; `CodexConfig.credential_ref` is an unenforced `str`
+placeholder. `RuntimeHost.start(credential_ref: UUID | None)` already implements
+`issue → consume → secret_env["EXECUTION_CREDENTIAL"] → revoke` with fail-closed semantics
+(`host/runtime_host.py:242-343`). The proposed lane (`09` §4) reuses that Phase 6 Broker,
+maps the consumed Secret to the provider's `env_key` variable inside a per-Execution private
+`CODEX_HOME` containing a **key-free** `config.toml`, and keeps the Secret out of
+config/argv/stdin/logs/events/`command_digest`. Explicitly rejected: mounting host
+`~/.codex`/`auth.json`/`.env`, injecting a deployment key into the container environment,
+widening `ProcessSpec.environment` into a free-form map, and pointing Codex at the Model
+Gateway (it has no OpenAI-compatible inbound endpoint). `09` §4.5 is a **blocking security
+review checklist**; P6 must not merge before it is signed.
+
+### 3.5 Ordered follow-up tasks (proposed — not yet implemented)
+
+| ID | Task | Depends on | Gate / sign-off |
+|---|---|---|---|
+| T11 | `ExecutionConfig.codex`, engine-dispatched `validate_config`, `react_matches_engine`, DTO/SDK/normalizer, frontend engine picker. | T2, R15 reversal | P1 / G1 |
+| T12 | Per-Run adapter resolution; engine-branched capability/snapshot/event/workdir; warm targets. | T11, R11 reversal | P2 / G2 |
+| T13 | Real `WorkspaceProvider` + per-Execution `CODEX_HOME` scaffolding (never `workspace_required=False`). | T12, R13 reversal | P3 / G3 / C4 |
+| T14 | `CODEX_CLI_EXECUTABLE_ID` trusted-target descriptor + tests. | T3, R16 reversal | P4 / G4 |
+| T15 | Narrow read-only volume mounts, `AGENT_CODEX_PATH_ENV`, key-free `config.toml` template, quickstart demo docs. | PR #147 switches | P5 / G6 |
+| T16 | Broker resolve/inject/revoke, `credential_env_key` allowlist, Secret-free audit. | T13, T15, R17 reversal | **P6 / G5 / `09` §4.5 sign-off (blocking)** |
+| T17 | End-to-end per-Run Codex turn (dialogue + tool use), `05`/`06`/`07` addenda, Stage A unlock record. | T11–T16 | P7; full Stage A acceptance; Stage B still locked |
+
+P0 (this design PR) satisfies L147 before any of T11–T17 begins. P1–P5 keep the deployment
+fail-closed until P6 and the PR #147 switches are combined. Test baseline (preserve all
+default-off tests including `test_agent_execution_phase4_deployment.py` and
+`test_quickstart_execution_switches_default_fail_closed` from PR #147; add enabled-path
+assertions per stage) is in `09` §7.
+
+### 3.6 Host-side independent verification (context, not acceptance evidence)
+
+On 2026-11-19, outside the platform, host `codex` 0.169.0 + Node v22.23.5 reached a real
+OpenAI-Responses-compatible provider via a custom `[model_providers.*]` block
+(`wire_api = "responses"`, key through an `env_key`-named environment variable) and
+completed both a plain turn and a tool-using (`command_execution`) turn with exit 0. This
+satisfies Gate 6's premise on the target host. It does not open Gates 1–5 and is local
+evidence with an owner (05 §6.1), not CI or acceptance evidence.

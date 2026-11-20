@@ -2,6 +2,11 @@
 
 > Status: Pending review (planning only, not implemented; target paths must be rechecked against actual Phase 1–4 deliverables before development)
 > Created: 2026-11-02
+> Revised: 2026-11-20 — the Stage A skeleton described here was implemented with the fail-closed
+> rulings recorded in `08`; a **separate enablement-track design** (turning the skeleton into a
+> per-Run selectable Codex CLI engine) is registered in
+> `09-stage-a-cli-engine-enablement-design.en.md`, with its proposed ruling reversals in `08` §3.
+> This document is retained as the planning baseline and its factual tables are not rewritten.
 > Basis: `01-business-goals.md` (G1–G6), `02-requirements.md` (FR-1–FR-12, AC-1–AC-12), and architecture Sections 4, 8–10, 12–13, and 16–17
 
 > Current code, tests, migrations, credentials, and SSE precedents were audited before this document was written; later revisions must record date and reason in the affected section.
@@ -161,3 +166,27 @@ See `04-test-plan.md` for detailed cases, adversarial/fault injection, and exit 
 3. Deploy code with switches off, enable CLI for one trusted tenant, permit App-Server canary only after the Stage A gate, and then enable Sessions as needed.
 4. Roll back by disabling Sessions → disabling App-Server → stopping new CLI Runs → cleaning active processes under Host policy; retain new tables and historical events, with no down migration required.
 5. Any Secret disclosure, cross-tenant access, accidental untrusted-tenant exposure, or uncontrolled orphaned process stops new executions and disables the switches; never restore availability by weakening sandbox or credential policy.
+
+## Stage A CLI Engine Enablement — addendum pointer (2026-11-20)
+
+> Design proposal only. This section is a pointer required by `08` L147 (update `03` and
+> `08` before changing a public contract or gate); it adds no new FR/AC/migration IDs and
+> rewrites no factual table above, so the `.md`/`.en.md` pair stays ID-consistent (R8).
+
+Phase 5 shipped the skeleton described above with **fail-closed** implementation rulings
+(`08` R11/R13/R15/R16/R17): a production Run cannot select or authenticate Codex, the
+publish path validates non-React engines against the React block, the workspace port is
+always `None`, the trusted-target allowlist is empty, and the Host supplies only a typed
+`PATH`. That state is intentional and is preserved as the historical record (`07` §9, `12`
+scope-limited record).
+
+A **separate enablement track** that turns this skeleton into a per-Run selectable
+`codex/cli_exec/v1` engine is designed in `09-stage-a-cli-engine-enablement-design.en.md`
+(Chinese mirror `09-stage-a-cli-engine-enablement-design.md`), with the proposed reversal
+of the engineering rulings and the follow-up task table registered in `08` §3. Its
+credential design consumes the already-existing Phase 6 `ExecutionCredentialBroker` seam
+(`RuntimeHost.start(credential_ref=...)`, `secret_env`) via a per-Execution private
+`CODEX_HOME` and a key-free `config.toml`; it explicitly rejects mounting host
+`~/.codex`/`auth.json`, widening `ProcessSpec.environment`, and using the Model Gateway as
+a credential source. The `05` §5 veto items C1–C4 and the Stage B lock are unchanged.
+Nothing in `09` is implemented or authorized by this addendum.

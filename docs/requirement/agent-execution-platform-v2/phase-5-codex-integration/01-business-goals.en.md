@@ -3,6 +3,10 @@
 > Status: Pending review (planning only, not implemented; the current code has no Codex support)
 > Created: 2026-11-02
 > Revised: 2026-11-18 (scope-limited acceptance: the success-metrics "pending Phase 0" baselines, p50/p95, and startup latency are historical context, not stage-acceptance gates; see 05 §6.1. Stage B stays locked)
+> Revised: 2026-11-20 — the Stage A skeleton was implemented under the fail-closed rulings in
+> `08`; a separate enablement-track design (making it a per-Run selectable Codex CLI engine)
+> is in `09-stage-a-cli-engine-enablement-design.en.md`, with proposed ruling reversals in
+> `08` §3. G1–G6 and this goals baseline are retained; this line is not an enablement grant.
 > Basis: `docs/architecture/agent-execution-platform-v2.md`, Sections 3.2, 4, 5, 7–10, 12–13, 17 (Phase 5), and 19–22; see `03-technical-design.md` for the current-state audit
 
 > Phase: Phase 5 (Stage A: CLI Exec; Stage B: App-Server, unlocked strictly in sequence)

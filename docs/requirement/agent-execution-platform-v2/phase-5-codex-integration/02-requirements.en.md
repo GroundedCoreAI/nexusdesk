@@ -2,6 +2,11 @@
 
 > Status: Pending review (planning only, not implemented)
 > Created: 2026-11-02
+> Revised: 2026-11-20 — the Stage A skeleton was implemented under the fail-closed rulings in
+> `08`. A separate enablement-track design (making it a per-Run selectable Codex CLI engine)
+> is in `09-stage-a-cli-engine-enablement-design.en.md` (proposed ruling reversals in `08` §3,
+> PR sequencing in `09` §6). FR-1–FR-12, AC-1–AC-12, and the `05` §5 veto items C1–C4 are
+> retained unchanged; the enablement track rewrites or waives no requirement or veto item.
 > Basis: `01-business-goals.md` (G1–G6); `docs/architecture/agent-execution-platform-v2.md`, Sections 4, 5, 8–10, 12–13, and 17 (Phase 5)
 
 ## User Stories
