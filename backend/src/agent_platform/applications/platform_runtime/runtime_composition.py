@@ -298,10 +298,15 @@ class RuntimeFactoryInstructionPreparer:
     The instruction provider output is produced by the preparation step, which
     lives in this layer; the execution layer only ever sees a structural seam, so
     no ``applications`` import appears below the boundary.
+
+    The composition hands over the ``RuntimeFactory`` that *owns* the method, and
+    a factory instance is not callable: store the bound method instead of the
+    object (P7 defect D-2, which turned every orchestrated Run into an immediate
+    ``execution_error``). A plain callable is still accepted for tests.
     """
 
-    def __init__(self, prepare: Callable[..., object]) -> None:
-        self._prepare = prepare
+    def __init__(self, prepare: Callable[..., object] | None) -> None:
+        self._prepare = getattr(prepare, "prepare_instructions", prepare)
 
     def prepare_instructions(
         self,
@@ -312,6 +317,10 @@ class RuntimeFactoryInstructionPreparer:
         customer_memory: str | None = None,
         engine_context: Mapping[str, object] | None = None,
     ) -> object:
+        if self._prepare is None:
+            # No factory means no preparation source; fail loudly instead of
+            # letting a ``NoneType is not callable`` surface as a generic error.
+            raise TypeError("instruction preparation is not configured")
         return self._prepare(
             row,
             history=history,

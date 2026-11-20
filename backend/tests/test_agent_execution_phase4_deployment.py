@@ -95,6 +95,11 @@ def test_quickstart_execution_switches_default_fail_closed():
     assert env["AGENT_CODEX_CREDENTIAL_ENV_KEY"] == (
         "${AGENT_CODEX_CREDENTIAL_ENV_KEY:-DEEPSEEK_API_KEY}"
     )
+    # D-3: the ceiling is parameterized but keeps the generic default, so a
+    # deployment that never enables Codex is byte-identical to before.
+    assert env["AGENT_EXECUTION_RESOURCE_MEMORY_BYTES"] == (
+        "${AGENT_EXECUTION_RESOURCE_MEMORY_BYTES:-536870912}"
+    )
     assert "AGENT_CODEX_APP_SERVER_ENABLED" not in env
 
 

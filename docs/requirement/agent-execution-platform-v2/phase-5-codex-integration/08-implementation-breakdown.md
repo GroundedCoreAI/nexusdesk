@@ -256,3 +256,29 @@ React 引擎会把 legacy 的 `model_profile_id` / `model_profile_version` 归�
 React 路径行为不变（缺档案仍为 `agent_model_required`，绑定档案仍解析并校验
 `chat`/`tool_calling`），并有 `backend/tests/test_agent_model_gate_engines.py`
 三个节点锁定两侧行为。该缺陷不影响 P1–P6 的 fail-closed 默认值。
+
+### 3.8 P7 验收发现 D-2 / D-3：编排屏障与 Node 资源上限
+
+D-1 修好后发布通了，但每个 Run 仍在 25–30 ms 内以 `execution_error` 结束。在运行容器
+内加临时堆栈日志后定位到两处与引擎无关的部署级缺陷：
+
+- **D-2（编排屏障）**：`runtime_composition.RuntimeFactoryInstructionPreparer` 期望一个
+  可调用对象，而组装点传入的是 `RuntimeFactory` 实例本身，于是 Phase 3 屏障在
+  `prepare_instructions` 处抛 `TypeError: 'RuntimeFactory' object is not callable`，
+  被屏障分类为 `execution_error`。任何启用 orchestrator 的 Run（含 React）都会在
+  `Adapter.start` 之前失败。修复：该适配器在构造时把工厂绑定为其
+  `prepare_instructions` 方法（保留接受裸可调用对象的测试接缝），未配置时抛出显式
+  `TypeError`，不再退化成不透明的 `NoneType` 错误。
+- **D-3（资源上限）**：Codex CLI 目标是 Node 进程，V8 启动需预留大段虚拟地址空间；
+  沿用通用 `AGENT_EXECUTION_RESOURCE_MEMORY_BYTES=536870912`（512 MiB 的
+  `RLIMIT_AS`）会让 CLI 在第一轮之前崩溃（实测 `Fatal process out of memory: Failed
+  to reserve virtual memory for CodeRange`，宿主记为 exit_code `-5`/SIGTRAP），Host
+  只能报 `engine_unavailable`。实测 1 GiB 可完成一轮。修复：新增
+  `CODEX_CLI_MIN_MEMORY_BYTES = 1 GiB` 与启动期校验——`AGENT_CODEX_CLI_ENABLED=true`
+  且内存上限低于该下限时直接拒绝启动；同时在 quickstart compose、两份 `.env.example`
+  与 `deploy/README.md` 写明抬升方式（演示用 2 GiB）。Codex 关闭时该校验不生效，
+  默认 512 MiB 部署行为不变。
+
+两处修复的回归在 `backend/tests/test_agent_execution_stage_a_preflight.py`：工厂方法绑定、
+裸可调用对象、未配置即报错、内存下限拒绝/接受、以及 Codex 关闭时校验失效共 5 个节点。
+两者都不改变 Stage B 锁定状态，也不放宽任何凭据或沙箱边界。
