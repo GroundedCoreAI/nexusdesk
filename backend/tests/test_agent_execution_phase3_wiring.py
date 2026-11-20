@@ -872,9 +872,7 @@ def test_rollout_gate_fails_closed_on_misconfiguration_and_unavailable_engine():
     assert mismatch.value.code == "execution_configuration_invalid"
     with pytest.raises(RuntimeFault) as unavailable:
         enforce_execution_rollout(
-            published_row(
-                engine={"engine_id": "codex", "protocol_id": "native", "adapter_version": "v1"}
-            ),
+            published_row(engine={}),
             phase3_enabled=True,
             orchestrator_enabled=True,
             selector=PRODUCTION_ADAPTER_SELECTOR,
@@ -893,6 +891,41 @@ def test_rollout_gate_lets_the_two_running_states_pass():
     )
     enforce_execution_rollout(
         published_row(),
+        phase3_enabled=True,
+        orchestrator_enabled=True,
+        selector=PRODUCTION_ADAPTER_SELECTOR,
+        fault=_fault,
+    )
+
+
+def test_rollout_gate_admits_a_published_codex_triple_only_with_both_switches_on():
+    """R11 reversal: on/on delegates engine admission to the Registry, not the gate."""
+    row = published_row(
+        engine={"engine_id": "codex", "protocol_id": "cli_exec", "adapter_version": "v1"}
+    )
+    for phase3, orchestrator in ((False, False), (False, True)):
+        with pytest.raises(RuntimeFault) as off:
+            enforce_execution_rollout(
+                row,
+                phase3_enabled=phase3,
+                orchestrator_enabled=orchestrator,
+                selector=PRODUCTION_ADAPTER_SELECTOR,
+                fault=_fault,
+            )
+        assert off.value.code == "execution_phase3_disabled"
+    with pytest.raises(RuntimeFault) as misconfigured:
+        enforce_execution_rollout(
+            row,
+            phase3_enabled=True,
+            orchestrator_enabled=False,
+            selector=PRODUCTION_ADAPTER_SELECTOR,
+            fault=_fault,
+        )
+    assert misconfigured.value.code == "execution_engine_unavailable"
+    # on/on: the published triple is the selector; an unregistered or disabled
+    # descriptor is refused later by Registry metadata, not by this classifier.
+    enforce_execution_rollout(
+        row,
         phase3_enabled=True,
         orchestrator_enabled=True,
         selector=PRODUCTION_ADAPTER_SELECTOR,

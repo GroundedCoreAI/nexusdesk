@@ -162,14 +162,13 @@ def test_codex_registration_does_not_add_a_second_warm_target() -> None:
     assert (targets[0].engine_id, targets[0].protocol_id) == ("react", "native")
 
 
-def test_orchestrator_closed_loop_with_an_injected_codex_selector(tmp_path) -> None:
-    """C1: prove the loop by injecting a selector; never change the Worker default.
+def test_orchestrator_closed_loop_with_a_published_codex_engine(tmp_path) -> None:
+    """R11 reversal: a published entity selects Codex without a deployment selector.
 
-    The production selector stays ``("react","native","v1")`` - that is exactly
-    why this test has to pass its own. A stub Host stands in for process
-    creation, so the assertion is about Orchestrator -> Adapter -> outcome
-    plumbing (event emission, private outcome, no identity drift), not about
-    spawning.
+    The orchestrator keeps the production React default; only the server-owned
+    published Agent config changes this Run's adapter. A stub Host stands in for
+    process creation, so the assertion stays about Orchestrator -> Adapter ->
+    outcome plumbing (events, private outcome, no identity drift).
     """
     import asyncio
     import json
@@ -287,7 +286,20 @@ def test_orchestrator_closed_loop_with_an_injected_codex_selector(tmp_path) -> N
             "tenant_id": tenant,
             "conversation_id": UUID("00000000-0000-4000-8000-000000000778"),
             "input": "current question",
-            "config": {},
+            "config": {
+                "agent": {
+                    "id": str(uuid4()),
+                    "version": 1,
+                    "config": {
+                        "engine": {
+                            "engine_id": "codex",
+                            "protocol_id": "cli_exec",
+                            "adapter_version": "v1",
+                        },
+                        "codex": {"version": "0.169.0"},
+                    },
+                }
+            },
         },
         history=[{"role": "user", "content": "earlier"}],
         timeout_seconds=30,
@@ -300,7 +312,8 @@ def test_orchestrator_closed_loop_with_an_injected_codex_selector(tmp_path) -> N
     async def emit(kind, data) -> None:
         emitted.append((kind, data))
 
-    orchestrator = ExecutionOrchestrator(registry, selector=("codex", "cli_exec", "v1"))
+    orchestrator = ExecutionOrchestrator(registry)
+    assert orchestrator.selector == ("react", "native", "v1")
     outcome = asyncio.run(orchestrator.execute(context, emit))
 
     assert outcome.status == "completed"
