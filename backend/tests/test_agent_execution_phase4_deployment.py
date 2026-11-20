@@ -81,6 +81,12 @@ def test_quickstart_execution_switches_default_fail_closed():
     assert env["AGENT_CODEX_TRUSTED_TENANTS"] == (
         "${AGENT_CODEX_TRUSTED_TENANTS:-[]}"
     )
+    assert env["AGENT_CODEX_PATH_ENV"] == (
+        "${AGENT_CODEX_PATH_ENV:-/usr/local/bin:/usr/bin:/bin}"
+    )
+    assert env["AGENT_CODEX_CLI_EXECUTABLE_PATH"] == (
+        "${AGENT_CODEX_CLI_EXECUTABLE_PATH:-}"
+    )
     assert "AGENT_CODEX_APP_SERVER_ENABLED" not in env
 
 

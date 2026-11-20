@@ -1,6 +1,8 @@
 # Phase 5 · Stage A CLI Engine Enablement — Design (enablement-track proposal)
 
-> Status: **DESIGN PROPOSAL — not implemented, not authorized, not acceptance evidence.**
+> Status: **enablement-track design baseline — P0–P3 merged (PRs #148–#151),
+> P4–P7 proceed under this file. This file is neither acceptance evidence nor a
+> security sign-off.**
 > Created: 2026-11-20
 > Language: English is the authoritative new text per `08` R8; the Chinese mirror is
 > `09-stage-a-cli-engine-enablement-design.md` and carries the same section/Gate/FR IDs.
@@ -296,6 +298,9 @@ sign-off.
    the Session table, Resume reauthorization, approval/interactive input, P5-IT-18 and
    the separate unlock record are all outside this track.
 
-**Gate still open**: the five §4.5 security-review checklist items must be signed by a
-security owner before the P6 credential lane merges; the signatory is still to be
-designated. P0 (this design PR) must merge before P1 code starts.
+**Gate still open**: the five §4.5 security-review checklist items must be signed before
+the P6 credential lane merges. The signatory is **JackChow (the owner, repository
+`git user.name`)**. Every prior signature on this track — the P0 design rulings and the
+single-owner phases 4–6 acceptance record — is also signed by JackChow; no separate
+product/QA/security roles are added. The signature must cite item-by-item evidence from
+the implemented lane and cannot be substituted by this design file.

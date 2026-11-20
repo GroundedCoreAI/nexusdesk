@@ -35,6 +35,10 @@ from agent_platform.core_platform.agent_execution.adapters.codex.adapter import 
 from agent_platform.core_platform.agent_execution.adapters.codex.adapter import (
     declared_capabilities as codex_declared_capabilities,
 )
+from agent_platform.core_platform.agent_execution.adapters.codex.cli_exec import (
+    CODEX_CLI_EXECUTABLE_ID,
+    CODEX_CLI_FIXED_ARGV,
+)
 from agent_platform.core_platform.agent_execution.adapters.codex.config import (
     CodexConfig,
     CodexProtocol,
@@ -99,6 +103,7 @@ from agent_platform.core_platform.agent_execution.host.observability import (
 from agent_platform.core_platform.agent_execution.host.process_registry import ProcessRegistry
 from agent_platform.core_platform.agent_execution.host.process_runner import (
     ProcessRunner,
+    TrustedTargetDescriptor,
     TrustedTargetRegistry,
 )
 from agent_platform.core_platform.agent_execution.host.process_supervisor import ProcessSupervisor
@@ -529,6 +534,34 @@ def _codex_stage_gate(settings: Settings) -> CodexStageGate:
         allowed_versions=tuple(settings.codex_allowed_versions),
         trusted_tenants=tuple(settings.codex_trusted_tenants),
         stage_a_verified=settings.codex_stage_a_verified,
+    )
+
+
+def _codex_trusted_targets(settings: Settings) -> tuple[TrustedTargetDescriptor, ...]:
+    """P4/G4: the one narrow CLI target, registered only in the enabled lane.
+
+    A published descriptor (G1/G2) is necessary but not sufficient: the Host must
+    actually be assembled, the deployment gate must be fully satisfied, and the
+    operator must pin an absolute in-container executable path. Any missing part
+    yields the empty registry, so ``RuntimeHost.start`` refuses the Run before
+    spawn. Stage A pins the full argv, hence ``max_parameters=0``.
+    """
+    if (
+        not settings.execution_runtime_host_enabled
+        or not settings.execution_runtime_host_id
+        or not settings.codex_cli_executable_path
+    ):
+        return ()
+    gate = _codex_stage_gate(settings)
+    if not gate.deployment_enabled(CodexProtocol.CLI_EXEC):
+        return ()
+    return (
+        TrustedTargetDescriptor(
+            executable_id=CODEX_CLI_EXECUTABLE_ID,
+            executable_path=settings.codex_cli_executable_path,
+            fixed_prefix=CODEX_CLI_FIXED_ARGV,
+            max_parameters=0,
+        ),
     )
 
 
@@ -1023,10 +1056,10 @@ def _build_execution_runtime_subsystem(
     check pins exactly this). ``boot_id`` and ``clock`` are code-level seams
     for tests and for the recovery audit, never settings-selectable.
 
-    The trusted-target allowlist is the empty code constant: Phase 4 registers
-    no production executable (08 §1.9 - real engines arrive in Phase 5), so
-    anything started through this composition lane is refused by the Runner
-    gate before spawn; test triples compose their own registry explicitly.
+    The trusted-target allowlist is empty unless the full Stage A lane is enabled
+    (P4/G4): the deployment gate, the Runtime Host and an absolute in-container
+    CLI path must all be present. Test triples compose their own registry
+    explicitly.
     """
     if not settings.execution_runtime_host_id:
         return None
@@ -1074,7 +1107,7 @@ def _build_execution_runtime_subsystem(
     host = RuntimeHost(
         enabled=settings.execution_runtime_host_enabled,
         host_id=settings.execution_runtime_host_id,
-        runner=ProcessRunner(TrustedTargetRegistry(())),
+        runner=ProcessRunner(TrustedTargetRegistry(_codex_trusted_targets(settings))),
         supervisor=ProcessSupervisor(
             cancel_grace_seconds=settings.execution_process_cancel_grace_seconds,
             kill_timeout_seconds=settings.execution_process_kill_timeout_seconds,

@@ -228,6 +228,10 @@ class Settings(BaseSettings):
     # (measured exit 127). Deployment-specific because the interpreter lives in
     # different places per image; it is never derived from the host process.
     codex_path_env: str = "/usr/local/bin:/usr/bin:/bin"
+    # Stage A trusted target (P4/G4): the absolute in-container CLI path pinned by
+    # the Runner allowlist. Empty by default, so no executable is registered and
+    # every Codex start remains untrusted even if the descriptor is enabled.
+    codex_cli_executable_path: str = ""
     model_timeout_seconds: float = Field(default=30, gt=0)
     # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
     # Enabled by default for the typewriter UI. A deployment can opt out with
@@ -604,6 +608,15 @@ class Settings(BaseSettings):
             raise ValueError("codex_app_server_enabled requires codex_cli_enabled")
         if not self.codex_stage_a_verified:
             raise ValueError("codex_app_server_enabled requires codex_stage_a_verified")
+        return self
+
+    @model_validator(mode="after")
+    def validate_codex_cli_executable_path(self):
+        # The Runner descriptor rejects relative paths before spawn; surface the
+        # same rule at configuration time so a bad deployment cannot look healthy
+        # while quietly registering no trusted target. Empty remains fail-closed.
+        if self.codex_cli_executable_path and not Path(self.codex_cli_executable_path).is_absolute():
+            raise ValueError("codex_cli_executable_path must be absolute when set")
         return self
 
     @property
