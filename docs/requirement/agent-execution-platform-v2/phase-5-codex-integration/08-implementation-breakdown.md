@@ -241,3 +241,18 @@ OpenAI-Responses-compatible provider via a custom `[model_providers.*]` block
 completed both a plain turn and a tool-using (`command_execution`) turn with exit 0. This
 satisfies Gate 6's premise on the target host. It does not open Gates 1–5 and is local
 evidence with an owner (05 §6.1), not CI or acceptance evidence.
+
+### 3.7 P7 验收发现 D-1：CLI 引擎仍被要求平台模型档案
+
+真实端到端验收第一次真正发布 Codex Agent 时，`POST /agents/{id}/publish` 返回
+`409 agent_model_required`，P7 无法继续。根因是 `AgentService.validate_model()` 的
+平台模型档案校验对所有引擎无条件生效，而 `AgentConfig.normalize_execution` 对非
+React 引擎会把 legacy 的 `model_profile_id` / `model_profile_version` 归一化为
+`None`（CLI 引擎的模型由引擎自身配置决定，见 `09` §3）。两者叠加使任何 Codex
+引擎 Agent 都无法发布、回滚或生成快照，P1/T11 的“可选引擎”在发布环节实际不可用。
+
+修复（本 PR）：新增显式集合 `MODEL_PROFILE_ENGINES = {"react"}`，`validate_model()`
+只对该集合内的引擎解析平台模型档案；集合外引擎直接返回，不做目录查询。默认
+React 路径行为不变（缺档案仍为 `agent_model_required`，绑定档案仍解析并校验
+`chat`/`tool_calling`），并有 `backend/tests/test_agent_model_gate_engines.py`
+三个节点锁定两侧行为。该缺陷不影响 P1–P6 的 fail-closed 默认值。
