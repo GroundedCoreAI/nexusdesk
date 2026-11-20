@@ -91,6 +91,9 @@ services:
       AGENT_CODEX_ALLOWED_VERSIONS: "${AGENT_CODEX_ALLOWED_VERSIONS:-[]}"
       AGENT_CODEX_TRUSTED_TENANTS: "${AGENT_CODEX_TRUSTED_TENANTS:-[]}"
       AGENT_CODEX_PATH_ENV: ${AGENT_CODEX_PATH_ENV:-/usr/local/bin:/usr/bin:/bin}
+      # P4/G4 trusted target: empty by default, so no executable is allowlisted.
+      # Set the absolute in-container CLI path only with the full Stage A gate.
+      AGENT_CODEX_CLI_EXECUTABLE_PATH: ${AGENT_CODEX_CLI_EXECUTABLE_PATH:-}
       # Runtime Host identity: empty by default so the Host subsystem never
       # assembles (08 R-7). Set it together with the switch above, e.g.
       # AGENT_EXECUTION_RUNTIME_HOST_ID=quickstart-runtime, as the deliberate
