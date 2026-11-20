@@ -180,6 +180,10 @@ Secret 没有字段可承载。天真地"把 `~/.codex/.env` 挂进容器"会：
 5. 05 C1/C2 与 AC-6 的对抗用例（宿主 auth 复制、Secret 输出、跨租户启动）在 lane 启用
    状态下重跑并通过。
 
+签字记录见 `10-stage-a-cli-credential-lane-security-signoff.md`：JackChow（用户本人）
+于 2026-11-20（GMT+8）逐项确认并署名，签署范围为 quickstart 演示凭据 lane，不含
+Stage B、不可信租户或生产多租户。
+
 ## 5. 拟翻转的实施裁决（供 `08` §3 登记）
 
 `08` §2（R1–R18）**逐字保留**为历史裁决记录（07 §9）。下表只登记启用轨道的拟翻转项；
@@ -265,7 +269,8 @@ fail-closed。
 4. **Stage B：排除**。`app_server` 保持 `enabled=False`、factory 抛错；Session 表、
    Resume 重鉴权、审批与交互输入、P5-IT-18 与独立解锁记录均不在本轨道。
 
-**仍未满足的门禁**：§4.5 安全评审清单（5 项）须在 P6 凭据 lane 合并前完成签字；
-签字人明确为 **JackChow（用户本人，仓库 `git user.name`）**。本轨道此前所有签字
-（含 P0 设计裁决、阶段 4–6 单一验收记录）也均由 JackChow 署名，不另设产品/QA/
-安全等多角色签字。签字必须附 P6 实现后的逐项证据，不得由本设计文件代替。
+**安全门禁已满足**：§4.5 安全评审清单（5 项）已由 **JackChow（用户本人，仓库
+`git user.name`）** 在 P6 实现后逐项签署，证据与范围见
+`10-stage-a-cli-credential-lane-security-signoff.md`。本轨道此前所有签字（含 P0 设计
+裁决、阶段 4–6 单一验收记录）也均由 JackChow 署名，不另设产品/QA/安全等多角色签字。
+签字只覆盖 quickstart 演示凭据 lane；Stage B、不可信租户与生产多租户仍锁定。
