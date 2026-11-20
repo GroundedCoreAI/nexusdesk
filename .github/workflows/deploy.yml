@@ -253,6 +253,21 @@ jobs:
             # rollback reference (spec V2 §5.3/§6).
             printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${COMMIT_SHA}" "${IMAGE_TAG}" | tee -a /home/nexus/nexusdesk/.deployed-versions
             docker compose -f deploy/quickstart/compose.yaml exec -T app python /app/deploy/healthcheck.py quickstart
+            # Persist the verified immutable tag into the host .env. CD exports
+            # NEXUSDESK_VERSION only for this shell, so a later manual
+            # `docker compose up -d` would otherwise read a stale .env pin and
+            # silently roll the running stack back to an older image. Only a
+            # deploy that passed --wait and the healthcheck reaches this line.
+            ENV_FILE=deploy/quickstart/.env
+            if [ ! -f "${ENV_FILE}" ]; then
+              : > "${ENV_FILE}"
+            fi
+            if grep -q '^NEXUSDESK_VERSION=' "${ENV_FILE}"; then
+              sed -i "s|^NEXUSDESK_VERSION=.*|NEXUSDESK_VERSION=${IMAGE_TAG}|" "${ENV_FILE}"
+            else
+              printf 'NEXUSDESK_VERSION=%s\n' "${IMAGE_TAG}" >> "${ENV_FILE}"
+            fi
+            echo "Pinned ${ENV_FILE} to NEXUSDESK_VERSION=${IMAGE_TAG}"
 
       - name: Record deployment
         if: always()

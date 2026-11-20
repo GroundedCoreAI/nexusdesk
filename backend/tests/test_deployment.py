@@ -483,6 +483,28 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     assert deploy_step["with"]["command_timeout"] == "60m"
 
 
+def test_deploy_workflow_persists_the_verified_image_tag_in_env():
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
+    deploy_step = next(
+        s
+        for s in workflow["jobs"]["deploy"]["steps"]
+        if s.get("name") == "Deploy to test server"
+    )
+    script = deploy_step["with"]["script"]
+
+    # CD exports the tag only for the current shell. Without persisting it, a
+    # later manual `docker compose up -d` reads a stale .env pin and silently
+    # rolls the running stack back to an older image.
+    assert "IMAGE_TAG" in deploy_step["with"]["envs"].split(",")
+    assert "deploy/quickstart/.env" in script
+    assert "NEXUSDESK_VERSION=${IMAGE_TAG}" in script
+
+    # Only a deploy that passed --wait and the healthcheck may pin the tag.
+    assert script.index("healthcheck.py quickstart") < script.index("NEXUSDESK_VERSION=${IMAGE_TAG}")
+
+
 def test_deploy_workflow_only_deploys_ci_verified_integration_commits():
     import yaml
 
