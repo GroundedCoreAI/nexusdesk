@@ -92,3 +92,31 @@
 | 验收负责人 | 执行人 | 日期 | 目标 SHA | 结论 | 证据/遗留 |
 |---|---|---|---|---|---|
 | JackChow（用户本人确认，2026-11-19 GMT+8） | WorkBuddy 自动化验收执行 | 2026-11-18 | `80fac6056682a7835c61dab4678c5772b8689d1f` | **通过（范围限定 / PASS scope-limited）** | `../12-scope-limited-acceptance-record-20261118-phase4-6.md` §5；证据包 `20261118T150343Z.tar.gz` |
+
+
+---
+
+## 2026-11-20 P7 Stage A 收口补记（范围限定）
+
+按 §6.1 的口径，本补记只追加证据与结论，不改写上文历史判据、门禁定义与 2026-11-18
+单一记录。P7 / T17 的端到端验收已在干净 CI 镜像 `63221a1fd3ba` 上执行，权威记录为
+`../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`，结论
+**通过（范围限定 / PASS scope-limited）**，由单一验收负责人 JackChow 于 2026-11-20
+18:49（GMT+8）签署。
+
+- **A1（对话 turn）**：两轮连续 `completed` / `output=OK`，每轮 8 条有序 `runtime_events`；
+  凭据 `grant_issued → grant_used`，`retained` workdir，`engine_terminal` usage 落账。
+- **工具调用 turn**：平台容器内受 Docker 默认 seccomp 阻断（`bwrap` 无法创建 user namespace，
+  `unshare -Ur` → EPERM）。按 2026-11-18 修订作为**明确超范围说明**登记，不改写为通过，
+  也不作为阶段门禁；平台外主机侧 `command_execution` turn 已独立验证 exit 0，
+  但按 `08` §3.6 属本地证据，不作验收证据。
+- **A2 / C7 不受影响**：本补记记录的是 Stage A（`cli_exec/v1`）在 quickstart 单租户演示范围的
+  解锁，**不是** A2 / C7 / `04` P5-IT-18 所指的 Stage B 解锁记录。Stage B 仍锁定，
+  P5-IT-18 与 Stage B 独立解锁记录仍缺失且未申请，须另附独立审批。
+- **门禁影响**：§3 / §6 的判据与 2026-11-18 单一记录保留为历史结论；本补记在其口径下
+  追加一条新的、证据绑定的范围限定验收记录，不追认 Phase 0/1 正式验收，
+  也不把 `pending_env` / 未测量项改写为通过。
+
+| 验收负责人 | 执行人 | 日期 | 目标 SHA | 结论 | 证据/遗留 |
+|---|---|---|---|---|---|
+| JackChow（用户本人，2026-11-20 GMT+8 确认签署） | WorkBuddy 自动化验收执行 | 2026-11-20 | `63221a1fd3bad7562b351b7bbbd23e0c95500cb6` | **通过（范围限定 / PASS scope-limited）** | `../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`；`06` / `07` 的 2026-11-20 补记；遗留：容器内 bwrap 沙箱边界、`cleanup_failed` 保守终态 |

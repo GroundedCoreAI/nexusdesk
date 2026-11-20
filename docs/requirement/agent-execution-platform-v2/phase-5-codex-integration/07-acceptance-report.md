@@ -187,3 +187,68 @@ This decision does **not** authorize enabling Codex, merging/enabling/advertisin
 结论：**通过（范围限定 / PASS scope-limited）**；单一验收负责人 JackChow 已于 2026-11-19 00:36（GMT+8）确认签署本阶段验收（见权威记录 `../12-scope-limited-acceptance-record-20261118-phase4-6.md` §5），无未完成签署项。性能/CI provenance/历史样本/真实 Codex 发布环境等已按 2026-11-18 修订移出阶段门禁；高风险启用未请求、未授权。本补记仅追加证据，不改写上文历史结论与数字。
 
 权威记录：`../12-scope-limited-acceptance-record-20261118-phase4-6.md`；证据包 `20261118T150343Z.tar.gz`，SHA256 `bbc979e7d999a274fb689dbc458367dcca3c61610006c0339207ebe7e9e8050c`。
+
+
+---
+
+## 2026-11-20 P7 Stage A 端到端验收补记（范围限定）
+
+> 本补记只追加证据与新结论，不改写 §8 / §9 的历史结论、判据与数字。按 append-only
+> 规则，新结论由新的、证据绑定的验收记录给出：
+> `../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`。
+
+在干净 CI 镜像 `63221a1fd3ba`（CD `44716695070`，3/3 success，`docker diff` 零 `/app`
+改动）上完成 P7 / T17 端到端验收：两轮连续 Codex 对话 Run `completed` /
+`error_code=None` / `output="OK"`，各 8 条有序 `runtime_events`
+（`run.queued → … → codex.turn.completed → run.completed`）；凭据审计
+`grant_issued:success → grant_used:success`；workdir `retained`；
+`runtime_usage_ledger` 的 `engine_terminal` 落账；`CODEX_HOME` 无 `auth.json`。
+PR #155 修复了「发布可用」到「真实轮次跑通」之间的 4 个阻断缺陷
+（D-1…D-4，`08` §3.7 / §3.8 / §3.9）。本地门禁 2368 passed / 6 skipped（#155 时点），
+CI 5/5，CD 3/3。
+
+结论：**通过（范围限定 / PASS scope-limited）**；单一验收负责人 JackChow 已于
+2026-11-20 18:49（GMT+8）确认签署，无未完成签署项（权威记录 `../13-…md` §8）。
+
+**对上文历史结论的影响。** §8 的 "Stage A full acceptance has NOT passed"、§3 的 A2
+`pending_env`、§7 的 L12 与 §8 的 "formal Stage A unlock record are absent" 均按
+append-only 保留为历史决策记录；作为**门禁逻辑**它们被 `05` §6.1、§9 与本补记取代。
+本补记给出的是范围限定的 Stage A 通过结论与 Stage A 解锁记录，**不宣称
+"full acceptance"，不改写为无条件通过**。容器内需要 `bwrap` 沙箱的工具调用受 Docker
+默认 seccomp 阻断（`unshare -Ur` → EPERM），按 2026-11-18 修订登记为明确超范围说明，
+不作为门禁；主机侧独立验证的 `command_execution` turn 属本地证据（`08` §3.6）。
+
+**Stage B stays locked and separate.** 本补记不解锁 Stage B，不授权 App-Server
+传输 / JSON-RPC 端到端 / Session Resume / 审批与交互输入，不放开生产 Codex 路由或
+不可信多租户，也不声明凭据或租户隔离已达生产门槛；C7 仍只在 Stage B 保持锁定的前提下成立。
+`cleanup_failed` / `runtime_host_identity_mismatch` 的 fail-closed 保守终态作为遗留跟踪项保留。
+
+
+---
+
+## Stage A 解锁记录（范围限定，2026-11-20）
+
+> 本记录由单一验收负责人确认，**仅解锁下述范围**；它不构成 `04` P5-IT-18、§3 A2、
+> §4 C7 与 `05` §6.1 所指的 **Stage B 解锁记录**。
+
+| 字段 | 值 |
+|---|---|
+| 解锁对象 | `codex` Engine 的 `cli_exec/v1` Protocol（Stage A），仅限 quickstart 演示部署 |
+| 授权范围 | 单可信租户 `local`；Codex CLI `0.169.0`；API key 仅经 Execution Credential Broker 的 typed env slot 投递；所有 `AGENT_EXECUTION_*` / `AGENT_CODEX_*` 默认仍 fail-closed |
+| 解锁依据 | P0–P7 全部合入（#148–#157）；`09` §10 负责人决策；`09` §4.5 安全签字（`10-stage-a-cli-credential-lane-security-signoff.md`，仅覆盖 quickstart 凭据 lane）；干净镜像端到端证据（`13`）；本文件 2026-11-20 补记 |
+| 目标 SHA | `63221a1fd3bad7562b351b7bbbd23e0c95500cb6` |
+| 验收负责人 | **JackChow**（用户本人；本轨道所有签字人均为同一人，单一验收负责人） |
+| 执行人 | WorkBuddy 自动化验收执行 |
+| 签署 | **已确认签署**，2026-11-20 18:49（GMT+8，即 2026-11-20T10:49Z） |
+| 结论 | **通过（范围限定 / PASS scope-limited）；Stage A 在上述范围内解锁** |
+| 权威记录 | `../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md` |
+
+**未解锁 / 未授权（明确边界）**：Stage B（`codex/app_server/v1`，`enabled=False`、
+factory 抛错）、P5-IT-18（至少 20 场景 × 连续 3 次回归）与 C7 所需的 Stage B 独立解锁记录、
+生产 Codex 路由、生产可信目标注册、不可信多租户 / 生产多租户、容器内 `bwrap` 沙箱工具执行
+（Docker 默认 seccomp，`13` §6.1）。高风险能力启用仍须独立安全 / 运维审批，本记录不替代
+该审批；`13` §6.2 的 `cleanup_failed` 保守终态作为遗留跟踪项保留。
+
+> 签署范围说明：按最小核心团队标准，仅要求单一验收负责人记录，不要求多角色签字；
+> §8 的历史多角色签字表及其 `pending` / `unsigned` 状态为历史背景，不再作为门禁，
+> 以 `12`、`13` 与本记录为准。
