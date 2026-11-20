@@ -526,8 +526,11 @@ def _codex_stage_gate(settings: Settings) -> CodexStageGate:
 
 
 def _codex_config(settings: Settings, protocol: CodexProtocol) -> CodexConfig:
-    """Deployment-level Codex options; never part of ``ExecutionConfig`` (C4).
+    """Deployment-level Codex defaults used only when metadata is registered.
 
+    A published Agent may now carry an optional ``ExecutionConfig.codex`` block
+    (09 §5 retires coordinator C4 for this track); this function supplies the
+    deployment default/placeholder for registration, not a second policy source.
     The pinned version is the first entry of the allowlist so one settings value
     drives both the gate and the adapter's own version. An empty allowlist keeps
     the placeholder version: the descriptor stays disabled in that state, so the

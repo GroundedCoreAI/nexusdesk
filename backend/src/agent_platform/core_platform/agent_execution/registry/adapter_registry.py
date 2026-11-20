@@ -33,6 +33,27 @@ _PROTOCOL_ID_ADAPTER = TypeAdapter(ProtocolId, config=ConfigDict(strict=True))
 _ADAPTER_VERSION_ADAPTER = TypeAdapter(AdapterVersion, config=ConfigDict(strict=True))
 _ASYNC_METHODS = ("get_capabilities", "start", "cancel", "collect_result")
 _SIGNATURE_PLACEHOLDER = object()
+# Engine id -> the one optional config block registered for it. Other engines
+# keep the historical empty-schema behaviour; the mapping is local to the
+# registry so it never imports an implementation adapter (08 R15 / 09 G1).
+_ENGINE_CONFIG_BLOCKS = {"react": "react", "codex": "codex"}
+
+
+def _engine_config_block(config: ExecutionConfig) -> object:
+    block = _ENGINE_CONFIG_BLOCKS.get(config.engine.engine_id)
+    if block is None:
+        # Historical generic-adapter behaviour: whatever React block survived
+        # validation is still checked against the registered (usually empty)
+        # schema, so a model_copy-injected block cannot slip through.
+        return config.react if config.react is not None else {}
+    other = "codex" if block == "react" else "react"
+    # ``model_copy(update=...)`` bypasses pydantic validators; feed the wrong
+    # block to the strict schema so it is rejected instead of silently ignored.
+    injected = getattr(config, other, None)
+    if injected is not None:
+        return injected
+    value = getattr(config, block, None)
+    return value if value is not None else {}
 
 
 class AdapterDescriptor(ExecutionContractModel):
@@ -403,7 +424,7 @@ class AdapterRegistry:
                 engine.protocol_id,
                 engine.adapter_version,
             )
-            engine_config = normalized.react if normalized.react is not None else {}
+            engine_config = _engine_config_block(normalized)
             descriptor.config_schema.model_validate(engine_config)
         except ConfigurationError:
             raise

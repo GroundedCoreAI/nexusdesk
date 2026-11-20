@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from agent_platform.core_platform.agent_execution.contracts.capabilities import EngineCapabilities
 from agent_platform.core_platform.agent_execution.contracts.config import (
     CapabilityName,
+    CodexConfig,
     EngineIdentity,
     ExecutionConfig,
     ReactConfig,
@@ -58,6 +59,7 @@ class AgentConfig(BaseModel):
         )
     )
     react: ReactConfig | None = None
+    codex: CodexConfig | None = None
     disabled_capabilities: tuple[CapabilityName, ...] = Field(default=(), max_length=11)
     reply_language: Literal["auto", "zh-CN", "zh-TW", "en", "hi"] = "auto"
     # Agent-level switch for the rolling conversation summary. Flows through the
@@ -99,6 +101,7 @@ class AgentConfig(BaseModel):
         execution_fields = {
             "engine",
             "react",
+            "codex",
             "disabled_capabilities",
             "model_profile_id",
             "model_profile_version",
@@ -111,6 +114,7 @@ class AgentConfig(BaseModel):
         normalized.update(
             engine=execution.engine,
             react=execution.react,
+            codex=execution.codex,
             disabled_capabilities=execution.disabled_capabilities,
         )
         if execution.react is not None:
@@ -128,6 +132,7 @@ class AgentConfig(BaseModel):
             {
                 "engine": self.engine,
                 "react": self.react,
+                "codex": self.codex,
                 "disabled_capabilities": self.disabled_capabilities,
             }
         )
