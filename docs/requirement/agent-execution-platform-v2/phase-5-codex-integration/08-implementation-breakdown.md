@@ -228,7 +228,9 @@ default-off tests including `test_agent_execution_phase4_deployment.py` and
 assertions per stage) is in `09` §7.
 
 Status (2026-11-20): T11–T13 landed as PRs #149, #150 and #151; T14–T16 are implemented
-in the P4–P6 PRs beginning with #152; T17 remains pending. Every signatory on this track is JackChow (the
+in the P4–P6 PRs beginning with #152; **T17 is closed on a scope-limited basis** — see
+§3.9 and the authoritative, owner-signed record
+`../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`. Every signatory on this track is JackChow (the
 owner/user). The `09` §4.5 security sign-off for T16/P6 is recorded in
 `10-stage-a-cli-credential-lane-security-signoff.md` and is scoped to the quickstart
 demo credential lane.
@@ -282,3 +284,40 @@ D-1 修好后发布通了，但每个 Run 仍在 25–30 ms 内以 `execution_er
 两处修复的回归在 `backend/tests/test_agent_execution_stage_a_preflight.py`：工厂方法绑定、
 裸可调用对象、未配置即报错、内存下限拒绝/接受、以及 Codex 关闭时校验失效共 5 个节点。
 两者都不改变 Stage B 锁定状态，也不放宽任何凭据或沙箱边界。
+
+### 3.9 P7 / T17 收口结论（2026-11-20，范围限定）
+
+权威记录：`../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`（单一验收负责人
+JackChow 已签署，结论 **PASS scope-limited**）。本节只登记收口状态与证据索引，不改写
+§3.5 的任务表和上文历史结论。
+
+**补齐 D-4**：D-1…D-3 见 §3.7/§3.8。第四个阻断缺陷是适配器由部署级占位
+`ExecutionConfig` 字面量构造，而非 Agent 修订上发布的 `codex` 块，因而没有
+`credential_ref` / `home_config`，凭据 Broker 从未被调用（`engine_unavailable`、
+宿主 exit 1、grant 审计 0 条）。修复：工厂改读
+`execution_config_from_context(context).codex`，缺失即 `RuntimeError` 失败关闭，
+删除占位字面量；回归见 `test_agent_execution_stage_a_preflight.py`。四项修复合入
+PR #155（`b228570`），merge 后 CI 5/5、CD `44716695070` 3/3 成功。
+
+**T17 逐项核对**：
+
+| T17 条目 | 结论 | 证据 |
+|---|---|---|
+| 端到端按 Run Codex 对话 turn | **通过**：两轮连续 `completed` / `output=OK` / 每轮 8 条有序事件 | `13` §3 |
+| 工具调用 turn（平台容器内） | **范围内未完成，登记为部署边界**：Docker 默认 seccomp 阻断 `bwrap` 创建 user namespace（`unshare -Ur` → EPERM），工具调用 Run 虽 `completed` 但自述沙箱无法启动 | `13` §6.1；第 3 轮 `aa9ab8f2-…` |
+| 工具调用 turn（平台外主机独立验证） | **通过**：`command_execution` turn exit 0；属本地证据、非验收证据 | §3.6 |
+| `05` / `06` / `07` 附录 | **已补齐**（本 PR） | 三份报告末尾的 2026-11-20 补记 |
+| Stage A 解锁记录 | **已落地**（范围限定，仅 `cli_exec/v1` quickstart 演示） | `07` 末章；`13` §8 |
+
+链路证据（干净 CI 镜像 `63221a1fd3ba`，`docker diff` 零 `/app` 可写层改动）：发布 →
+Phase 3 编排屏障 → Runtime Host → 凭据 Broker `grant_issued → grant_used` → Codex CLI
+真实轮次 → 事件与终态 → `engine_terminal` usage 落账。本地门禁 2368 passed / 6 skipped
+（PR #155 时点），PR #157 追加 1 条部署回归后为 2369 passed / 6 skipped。
+
+**闭环说明**：`13` §5 记为「建议后续（不在本阶段修复）」的 CD `.env` 版本号回写陷阱，
+已由 PR #157 落地，并在 CD run `44725578236` 的部署日志实测生效
+（`Pinned deploy/quickstart/.env to NEXUSDESK_VERSION=2c03528cd7b6`）；该条建议至此关闭。
+
+**边界不变**：工具调用的沙箱限制属部署加固决策，本阶段不改默认安全姿态；Stage B
+（`codex/app_server/v1`）保持锁定；生产 Codex 路由、不可信多租户与高风险能力启用
+未请求、未授权。T17 因此以范围限定口径收口，不宣称「完整 Stage A 验收」。

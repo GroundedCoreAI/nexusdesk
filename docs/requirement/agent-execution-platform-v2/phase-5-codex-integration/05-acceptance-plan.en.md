@@ -92,3 +92,36 @@ Produce the Phase 5 Acceptance Report with the Stage A unlock record, A/C eviden
 | Acceptance owner | Executor | Date | Target SHA | Decision | Evidence/residuals |
 |---|---|---|---|---|---|
 | JackChow (confirmed by the user, 2026-11-19 GMT+8) | WorkBuddy automated acceptance execution | 2026-11-18 | `80fac6056682a7835c61dab4678c5772b8689d1f` | **PASS (scope-limited)** | `../12-scope-limited-acceptance-record-20261118-phase4-6.md` §5; evidence `20261118T150343Z.tar.gz` |
+
+
+---
+
+## 2026-11-20 P7 Stage A Closure Addendum (Scope-Limited)
+
+Under §6.1 this addendum only appends evidence and a conclusion; it rewrites no historical
+criterion, gate definition, or the 2026-11-18 single record. P7 / T17 end-to-end acceptance
+was executed on the clean CI image `63221a1fd3ba`. The authoritative record is
+`../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`; verdict
+**PASS (scope-limited)**, signed by the single acceptance owner JackChow on
+2026-11-20 18:49 (GMT+8).
+
+- **A1 (dialogue turn)**: two consecutive `completed` / `output=OK` runs, eight ordered
+  `runtime_events` each; credential `grant_issued → grant_used`, `retained` workdir, and an
+  `engine_terminal` usage-ledger row.
+- **Tool-use turn**: blocked inside the platform container by Docker's default seccomp
+  (`bwrap` cannot create a user namespace, `unshare -Ur` → EPERM). Per the 2026-11-18
+  revision it is registered as an **explicit out-of-scope note** — not rewritten as a pass
+  and not a stage gate. A host-side `command_execution` turn outside the platform verified
+  exit 0, but per `08` §3.6 that is local evidence, not acceptance evidence.
+- **A2 / C7 unaffected**: this addendum records the unlock of Stage A (`cli_exec/v1`) for
+  the single-tenant quickstart demo; it is **not** the Stage B unlock record referenced by
+  A2 / C7 / `04` P5-IT-18. Stage B stays locked; P5-IT-18 and the separate Stage B unlock
+  record remain absent and unrequested, requiring independent approval.
+- **Gate effect**: §3 / §6 criteria and the 2026-11-18 single record remain the historical
+  decision. This addendum appends a new, evidence-bound scope-limited acceptance record
+  under that policy. It does not retroactively complete Phase 0/1 formal acceptance and
+  does not rewrite any `pending_env` / unmeasured item as a pass.
+
+| Acceptance owner | Executor | Date | Target SHA | Decision | Evidence / residuals |
+|---|---|---|---|---|---|
+| JackChow (confirmed by the user, 2026-11-20 GMT+8) | WorkBuddy automated acceptance execution | 2026-11-20 | `63221a1fd3bad7562b351b7bbbd23e0c95500cb6` | **PASS (scope-limited)** | `../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`; 2026-11-20 addenda in `06` / `07`; residuals: in-container bwrap sandbox boundary, `cleanup_failed` conservative terminal state |

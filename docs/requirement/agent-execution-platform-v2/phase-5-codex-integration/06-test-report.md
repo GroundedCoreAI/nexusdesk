@@ -780,3 +780,49 @@ D-7 Documentation sync checked this round
 ## 2026-11-18 远程执行结果补记（范围限定）
 
 本轮远程执行（run `20261118T150343Z`，SHA `80fac60`）结果：12 lane exit 0；6,103 tests / 0 failures / 0 errors / 62 declared skips；各 lane 明细与 JUnit XML 见权威记录 `../12-scope-limited-acceptance-record-20261118-phase4-6.md` 与证据包 `20261118T150343Z.tar.gz`。本段仅追加执行结果，不修改上文历史数字。E 类环境演练为 `pending_env`，按 2026-11-18 修订不阻断阶段验收。
+
+
+---
+
+## 2026-11-20 P7 干净镜像端到端执行补记（范围限定）
+
+本段只追加执行结果，不修改上文历史数字与结论。P7 / T17 在干净 CI 镜像
+`ghcr.io/groundedcoreai/nexusdesk-quickstart:63221a1fd3ba`（CD run `44716695070`，
+3/3 job success；`docker diff` 零 `/app` 可写层改动）上重跑；权威记录为
+`../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`。
+
+**门禁**：PR #155 时点 `pytest -m "not postgres"` **2368 passed / 6 skipped / 661 deselected**；
+ruff、architecture gate、`git diff --check` 干净。PR #157 追加 1 条部署回归后为
+**2369 passed / 6 skipped**。CI：`b228570` 5/5；merge `63221a1` push CI `44715956443` success；
+merge `2c03528` CI `44724692668` success → CD `44725578236` 3/3（部署日志实测
+`Pinned deploy/quickstart/.env to NEXUSDESK_VERSION=2c03528cd7b6`）。
+
+**三轮 Codex Run**（同一已发布 Agent，`runtime_runs` / `runtime_events` 实测）：
+
+| # | run_id | 终态 | output | 事件 |
+|---|---|---|---|---|
+| 1 | `99563a82-cd9c-40b9-9b81-651b1b61ea08` | `completed`, `error_code=None` | `OK` | 8 行 / 7 类 |
+| 2 | `d8c72fd7-affe-4f4e-883a-c707b5c9f4e9` | `completed`, `error_code=None` | `OK` | 8 行 / 7 类 |
+| 3（工具调用） | `aa9ab8f2-aa4b-4714-9a1d-4e295db768db` | `completed`, `error_code=None` | 自述沙箱无法启动 | 10 行 / 8 类 |
+
+第 1 轮按 `runtime_events.seq`：`run.queued → run.started → codex.thread.started →
+codex.item.completed → codex.turn.started → codex.item.completed → codex.turn.completed
+→ run.completed`；第 2 轮形状一致，链路可重复。凭据审计 `grant_issued:success ×1`、
+`grant_used:success ×1`；workdir `retained` 且无 `last_error_code`；`CODEX_HOME` 无 `auth.json`。
+
+**新增回归**：D-1 `test_agent_model_gate_engines.py`（3 nodes）；D-2 / D-3 / D-4 在
+`test_agent_execution_stage_a_preflight.py`（7 nodes，含工厂方法绑定、发布块读取、
+缺失即失败关闭、内存下限拒绝/接受、Codex 关闭时校验失效）；compose 的
+`AGENT_EXECUTION_RESOURCE_MEMORY_BYTES` 参数化断言；PR #157 的
+`test_deploy_workflow_persists_the_verified_image_tag_in_env`（1 node）。
+
+**更正两处早前探针误判**：`/observability/runs/{id}/trace` 按设计只投影
+`runtime_runs` / `gateway_calls` / `tool_calls`，事件日志由独立的 `/events` 端点提供；
+Codex Run 的 `runtime_usage_ledger` **有** `engine_terminal` 行。两者均非缺口。
+
+**边界**：第 3 轮工具调用 Run 仍 `completed`，但输出自述
+`bwrap: No permissions to create a new namespace`，容器内 `unshare -Ur true` → EPERM
+（宿主 `kernel.unprivileged_userns_clone=1` 正常，故为容器 seccomp profile 限制）。
+`runtime_host_processes` 行收在 `cleanup_failed` / `runtime_host_identity_mismatch`，
+按 `03` §4.4 的 fail-closed `no_signal` 保守终态，复查无孤儿进程。两者均非当前阶段门禁，
+详见 `13` §6。
