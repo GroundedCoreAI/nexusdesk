@@ -55,6 +55,7 @@ from ...host.host_models import (
 )
 from ...host.runtime_host import HostStartError, RuntimeHost
 from ...orchestration.execution_lifecycle import ExecutionOutcome
+from ...workspace.execution_workdir import WorkdirOperationError, ensure_private_engine_home
 from ...workspace.workspace_policy import WorkspacePathError, normalize_relative_path
 from .cli_exec import CODEX_CLI_EXECUTABLE_ID, CODEX_CLI_FIXED_ARGV
 from .config import (
@@ -191,6 +192,7 @@ class CodexCliAdapter:
         self._request: ExecutionRequest | None = None
         self._handle: ExecutionHandle | None = None
         self._managed_id: UUID | None = None
+        self._private_home: Path | None = None
         # Host ``wait``/``cancel`` untrack a record once it reaches a terminal
         # result, so a second call would raise SupervisorStateError. The first
         # terminal observation is cached here and every later read serves it.
@@ -244,6 +246,18 @@ class CodexCliAdapter:
 
         relative = self._workdir_relative(request)
         working_dir = self._contained_workdir(relative)
+        # G3 (08 R-13/C5, Phase 5 stage-A P3): create the per-Execution private
+        # CODEX_HOME scaffold inside the validated run workdir. P3 owns only the
+        # directory (0700, no-follow, no content); the key-free config.toml (P5)
+        # and the typed credential/env injection (P6) come later. A symlink or
+        # ownership fault here is a WORKSPACE_ERROR before any Host call.
+        try:
+            private_home = ensure_private_engine_home(working_dir)
+        except WorkdirOperationError:
+            raise _bounded_error(
+                ExecutionErrorCategory.WORKSPACE_ERROR, ExecutionErrorCode.WORKSPACE_ERROR
+            ) from None
+        self._private_home = private_home
 
         spec = ProcessSpec(
             executable_id=CODEX_CLI_EXECUTABLE_ID,
