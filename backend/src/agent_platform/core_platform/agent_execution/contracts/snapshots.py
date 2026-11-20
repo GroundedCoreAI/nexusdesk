@@ -21,7 +21,11 @@ Two deliberate narrowing decisions are part of this contract, not accidents:
   never record a host filesystem location. Inbound values therefore have to be
   opaque identifiers, never paths. Consequence for callers: if a legitimate
   snapshot field ever needs a leading-separator value, this rule must be
-  revisited explicitly instead of being widened ad hoc.
+  revisited explicitly instead of being widened ad hoc. The single exception
+  is the Stage A Codex block's typed ``path_env``, allowed only at the exact
+  ``config.codex.path_env`` path and only when every entry is an absolute
+  directory; a UUID-valued ``config.codex.credential_ref`` is likewise pinned
+  as a reference, never a secret (09 §4).
 * **Semantic, not byte-level, replay.** See ``deserialize_execution_snapshots``.
 """
 
@@ -137,6 +141,46 @@ _CREDENTIAL_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 _HOST_PATH_PATTERN = re.compile(r"^(?:/|\./|\.\./|~/|[A-Za-z]:[\\/])")
 
+# Stage A codex publishability (09 §4): two typed fields in the one new engine
+# block need a narrow, path-scoped exception to the recursive denylist. Both are
+# references/configuration, never secret material. The exception is keyed by the
+# *exact* snapshot path (serializer root or the one stored-column prefix) so a
+# smuggled ``credential_ref`` under any other key still fails closed.
+_TYPED_CODEX_FIELDS = frozenset({"credential_ref", "path_env"})
+
+
+def _typed_codex_field(path: tuple[str, ...]) -> str | None:
+    if len(path) == 3 and path[0] == "config" and path[1] == "codex":
+        return path[2] if path[2] in _TYPED_CODEX_FIELDS else None
+    if (
+        len(path) == 4
+        and path[0] in SNAPSHOT_COLUMNS
+        and path[1] == "config"
+        and path[2] == "codex"
+    ):
+        return path[3] if path[3] in _TYPED_CODEX_FIELDS else None
+    return None
+
+
+def _typed_codex_value_is_valid(field: str, value: object) -> bool:
+    if field == "credential_ref":
+        if value is None:
+            return True
+        if not isinstance(value, str):
+            return False
+        try:
+            UUID(value)
+        except (ValueError, AttributeError, TypeError):
+            return False
+        return True
+    if not isinstance(value, str) or "\x00" in value:
+        return False
+    entries = value.split(":")
+    return bool(entries) and all(
+        entry.startswith("/") and ".." not in entry for entry in entries
+    )
+
+
 
 def _normalized_key(key: str) -> tuple[str, frozenset[str]]:
     # Split camelCase before lowering, otherwise ``accessToken`` would fold
@@ -175,7 +219,8 @@ def assert_snapshot_payload_clean(payload: object, path: tuple[str, ...] = ()) -
         for key, value in payload.items():
             key_text = str(key)
             child = (*path, key_text)
-            if _key_is_denied(key_text):
+            typed_codex_field = _typed_codex_field(child)
+            if _key_is_denied(key_text) and typed_codex_field is None:
                 raise ExecutionSnapshotError("snapshot_denied_field_name", child) from None
             assert_snapshot_payload_clean(value, child)
         return
@@ -185,10 +230,24 @@ def assert_snapshot_payload_clean(payload: object, path: tuple[str, ...] = ()) -
         return
     if isinstance(payload, (UUID, datetime)):
         return
+    typed_codex_field = _typed_codex_field(path)
+    if (
+        typed_codex_field is not None
+        and not isinstance(payload, str)
+        and not (typed_codex_field == "credential_ref" and payload is None)
+    ):
+        raise ExecutionSnapshotError("snapshot_field_invalid", path) from None
     if isinstance(payload, str):
         code = _value_is_denied(payload)
-        if code is not None:
+        if code is not None and not (
+            typed_codex_field is not None
+            and _typed_codex_value_is_valid(typed_codex_field, payload)
+        ):
             raise ExecutionSnapshotError(code, path) from None
+        if typed_codex_field is not None and not _typed_codex_value_is_valid(
+            typed_codex_field, payload
+        ):
+            raise ExecutionSnapshotError("snapshot_field_invalid", path) from None
         return
     if payload is None or isinstance(payload, (bool, int, float)):
         return

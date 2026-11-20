@@ -12,6 +12,17 @@ export interface ReactExecutionConfig {
   model_profile_version: number | null;
   max_model_rounds: number;
 }
+/** Typed Stage A Codex settings. `credential_ref` is a UUID reference, never a key. */
+export interface CodexExecutionConfig {
+  protocol: 'cli_exec' | 'app_server';
+  version: string;
+  executable: string;
+  timeout_seconds: number;
+  approval_mode: 'never';
+  sandbox_mode: 'read-only';
+  credential_ref: string | null;
+  path_env: string;
+}
 /** The 11 capability names the execution contract recognises, in CAPABILITY_ORDER. */
 export const EXECUTION_CAPABILITY_NAMES = [
   'streaming',
@@ -71,6 +82,7 @@ export interface AgentConfig {
   /** Absent on drafts written before Phase 3; the server supplies the default. */
   engine?: EngineIdentity;
   react?: ReactExecutionConfig | null;
+  codex?: CodexExecutionConfig | null;
   disabled_capabilities?: ExecutionCapabilityName[];
   summary_enabled?: boolean;
   memory_enabled?: boolean;
@@ -83,16 +95,29 @@ export interface AgentConfig {
   memory_search_limit?: number | null;
   memory_blacklist_auto_handoff?: boolean;
 }
-/** The only engine triple the Phase 3 registry ships for production traffic. */
-export const SUPPORTED_ENGINES: EngineIdentity[] = [{ engine_id: 'react', protocol_id: 'native', adapter_version: 'v1' }];
+/**
+ * Engine triples the UI can publish. The Codex CLI descriptor is registered by
+ * the server only when the Stage A gate is enabled; publishing an unregistered
+ * triple is still rejected there, so this list grants nothing by itself.
+ */
+export const SUPPORTED_ENGINES: EngineIdentity[] = [
+  { engine_id: 'react', protocol_id: 'native', adapter_version: 'v1' },
+  { engine_id: 'codex', protocol_id: 'cli_exec', adapter_version: 'v1' },
+];
 export const DEFAULT_ENGINE: EngineIdentity = SUPPORTED_ENGINES[0];
 const DEFAULT_REACT: ReactExecutionConfig = { model_profile_id: null, model_profile_version: null, max_model_rounds: 6 };
+export const DEFAULT_CODEX: CodexExecutionConfig = {
+  protocol: 'cli_exec', version: '', executable: 'codex', timeout_seconds: 600,
+  approval_mode: 'never', sandbox_mode: 'read-only', credential_ref: null,
+  path_env: '/usr/local/bin:/usr/bin:/bin',
+};
 const REACT_ALIASES: Array<keyof ReactExecutionConfig> = ['model_profile_id', 'model_profile_version', 'max_model_rounds'];
 /** Semantic view of the execution part of a draft; never mutates the draft. */
 export interface ExecutionView {
   engine: EngineIdentity;
   engineKnown: boolean;
   react: ReactExecutionConfig | null;
+  codex: CodexExecutionConfig | null;
   disabledCapabilities: ExecutionCapabilityName[];
   /** Draft fields whose root alias disagrees with the same field under `react`. */
   conflicts: string[];
@@ -125,6 +150,7 @@ export function readExecution(config: AgentConfig): ExecutionView {
     engine,
     engineKnown: SUPPORTED_ENGINES.some(item => item.engine_id === engine.engine_id && item.protocol_id === engine.protocol_id && item.adapter_version === engine.adapter_version),
     react: engine.engine_id === 'react' ? merged as unknown as ReactExecutionConfig : null,
+    codex: engine.engine_id === 'codex' ? (config.codex ?? { ...DEFAULT_CODEX }) : null,
     disabledCapabilities: config.disabled_capabilities ? [...config.disabled_capabilities] : [],
     conflicts,
   };
@@ -152,6 +178,32 @@ export function patchReactConfig(config: AgentConfig, patch: Partial<ReactExecut
     if (field in config || !inReact) root[field] = value;
   }
   if (keepsReact) next.react = react as unknown as ReactExecutionConfig;
+  return next;
+}
+/** Update the typed Codex block only; it has no legacy root aliases to keep in step. */
+export function patchCodexConfig(config: AgentConfig, patch: Partial<CodexExecutionConfig>): AgentConfig {
+  const codex = { ...(config.codex ?? DEFAULT_CODEX), ...patch };
+  return { ...config, codex };
+}
+/**
+ * Switch engine and drop the block that no longer belongs to it.
+ *
+ * The server enforces the same mutual exclusion; clearing the legacy React root
+ * aliases here prevents a stale non-default value from rejecting the publish.
+ */
+export function patchEngine(config: AgentConfig, engine: EngineIdentity): AgentConfig {
+  const next: AgentConfig = { ...config, engine };
+  const root = next as unknown as Record<string, unknown>;
+  if (engine.engine_id === 'codex') {
+    next.react = undefined;
+    next.codex = config.codex ?? { ...DEFAULT_CODEX };
+    root.model_profile_id = null;
+    root.model_profile_version = null;
+    root.max_model_rounds = DEFAULT_REACT.max_model_rounds;
+  } else {
+    next.codex = undefined;
+    if (!next.react) next.react = { ...DEFAULT_REACT };
+  }
   return next;
 }
 /** Narrow one capability; unchecking only removes a prior local narrowing. */

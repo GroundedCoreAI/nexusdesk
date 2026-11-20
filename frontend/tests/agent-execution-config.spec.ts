@@ -385,6 +385,33 @@ test('P3-FE-04 an unregistered engine triple is reported against the engine fiel
   await expect(saveState(page)).not.toContainText('有未保存修改');
 });
 
+test('P5-FE-01 (G1) engine selector publishes a typed Codex block without React aliases', async ({ page }) => {
+  const harness = await open(page, {});
+  await page.getByLabel('选择 Engine').click();
+  await page.locator('.ant-select-item-option-content', { hasText: 'codex / cli_exec / v1' }).click();
+  await expect(section(page).getByRole('heading', { name: 'Codex 配置' })).toBeVisible();
+  await page.getByLabel('Codex 版本').fill('0.169.0');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  const saved = harness.saves[0].config as Record<string, unknown>;
+  expect((saved.engine as Record<string, unknown>).engine_id).toBe('codex');
+  expect((saved.codex as Record<string, unknown>).version).toBe('0.169.0');
+  expect(saved.react).toBeUndefined();
+  expect(saved.model_profile_id).toBeNull();
+  expect(saved.max_model_rounds).toBe(6);
+});
+
+test('P5-FE-02 phase3 off hides the engine selector and keeps codex fields read-only', async ({ page }) => {
+  await open(page, {
+    flags: { execution_phase3_enabled: false, execution_orchestrator_enabled: true },
+    draft: legacyDraft({ engine: { engine_id: 'codex', protocol_id: 'cli_exec', adapter_version: 'v1' }, codex: { version: '0.169.0', protocol: 'cli_exec', executable: 'codex', timeout_seconds: 600, approval_mode: 'never', sandbox_mode: 'read-only', credential_ref: null, path_env: '/usr/bin' } }),
+  });
+  await expect(page.getByLabel('选择 Engine')).toHaveCount(0);
+  await expect(page.getByLabel('Engine 三元组')).toHaveValue('codex / cli_exec / v1');
+  await expect(page.getByLabel('Codex 版本')).toBeDisabled();
+  await expect(page.getByLabel('Codex PATH')).toHaveValue('/usr/bin');
+});
+
 test('P3-FE-05 preview posts the unsaved draft and stays read-only', async ({ page }) => {
   const harness = await open(page, { preview: () => previewBody() });
   await page.getByLabel('Agent 简介').fill('未保存的简介');
@@ -898,6 +925,9 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '禁用能力只会收窄服务端计算结果，不能授予任何能力。',
     '预览结果由服务端计算，不会创建运行，也不会授予执行权限。',
     '运行 Engine 与能力由服务端注册表和策略决定，这里只能查看与收窄。',
+    '选择 Engine', 'Codex 配置', 'Codex 版本', 'Codex 可执行文件', 'Codex 超时（秒）',
+    'Codex 凭据引用（UUID）', '仅存引用，不填密钥', 'Codex PATH',
+    'Stage A 仅支持审批模式 never 与沙箱模式 read-only；会话恢复与人工审批未启用。',
     'Phase 3 执行能力尚未启用，无法预览。',
     '所选 Engine 未注册或已停用，无法预览或发布。',
     '执行配置不合法，请检查标记的字段。', '字段 {{v0}}：{{v1}}',

@@ -1,9 +1,12 @@
 import { errorText, t } from '../../i18n/index';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, InputNumber, Tag } from 'antd';
+import { Button, Input, InputNumber, Select, Tag } from 'antd';
 import {
   DEFAULT_ENGINE,
+  SUPPORTED_ENGINES,
+  patchCodexConfig,
+  patchEngine,
   patchReactConfig,
   previewExecution,
   readExecution,
@@ -19,7 +22,7 @@ import { CapabilityPreview } from './CapabilityPreview';
 /** Stable domain errors the execution endpoints answer with (03-technical-design.md §7.3). */
 const EXECUTION_ERROR_CODES = ['execution_phase3_disabled', 'execution_engine_unavailable', 'execution_configuration_invalid', 'execution_policy_unavailable'];
 /** Draft paths that belong to the execution contract; a 422 on these must stay pointable. */
-const EXECUTION_PATHS = ['engine', 'react', 'disabled_capabilities', 'max_model_rounds', 'model_profile_id', 'model_profile_version'];
+const EXECUTION_PATHS = ['engine', 'react', 'codex', 'disabled_capabilities', 'max_model_rounds', 'model_profile_id', 'model_profile_version'];
 
 /**
  * Recover the field paths from a strict-schema rejection. The shared error
@@ -102,6 +105,11 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
     const phase3Off = !!flags && !flags.execution_phase3_enabled;
     const misconfigured = !!flags && flags.execution_phase3_enabled && !flags.execution_orchestrator_enabled;
     const engineText = `${view.engine.engine_id} / ${view.engine.protocol_id} / ${view.engine.adapter_version}`;
+    const engineOptions = SUPPORTED_ENGINES.map(item => ({
+        value: `${item.engine_id} / ${item.protocol_id} / ${item.adapter_version}`,
+        engine: item,
+    }));
+    const codexReadOnly = !canEdit || busy || !phase3Entries;
     const previewPaths = locateExecutionErrors(previewError);
   const savePaths = locateExecutionErrors(saveError || '');
   const saveErrorIsExecution = EXECUTION_ERROR_CODES.some(code => (saveError || '').includes(code)) || savePaths.length > 0;
@@ -143,6 +151,19 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
           <Tag color={view.engineKnown ? 'green' : 'red'}>{view.engineKnown ? t('已注册') : t('未注册')}</Tag>
         </div>
       </Field>
+      {phase3Entries && <Field label={t('选择 Engine')}>
+        <Select
+          aria-label={t('选择 Engine')}
+          className="agent-execution-engine-select"
+          value={engineText}
+          options={engineOptions}
+          disabled={!canEdit || busy}
+          onChange={value => {
+            const chosen = engineOptions.find(item => item.value === value);
+            if (chosen) onChange(patchEngine(config, chosen.engine));
+          }}
+        />
+      </Field>}
       <p className="agent-muted">{view.engineKnown ? t('缺省即 {{v0}}，旧 Agent 无需重新发布。', { v0: `${DEFAULT_ENGINE.engine_id}/${DEFAULT_ENGINE.protocol_id}/${DEFAULT_ENGINE.adapter_version}` }) : t('所选 Engine 未注册或已停用，无法预览或发布。')}</p>
     </div>
     <div className="agent-setting-card">
@@ -154,6 +175,25 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
       <p className="agent-muted">{t('Chat 模型方案在「模型配置」区块中选择，与轮次同属 React Engine 的配置。')}</p>
       {phase3Entries && <p className="agent-muted">{t('禁用能力只会收窄服务端计算结果，不能授予任何能力。')}</p>}
     </div>
+    {view.codex && <div className="agent-setting-card">
+      <h3 className="agent-memory-group">{t('Codex 配置')}</h3>
+      <Field label={t('Codex 版本')}>
+        <Input aria-label={t('Codex 版本')} value={view.codex.version} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { version: event.target.value }))}/>
+      </Field>
+      <Field label={t('Codex 可执行文件')}>
+        <Input aria-label={t('Codex 可执行文件')} value={view.codex.executable} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { executable: event.target.value }))}/>
+      </Field>
+      <Field label={t('Codex 超时（秒）')}>
+        <InputNumber aria-label={t('Codex 超时（秒）')} min={1} max={600} precision={0} value={view.codex.timeout_seconds} disabled={codexReadOnly} onChange={value => onChange(patchCodexConfig(config, { timeout_seconds: value || 1 }))}/>
+      </Field>
+      <Field label={t('Codex 凭据引用（UUID）')}>
+        <Input aria-label={t('Codex 凭据引用（UUID）')} value={view.codex.credential_ref ?? ''} placeholder={t('仅存引用，不填密钥')} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { credential_ref: event.target.value || null }))}/>
+      </Field>
+      <Field label={t('Codex PATH')}>
+        <Input aria-label={t('Codex PATH')} value={view.codex.path_env} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { path_env: event.target.value }))}/>
+      </Field>
+      <p className="agent-muted">{t('Stage A 仅支持审批模式 never 与沙箱模式 read-only；会话恢复与人工审批未启用。')}</p>
+    </div>}
     {preview && phase3Entries && <CapabilityPreview preview={preview} disabledCapabilities={view.disabledCapabilities} onNarrow={(name, disabled) => onChange(toggleDisabledCapability(config, name, disabled))} canEdit={canEdit && !busy} stale={previewedConfig !== JSON.stringify(config)}/>}
   </section>;
 }

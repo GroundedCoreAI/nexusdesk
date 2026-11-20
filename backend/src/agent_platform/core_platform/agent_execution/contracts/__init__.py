@@ -34,6 +34,8 @@ from .capabilities import (
 from .common import ExecutionKey
 from .config import (
     CapabilityName,
+    CodexConfig,
+    CodexProtocol,
     EngineIdentity,
     ExecutionConfig,
     ReactConfig,
@@ -99,6 +101,8 @@ __all__ = [
     "CapabilityName",
     "CapabilityPolicy",
     "CapabilityReasonCode",
+    "CodexConfig",
+    "CodexProtocol",
     "ConfigurationError",
     "DeclaredCapabilities",
     "DeclaredCapabilitiesSnapshot",

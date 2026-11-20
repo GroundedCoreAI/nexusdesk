@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Mapping
+from enum import StrEnum
 from typing import Literal, Self
 from uuid import UUID
 
@@ -33,6 +34,7 @@ _AGENT_CONFIG_EXECUTION_FIELDS = frozenset(
     {
         "engine",
         "react",
+        "codex",
         "disabled_capabilities",
         *_LEGACY_REACT_FIELDS,
     }
@@ -66,6 +68,87 @@ class ReactConfig(ExecutionContractModel):
         return self
 
 
+class CodexProtocol(StrEnum):
+    """Stable protocol identity; Stage B stays registered but hard-disabled."""
+
+    CLI_EXEC = "cli_exec"
+    APP_SERVER = "app_server"
+
+
+def _codex_protocol(value: CodexProtocol | str) -> CodexProtocol:
+    try:
+        return value if isinstance(value, CodexProtocol) else CodexProtocol(value)
+    except (TypeError, ValueError):
+        raise ValueError("unknown Codex protocol") from None
+
+
+class CodexConfig(ExecutionContractModel):
+    """Publishable, typed and bounded Codex CLI options (Stage A enablement).
+
+    The type lives in ``contracts`` (not in ``adapters``) so the publish path,
+    registry and snapshots can validate the same strict model without creating a
+    contracts-to-implementation dependency. Adapters import it from here. Only a
+    credential *reference* is representable; no secret value, proxy setting or
+    free-form environment map can enter this DTO.
+    """
+
+    protocol: CodexProtocol = CodexProtocol.CLI_EXEC
+    version: str = Field(min_length=1, max_length=64)
+    executable: str = Field(default="codex", min_length=1, max_length=256)
+    # Bounded by the Run deadline ceiling; the effective timeout is the minimum
+    # of this value, the Run deadline and the Host wall ceiling.
+    timeout_seconds: int = Field(default=600, gt=0, le=600)
+    approval_mode: Literal["never"] = "never"
+    sandbox_mode: Literal["read-only"] = "read-only"
+    credential_ref: str | None = Field(default=None, min_length=1, max_length=256)
+    # The one environment value this lane may contribute (08 R17): the installed
+    # CLI is a ``#!/usr/bin/env node`` launcher, so an empty environment would
+    # fail exec with ENOENT. A typed PATH is deliberately narrower than a free
+    # map: credentials, proxies and host secrets have no field to travel in.
+    path_env: str = Field(default="/usr/local/bin:/usr/bin:/bin", min_length=1, max_length=4096)
+
+    @field_validator("path_env")
+    @classmethod
+    def path_env_must_be_absolute_dirs(cls, value: str) -> str:
+        if "\x00" in value or ".." in value.split(":"):
+            raise ValueError("path_env must not contain NUL or parent segments")
+        if any(not entry.startswith("/") for entry in value.split(":")):
+            raise ValueError("path_env entries must be absolute directories")
+        return value
+
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def accept_protocol_value(cls, value: object) -> object:
+        # ``strict=True`` is mandatory; normalize the plain string supplied by
+        # persisted JSON without weakening validation of any other field.
+        if isinstance(value, CodexProtocol):
+            return value
+        if type(value) is str:
+            return _codex_protocol(value)
+        return value
+
+    @field_validator("executable")
+    @classmethod
+    def executable_must_be_name(cls, value: str) -> str:
+        if "\x00" in value or "/" in value or "\\" in value:
+            raise ValueError("executable must be a command name, not a path")
+        return value
+
+    @field_validator("approval_mode", mode="before")
+    @classmethod
+    def stage_a_approval_mode_only(cls, value: object) -> object:
+        if value != "never":
+            raise ValueError("Stage A only supports approval_mode='never'")
+        return value
+
+    @field_validator("sandbox_mode", mode="before")
+    @classmethod
+    def stage_a_sandbox_mode_only(cls, value: object) -> object:
+        if value != "read-only":
+            raise ValueError("Stage A only supports sandbox_mode='read-only'")
+        return value
+
+
 class EmptyEngineConfig(ExecutionContractModel):
     """Safe no-configuration schema for legacy generic test adapter registrations."""
 
@@ -75,6 +158,7 @@ class ExecutionConfig(ExecutionContractModel):
 
     engine: EngineIdentity = Field(default_factory=lambda: EngineIdentity(**_DEFAULT_ENGINE))
     react: ReactConfig | None = Field(default_factory=ReactConfig)
+    codex: CodexConfig | None = None
     # ``max_length`` is enforced before the ``after`` dedup validator below, so
     # an over-bound list that still contains duplicates is rejected outright;
     # deduplication is not expected to rescue oversized input.
@@ -88,12 +172,23 @@ class ExecutionConfig(ExecutionContractModel):
         return tuple(dict.fromkeys(value))
 
     @model_validator(mode="after")
-    def react_matches_engine(self) -> Self:
-        is_react = self.engine.engine_id == "react"
-        if is_react and self.react is None:
-            raise ValueError("react configuration is required for the react engine")
-        if not is_react and self.react is not None:
-            raise ValueError("react configuration is only valid for the react engine")
+    def engine_config_matches_engine(self) -> Self:
+        """Enforce exactly one engine-specific block, when that engine has one."""
+        engine_id = self.engine.engine_id
+        if engine_id == "react":
+            if self.react is None:
+                raise ValueError("react configuration is required for the react engine")
+            if self.codex is not None:
+                raise ValueError("codex configuration is only valid for the codex engine")
+            return self
+        if engine_id == "codex":
+            if self.react is not None:
+                raise ValueError("react configuration is only valid for the react engine")
+            # Presence is enforced by the registered Codex config schema, which
+            # requires ``version``; a missing block is rejected on publish.
+            return self
+        if self.react is not None or self.codex is not None:
+            raise ValueError("react/codex configuration is only valid for its own engine")
         return self
 
 
@@ -148,9 +243,9 @@ def execution_config_from_agent_config(value: Mapping[str, object]) -> Execution
     gate), yet the Phase 3 startup snapshot has to pin the very same canonical
     configuration the publish path stored. The key set below is therefore exactly
     the set ``AgentConfig.normalize_execution`` consumes - the three engine keys,
-    the ``react`` block, the three legacy root React aliases and
-    ``disabled_capabilities`` - and nothing else is read, so agent-level prompt,
-    language, memory and tool keys cannot leak into an execution snapshot.
+    the ``react`` block, the optional ``codex`` block, the three legacy root React
+    aliases and ``disabled_capabilities`` - and nothing else is read, so agent-level
+    prompt, language, memory and tool keys cannot leak into an execution snapshot.
 
     Parity with ``AgentConfig.execution_config()`` is pinned by a test in both
     legacy-root-alias and ``react`` shapes; that is what keeps "one normalizer
@@ -177,6 +272,10 @@ def normalize_execution_config(value: ExecutionConfig | Mapping[str, object]) ->
 
     supplied_react = value.get("react", {})
     supplied_engine = value.get("engine")
+    # AgentConfig passes an already-typed EngineIdentity; the legacy alias
+    # normalizer below reasons about the raw engine_id in either shape.
+    if isinstance(supplied_engine, BaseModel):
+        supplied_engine = supplied_engine.model_dump()
     if isinstance(supplied_engine, Mapping) and set(supplied_engine) - {
         "engine_id",
         "protocol_id",
