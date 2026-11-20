@@ -6,6 +6,14 @@ from typing import Annotated, Literal
 from pydantic import Field, SecretStr, StringConstraints, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+# P7 defect D-3: the Codex CLI lane runs a Node process, and V8 reserves a large
+# virtual-address range at startup. Measured on the acceptance host: a 512 MiB
+# ``RLIMIT_AS`` kills the CLI with SIGTRAP ("Failed to reserve virtual memory for
+# CodeRange") before the first turn, while 1 GiB completes one. The gate below
+# refuses a Codex-enabled deployment below this ceiling instead of accepting a
+# configuration in which every Run is doomed to ENGINE_UNAVAILABLE.
+CODEX_CLI_MIN_MEMORY_BYTES = 1_073_741_824
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENT_", env_file=".env", extra="ignore")
@@ -240,6 +248,7 @@ class Settings(BaseSettings):
     codex_model_base_url: str = "https://api.deepseek.com/v1"
     codex_credential_env_key: str = "DEEPSEEK_API_KEY"
     model_timeout_seconds: float = Field(default=30, gt=0)
+
     # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
     # Enabled by default for the typewriter UI. A deployment can opt out with
     # AGENT_STREAM_MODEL_DELTAS=false. Deltas are best-effort; the durable answer
@@ -624,6 +633,29 @@ class Settings(BaseSettings):
         # while quietly registering no trusted target. Empty remains fail-closed.
         if self.codex_cli_executable_path and not Path(self.codex_cli_executable_path).is_absolute():
             raise ValueError("codex_cli_executable_path must be absolute when set")
+        return self
+
+    @model_validator(mode="after")
+    def validate_codex_cli_memory_ceiling(self):
+        # P7 defect D-3: the lane's target is a Node process, and V8 reserves a
+        # large virtual-address range at startup. The generic 512 MiB
+        # ``RLIMIT_AS`` ceiling kills it with SIGTRAP before the first turn
+        # ("Failed to reserve virtual memory for CodeRange"), which the Host can
+        # only report as ENGINE_UNAVAILABLE. Measured: 512 MiB fails, 1 GiB
+        # completes a turn. Refuse the configuration instead of accepting a
+        # deployment whose every Codex Run is doomed.
+        #
+        # The check is scoped to a fully staged lane: a partial gate already
+        # denies every execution, so it keeps its own (cheaper) refusal path.
+        if not (self.codex_cli_enabled and self.codex_stage_a_verified):
+            return self
+        if not self.codex_cli_executable_path:
+            return self
+        if self.execution_resource_memory_bytes < CODEX_CLI_MIN_MEMORY_BYTES:
+            raise ValueError(
+                "codex_cli_enabled requires execution_resource_memory_bytes >= "
+                f"{CODEX_CLI_MIN_MEMORY_BYTES}"
+            )
         return self
 
     @property

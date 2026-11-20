@@ -101,6 +101,11 @@ services:
       AGENT_CODEX_MODEL_PROVIDER: ${AGENT_CODEX_MODEL_PROVIDER:-deepseek}
       AGENT_CODEX_MODEL_BASE_URL: ${AGENT_CODEX_MODEL_BASE_URL:-https://api.deepseek.com/v1}
       AGENT_CODEX_CREDENTIAL_ENV_KEY: ${AGENT_CODEX_CREDENTIAL_ENV_KEY:-DEEPSEEK_API_KEY}
+      # D-3: the CLI target is a Node process, so the generic 512 MiB RLIMIT_AS
+      # kills it before the first turn. Raise this together with the switches
+      # above (>= 1073741824 required, 2147483648 recommended); the app refuses
+      # to start a Codex-enabled deployment below the floor.
+      AGENT_EXECUTION_RESOURCE_MEMORY_BYTES: ${AGENT_EXECUTION_RESOURCE_MEMORY_BYTES:-536870912}
       # Runtime Host identity: empty by default so the Host subsystem never
       # assembles (08 R-7). Set it together with the switch above, e.g.
       # AGENT_EXECUTION_RUNTIME_HOST_ID=quickstart-runtime, as the deliberate

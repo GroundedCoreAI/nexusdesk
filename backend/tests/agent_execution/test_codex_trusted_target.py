@@ -24,6 +24,9 @@ def _enabled_settings(**overrides):
         "codex_allowed_versions": ("0.169.0",),
         "codex_trusted_tenants": ("local",),
         "codex_cli_executable_path": "/opt/codex/bin/codex",
+        # D-3: a fully staged Codex lane needs a Node-sized address-space ceiling
+        # (>= 1 GiB); the generic 512 MiB default kills V8 with SIGTRAP.
+        "execution_resource_memory_bytes": 2_147_483_648,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)

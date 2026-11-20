@@ -74,7 +74,16 @@ AGENT_EXECUTION_ORCHESTRATOR_ENABLED=true AGENT_EXECUTION_PHASE3_ENABLED=true \
 
 Phase 4 Runtime Host 与 Phase 5 Codex 是单独决策的高风险启用项，同样以变量提供、默认关闭：Runtime Host 需要 `AGENT_EXECUTION_RUNTIME_HOST_ENABLED=true` 加非空 `AGENT_EXECUTION_RUNTIME_HOST_ID`（如 `quickstart-runtime`）；Codex 引擎注册要求 `AGENT_CODEX_CLI_ENABLED=true`、`AGENT_CODEX_STAGE_A_VERIFIED=true`、`AGENT_CODEX_ALLOWED_VERSIONS='["0.169.0"]'` 与 `AGENT_CODEX_TRUSTED_TENANTS='["local"]'` 同时成立（版本与租户清单任一为空即保持禁用），且真实执行还要求镜像内装有 Codex CLI。本阶段控制台已提供 Codex Engine 选择与凭据引用输入，但凭据 lane（P6）仍需安全签字后才启用。
 
-P4/G4 的可信目标还需要绝对路径 `AGENT_CODEX_CLI_EXECUTABLE_PATH`（容器内路径，如 `/opt/nexusdesk/codex/bin/codex`）；未设置时注册表为空，任何 Codex Run 在 spawn 前被拒绝。P5/G6 的演示挂载只暴露两个显式目录，默认值是空目录 `deploy/quickstart/codex-empty`，不会挂载宿主 home：
+P4/G4 的可信目标还需要绝对路径 `AGENT_CODEX_CLI_EXECUTABLE_PATH`（容器内路径，如 `/opt/nexusdesk/codex/bin/codex`）；未设置时注册表为空，任何 Codex Run 在 spawn 前被拒绝。P6/G5 的凭据 lane 另需
+`AGENT_EXECUTION_CREDENTIAL_KEY_FILE` 指向真实存在的安装密钥（缺失时 Broker 无法解密，Run 以 `engine_unavailable` 结束）。
+
+Codex CLI 是 Node 进程，V8 启动时要预留大段虚拟地址空间：沿用通用 512 MiB 的 `AGENT_EXECUTION_RESOURCE_MEMORY_BYTES` 会让它在第一轮之前被 `SIGTRAP` 杀掉（实测 512 MiB 失败、1 GiB 成功）。因此启用 Codex 时必须把它抬到 **≥ 1073741824**（推荐 2147483648）：
+
+```sh
+AGENT_EXECUTION_RESOURCE_MEMORY_BYTES=2147483648
+```
+
+低于该下限时应用会在启动配置校验阶段直接拒绝，而不是让每个 Run 都以 `engine_unavailable` 结束。P5/G6 的演示挂载只暴露两个显式目录，默认值是空目录 `deploy/quickstart/codex-empty`，不会挂载宿主 home：
 
 ```sh
 NEXUSDESK_CODEX_BIN_DIR=/home/nexus/.npm-global/bin \

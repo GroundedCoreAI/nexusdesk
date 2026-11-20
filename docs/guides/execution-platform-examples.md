@@ -91,6 +91,12 @@ each Execution's private `CODEX_HOME`; `env_key` is a variable name, never a
 secret value. Host `~/.codex`, `auth.json`, `.env` and whole-home mounts stay
 forbidden. The credential lane (P6) and Stage B remain separate decisions.
 
+A real CLI turn also needs a Node-sized process ceiling: keep
+`AGENT_EXECUTION_RESOURCE_MEMORY_BYTES` at **>= 1073741824** (2147483648
+recommended). The generic 512 MiB default makes V8 fail while reserving its
+code range, and the Host can only report `engine_unavailable`; the app now
+refuses to start a fully staged Codex lane below the floor.
+
 ## Boundaries
 
 This is customer-facing demonstration data, not acceptance evidence. It does

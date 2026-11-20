@@ -44,6 +44,15 @@ from .classification import INDUSTRIES, TAGS
 
 logger = logging.getLogger(__name__)
 
+# Engines whose configuration surface binds a platform model profile through the
+# Gateway catalog. A CLI engine owns its provider and model inside its own config
+# (09 stage-A design §3), and ``AgentConfig.normalize_execution`` already
+# normalizes the legacy model aliases to ``None`` for it, so requiring a profile
+# here would make every CLI-engine Agent unpublishable (P7 defect D-1). The set
+# is explicit rather than "anything that is not react": a new engine has to opt
+# out of the platform catalog deliberately.
+MODEL_PROFILE_ENGINES: frozenset[str] = frozenset({"react"})
+
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -260,6 +269,13 @@ class AgentService:
             raise DomainError("execution_engine_unavailable", 409) from None
 
     async def validate_model(self, tenant, config, c):
+        if config.engine.engine_id not in MODEL_PROFILE_ENGINES:
+            # Nothing to resolve and nothing to compare: the engine's own
+            # configuration selects the model, so no Gateway profile is part of
+            # this Agent's contract. Any stray profile is already normalized
+            # away, and inventing a requirement here would silently block
+            # publish/rollback/snapshot for the whole engine.
+            return
         if not config.model_profile_id:
             raise DomainError("agent_model_required", 409)
         if config.model_profile_id:
