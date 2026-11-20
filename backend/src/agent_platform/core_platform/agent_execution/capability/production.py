@@ -240,6 +240,39 @@ class NoTrustedWorkspaceGeneration:
         return None
 
 
+# The workdir subsystem's "generation" is a scope-stable constant, exactly like
+# ``NO_TENANT_POLICY_REVISION``: the resolver's cache key embeds it, so advancing
+# it per call would split the Available key into one cold entry per call and
+# silently fail every Run (R-44). A constant is trivially monotonic, which is
+# what 03 §4.2 requires of a compliant generation source.
+ASSEMBLED_WORKSPACE_GENERATION: int = 1
+
+
+class AssembledWorkspaceGeneration:
+    """Honest workspace availability backed by an assembled workdir subsystem.
+
+    Constructed by composition *only* when the real Phase 4
+    ``ExecutionWorkspaceManager`` exists (08 R-7). It never reads a settings or
+    environment key and is never supplied by a client: ``production_ports``
+    selects it from the assembled subsystem object (03 §4.1, R-44).
+
+    ``available=True`` is a truthful claim here: a tenant-scoped, isolated
+    workdir can be provisioned for any trusted ``(business, workspace)`` scope.
+    It grants nothing on its own -- the Codex stage gate (allowed version /
+    trusted tenant), the capability barrier and the trusted-target gate (08
+    R-16) still apply. An empty scope fails closed with ``None`` rather than a
+    fabricated generation (production.py module contract).
+    """
+
+    def __init__(self, generation: int = ASSEMBLED_WORKSPACE_GENERATION) -> None:
+        self._generation = generation
+
+    def current(self, scope: WorkspaceScope) -> AvailabilityGeneration | None:
+        if not scope.business_scope or not scope.workspace_id:
+            return None
+        return AvailabilityGeneration(generation=self._generation, available=True)
+
+
 def _platform_layer(name: CapabilityName) -> PolicyLayerDecision:
     allowed = name in PHASE3_PLATFORM_CAPABILITY_ALLOWLIST
     return PolicyLayerDecision(
@@ -281,9 +314,11 @@ def _execution_layer() -> PolicyLayerDecision:
 
 
 __all__ = [
+    "ASSEMBLED_WORKSPACE_GENERATION",
     "NO_TENANT_POLICY_REVISION",
     "PHASE3_PLATFORM_CAPABILITY_ALLOWLIST",
     "POLICY_LAYER_PROVENANCE_VERSION",
+    "AssembledWorkspaceGeneration",
     "DeclarationDerivedDeploymentProbe",
     "NoTrustedWorkspaceGeneration",
     "PlatformDefaultPolicyProvider",

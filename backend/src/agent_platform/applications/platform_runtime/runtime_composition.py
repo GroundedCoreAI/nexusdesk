@@ -47,6 +47,7 @@ from agent_platform.core_platform.agent_execution.capability.ports import (
     WorkspaceAvailabilityPort,
 )
 from agent_platform.core_platform.agent_execution.capability.production import (
+    AssembledWorkspaceGeneration,
     DeclarationDerivedDeploymentProbe,
     NoTrustedWorkspaceGeneration,
     PlatformDefaultPolicyProvider,
@@ -317,12 +318,18 @@ def production_ports(
     registry: AdapterRegistry,
     *,
     clock: Callable[[], float],
+    workspace_port: WorkspaceAvailabilityPort | None = None,
 ) -> ExecutionCapabilityPorts:
     """The production port set: the only place these three classes are built.
 
     Tests substitute doubles through the ``ports=`` seam of the private
     composition builders. There is no settings or environment key that selects a
     port, so a client-supplied trusted port is structurally impossible (R-44).
+
+    ``workspace_port`` is a code-level seam for composition only: it is supplied
+    from the *assembled* Phase 4 workdir subsystem, never from a settings read.
+    With no argument the fail-closed ``NoTrustedWorkspaceGeneration`` is kept,
+    so every deployment that assembles no workdir subsystem stays byte-identical.
     """
     return ExecutionCapabilityPorts(
         probe=DeclarationDerivedDeploymentProbe(registry=registry, clock=clock),
@@ -333,7 +340,7 @@ def production_ports(
             policy_version=settings.execution_capability_policy_version,
             clock=clock,
         ),
-        workspace_port=NoTrustedWorkspaceGeneration(),
+        workspace_port=workspace_port or NoTrustedWorkspaceGeneration(),
     )
 
 
@@ -729,6 +736,7 @@ def _build_execution_capability_subsystem(
     ports: ExecutionCapabilityPorts | None = None,
     barrier: ExecutionSnapshotBarrier | None = None,
     clock: Callable[[], float] | None = None,
+    workspace_port: WorkspaceAvailabilityPort | None = None,
 ) -> ExecutionCapabilitySubsystem | None:
     """Construct the trusted ports, caches, resolver and warmer from settings.
 
@@ -745,7 +753,9 @@ def _build_execution_capability_subsystem(
     # ``observed_at``/``resolved_at``. ``time.monotonic`` would keep passing the
     # aware-datetime validation while producing evidence dated near 1970.
     shared_clock = clock or time.time
-    production = ports or production_ports(settings, registry, clock=shared_clock)
+    production = ports or production_ports(
+        settings, registry, clock=shared_clock, workspace_port=workspace_port
+    )
     availability_cache = CapabilityCache(
         ttl_seconds=settings.execution_capability_probe_cache_seconds,
         capacity=settings.execution_capability_cache_capacity,
@@ -1337,11 +1347,6 @@ async def runtime_services(
                 application_runtime=platform.application_runtime,
             )
             platform.service_apps.preview_runner = factory
-            subsystem = _build_execution_capability_subsystem(
-                settings,
-                adapters,
-                barrier=_RepositorySnapshotBarrier(repository.write_execution_snapshots),
-            )
             # T-07: the admin lifecycle repository exists even when the key is
             # absent; encrypting fails closed at request time, never auto-creates.
             execution_vault = ExecutionCredentialVault(settings.execution_credential_key_file)
@@ -1360,6 +1365,20 @@ async def runtime_services(
                 event_bus=platform.event_bus,
                 execution_broker=execution_broker,
                 execution_redactor=execution_redactor,
+            )
+            # G3 (08 R-13/C5): a real WorkspaceAvailabilityPort is injected only
+            # when a real workdir subsystem was actually assembled. This is a
+            # code-level decision from the assembled object (R-44) -- never a
+            # settings/env read. Deployments with no Host id assemble no runtime
+            # subsystem and keep the fail-closed NoTrustedWorkspaceGeneration.
+            real_workspace_port: WorkspaceAvailabilityPort | None = (
+                AssembledWorkspaceGeneration() if execution_runtime is not None else None
+            )
+            subsystem = _build_execution_capability_subsystem(
+                settings,
+                adapters,
+                barrier=_RepositorySnapshotBarrier(repository.write_execution_snapshots),
+                workspace_port=real_workspace_port,
             )
             orchestrator = _build_execution_orchestrator(
                 factory,

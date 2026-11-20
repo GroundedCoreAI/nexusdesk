@@ -19,9 +19,11 @@ from .ports import (
     WorkspaceScope,
 )
 from .production import (
+    ASSEMBLED_WORKSPACE_GENERATION,
     NO_TENANT_POLICY_REVISION,
     PHASE3_PLATFORM_CAPABILITY_ALLOWLIST,
     POLICY_LAYER_PROVENANCE_VERSION,
+    AssembledWorkspaceGeneration,
     DeclarationDerivedDeploymentProbe,
     NoTrustedWorkspaceGeneration,
     PlatformDefaultPolicyProvider,
@@ -43,9 +45,11 @@ from .snapshots import (
 from .warmer import CapabilityWarmer
 
 __all__ = [
+    "ASSEMBLED_WORKSPACE_GENERATION",
     "NO_TENANT_POLICY_REVISION",
     "PHASE3_PLATFORM_CAPABILITY_ALLOWLIST",
     "POLICY_LAYER_PROVENANCE_VERSION",
+    "AssembledWorkspaceGeneration",
     "AvailabilityCacheKey",
     "AvailabilityGeneration",
     "CacheLookup",

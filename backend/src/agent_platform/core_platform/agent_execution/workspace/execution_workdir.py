@@ -206,6 +206,41 @@ def ensure_layout(run_fd: int, *, expected_uid: int | None = None) -> tuple[str,
     return policy.expected_layout_dirs()
 
 
+# Per-Execution private engine home (08 G3 / R13, Phase 5 stage-A P3). A fixed
+# platform-owned component -- never client input -- so it cannot escape the Run
+# directory or collide with the fixed layout dirs.
+PRIVATE_ENGINE_HOME_NAME = "codex_home"
+
+
+def ensure_private_engine_home(
+    workdir: Path, name: str = PRIVATE_ENGINE_HOME_NAME
+) -> Path:
+    """Create/verify an owner-only private engine home under one Run workdir.
+
+    P3 scaffolding only: the directory exists, is 0700 and is created through
+    no-follow primitives so a planted symlink is denied rather than followed.
+    No ``config.toml``, credential or host path is written here -- the key-free
+    config template belongs to P5 and the typed env/credential injection to P6.
+    Because it lives inside the Run directory it is cleaned with that workdir
+    by the existing durable lifecycle (03 §4.2 / FR-3).
+
+    ``workdir`` must already be a platform-validated, contained Run directory;
+    this function does not re-derive the path from untrusted input.
+    """
+    _require_dir_fd_support(name)
+    try:
+        parent_fd = os.open(str(workdir), _DIR_OPEN)
+    except OSError:
+        raise WorkdirOperationError(WORKDIR_FS_FAILED, name) from None
+    try:
+        _verify_open_dir(parent_fd, None, WORKDIR_UNSUPPORTED_OBJECT, name)
+        home_fd = _mkdir_verified(parent_fd, name, policy.DIR_MODE, None)
+        os.close(home_fd)
+    finally:
+        os.close(parent_fd)
+    return workdir / name
+
+
 def verify_workdir_identity(
     run_fd: int, relative_path: str, *, expected_uid: int | None = None
 ) -> None:
