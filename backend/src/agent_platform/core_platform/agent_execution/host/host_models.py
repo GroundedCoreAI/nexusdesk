@@ -184,7 +184,9 @@ class ProcessSpec(ExecutionContractModel):
     Only allowlisted executable ids are admitted and the Host validates the
     registry membership before spawn (T7/T10); the argv list is fixed by the
     platform, never a client command line. ``environment`` is minimal and stays
-    internal: it is never persisted to DB rows nor logged (FR-2, FR-9).
+    internal: it is never persisted to DB rows nor logged (FR-2, FR-9), and both
+    the environment and the credential slot are excluded from repr/dump so a
+    consumed Secret cannot be serialized after start.
 
     ``stdin_payload`` is the opt-in bounded prompt channel (08 R18). ``None``
     keeps the historical ``DEVNULL`` start, which is the default for every
@@ -197,7 +199,13 @@ class ProcessSpec(ExecutionContractModel):
 
     executable_id: TrustedExecutableId
     argv: tuple[ArgvValue, ...] = ()
-    environment: dict[EnvironmentKey, EnvironmentValue] = Field(default_factory=dict)
+    environment: dict[EnvironmentKey, EnvironmentValue] = Field(
+        default_factory=dict, repr=False, exclude=True
+    )
+    # P6/G5: the closed-allowlist NAME the Broker-consumed Secret is bound to.
+    # It is a typed slot, never a free environment map, and is cleared after the
+    # Host materializes the value into the child process environment.
+    credential_env_key: EnvironmentKey | None = Field(default=None, repr=False, exclude=True)
     # 08 R18: ``None`` = no payload (child gets ``DEVNULL``). Bounded in bytes;
     # ``repr=False``/``exclude=True`` keep the prompt out of every serialized or
     # logged representation of this DTO.

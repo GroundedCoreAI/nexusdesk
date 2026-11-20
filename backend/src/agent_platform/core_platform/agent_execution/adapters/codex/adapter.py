@@ -242,6 +242,34 @@ class CodexCliAdapter:
         if denial is not None:
             raise _configuration_error(_GATE_CODES[denial])
 
+        # P6/G5: the published config carries only a UUID reference. Resolve it
+        # here and hand an explicit audience to the Host; never let the Host
+        # fall back to "native"/"default", which would broaden credential reuse.
+        credential_ref: UUID | None = None
+        broker_audience: dict[str, str] = {}
+        if self._config.credential_ref is not None:
+            try:
+                credential_ref = UUID(self._config.credential_ref)
+            except (TypeError, ValueError):
+                raise _bounded_error(
+                    ExecutionErrorCategory.ENGINE_UNAVAILABLE,
+                    ExecutionErrorCode.ENGINE_UNAVAILABLE,
+                ) from None
+            if (
+                self._credential_broker is None
+                or self._engine_home_config is None
+                or request.workspace_id is None
+            ):
+                raise _bounded_error(
+                    ExecutionErrorCategory.ENGINE_UNAVAILABLE,
+                    ExecutionErrorCode.ENGINE_UNAVAILABLE,
+                )
+            broker_audience = {
+                "engine_id": self.engine_id,
+                "protocol_id": self.protocol_id,
+                "workspace_id": str(request.workspace_id),
+            }
+
         # 08 R18: encode once, here, before anything has a side effect. An
         # unencodable or over-ceiling prompt must not create the adhoc Workdir
         # below, and must never reach the Host as a truncated prompt.
@@ -275,6 +303,11 @@ class CodexCliAdapter:
             # CODEX_HOME are typed, non-secret slots; credentials/proxies/host
             # values have no field to travel in.
             environment=engine_env,
+            # P6/G5: a typed, closed-allowlist variable name. The Host binds the
+            # Broker secret to it after issue/consume and clears this slot.
+            credential_env_key=(
+                self._engine_home_config.env_key if credential_ref is not None else None
+            ),
             # 08 R18: the prompt goes to the Host stdin channel, never argv.
             stdin_payload=payload,
             workdir_relative_path=relative,
@@ -286,6 +319,8 @@ class CodexCliAdapter:
                 run_id=request.execution_id,
                 tenant_id=request.tenant_id,
                 working_dir=working_dir,
+                credential_ref=credential_ref,
+                broker_audience=broker_audience,
             )
         except HostStartError:
             # HostStartError is an internal Host failure, not an adapter error:

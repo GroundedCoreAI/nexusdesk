@@ -66,6 +66,21 @@ _AUDIENCE_ENGINE = "engine" + "_id"
 _AUDIENCE_PROTOCOL = "protocol" + "_id"
 _AUDIENCE_WORKSPACE = "workspace" + "_id"
 
+# Phase 6's original slot is retained for callers that do not declare a
+# provider-specific name. The Codex lane declares one from a closed allowlist.
+_LEGACY_CREDENTIAL_ENV = "EXECUTION_CREDENTIAL"
+
+
+def _with_credential_env(spec: ProcessSpec, secret: str) -> ProcessSpec:
+    """Materialize a consumed Secret into exactly one typed child env slot."""
+    env_key = spec.credential_env_key or _LEGACY_CREDENTIAL_ENV
+    environment = dict(spec.environment)
+    environment[env_key] = secret
+    # Clear the declaration after binding: the resulting DTO carries only the
+    # child environment, which is excluded from repr/dump/digest.
+    return spec.model_copy(update={"environment": environment, "credential_env_key": None})
+
+
 # The manager-level Workdir vocabulary is the second frozen code space for
 # alerts (workspace_provider.WorkdirErrorCode); anything outside the two
 # vocabularies collapses in _stable_code.
@@ -276,9 +291,7 @@ class RuntimeHost:
             # Materialize the Secret ONLY into the controlled launch channel:
             # the child process environment, never logs/DB/events.
             if consumed is not None:
-                secret_env = dict(spec.environment)
-                secret_env["EXECUTION_CREDENTIAL"] = consumed.secret
-                spec = spec.model_copy(update={"environment": secret_env})
+                spec = _with_credential_env(spec, consumed.secret)
 
         # R2-B: (re)build the launch plan AFTER consumption so the controlled
         # child environment carries the consumed Secret. A plan built earlier
@@ -408,6 +421,9 @@ class RuntimeHost:
             if row.host_instance_id == self._registry.host_instance_id:
                 skipped += 1  # current boot: supervised live work, not an orphan
                 continue
+            # A foreign-boot row must not keep an in-memory grant alive even
+            # when the process is already gone or the identity mismatches.
+            await self._revoke_grant(row.managed_id)
             outcome = await self._decide(row)
             if outcome == "terminate":
                 await self._terminate_row(row)

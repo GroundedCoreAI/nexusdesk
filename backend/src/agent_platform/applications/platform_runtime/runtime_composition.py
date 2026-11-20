@@ -601,6 +601,7 @@ def _codex_engine_home_config(settings: Settings) -> CodexEngineHomeConfig:
 def _codex_adapters(
     settings: Settings,
     runtime_host: RuntimeHost | None,
+    execution_broker=None,
 ) -> tuple[
     tuple[AdapterDescriptor, Callable[[], AgentEngineAdapter]],
     tuple[AdapterDescriptor, Callable[[], AgentEngineAdapter]],
@@ -672,6 +673,7 @@ def _codex_adapters(
             workdir_root=settings.execution_workdir_root,
             resource_policy=_codex_resource_policy(settings),
             engine_home_config=_codex_engine_home_config(settings),
+            credential_broker=execution_broker,
             history=context.history,
             ownership=ownership,
         )
@@ -710,6 +712,7 @@ def _build_execution_orchestrator(
     clock: Callable[[], float] | None = None,
     subsystem: ExecutionCapabilitySubsystem | None = None,
     execution_runtime: "ExecutionRuntimeSubsystem | None" = None,
+    execution_broker=None,
 ) -> ExecutionOrchestrator:
     """Register production metadata and wire the Phase 3 seams from settings.
 
@@ -739,7 +742,7 @@ def _build_execution_orchestrator(
     # Stage B is locked. In the default deployment neither is enabled, so the
     # warm targets below stay exactly one React entry (R-46).
     codex_runtime_host = execution_runtime.host if execution_runtime is not None else None
-    for descriptor, factory in _codex_adapters(settings, codex_runtime_host):
+    for descriptor, factory in _codex_adapters(settings, codex_runtime_host, execution_broker):
         # Registering a disabled descriptor is legal and is what keeps the
         # Engine/Protocol pairing enumerable; resolution still fails closed with
         # ``ADAPTER_DISABLED``. A registry that already carries one of these
@@ -1433,6 +1436,7 @@ async def runtime_services(
                 settings=settings,
                 subsystem=subsystem,
                 execution_runtime=execution_runtime,
+                execution_broker=execution_broker,
             )
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             groups.application.evaluation = platform.evaluation
