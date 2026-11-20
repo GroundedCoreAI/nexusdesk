@@ -115,6 +115,7 @@ from agent_platform.core_platform.agent_execution.host.runtime_host import Runti
 from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
     ExecutionSnapshotBarrier,
     capture_execution_context,
+    execution_config_from_context,
 )
 from agent_platform.core_platform.agent_execution.orchestration.orchestrator import (
     ExecutionOrchestrator,
@@ -577,26 +578,6 @@ def _codex_trusted_targets(settings: Settings) -> tuple[TrustedTargetDescriptor,
     )
 
 
-def _codex_config(settings: Settings, protocol: CodexProtocol) -> CodexConfig:
-    """Deployment-level Codex defaults used only when metadata is registered.
-
-    A published Agent may now carry an optional ``ExecutionConfig.codex`` block
-    (09 §5 retires coordinator C4 for this track); this function supplies the
-    deployment default/placeholder for registration, not a second policy source.
-    The pinned version is the first entry of the allowlist so one settings value
-    drives both the gate and the adapter's own version. An empty allowlist keeps
-    the placeholder version: the descriptor stays disabled in that state, so the
-    factory is never reached, and construction must not raise while merely
-    registering metadata.
-    """
-    version = settings.codex_allowed_versions[0] if settings.codex_allowed_versions else "unset"
-    return CodexConfig(
-        protocol=protocol,
-        version=version,
-        path_env=settings.codex_path_env,
-    )
-
-
 def _codex_engine_home_config(settings: Settings) -> CodexEngineHomeConfig:
     """Deployment-owned key-free provider metadata for the private CODEX_HOME."""
     return CodexEngineHomeConfig(
@@ -675,9 +656,16 @@ def _codex_adapters(
             )
 
             ownership = ExecutionOwnership(context.execution_id, context.owner, context.lease_epoch)
+        # D-4: run the *published* Codex block, never the deployment
+        # placeholder. The placeholder carries no ``credential_ref`` and the
+        # deployment ``path_env``, so the P6 lane silently started the CLI with
+        # no secret and every Run ended in ``engine_unavailable``.
+        published = execution_config_from_context(context).codex
+        if published is None:
+            raise RuntimeError("codex cli_exec requires a published codex block")
         return CodexCliAdapter(
             runtime_host,
-            config=_codex_config(settings, CodexProtocol.CLI_EXEC),
+            config=published,
             gate=gate,
             workdir_root=settings.execution_workdir_root,
             resource_policy=_codex_resource_policy(settings),

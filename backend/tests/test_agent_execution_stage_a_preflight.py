@@ -13,6 +13,7 @@ Two deployment defects made stage A unreachable even with every gate open:
 
 import pytest
 
+from agent_platform.applications.platform_runtime import runtime_composition
 from agent_platform.applications.platform_runtime.runtime_composition import (
     RuntimeFactoryInstructionPreparer,
 )
@@ -91,3 +92,79 @@ def test_the_memory_ceiling_gate_is_inert_while_codex_is_off():
     settings = Settings(_env_file=None)
     assert settings.codex_cli_enabled is False
     assert settings.execution_resource_memory_bytes < CODEX_CLI_MIN_MEMORY_BYTES
+
+
+# --------------------------------------------------------------------------- #
+# D-4: the adapter must run the published Codex block, not the deployment one  #
+# --------------------------------------------------------------------------- #
+
+CODEX_PUBLISHED = {
+    "engine": {"engine_id": "codex", "protocol_id": "cli_exec", "adapter_version": "v1"},
+    "codex": {
+        "version": "0.169.0",
+        "credential_ref": "745a1781-e51b-4212-97f4-7b9834987781",
+        "path_env": "/opt/nexusdesk/codex/node:/usr/bin:/bin",
+    },
+}
+
+
+def _codex_context(published):
+    from uuid import uuid4
+
+    from test_agent_execution_phase3_wiring import published_row
+
+    from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
+        build_execution_context,
+    )
+    from agent_platform.extension_contracts import BusinessScope
+
+    row = published_row()
+    row["config"]["agent"]["config"] = published
+    return build_execution_context(
+        row,
+        history=[],
+        owner=uuid4(),
+        scope=BusinessScope(
+            tenant_id=row["tenant_id"],
+            business_id=row["business_id"],
+            workspace_id=row["workspace_id"],
+        ),
+        execution_phase3_enabled=True,
+    )
+
+
+def _cli_factory():
+    settings = Settings(
+        _env_file=None,
+        **CODEX_ON,
+        execution_resource_memory_bytes=2_147_483_648,
+        execution_runtime_host_enabled=True,
+        execution_runtime_host_id="runtime-01",
+    )
+    (_, factory), _ = runtime_composition._codex_adapters(settings, object(), object())
+    return factory
+
+
+def test_the_codex_factory_runs_the_published_block():
+    from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
+        resolve_with_execution_context,
+    )
+
+    adapter = resolve_with_execution_context(_codex_context(CODEX_PUBLISHED), _cli_factory())
+
+    # The published credential reference is what the Broker lane needs; the old
+    # deployment placeholder carried none, so P6 never issued a grant.
+    assert adapter._config.credential_ref == CODEX_PUBLISHED["codex"]["credential_ref"]
+    assert adapter._config.path_env == CODEX_PUBLISHED["codex"]["path_env"]
+
+
+def test_the_codex_factory_refuses_a_run_without_a_published_block():
+    from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
+        resolve_with_execution_context,
+    )
+
+    react_published = {
+        "engine": {"engine_id": "react", "protocol_id": "native", "adapter_version": "v1"}
+    }
+    with pytest.raises(RuntimeError, match="published codex block"):
+        resolve_with_execution_context(_codex_context(react_published), _cli_factory())
