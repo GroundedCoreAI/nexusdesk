@@ -33,6 +33,7 @@ from .capabilities import (
 )
 from .common import ExecutionKey
 from .config import (
+    CODEX_CREDENTIAL_ENV_KEYS,
     CapabilityName,
     CodexConfig,
     CodexProtocol,
@@ -85,6 +86,7 @@ from .snapshots import (
 
 __all__ = [
     "CAPABILITY_ORDER",
+    "CODEX_CREDENTIAL_ENV_KEYS",
     "NO_EXECUTION_RESTRICTIONS",
     "POLICY_LAYER_ORDER",
     "REACT_INSTRUCTION_PROVIDER_ID",

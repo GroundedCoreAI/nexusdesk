@@ -287,8 +287,9 @@ def test_cumulative_t2_t3_t4_modules_and_dependency_direction_are_exact():
         "adapters/codex/app_server.py",
         "adapters/codex/cli_exec.py",
         "adapters/codex/config.py",
-        "adapters/codex/events.py",
-        "adapters/codex/jsonrpc.py",
+            "adapters/codex/events.py",
+            "adapters/codex/home_config.py",
+            "adapters/codex/jsonrpc.py",
     }
     t2_modules = {
         "orchestration/__init__.py",

@@ -232,6 +232,13 @@ class Settings(BaseSettings):
     # the Runner allowlist. Empty by default, so no executable is registered and
     # every Codex start remains untrusted even if the descriptor is enabled.
     codex_cli_executable_path: str = ""
+    # P5/G6: deployment-owned, non-secret provider metadata used to render the
+    # key-free config.toml in each Execution's private CODEX_HOME. The env_key is
+    # a variable NAME, never a value; P6 binds it from the Credential Broker.
+    codex_model: str = "deepseek-flash"
+    codex_model_provider: str = "deepseek"
+    codex_model_base_url: str = "https://api.deepseek.com/v1"
+    codex_credential_env_key: str = "DEEPSEEK_API_KEY"
     model_timeout_seconds: float = Field(default=30, gt=0)
     # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
     # Enabled by default for the typewriter UI. A deployment can opt out with

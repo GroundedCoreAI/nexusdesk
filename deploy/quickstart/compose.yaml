@@ -94,6 +94,13 @@ services:
       # P4/G4 trusted target: empty by default, so no executable is allowlisted.
       # Set the absolute in-container CLI path only with the full Stage A gate.
       AGENT_CODEX_CLI_EXECUTABLE_PATH: ${AGENT_CODEX_CLI_EXECUTABLE_PATH:-}
+      # P5/G6: deployment-owned provider metadata for the key-free config.toml.
+      # Only variable NAMES are configured here; no key value ever enters the
+      # app container environment or this compose file.
+      AGENT_CODEX_MODEL: ${AGENT_CODEX_MODEL:-deepseek-flash}
+      AGENT_CODEX_MODEL_PROVIDER: ${AGENT_CODEX_MODEL_PROVIDER:-deepseek}
+      AGENT_CODEX_MODEL_BASE_URL: ${AGENT_CODEX_MODEL_BASE_URL:-https://api.deepseek.com/v1}
+      AGENT_CODEX_CREDENTIAL_ENV_KEY: ${AGENT_CODEX_CREDENTIAL_ENV_KEY:-DEEPSEEK_API_KEY}
       # Runtime Host identity: empty by default so the Host subsystem never
       # assembles (08 R-7). Set it together with the switch above, e.g.
       # AGENT_EXECUTION_RUNTIME_HOST_ID=quickstart-runtime, as the deliberate
@@ -111,6 +118,12 @@ services:
       AGENT_TOOL_ALLOW_PRIVATE_NETWORKS: "true"
     volumes:
       - app_data:/data
+      # P5/G6 narrow, read-only CLI mounts. Defaults are an empty in-repo
+      # placeholder, not a host home; point the two variables at explicit
+      # absolute directories only when enabling the demo CLI. Never mount
+      # ~/.codex, auth.json, .env or the whole /home/nexus.
+      - ${NEXUSDESK_CODEX_BIN_DIR:-./codex-empty}:/opt/nexusdesk/codex/bin:ro
+      - ${NEXUSDESK_CODEX_NODE_DIR:-./codex-empty}:/opt/nexusdesk/codex/node:ro
     depends_on:
       postgres:
         condition: service_healthy

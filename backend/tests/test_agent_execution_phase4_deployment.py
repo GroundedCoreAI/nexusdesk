@@ -87,7 +87,39 @@ def test_quickstart_execution_switches_default_fail_closed():
     assert env["AGENT_CODEX_CLI_EXECUTABLE_PATH"] == (
         "${AGENT_CODEX_CLI_EXECUTABLE_PATH:-}"
     )
+    assert env["AGENT_CODEX_MODEL"] == "${AGENT_CODEX_MODEL:-deepseek-flash}"
+    assert env["AGENT_CODEX_MODEL_PROVIDER"] == "${AGENT_CODEX_MODEL_PROVIDER:-deepseek}"
+    assert env["AGENT_CODEX_MODEL_BASE_URL"] == (
+        "${AGENT_CODEX_MODEL_BASE_URL:-https://api.deepseek.com/v1}"
+    )
+    assert env["AGENT_CODEX_CREDENTIAL_ENV_KEY"] == (
+        "${AGENT_CODEX_CREDENTIAL_ENV_KEY:-DEEPSEEK_API_KEY}"
+    )
     assert "AGENT_CODEX_APP_SERVER_ENABLED" not in env
+
+
+def test_quickstart_codex_mounts_are_narrow_and_read_only():
+    volumes = _quick()["services"]["app"]["volumes"]
+    assert "app_data:/data" in volumes
+    assert "${NEXUSDESK_CODEX_BIN_DIR:-./codex-empty}:/opt/nexusdesk/codex/bin:ro" in volumes
+    assert "${NEXUSDESK_CODEX_NODE_DIR:-./codex-empty}:/opt/nexusdesk/codex/node:ro" in volumes
+    assert all(
+        ":ro" in entry
+        for entry in volumes
+        if "/opt/nexusdesk/codex/" in entry
+    )
+    assert not any(
+        forbidden in entry
+        for entry in volumes
+        for forbidden in ("/home/", ".codex", "auth.json", "/etc/ssh")
+    )
+
+
+def test_quickstart_codex_template_is_key_free():
+    template = (ROOT / "deploy/quickstart/codex-config.toml.template").read_text()
+    assert 'env_key = "__CODEX_ENV_KEY__"' in template
+    assert 'wire_api = "responses"' in template
+    assert "CANARY_VALUE" not in template
 
 
 def test_quickstart_default_windows_fit_the_stop_grace():
