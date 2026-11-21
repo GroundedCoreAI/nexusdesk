@@ -173,6 +173,8 @@ class CodexCliAdapter:
         engine_home_config: CodexEngineHomeConfig | None = None,
         clock: object | None = None,
         id_factory: object | None = None,
+        provider_resolver: object | None = None,
+        path_env: str | None = None,
     ) -> None:
         self._host = host
         # Internal Fencing evidence captured from the claimed ExecutionContext;
@@ -180,9 +182,15 @@ class CodexCliAdapter:
         self._ownership = ownership
         # R-18(a): the Host consumes the grant before spawn; the adapter passes
         # the credential reference and audience so the Host binds it to this Run.
+        # ``credential_ref`` is the optional deployment-level override; the
+        # published Codex block remains the legacy fallback.
         self._credential_broker = credential_broker
         self._credential_ref = credential_ref
         self._engine_home_config = engine_home_config
+        # Q3: injected ModelGateway provider resolver (None keeps the legacy
+        # lane). Q5: deployment-owned PATH wins over the published path_env.
+        self._provider_resolver = provider_resolver
+        self._path_env = path_env
         self._config = config
         self._gate = gate
         self._root = workdir_root
@@ -242,22 +250,56 @@ class CodexCliAdapter:
         if denial is not None:
             raise _configuration_error(_GATE_CODES[denial])
 
-        # P6/G5: the published config carries only a UUID reference. Resolve it
-        # here and hand an explicit audience to the Host; never let the Host
-        # fall back to "native"/"default", which would broaden credential reuse.
+        # Resolve the launch plan. Gateway lane (Q3): the published profile's
+        # primary route supplies both the per-run home config and the credential
+        # reference, and no DeepSeek or legacy reference participates. Legacy
+        # lane: deployment-global home config plus the constructor-provided
+        # deployment credential reference, falling back to the published one.
+        home_config: CodexEngineHomeConfig | None = self._engine_home_config
         credential_ref: UUID | None = None
-        broker_audience: dict[str, str] = {}
-        if self._config.credential_ref is not None:
+        if self._config.model_profile_id is not None and self._provider_resolver is not None:
             try:
-                credential_ref = UUID(self._config.credential_ref)
-            except (TypeError, ValueError):
-                raise _bounded_error(
-                    ExecutionErrorCategory.ENGINE_UNAVAILABLE,
-                    ExecutionErrorCode.ENGINE_UNAVAILABLE,
-                ) from None
+                plan = await self._provider_resolver.resolve(
+                    request.tenant_id,
+                    self._config.model_profile_id,
+                    self._config.model_profile_version,
+                    str(request.workspace_id),
+                )
+            except Exception:  # noqa: BLE001 - resolver crosses a DB/allowlist boundary.
+                # CodexRouteError (and any resolver/DB failure) must not escape as
+                # a raw exception: _safe_legacy_code would sanitize it to the
+                # opaque "execution_error". INVALID_REQUEST mirrors the React
+                # adapter's mapping of Gateway resolution faults, so the Run
+                # carries a classified, secret-free configuration code instead.
+                raise _configuration_error(ExecutionErrorCode.INVALID_REQUEST) from None
+            home_config = plan.home_config
+            credential_ref = plan.credential_ref
+        else:
+            # P6/G5: both references carry only UUIDs, never secret values. Parse
+            # the effective legacy one here and hand an explicit audience to the
+            # Host; never let the Host fall back to "native"/"default", which
+            # would broaden credential reuse.
+            raw_credential_ref: object | None = self._credential_ref
+            if raw_credential_ref is None:
+                raw_credential_ref = self._config.credential_ref
+            if raw_credential_ref is not None:
+                try:
+                    credential_ref = (
+                        raw_credential_ref
+                        if isinstance(raw_credential_ref, UUID)
+                        else UUID(str(raw_credential_ref))
+                    )
+                except (TypeError, ValueError, AttributeError):
+                    raise _bounded_error(
+                        ExecutionErrorCategory.ENGINE_UNAVAILABLE,
+                        ExecutionErrorCode.ENGINE_UNAVAILABLE,
+                    ) from None
+
+        broker_audience: dict[str, str] = {}
+        if credential_ref is not None:
             if (
                 self._credential_broker is None
-                or self._engine_home_config is None
+                or home_config is None
                 or request.workspace_id is None
             ):
                 raise _bounded_error(
@@ -284,9 +326,12 @@ class CodexCliAdapter:
         # ownership fault here is a WORKSPACE_ERROR before any Host call.
         try:
             private_home = ensure_private_engine_home(working_dir)
-            engine_env = {"PATH": self._config.path_env}
-            if self._engine_home_config is not None:
-                write_private_engine_config(private_home, self._engine_home_config)
+            # Q5: the deployment value is the single effective PATH. ``_path_env``
+            # is injected by the composition root; the published path_env is only
+            # a legacy fallback for callers that did not wire the setting.
+            engine_env = {"PATH": self._path_env or self._config.path_env}
+            if home_config is not None:
+                write_private_engine_config(private_home, home_config)
                 engine_env["CODEX_HOME"] = str(private_home)
         except WorkdirOperationError:
             raise _bounded_error(
@@ -304,9 +349,13 @@ class CodexCliAdapter:
             # values have no field to travel in.
             environment=engine_env,
             # P6/G5: a typed, closed-allowlist variable name. The Host binds the
-            # Broker secret to it after issue/consume and clears this slot.
+            # Broker secret to it after issue/consume and clears this slot. The
+            # resolved plan's env_key (OPENAI_API_KEY in the Gateway lane) is
+            # used, never the deployment placeholder's key.
             credential_env_key=(
-                self._engine_home_config.env_key if credential_ref is not None else None
+                home_config.env_key
+                if credential_ref is not None and home_config is not None
+                else None
             ),
             # 08 R18: the prompt goes to the Host stdin channel, never argv.
             stdin_payload=payload,

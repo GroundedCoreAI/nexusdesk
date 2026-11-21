@@ -153,6 +153,9 @@ from agent_platform.core_platform.extension_platform import (
     register_builtin_capabilities,
     register_builtin_ui_extensions,
 )
+from agent_platform.core_platform.platform_services.model_gateway.codex_route import (
+    CodexProviderResolver,
+)
 from agent_platform.core_platform.platform_services.model_gateway.service import build_model
 from agent_platform.core_platform.platform_services.persistence.database import create_engine
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
@@ -592,6 +595,7 @@ def _codex_adapters(
     settings: Settings,
     runtime_host: RuntimeHost | None,
     execution_broker=None,
+    codex_provider_resolver: CodexProviderResolver | None = None,
 ) -> tuple[
     tuple[AdapterDescriptor, Callable[[], AgentEngineAdapter]],
     tuple[AdapterDescriptor, Callable[[], AgentEngineAdapter]],
@@ -669,7 +673,13 @@ def _codex_adapters(
             gate=gate,
             workdir_root=settings.execution_workdir_root,
             resource_policy=_codex_resource_policy(settings),
+            # LEGACY fallback: the four deployment-global Settings. The Gateway
+            # lane replaces this per run when the published block binds a profile.
             engine_home_config=_codex_engine_home_config(settings),
+            provider_resolver=codex_provider_resolver,
+            # Q5: the deployment value is the single effective child PATH.
+            path_env=settings.codex_path_env,
+            credential_ref=settings.codex_credential_ref,
             credential_broker=execution_broker,
             history=context.history,
             ownership=ownership,
@@ -710,6 +720,7 @@ def _build_execution_orchestrator(
     subsystem: ExecutionCapabilitySubsystem | None = None,
     execution_runtime: "ExecutionRuntimeSubsystem | None" = None,
     execution_broker=None,
+    codex_provider_resolver: CodexProviderResolver | None = None,
 ) -> ExecutionOrchestrator:
     """Register production metadata and wire the Phase 3 seams from settings.
 
@@ -739,7 +750,9 @@ def _build_execution_orchestrator(
     # Stage B is locked. In the default deployment neither is enabled, so the
     # warm targets below stay exactly one React entry (R-46).
     codex_runtime_host = execution_runtime.host if execution_runtime is not None else None
-    for descriptor, factory in _codex_adapters(settings, codex_runtime_host, execution_broker):
+    for descriptor, factory in _codex_adapters(
+        settings, codex_runtime_host, execution_broker, codex_provider_resolver
+    ):
         # Registering a disabled descriptor is legal and is what keeps the
         # Engine/Protocol pairing enumerable; resolution still fails closed with
         # ``ADAPTER_DISABLED``. A registry that already carries one of these
@@ -1427,6 +1440,14 @@ async def runtime_services(
                 barrier=_RepositorySnapshotBarrier(repository.write_execution_snapshots),
                 workspace_port=real_workspace_port,
             )
+            # One Codex provider resolver per application process. It reuses the
+            # exact Catalog instance the Gateway and AgentService validation use,
+            # so profile resolution and the model_gateway_allowed_hosts allowlist
+            # cannot drift. Constructing it has no side effects: the adapters
+            # only call it when a published Agent binds a profile pair.
+            codex_provider_resolver = CodexProviderResolver(
+                engine, settings, platform.gateway.catalog
+            )
             orchestrator = _build_execution_orchestrator(
                 factory,
                 adapters,
@@ -1434,6 +1455,7 @@ async def runtime_services(
                 subsystem=subsystem,
                 execution_runtime=execution_runtime,
                 execution_broker=execution_broker,
+                codex_provider_resolver=codex_provider_resolver,
             )
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             groups.application.evaluation = platform.evaluation

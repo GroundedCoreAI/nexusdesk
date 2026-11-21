@@ -94,6 +94,16 @@ class CodexConfig(ExecutionContractModel):
     contracts-to-implementation dependency. Adapters import it from here. Only a
     credential *reference* is representable; no secret value, proxy setting or
     free-form environment map can enter this DTO.
+
+    ``model_profile_id`` / ``model_profile_version`` optionally bind this Agent to
+    a published ModelGateway chat profile. When the pair is present, the run-time
+    resolver derives model, provider, base URL, wire protocol and credential from
+    the profile's primary route instead of the deployment defaults; the CLI still
+    calls the resolved upstream directly (ModelGateway has no inbound endpoint).
+    When the pair is absent, the **legacy lane** stays valid and unchanged: the
+    four deployment-global ``codex_*`` Settings plus ``codex.credential_ref`` and
+    ``codex.path_env`` from this block are used. Both fields are additive with
+    ``None`` defaults, so no already-published snapshot becomes unparseable.
     """
 
     protocol: CodexProtocol = CodexProtocol.CLI_EXEC
@@ -110,6 +120,16 @@ class CodexConfig(ExecutionContractModel):
     # fail exec with ENOENT. A typed PATH is deliberately narrower than a free
     # map: credentials, proxies and host secrets have no field to travel in.
     path_env: str = Field(default="/usr/local/bin:/usr/bin:/bin", min_length=1, max_length=4096)
+    # Optional ModelGateway binding (Q3). Both-or-neither is enforced below, mirroring
+    # ``ReactConfig.model_profile_is_paired``. These are identifiers, never secrets.
+    model_profile_id: UUID | None = None
+    model_profile_version: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def model_profile_is_paired(self) -> Self:
+        if (self.model_profile_id is None) != (self.model_profile_version is None):
+            raise ValueError("model_profile_id and model_profile_version must be set together")
+        return self
 
     @field_validator("path_env")
     @classmethod

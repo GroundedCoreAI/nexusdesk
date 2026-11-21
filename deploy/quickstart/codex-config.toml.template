@@ -8,4 +8,8 @@ model_provider = "__CODEX_MODEL_PROVIDER__"
 name = "__CODEX_MODEL_PROVIDER__"
 base_url = "__CODEX_BASE_URL__"
 env_key = "__CODEX_ENV_KEY__"
-wire_api = "responses"
+# Resolved per run from the ModelGateway route (codex_wire_api) or the legacy
+# deployment default; the legacy default is wire_api = "responses", and "chat" is
+# also supported, so no wire protocol or provider name is hardcoded as the
+# effective value in this template.
+wire_api = "__CODEX_WIRE_API__"

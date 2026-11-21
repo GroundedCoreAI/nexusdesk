@@ -1,6 +1,8 @@
 """Gateway contracts. Provider secrets are write-only and excluded from serialization."""
 
+import re
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, SchemaError
@@ -14,6 +16,9 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
+_CODEX_PROVIDER_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+
+
 class Connection(Contract):
     name: str = Field(min_length=1, max_length=100)
     protocol: Literal["demo", "openai_compatible", "gateway_http"] = "demo"
@@ -22,6 +27,47 @@ class Connection(Contract):
     concurrency: int = Field(default=8, ge=1, le=64)
     api_key: SecretStr | None = Field(default=None, min_length=1, max_length=8192, exclude=True)
     clear_api_key: bool = Field(default=False, exclude=True)
+    # Codex CLI transport metadata (Q3). All four are optional and defaulted so
+    # stored connection specs stay valid. ``execution_credential_ref`` is a UUID
+    # *reference* into ``execution_credentials``, never a secret; it is distinct
+    # from ``credential_ref`` above, which names an ``AGENT_MODEL_SECRET_*`` env
+    # variable for the outbound Gateway client. The Codex CLI calls the resolved
+    # upstream directly, so these describe that transport, not Gateway.invoke().
+    execution_credential_ref: UUID | None = None
+    codex_base_url: str | None = Field(default=None, max_length=500)
+    codex_wire_api: Literal["responses", "chat"] | None = None
+    codex_model_provider: str | None = Field(default=None, max_length=64)
+
+    @field_validator("codex_base_url")
+    @classmethod
+    def codex_base_url_must_be_bare_https(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        parsed = urlsplit(value)
+        try:
+            _ = parsed.port  # malformed ports raise ValueError in urllib
+        except ValueError:
+            raise ValueError("codex_base_url must be a bare https URL") from None
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or any(ch.isspace() for ch in value)
+        ):
+            raise ValueError("codex_base_url must be a bare https URL")
+        return value
+
+    @field_validator("codex_model_provider")
+    @classmethod
+    def codex_model_provider_must_be_identifier(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if not _CODEX_PROVIDER_ID.fullmatch(value):
+            raise ValueError("codex_model_provider must be a bounded provider identifier")
+        return value
 
 
 class Model(Contract):
