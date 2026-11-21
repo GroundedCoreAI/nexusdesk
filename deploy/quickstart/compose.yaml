@@ -15,6 +15,13 @@ services:
       timeout: 3s
       retries: 20
   app:
+    # CD deploys the exact CI-verified SHA by exporting NEXUSDESK_VERSION for
+    # its own `up -d` shell, but never writes that value back into the host's
+    # deploy/quickstart/.env. A later manual `docker compose up -d` without
+    # `export NEXUSDESK_VERSION=<deployed-sha>` therefore resolves this image
+    # from the stale tag still in that .env and silently rolls the container
+    # back. Always export the deployed SHA (or remove the key) before a manual
+    # up, and confirm with `docker compose config` afterwards.
     image: ${NEXUSDESK_IMAGE_REGISTRY:-}nexusdesk-quickstart:${NEXUSDESK_VERSION:-local}
     build:
       context: ../..
