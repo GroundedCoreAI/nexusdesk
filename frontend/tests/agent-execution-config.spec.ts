@@ -45,10 +45,20 @@ const CAPS = {
   summary_enabled: true, memory_inject_enabled: true, memory_extract_enabled: true,
   memory_inject_max_items: 20, memory_search_limit: 5, memory_blacklist_auto_handoff: false,
 };
-// GET /agents/execution-config-flags (03 §7.4): exactly the two booleans, named
-// verbatim like the backend settings. Both on is the regular deployment state,
-// so the pre-existing cases keep exercising the Phase 3 entries.
-const FLAGS = { execution_phase3_enabled: true, execution_orchestrator_enabled: true };
+// GET /agents/execution-config-flags (03 §7.4): the two booleans plus the issue
+// #162 non-sensitive Codex metadata. Both on is the regular deployment state.
+// The allowlist pins 0.169.0 (the installed/verified version) while the newest
+// npm version 0.171.0 is catalogue-only — the exact scenario from issue #162.
+const CODEX_CATALOGUE = [
+  { version: '0.171.0', source: 'npm-registry', verified: true },
+  { version: '0.169.0', source: 'installed-cli', verified: false },
+];
+const FLAGS = {
+  execution_phase3_enabled: true,
+  execution_orchestrator_enabled: true,
+  allowed_codex_versions: ['0.169.0'],
+  codex_version_catalogue: CODEX_CATALOGUE,
+};
 // One stored conversation with one finished Run, used only by the M3
 // "history and Run stay viewable" cases (P3-FE-20/21).
 const RECORD = {
@@ -146,8 +156,13 @@ interface Options {
   /** Response body the draft PUT answers with on `saveStatus`. */
   saveError?: unknown;
   onSave?: (config: Record<string, unknown>) => void;
-  /** Deployment switches the flags endpoint answers with; defaults to both on. */
-  flags?: { execution_phase3_enabled: boolean; execution_orchestrator_enabled: boolean };
+  /** Flags endpoint body; defaults to both on plus the #162 Codex metadata. */
+  flags?: {
+    execution_phase3_enabled: boolean;
+    execution_orchestrator_enabled: boolean;
+    allowed_codex_versions?: string[];
+    codex_version_catalogue?: Array<{ version: string; source: string; verified: boolean }>;
+  };
   /** Status code the flags endpoint answers with, to exercise fail-closed gating. */
   flagsStatus?: number;
   /** Admin-only credential metadata behind GET /execution-credentials (T-07). */
@@ -413,7 +428,7 @@ test('P5-FE-01 (G1) engine selector publishes a typed Codex block without React 
   await page.getByLabel('选择 Engine').click();
   await page.locator('.ant-select-item-option-content', { hasText: 'codex / cli_exec / v1' }).click();
   await expect(section(page).getByRole('heading', { name: 'Codex 配置' })).toBeVisible();
-  await page.getByLabel('Codex 版本').fill('0.169.0');
+  // No version control: the whitelist version is injected at the save boundary.
   await page.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect.poll(() => harness.saves.length).toBe(1);
   const saved = harness.saves[0].config as Record<string, unknown>;
@@ -431,7 +446,9 @@ test('P5-FE-02 phase3 off hides the engine selector and keeps codex fields read-
   });
   await expect(page.getByLabel('选择 Engine')).toHaveCount(0);
   await expect(page.getByLabel('Engine 三元组')).toHaveValue('codex / cli_exec / v1');
-  await expect(page.getByLabel('Codex 版本')).toBeDisabled();
+  // No version control exists at all, enabled or disabled.
+  await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
+  await expect(page.locator('.agent-codex-version-select')).toHaveCount(0);
   await expect(page.getByLabel('Codex PATH')).toHaveValue('/usr/bin');
 });
 
@@ -477,15 +494,14 @@ test('P7-UI-02 (bug 3/4) switching React -> Codex -> React -> Codex loses nothin
   await choose('codex / cli_exec / v1');
   await expect(page.getByLabel('Chat 模型方案')).toHaveCount(0);
   await expect(section(page).locator('[role="alert"]')).toHaveCount(0);
-  await page.getByLabel('Codex 版本').fill('0.169.0');
   await choose('react / native / v1');
   // No model_profile_id / model_profile_version alias conflict on the way back.
   await expect(section(page).locator('[role="alert"]')).toHaveCount(0);
   await expect(page.getByLabel('Chat 模型方案')).toHaveValue('6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f');
   await choose('codex / cli_exec / v1');
-  // The version typed before the round trip is still there, so switching back
-  // to Codex no longer resets it to an empty string (the old blocker).
-  await expect(page.getByLabel('Codex 版本')).toHaveValue('0.169.0');
+  // The version is no longer a UI concern: no picker to reset, and the preview
+  // below still carries the allowlist-injected value (old blocker stays fixed).
+  await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
   await page.getByRole('button', { name: '预览能力' }).click();
   await expect.poll(() => harness.previews.length).toBe(1);
   const config = harness.previews[0].config as Record<string, unknown>;
@@ -1040,7 +1056,7 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '禁用能力只会收窄服务端计算结果，不能授予任何能力。',
     '预览结果由服务端计算，不会创建运行，也不会授予执行权限。',
     '运行 Engine 与能力由服务端注册表和策略决定，这里只能查看与收窄。',
-    '选择 Engine', 'Codex 配置', 'Codex 版本', 'Codex 可执行文件', 'Codex 超时（秒）',
+    '选择 Engine', 'Codex 配置', 'Codex 可执行文件', 'Codex 超时（秒）',
     'Codex 凭据引用（UUID）', '仅存引用，不填密钥', 'Codex PATH',
     'Stage A 仅支持审批模式 never 与沙箱模式 read-only；会话恢复与人工审批未启用。',
     'Phase 3 执行能力尚未启用，无法预览。',
@@ -1060,7 +1076,8 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '取值必须是允许值之一', '取值格式不正确',
     '当前 Engine 不支持旧版 React 字段，请清除模型方案或切回 React Engine',
     '当前 Engine 由自身配置决定模型与凭据，不使用平台 Chat 模型方案；发布前无需在此绑定方案。',
-    '请填写已部署并列入 AGENT_CODEX_ALLOWED_VERSIONS 的 Codex CLI 版本号，例如 0.169.0。',
+    // Issue #162 (maintainer follow-up): the version UI and all of its markers
+    // were removed, so none of those keys may be required from the locales.
     '凭据来源（只读）',
     '密钥由运维在凭据库中加密登记，运行时由凭据 Broker 一次性授权并注入子进程环境变量。',
     'Agent 配置只保存 credential_ref 引用；平台不存储、不展示、也不通过接口返回密钥明文。',
@@ -1135,7 +1152,6 @@ test('I161-01 (issue #161) engine round trip keeps the React Chat binding throug
   // must strip the React block and neutralise the three aliases (the P7 422
   // fix), so the echoed draft itself no longer carries the binding.
   await choose('codex / cli_exec / v1');
-  await page.getByLabel('Codex 版本').fill('0.169.0');
   await page.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect.poll(() => harness.saves.length).toBe(1);
   const savedCodex = harness.saves[0].config as Record<string, unknown>;
@@ -1179,4 +1195,68 @@ test('I161-02 (issue #161) publishing a React draft with no Chat profile is bloc
   const alert = page.locator('.agent-workspace > .alert.error');
   await expect(alert).toContainText('请先选择已发布的 Chat 配置方案');
   expect(harness.calls.filter(call => call === 'POST /agents/agent-1/publish')).toHaveLength(0);
+});
+
+// Issue #162, maintainer follow-up — the version dropdown was a fake choice
+// (one installed binary, one allowed version), so the UI was removed entirely.
+// The version is now injected from the deployment allowlist at the wire
+// boundary. The backend gate is untouched and no version is fabricated when the
+// allowlist is empty: these cases are contract-level UI evidence only.
+test('I162-01 (issue #162) the Codex version control is gone while other Codex fields stay', async ({ page }) => {
+  await open(page, { draft: codexDraft() });
+  await expect(section(page).getByRole('heading', { name: 'Codex 配置' })).toBeVisible();
+  // No picker, no input, no stale-value warning, no grouping markers.
+  await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
+  await expect(page.locator('.agent-codex-version-select')).toHaveCount(0);
+  await expect(page.locator('.agent-codex-version-stale')).toHaveCount(0);
+  // The remaining Codex settings are still present and editable.
+  await expect(page.getByLabel('Codex 可执行文件')).toBeVisible();
+  await expect(page.getByLabel('Codex 超时（秒）')).toBeVisible();
+  await expect(page.getByLabel('Codex 凭据引用（UUID）')).toBeVisible();
+  await expect(page.getByLabel('Codex PATH')).toBeVisible();
+});
+
+test('I162-02 (issue #162) selecting the codex engine saves the flag allowlist version', async ({ page }) => {
+  // Mock an allowlist that is deliberately not the old hardcoded/default value
+  // so the assertion proves the version comes from the flags response.
+  const allowed = '0.168.0';
+  const harness = await open(page, {
+    flags: { ...FLAGS, allowed_codex_versions: [allowed] },
+  });
+  await page.getByLabel('选择 Engine').click();
+  await page.locator('.ant-select-item-option-content', { hasText: 'codex / cli_exec / v1' }).click();
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  const saved = harness.saves[0].config as Record<string, unknown>;
+  expect((saved.engine as Record<string, unknown>).engine_id).toBe('codex');
+  expect((saved.codex as Record<string, unknown>).version).toBe(allowed);
+});
+
+test('I162-03 (issue #162) a stale codex version is corrected to the allowlist on save', async ({ page }) => {
+  const allowed = '0.169.0';
+  const harness = await open(page, {
+    draft: codexDraft({ codex: { ...CODEX_BLOCK, version: '0.150.0' } }),
+    flags: { ...FLAGS, allowed_codex_versions: [allowed] },
+  });
+  // There is no stale-value UI left for the user to fix by hand. An edit makes
+  // the draft dirty so the save button actually sends the wire request.
+  await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
+  await page.getByLabel('Agent 简介').fill('保存时自动纠正 Codex 版本');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  expect((harness.saves[0].config.codex as Record<string, unknown>).version).toBe(allowed);
+});
+
+test('I162-04 (issue #162) an empty allowlist fabricates no version (fail-closed)', async ({ page }) => {
+  const harness = await open(page, {
+    draft: codexDraft({ codex: { ...CODEX_BLOCK, version: '' } }),
+    flags: { ...FLAGS, allowed_codex_versions: [] },
+  });
+  await page.getByLabel('Agent 简介').fill('空白名单不得编造版本');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  // The draft keeps its empty version; the server's strict min_length=1 gate
+  // still rejects it. The frontend never invents a version when the deployment
+  // allows none — fail-closed, exactly like the backend gate.
+  expect((harness.saves[0].config.codex as Record<string, unknown>).version).toBe('');
 });

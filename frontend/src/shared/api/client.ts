@@ -115,6 +115,9 @@ export const SUPPORTED_ENGINES: EngineIdentity[] = [
 ];
 export const DEFAULT_ENGINE: EngineIdentity = SUPPORTED_ENGINES[0];
 const DEFAULT_REACT: ReactExecutionConfig = { model_profile_id: null, model_profile_version: null, max_model_rounds: 6 };
+// `version` is a placeholder here: there is no version UI, and the real value
+// is injected from the deployment allowlist at the save/preview boundary by
+// `normalizeExecutionForEngine`. An empty allowlist leaves it empty (fail-closed).
 export const DEFAULT_CODEX: CodexExecutionConfig = {
   protocol: 'cli_exec', version: '', executable: 'codex', timeout_seconds: 600,
   approval_mode: 'never', sandbox_mode: 'read-only', credential_ref: null,
@@ -296,12 +299,21 @@ export function patchEngine(config: AgentConfig, engine: EngineIdentity): AgentC
  *
  * - CLI engine: drop the React block and neutralise the three legacy root
  *   aliases (the normalizer rejects non-default React aliases on a CLI engine).
+ *   The Codex version is a required, gate-checked field with no UI control, so
+ *   it is injected from the deployment allowlist here (first allowed version =
+ *   the deployment default). An empty allowlist injects nothing and stays
+ *   fail-closed: no version is ever fabricated.
  * - React engine: drop the Codex block and keep root aliases in step with the
  *   typed React block, so no "取值不一致" conflict can be published. A legacy
  *   draft with no typed block keeps its root aliases exactly as they are — they
  *   are its only source of React settings.
+ *
+ * `allowedCodexVersions` comes from `GET /agents/execution-config-flags`
+ * (`flags.allowed_codex_versions`), which loads asynchronously. Callers pass the
+ * latest loaded value so the saved version is always the deployment's current
+ * allowlist, not a hardcoded constant or a stale snapshot.
  */
-export function normalizeExecutionForEngine(config: AgentConfig): AgentConfig {
+export function normalizeExecutionForEngine(config: AgentConfig, allowedCodexVersions?: readonly string[]): AgentConfig {
   const engineId = config.engine?.engine_id ?? DEFAULT_ENGINE.engine_id;
   const next: AgentConfig = { ...config };
   // `reactBindingMemory` is editor state, not a draft field. The backend rejects
@@ -316,6 +328,12 @@ export function normalizeExecutionForEngine(config: AgentConfig): AgentConfig {
     root.model_profile_version = null;
     root.max_model_rounds = DEFAULT_REACT.max_model_rounds;
     if (!next.codex) next.codex = { ...DEFAULT_CODEX };
+    // The deployment allowlist is the single source of truth for the version.
+    // Replace whatever the draft carried (empty on a new draft, stale on an old
+    // one) with the first allowed version. Copy the block rather than mutating
+    // it: `next` is only a shallow clone of `config`.
+    if (allowedCodexVersions?.length)
+      next.codex = { ...next.codex, version: allowedCodexVersions[0] };
   } else {
     next.codex = undefined;
     if (config.react) {
@@ -357,10 +375,10 @@ export function toggleDisabledCapability(config: AgentConfig, name: ExecutionCap
  * The draft is normalised for its active engine first, so a preview can never
  * reject an editor-only round trip between two engine blocks (P7 defect set).
  */
-export function previewExecution(agentId: string | null, config: AgentConfig) {
+export function previewExecution(agentId: string | null, config: AgentConfig, allowedCodexVersions?: readonly string[]) {
   return post<ExecutionPreview>('/agents/execution-preview', {
     agent_id: agentId,
-    config: normalizeExecutionForEngine(config),
+    config: normalizeExecutionForEngine(config, allowedCodexVersions),
   });
 }
 
@@ -399,15 +417,30 @@ export interface MemoryConfigCaps {
   memory_blacklist_auto_handoff: boolean;
 }
 /**
+ * One informational Codex version row exposed by the flags endpoint (issue #162).
+ * `verified` records whether npm officially confirmed the version; it never
+ * grants execution permission — the allowlist is the authoritative gate.
+ */
+export interface CodexVersionCatalogueEntry {
+  version: string;
+  source: string;
+  verified: boolean;
+}
+/**
  * Deployment-side Phase 3 switches exposed by GET /agents/execution-config-flags
- * (03-technical-design.md §7.4, R-25). The strict response carries exactly these
- * two booleans, named verbatim like the backend settings, and nothing else; the
- * frontend only uses them to decide which Phase 3 editing entries to show. It is
- * a presentation hint — the server remains the authorization boundary.
+ * (03-technical-design.md §7.4, R-25) plus the non-sensitive Codex version
+ * metadata added in issue #162. The two booleans decide which Phase 3 editing
+ * entries to show. `allowed_codex_versions` is the authoritative runtime
+ * allowlist (absent/empty = deny-all) and `codex_version_catalogue` is a
+ * TTL-cached informational snapshot. Neither grants execution permission:
+ * the server remains the authorization boundary. The metadata fields are
+ * optional so an older backend response still renders safely (fail-closed).
  */
 export interface ExecutionConfigFlags {
   execution_phase3_enabled: boolean;
   execution_orchestrator_enabled: boolean;
+  allowed_codex_versions?: string[];
+  codex_version_catalogue?: CodexVersionCatalogueEntry[];
 }
 export interface Agent { created_by?: string | null; industry?:string; tags?:string[]; is_example?:boolean; updated_at?: string; created_at?: string; id: string; name: string; description: string; draft: AgentConfig; draft_revision: number; published_version: number | null; archived?: boolean }
 export interface KnowledgeBase { id: string; name: string; document_count: number; enabled: boolean }

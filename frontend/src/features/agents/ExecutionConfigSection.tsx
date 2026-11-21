@@ -158,6 +158,13 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
         engine: item,
     }));
     const codexReadOnly = !canEdit || busy || !phase3Entries;
+    // Issue #162 (maintainer follow-up): there is no Codex version control in
+    // the UI. The deployment installs a single Codex binary, so a version
+    // "choice" was fake — users saw many versions but only one was runnable.
+    // The version is instead injected from the authoritative deployment
+    // allowlist at the save/preview wire boundary (see
+    // `normalizeExecutionForEngine`), so new drafts and stale drafts alike
+    // always carry a legal version without the user having to pick one.
     const previewPaths = locateExecutionErrors(previewError);
   const savePaths = locateExecutionErrors(saveError || '');
   const saveErrorIsExecution = EXECUTION_ERROR_CODES.some(code => (saveError || '').includes(code)) || savePaths.length > 0;
@@ -173,7 +180,7 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
         setPreviewing(true);
         setPreviewError('');
         try {
-            setPreview(await previewExecution(agentId, config));
+            setPreview(await previewExecution(agentId, config, flags?.allowed_codex_versions));
             setPreviewedConfig(JSON.stringify(config));
         }
         catch (error) {
@@ -226,10 +233,6 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
     {view.codex && <>
     <div className="agent-setting-card">
       <h3 className="agent-memory-group">{t('Codex 配置')}</h3>
-      <Field label={t('Codex 版本')}>
-        <Input aria-label={t('Codex 版本')} required value={view.codex.version} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { version: event.target.value }))}/>
-      </Field>
-      <p className="agent-muted">{`${t('必填')} · ${t('请填写已部署并列入 AGENT_CODEX_ALLOWED_VERSIONS 的 Codex CLI 版本号，例如 0.169.0。')}`}</p>
       <Field label={t('Codex 可执行文件')}>
         <Input aria-label={t('Codex 可执行文件')} value={view.codex.executable} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { executable: event.target.value }))}/>
       </Field>
