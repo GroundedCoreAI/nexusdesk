@@ -1,7 +1,8 @@
 # NexusDesk Agent 执行平台 v2 · 分阶段规划文档
 
-> 状态：Phase 0/1 正式验收仍未完成，后续各阶段报告保留各自边界。Phase 5 Stage A（`codex/cli_exec/v1`）已于 2026-11-20 完成**范围限定**端到端验收（PASS scope-limited），由单一验收负责人 JackChow 签署，权威记录 `13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`；Stage A 在 quickstart 单租户演示范围的解锁记录见 `phase-5-codex-integration/07-acceptance-report.md` 末章。容器内需 `bwrap` 沙箱的工具调用受 Docker 默认 seccomp 阻断，登记为部署加固边界；Stage B 仍锁定，P5-IT-18 与 Stage B 独立解锁记录仍未满足；生产 Codex 路由、不可信多租户等高风险启用未请求、未授权。Phase 6 01～05 与双语 08 已于 2026-11-16 按代码现实核查并批准直接继续开发；不声称 Phase 6 已实施、测试、验收或获准不可信开放。Phase 7 暂缓。
+> 状态：Phase 0/1 已按 `11-scope-limited-acceptance-record-20261118.md` 于 2026-11-18 重新验收闭合，判定 **通过（范围限定 / PASS scope-limited）**；该闭合来自新的证据约束验收记录（13 lanes / 5,464 tests / 0 failures）与单一验收负责人签署，**非由后续合入追认**，Phase 0/1 的 07 历史原文与测试数值一律保留。后续各阶段报告保留各自边界。Phase 5 Stage A（`codex/cli_exec/v1`）已于 2026-11-20 完成**范围限定**端到端验收（PASS scope-limited），由单一验收负责人 JackChow 签署，权威记录 `13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`；Stage A 在 quickstart 单租户演示范围的解锁记录见 `phase-5-codex-integration/07-acceptance-report.md` 末章。容器内需 `bwrap` 沙箱的工具调用受 Docker 默认 seccomp 阻断，登记为部署加固边界；Stage B 仍锁定，P5-IT-18 与 Stage B 独立解锁记录仍未满足；生产 Codex 路由、不可信多租户等高风险启用未请求、未授权。Phase 6 01～05 与双语 08 已于 2026-11-16 按代码现实核查并批准直接继续开发；不声称 Phase 6 已实施、测试、验收或获准不可信开放。Phase 7 暂缓。
 > 创建：2026-11-02
+> 修订：2026-11-21（Phase 0/1 状态行按 11 号记录同步为「通过（范围限定）」，明确「非由后续合入追认」；同步 Review 指引；09 §0 表格拆行，区分「验收负责人结论可闭合」与「独立安全批准不可由机器产出」；Phase 4/5 的 07 状态行按 12/13 号记录同步；归档 `05-pending-env.md` 登记清单并补齐证据包链接与 SHA256。本修订不改写任何历史结论、执行记录或测试数值）
 > 修订：2026-11-20（Phase 5 Stage A 收口：修正本行「Stage A 完整验收未通过」的过期表述，登记 `13` 已签署的范围限定验收记录与 `07` Stage A 解锁记录；明确容器内 bwrap 沙箱边界、Stage B 与高风险启用仍锁定；CD `.env` 版本号回写陷阱由 PR #157 关闭。Phase 0/1 正式验收缺口不因本修订追认完成）
 > 修订：2026-11-18（阶段 0–3 验收范围限定：性能/容量/p50/p95/C11 延迟、配对样本与样本数、≤5%/≤50ms、CI provenance/最终 PR head 双跑/CI run URL、真实或授权历史样本、多样本/大数据量均不作为阶段验收门禁，仅作历史记录或范围外说明；保留功能正确性、开关完备性、租户隔离、Secret、数据完整性、迁移、终态/副作用、无 P0/P1 与单一验收记录；高风险能力启用仍为独立审批；阶段 0–3 非破坏性 lane 接受受控共享生产主机）
 > 修订：2026-11-16（新增 Phase 6 实施基线；记录当前迁移 head 与上游验收边界）
@@ -76,7 +77,7 @@ Phase 3 必须扩展这些组件而不是复制执行链。`Repository.claim` �
 
 ## Review 指引
 
-- Phase 0/1：正式验收缺口仍按各自 07 跟踪，不能由后续合入追认完成。
+- Phase 0/1：已按 `11-scope-limited-acceptance-record-20261118.md` 重新验收闭合，判定为 **通过（范围限定 / PASS scope-limited）**；**该闭合非由后续合入追认**，而是来自新的证据约束验收记录（13 lanes / 5,464 tests / 0 failures）与单一验收负责人签署。两份 07 的历史状态原文、执行记录与测试数值保留不变，审查时以文末「2026-11-18 范围限定验收执行补记」及 11 号记录为准；CI 双跑、真实历史样本、多角色签字属于 2026-11-18 范围外历史背景，不作为门禁。
 - Phase 2：关注有条件通过边界、开关矩阵/隔离/数据/迁移/终态/副作用等保留门禁及附录证据；性能/真实部署缺口为 2026-11-18 范围外历史记录，不重写历史结论。
 - Phase 3：重点审查旧根别名与 canonical diff、无 Adapter 实例的草稿校验、最小权限与缓存失效、五快照启动屏障、Provider 单次渲染、双开关矩阵、预览租户隔离及默认关闭/无静默回退/开关不泄漏等保留门禁；C11 的 100 个真实样本为 2026-11-18 范围外历史记录，非门禁。
 - Phase 4/5：按实际报告审查进程与 Workspace 隔离、原生协议封装。

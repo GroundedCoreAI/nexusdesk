@@ -1,6 +1,7 @@
 # Phase 0 · Baseline and Inventory — Acceptance Report
 
-> Status: **Pending acceptance / not approved** (historical and subsequent committed-artifact local automated evidence recorded; neither a pass nor a conditional pass)
+> Status: **PASS (scope-limited)** — closed by a new evidence-bound re-acceptance on 2026-11-18 at target SHA `5170e140f10b117549cf54ba400131f5d7f95f69` under `../11-scope-limited-acceptance-record-20261118.md`; **this is not a retroactive ratification by later merges**. Basis, evidence package and signature: the "2026-11-18 scope-limited acceptance execution addendum (phases 0–3)" at the end of this report. All historical text, execution records and test numbers above are preserved unchanged.
+> Historical status (verbatim): **Pending acceptance / not approved** (historical and subsequent committed-artifact local automated evidence recorded; neither a pass nor a conditional pass)
 > Created: 2026-11-08
 > Basis: `05-acceptance-plan.en.md` (A1–A6, UAT, five business metrics, C1–C5), `06-test-report.en.md`, and all documents under `baseline/`
 > Execution: T10 automated acceptance agent, **not human acceptance and not a substitute for signatures**; historical double run on UTC 2026-11-07, subsequent committed-artifact local Docker double run on UTC 2026-11-09; documentation backfilled on 2026-11-10
@@ -170,3 +171,22 @@ Authoritative record: `../11-scope-limited-acceptance-record-20261118.md`; evide
 `109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23`.
 Historical conclusions and numbers above are not retroactively modified; this addendum only records
 the current scope-limited conclusion.
+
+### 09 §10 template fields (index sync, 2026-11-21)
+
+> This subsection only completes the `09` §10 appendix template fields. The wording of the
+> "2026-11-18 scope-limited acceptance execution addendum (phases 0–3)" above, all historical
+> conclusions and all test numbers are preserved unchanged.
+
+Environment: governed shared production Linux host `iZwz9hk5o1f6h2hs6kfetpZ` (Alibaba Cloud
+Linux 3, kernel 5.10.134, x86_64); run-scoped containers/ports/paths/credentials; zero changes
+to co-tenant services; target SHA `5170e140f10b117549cf54ba400131f5d7f95f69` (`integration`, PR #143 merge).
+
+| Item | Basis / command | Result | Verdict | Evidence |
+|---|---|---|---|---|
+| Functional correctness, switch completeness, tenant isolation, Secret, data integrity, migration, terminal state, side effects/cleanup | 13 lanes + dedicated 913-test `d9-switch-completeness` lane + read-only default-off inspection | 5,464 tests / 0 failures / 0 errors / 55 declared skips | **PASS (scope-limited)** | `11` §3–§4; `20261118T125822Z.tar.gz`, SHA256 `109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23` |
+| Single acceptance-owner record | `11` §7 signature | JackChow signed on 2026-11-18 (GMT+8); no signature item outstanding | **PASS** | `11` §7 |
+| CI provenance / real historical samples / large samples / performance | 2026-11-18 scope revision | Removed as stage gates; historical notes only | not a gate | `11` §1; §0 of this report |
+
+Residuals: high-risk capability enablement still requires separate independent security and
+operations approval (not requested, not authorized); no other signature item is outstanding.

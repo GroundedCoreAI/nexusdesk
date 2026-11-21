@@ -1,6 +1,7 @@
 # Phase 1 · Execution Contracts and Registries — Acceptance Report
 
-> Status: independent R6/R11 spec review and scoped quality review are both APPROVED; current-tree A1～A8 local engineering evidence and the scoped C1～C4 checks pass; **formal acceptance has not yet passed and remains incomplete**, with CI, final overall package review, human UAT, and signatures still outstanding
+> Status: **PASS (scope-limited)** — closed by a new evidence-bound re-acceptance on 2026-11-18 at target SHA `5170e140f10b117549cf54ba400131f5d7f95f69` under `../11-scope-limited-acceptance-record-20261118.md`; **this is not a retroactive ratification by later merges**. Basis, evidence package and signature: the "2026-11-18 scope-limited acceptance execution addendum (phases 0–3)" at the end of this report. All historical text, execution records and test numbers above are preserved unchanged.
+> Historical status (verbatim): independent R6/R11 spec review and scoped quality review are both APPROVED; current-tree A1～A8 local engineering evidence and the scoped C1～C4 checks pass; **formal acceptance has not yet passed and remains incomplete**, with CI, final overall package review, human UAT, and signatures still outstanding
 > Created/finalized: 2026-11-09
 > Basis: `05-acceptance-plan.md` (A1～A8, business metrics, C1～C4), `06-test-report.md` (29/29 planned rows passed)
 > Executed by: local automation agent (not human signoff); execution coverage: 2026-11-08 to 2026-11-09
@@ -138,3 +139,22 @@ Authoritative record: `../11-scope-limited-acceptance-record-20261118.md`; evide
 `109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23`.
 Historical conclusions and numbers above are not retroactively modified; this addendum only records
 the current scope-limited conclusion.
+
+### 09 §10 template fields (index sync, 2026-11-21)
+
+> This subsection only completes the `09` §10 appendix template fields. The wording of the
+> "2026-11-18 scope-limited acceptance execution addendum (phases 0–3)" above, all historical
+> conclusions and all test numbers are preserved unchanged.
+
+Environment: governed shared production Linux host `iZwz9hk5o1f6h2hs6kfetpZ` (Alibaba Cloud
+Linux 3, kernel 5.10.134, x86_64); run-scoped containers/ports/paths/credentials; zero changes
+to co-tenant services; target SHA `5170e140f10b117549cf54ba400131f5d7f95f69` (`integration`, PR #143 merge).
+
+| Item | Basis / command | Result | Verdict | Evidence |
+|---|---|---|---|---|
+| Functional correctness and contract/terminal semantics, tenant isolation, Secret, data integrity, migration and lockfile zero drift, rollback, side effects/cleanup | 13 lanes + dedicated 913-test `d9-switch-completeness` lane + read-only default-off inspection | 5,464 tests / 0 failures / 0 errors / 55 declared skips | **PASS (scope-limited)** | `11` §3–§4 and the Phase 1 row of §5; `20261118T125822Z.tar.gz`, SHA256 `109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23` |
+| Single acceptance-owner record | `11` §7 signature | JackChow signed on 2026-11-18 (GMT+8); no signature item outstanding | **PASS** | `11` §7 |
+| CI run URL / CI double-run / real historical samples / performance baseline | 2026-11-18 scope revision | superseded / out of scope; historical notes only | not a gate | `11` §1; §0 of this report |
+
+Residuals: high-risk capability enablement still requires separate independent security and
+operations approval (not requested, not authorized); no other signature item is outstanding.
