@@ -296,19 +296,6 @@ async function open(page: import('@playwright/test').Page, options: Options, lan
 
 const saveState = (page: import('@playwright/test').Page) => page.locator('.agent-save-state');
 const section = (page: import('@playwright/test').Page) => page.locator('#agent-execution');
-/** This antd build renders the chosen label inside `.ant-select-content`. */
-const codexVersionSelection = (page: import('@playwright/test').Page) =>
-  page.locator('.agent-codex-version-select .ant-select-content');
-/** Open the Codex version dropdown and click the one enabled option for `version`. */
-async function chooseCodexVersion(page: import('@playwright/test').Page, version: string) {
-  const combo = page.getByLabel('Codex 版本');
-  // Callers may already have the dropdown open to inspect its options; a
-  // second click would toggle it shut, so only open when it is closed.
-  if (await combo.getAttribute('aria-expanded') !== 'true') await combo.click();
-  await page
-    .locator('.ant-select-item-option:not(.ant-select-item-option-disabled)', { hasText: version })
-    .click();
-}
 /**
  * How often the page read `GET /agents/execution-config-flags`.
  * Measured against a real browser and the current `useResource` semantics
@@ -441,7 +428,7 @@ test('P5-FE-01 (G1) engine selector publishes a typed Codex block without React 
   await page.getByLabel('选择 Engine').click();
   await page.locator('.ant-select-item-option-content', { hasText: 'codex / cli_exec / v1' }).click();
   await expect(section(page).getByRole('heading', { name: 'Codex 配置' })).toBeVisible();
-  await chooseCodexVersion(page, '0.169.0');
+  // No version control: the whitelist version is injected at the save boundary.
   await page.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect.poll(() => harness.saves.length).toBe(1);
   const saved = harness.saves[0].config as Record<string, unknown>;
@@ -459,7 +446,9 @@ test('P5-FE-02 phase3 off hides the engine selector and keeps codex fields read-
   });
   await expect(page.getByLabel('选择 Engine')).toHaveCount(0);
   await expect(page.getByLabel('Engine 三元组')).toHaveValue('codex / cli_exec / v1');
-  await expect(page.locator('.agent-codex-version-select')).toHaveClass(/ant-select-disabled/);
+  // No version control exists at all, enabled or disabled.
+  await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
+  await expect(page.locator('.agent-codex-version-select')).toHaveCount(0);
   await expect(page.getByLabel('Codex PATH')).toHaveValue('/usr/bin');
 });
 
@@ -505,15 +494,14 @@ test('P7-UI-02 (bug 3/4) switching React -> Codex -> React -> Codex loses nothin
   await choose('codex / cli_exec / v1');
   await expect(page.getByLabel('Chat 模型方案')).toHaveCount(0);
   await expect(section(page).locator('[role="alert"]')).toHaveCount(0);
-  await chooseCodexVersion(page, '0.169.0');
   await choose('react / native / v1');
   // No model_profile_id / model_profile_version alias conflict on the way back.
   await expect(section(page).locator('[role="alert"]')).toHaveCount(0);
   await expect(page.getByLabel('Chat 模型方案')).toHaveValue('6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f');
   await choose('codex / cli_exec / v1');
-  // The version picked before the round trip is still there, so switching back
-  // to Codex no longer resets it to an empty string (the old blocker).
-  await expect(codexVersionSelection(page)).toHaveText('0.169.0');
+  // The version is no longer a UI concern: no picker to reset, and the preview
+  // below still carries the allowlist-injected value (old blocker stays fixed).
+  await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
   await page.getByRole('button', { name: '预览能力' }).click();
   await expect.poll(() => harness.previews.length).toBe(1);
   const config = harness.previews[0].config as Record<string, unknown>;
@@ -1068,7 +1056,7 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '禁用能力只会收窄服务端计算结果，不能授予任何能力。',
     '预览结果由服务端计算，不会创建运行，也不会授予执行权限。',
     '运行 Engine 与能力由服务端注册表和策略决定，这里只能查看与收窄。',
-    '选择 Engine', 'Codex 配置', 'Codex 版本', 'Codex 可执行文件', 'Codex 超时（秒）',
+    '选择 Engine', 'Codex 配置', 'Codex 可执行文件', 'Codex 超时（秒）',
     'Codex 凭据引用（UUID）', '仅存引用，不填密钥', 'Codex PATH',
     'Stage A 仅支持审批模式 never 与沙箱模式 read-only；会话恢复与人工审批未启用。',
     'Phase 3 执行能力尚未启用，无法预览。',
@@ -1088,11 +1076,8 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '取值必须是允许值之一', '取值格式不正确',
     '当前 Engine 不支持旧版 React 字段，请清除模型方案或切回 React Engine',
     '当前 Engine 由自身配置决定模型与凭据，不使用平台 Chat 模型方案；发布前无需在此绑定方案。',
-    '请填写已部署并列入 AGENT_CODEX_ALLOWED_VERSIONS 的 Codex CLI 版本号，例如 0.169.0。',
-    // Issue #162 dropdown markers and stale-value warning.
-    '已验证可运行', '未验证，需运维启用', '当前版本不可用',
-    '仅可选择列入 AGENT_CODEX_ALLOWED_VERSIONS 且已验证可运行的版本；目录中的其他版本需运维启用后方可选择。',
-    '当前 Codex 版本不在版本目录或白名单中，无法运行，请改选允许的版本。',
+    // Issue #162 (maintainer follow-up): the version UI and all of its markers
+    // were removed, so none of those keys may be required from the locales.
     '凭据来源（只读）',
     '密钥由运维在凭据库中加密登记，运行时由凭据 Broker 一次性授权并注入子进程环境变量。',
     'Agent 配置只保存 credential_ref 引用；平台不存储、不展示、也不通过接口返回密钥明文。',
@@ -1167,7 +1152,6 @@ test('I161-01 (issue #161) engine round trip keeps the React Chat binding throug
   // must strip the React block and neutralise the three aliases (the P7 422
   // fix), so the echoed draft itself no longer carries the binding.
   await choose('codex / cli_exec / v1');
-  await chooseCodexVersion(page, '0.169.0');
   await page.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect.poll(() => harness.saves.length).toBe(1);
   const savedCodex = harness.saves[0].config as Record<string, unknown>;
@@ -1213,62 +1197,66 @@ test('I161-02 (issue #161) publishing a React draft with no Chat profile is bloc
   expect(harness.calls.filter(call => call === 'POST /agents/agent-1/publish')).toHaveLength(0);
 });
 
-// Issue #162 — the free-text Codex version box became an allowlist-driven
-// dropdown. The backend gate is untouched: the allowlist stays authoritative
-// and these cases only assert what the form offers, marks and disables.
-test('I162-01 (issue #162) an allowlisted and catalogued version is selectable and marked verified', async ({ page }) => {
+// Issue #162, maintainer follow-up — the version dropdown was a fake choice
+// (one installed binary, one allowed version), so the UI was removed entirely.
+// The version is now injected from the deployment allowlist at the wire
+// boundary. The backend gate is untouched and no version is fabricated when the
+// allowlist is empty: these cases are contract-level UI evidence only.
+test('I162-01 (issue #162) the Codex version control is gone while other Codex fields stay', async ({ page }) => {
+  await open(page, { draft: codexDraft() });
+  await expect(section(page).getByRole('heading', { name: 'Codex 配置' })).toBeVisible();
+  // No picker, no input, no stale-value warning, no grouping markers.
+  await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
+  await expect(page.locator('.agent-codex-version-select')).toHaveCount(0);
+  await expect(page.locator('.agent-codex-version-stale')).toHaveCount(0);
+  // The remaining Codex settings are still present and editable.
+  await expect(page.getByLabel('Codex 可执行文件')).toBeVisible();
+  await expect(page.getByLabel('Codex 超时（秒）')).toBeVisible();
+  await expect(page.getByLabel('Codex 凭据引用（UUID）')).toBeVisible();
+  await expect(page.getByLabel('Codex PATH')).toBeVisible();
+});
+
+test('I162-02 (issue #162) selecting the codex engine saves the flag allowlist version', async ({ page }) => {
+  // Mock an allowlist that is deliberately not the old hardcoded/default value
+  // so the assertion proves the version comes from the flags response.
+  const allowed = '0.168.0';
   const harness = await open(page, {
-    draft: codexDraft({ codex: { ...CODEX_BLOCK, version: '' } }),
+    flags: { ...FLAGS, allowed_codex_versions: [allowed] },
   });
-  await page.getByLabel('Codex 版本').click();
-  await expect(page.locator('.ant-select-item-group', { hasText: '已验证可运行' })).toBeVisible();
-  const verified = page.locator('.ant-select-item-option', { hasText: '0.169.0' });
-  await expect(verified).toBeVisible();
-  await expect(verified).not.toHaveClass(/ant-select-item-option-disabled/);
-  await verified.click();
-  await expect(codexVersionSelection(page)).toHaveText('0.169.0');
-  // patchCodexConfig stays lossless on a save round trip.
+  await page.getByLabel('选择 Engine').click();
+  await page.locator('.ant-select-item-option-content', { hasText: 'codex / cli_exec / v1' }).click();
   await page.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect.poll(() => harness.saves.length).toBe(1);
-  expect((harness.saves[0].config.codex as Record<string, unknown>).version).toBe('0.169.0');
+  const saved = harness.saves[0].config as Record<string, unknown>;
+  expect((saved.engine as Record<string, unknown>).engine_id).toBe('codex');
+  expect((saved.codex as Record<string, unknown>).version).toBe(allowed);
 });
 
-test('I162-02 (issue #162) a catalogue-only version is visible but disabled', async ({ page }) => {
-  await open(page, { draft: codexDraft() });
-  await page.getByLabel('Codex 版本').click();
-  await expect(page.locator('.ant-select-item-group', { hasText: '未验证，需运维启用' })).toBeVisible();
-  const unverified = page.locator('.ant-select-item-option', { hasText: '0.171.0' });
-  await expect(unverified).toBeVisible();
-  await expect(unverified).toHaveClass(/ant-select-item-option-disabled/);
-  // Clicking it cannot become a new value — the allowlist is the gate.
-  await unverified.click({ force: true });
-  await expect(codexVersionSelection(page)).toHaveText('0.169.0');
+test('I162-03 (issue #162) a stale codex version is corrected to the allowlist on save', async ({ page }) => {
+  const allowed = '0.169.0';
+  const harness = await open(page, {
+    draft: codexDraft({ codex: { ...CODEX_BLOCK, version: '0.150.0' } }),
+    flags: { ...FLAGS, allowed_codex_versions: [allowed] },
+  });
+  // There is no stale-value UI left for the user to fix by hand. An edit makes
+  // the draft dirty so the save button actually sends the wire request.
+  await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
+  await page.getByLabel('Agent 简介').fill('保存时自动纠正 Codex 版本');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  expect((harness.saves[0].config.codex as Record<string, unknown>).version).toBe(allowed);
 });
 
-test('I162-03 (issue #162) a stale published version stays visible and is flagged unavailable', async ({ page }) => {
-  await open(page, { draft: codexDraft({ codex: { ...CODEX_BLOCK, version: '0.150.0' } }) });
-  await expect(codexVersionSelection(page)).toHaveText('0.150.0');
-  const warning = page.locator('.agent-codex-version-stale');
-  await expect(warning).toContainText('当前 Codex 版本不在版本目录或白名单中');
-  await page.getByLabel('Codex 版本').click();
-  await expect(page.locator('.ant-select-item-group', { hasText: '当前版本不可用' })).toBeVisible();
-  await expect(page.locator('.ant-select-item-option', { hasText: '0.150.0' }))
-    .toHaveClass(/ant-select-item-option-disabled/);
-  // Only an allowed version can replace it; the warning then clears.
-  await chooseCodexVersion(page, '0.169.0');
-  await expect(codexVersionSelection(page)).toHaveText('0.169.0');
-  await expect(warning).toHaveCount(0);
-});
-
-test('I162-04 (issue #162) an empty allowlist leaves every catalogue option disabled', async ({ page }) => {
-  await open(page, {
-    draft: codexDraft(),
+test('I162-04 (issue #162) an empty allowlist fabricates no version (fail-closed)', async ({ page }) => {
+  const harness = await open(page, {
+    draft: codexDraft({ codex: { ...CODEX_BLOCK, version: '' } }),
     flags: { ...FLAGS, allowed_codex_versions: [] },
   });
-  await page.getByLabel('Codex 版本').click();
-  const options = page.locator('.ant-select-item-option');
-  expect(await options.count()).toBeGreaterThan(0);
-  for (let index = 0; index < await options.count(); index++) {
-    await expect(options.nth(index)).toHaveClass(/ant-select-item-option-disabled/);
-  }
+  await page.getByLabel('Agent 简介').fill('空白名单不得编造版本');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  // The draft keeps its empty version; the server's strict min_length=1 gate
+  // still rejects it. The frontend never invents a version when the deployment
+  // allows none — fail-closed, exactly like the backend gate.
+  expect((harness.saves[0].config.codex as Record<string, unknown>).version).toBe('');
 });

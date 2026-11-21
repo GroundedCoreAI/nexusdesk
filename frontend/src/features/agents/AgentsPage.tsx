@@ -375,7 +375,11 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
             ? currentReactBinding(config)
             : (config.reactBindingMemory ?? null);
         rememberReactBinding(selected?.id, bindingToRemember());
-        const wireConfig = normalizeExecutionForEngine(config);
+        // The Codex version has no UI control; inject the deployment allowlist
+        // here so every saved draft (new or stale) carries a legal version.
+        // Flags load asynchronously — read the latest loaded value at click
+        // time; an empty/absent allowlist injects nothing (fail-closed).
+        const wireConfig = normalizeExecutionForEngine(config, executionFlags.data?.allowed_codex_versions);
         const body = { name: name.trim(), description: description.trim(), config: wireConfig, industry, tags, is_example: isExample };
         const agent = selected ? await put<Agent>(`/agents/${selected.id}`, { ...body, revision: selected.draft_revision }) : await post<Agent>('/agents', body);
         if (!selected)
