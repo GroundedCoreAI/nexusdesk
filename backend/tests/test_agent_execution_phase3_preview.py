@@ -857,15 +857,34 @@ async def test_foreign_agent_id_keeps_the_existing_not_found_domain_answer() -> 
 
 
 @pytest.mark.asyncio
-async def test_flags_endpoint_still_answers_two_bools() -> None:
-    harness = Harness(settings=preview_settings(execution_phase3_enabled=False))
-    async with _client(harness.app, VIEWER_TOKEN) as client:
-        response = await client.get(FLAGS_PATH)
-    assert response.status_code == 200, response.text
-    assert set(response.json()) == {
-        "execution_phase3_enabled",
-        "execution_orchestrator_enabled",
-    }
+async def test_flags_endpoint_still_answers_phase3_flags_plus_codex_metadata() -> None:
+    # Issue #162 adds two non-sensitive metadata fields; the two rollout booleans
+    # are still read verbatim and neither field widens the execution gate.
+    from pathlib import Path
+
+    from agent_platform.core_platform.platform_services import codex_version_catalogue as catalogue
+
+    catalogue.configure_catalogue_path(
+        Path(__file__).parents[1] / "work" / "issue162-preview" / "missing.json"
+    )
+    catalogue.clear_cache()
+    try:
+        harness = Harness(settings=preview_settings(execution_phase3_enabled=False))
+        async with _client(harness.app, VIEWER_TOKEN) as client:
+            response = await client.get(FLAGS_PATH)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert set(body) == {
+            "execution_phase3_enabled",
+            "execution_orchestrator_enabled",
+            "allowed_codex_versions",
+            "codex_version_catalogue",
+        }
+        assert isinstance(body["execution_phase3_enabled"], bool)
+        assert isinstance(body["execution_orchestrator_enabled"], bool)
+        assert isinstance(body["allowed_codex_versions"], list)
+    finally:
+        catalogue.configure_catalogue_path(None)
 
 
 # --------------------------------------------------------------------------- #

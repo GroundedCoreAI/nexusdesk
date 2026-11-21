@@ -10,6 +10,8 @@ dependency, but wires a tripwire runtime that explodes on anything the handler
 is not allowed to touch.
 """
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -25,9 +27,19 @@ from agent_platform.core_platform.agent_execution.capability.resolver import Cap
 from agent_platform.core_platform.agent_execution.orchestration.orchestrator import (
     ExecutionOrchestrator,
 )
+from agent_platform.core_platform.platform_services import codex_version_catalogue as catalogue
 from agent_platform.core_platform.platform_services.platform_settings.settings import Settings
 
 FLAG_FIELDS = ("execution_phase3_enabled", "execution_orchestrator_enabled")
+# Issue #162: non-sensitive Codex metadata added to the same strict response.
+CODEX_METADATA_FIELDS = ("allowed_codex_versions", "codex_version_catalogue")
+ALL_FIELDS = FLAG_FIELDS + CODEX_METADATA_FIELDS
+# The handler now reads one more non-secret setting: the authoritative version
+# allowlist. No token, path, tenant or gate toggle is read by the flags endpoint.
+SETTINGS_READ_FIELDS = FLAG_FIELDS + ("codex_allowed_versions",)
+# A catalogue file that never exists, so default test responses carry an empty
+# catalogue without touching deployment data.
+MISSING_CATALOGUE = Path(__file__).parents[1] / "work" / "issue162-flags" / "missing.json"
 ADMIN_TOKEN = "flags-admin"
 OPERATOR_TOKEN = "flags-operator"
 VIEWER_TOKEN = "flags-viewer"
@@ -46,6 +58,15 @@ FORBIDDEN_KEY_MARKERS = (
     "tenant",
     "actor",
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_catalogue():
+    """Keep every flags test off the real catalogue snapshot and cache."""
+    catalogue.configure_catalogue_path(MISSING_CATALOGUE)
+    catalogue.clear_cache()
+    yield
+    catalogue.configure_catalogue_path(None)
 
 
 def _settings(**overrides: Any) -> Settings:
@@ -159,14 +180,16 @@ def _get(client: TestClient, token: str | None = None) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def test_flags_response_is_exactly_two_bools() -> None:
+def test_flags_response_shape_with_allowlist_and_catalogue() -> None:
     client, _ = _client(_settings())
     response = _get(client, ADMIN_TOKEN)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert set(body) == set(FLAG_FIELDS)
+    assert set(body) == set(ALL_FIELDS)
     assert isinstance(body["execution_phase3_enabled"], bool)
     assert isinstance(body["execution_orchestrator_enabled"], bool)
+    assert body["allowed_codex_versions"] == []
+    assert body["codex_version_catalogue"] == []
 
 
 def test_flags_dto_is_strict_extra_forbid_and_frozen() -> None:
@@ -216,6 +239,8 @@ def test_all_four_states_return_200_with_real_values(phase3: bool, orchestrator:
     assert response.json() == {
         "execution_phase3_enabled": phase3,
         "execution_orchestrator_enabled": orchestrator,
+        "allowed_codex_versions": [],
+        "codex_version_catalogue": [],
     }
 
 
@@ -226,12 +251,17 @@ def test_flags_track_settings_mutations() -> None:
     assert _get(client, ADMIN_TOKEN).json() == {
         "execution_phase3_enabled": False,
         "execution_orchestrator_enabled": False,
+        "allowed_codex_versions": [],
+        "codex_version_catalogue": [],
     }
     settings.execution_phase3_enabled = True
     settings.execution_orchestrator_enabled = True
+    settings.codex_allowed_versions = ("0.169.0",)
     assert _get(client, ADMIN_TOKEN).json() == {
         "execution_phase3_enabled": True,
         "execution_orchestrator_enabled": True,
+        "allowed_codex_versions": ["0.169.0"],
+        "codex_version_catalogue": [],
     }
 
 
@@ -240,14 +270,15 @@ def test_flags_track_settings_mutations() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_flags_read_only_two_setting_booleans(calls: _Calls) -> None:
+def test_flags_read_only_whitelisted_settings(calls: _Calls) -> None:
     settings = _settings(execution_phase3_enabled=True, execution_orchestrator_enabled=False)
     client, reads = _client(settings)
     response = _get(client, VIEWER_TOKEN)
     assert response.status_code == 200, response.text
-    # Only the two flag names may be read off settings (no TTLs, no tokens,
-    # no execution_capability_* tuning, no tenant_id).
-    assert set(reads) == set(FLAG_FIELDS)
+    # Only the two flag names plus the non-secret Codex allowlist may be read
+    # off settings — no TTLs, no tokens, no execution_capability_* tuning, no
+    # tenant_id, no gate switches, no executable path.
+    assert set(reads) == set(SETTINGS_READ_FIELDS)
     # No Phase 3 subsystem instantiation, probe or cache construction.
     assert (calls.adapters, calls.resolvers, calls.orchestrators) == (0, 0, 0)
 
@@ -268,7 +299,12 @@ def test_unauthenticated_or_bad_token_is_401_or_403(authorization: str | None) -
 def test_reader_operator_and_admin_can_all_read() -> None:
     settings = _settings(execution_phase3_enabled=True, execution_orchestrator_enabled=True)
     client, _ = _client(settings)
-    expected = {"execution_phase3_enabled": True, "execution_orchestrator_enabled": True}
+    expected = {
+        "execution_phase3_enabled": True,
+        "execution_orchestrator_enabled": True,
+        "allowed_codex_versions": [],
+        "codex_version_catalogue": [],
+    }
     # Reader (viewer) must be able to read: the UI gates on it for viewers too.
     for token in (VIEWER_TOKEN, OPERATOR_TOKEN, ADMIN_TOKEN):
         response = _get(client, token)
@@ -290,7 +326,7 @@ def test_flags_are_tenant_agnostic() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_openapi_contains_flags_route_with_two_property_schema() -> None:
+def test_openapi_contains_flags_route_with_expected_properties() -> None:
     client, _ = _client(_settings())
     schema = client.get("/openapi.json").json()
     operation = schema["paths"]["/api/v1/agents/execution-config-flags"]["get"]
@@ -299,8 +335,11 @@ def test_openapi_contains_flags_route_with_two_property_schema() -> None:
         name = responses["$ref"].split("/")[-1]
         responses = schema["components"]["schemas"][name]
     assert responses["type"] == "object"
-    assert set(responses["properties"]) == set(FLAG_FIELDS)
-    assert all(p["type"] == "boolean" for p in responses["properties"].values())
+    assert set(responses["properties"]) == set(ALL_FIELDS)
+    properties = responses["properties"]
+    assert all(properties[field]["type"] == "boolean" for field in FLAG_FIELDS)
+    assert properties["allowed_codex_versions"]["type"] == "array"
+    assert properties["codex_version_catalogue"]["type"] == "array"
 
 
 def _walk_keys(node: Any) -> set[str]:
@@ -315,8 +354,100 @@ def test_response_body_carries_no_internal_fields() -> None:
     settings = _settings(execution_phase3_enabled=True, execution_orchestrator_enabled=True)
     client, _ = _client(settings)
     body = _get(client, ADMIN_TOKEN).json()
-    leaked = {k for k in _walk_keys(body) if k not in FLAG_FIELDS}
+    safe_keys = set(ALL_FIELDS) | {"version", "source", "verified"}
+    leaked = {k for k in _walk_keys(body) if k not in safe_keys}
     assert not leaked, f"flags response leaked non-whitelist keys: {leaked}"
     text = str(body).lower()
     for marker in ("secret", "token", "host", "path", "tenant"):
         assert marker not in text
+
+
+# ---------------------------------------------------------------------------
+# Issue #162: allowlist is authoritative and catalogue is sanitised/cached
+# ---------------------------------------------------------------------------
+
+
+def test_allowlist_is_projected_verbatim_without_default_allow() -> None:
+    """Empty allowlist stays empty (deny-all); a configured one appears as-is.
+
+    The endpoint is read-only metadata: it never widens the gate. The stage
+    gate still refuses versions that are not in this exact tuple.
+    """
+    denied, _ = _client(_settings())
+    assert _get(denied, ADMIN_TOKEN).json()["allowed_codex_versions"] == []
+
+    allowed, _ = _client(_settings(codex_allowed_versions=("0.169.0",)))
+    body = _get(allowed, ADMIN_TOKEN).json()
+    assert body["allowed_codex_versions"] == ["0.169.0"]
+    assert isinstance(body["allowed_codex_versions"], list)
+
+
+def test_catalogue_is_sanitised_bounded_and_no_internal_fields() -> None:
+    """A hostile snapshot with secrets/paths is projected to version/source/verified only."""
+    target = Path(__file__).parents[1] / "work" / "issue162-flags" / "populated.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generated_at": "2026-11-21T00:00:00Z",
+                "versions": [
+                    {
+                        "version": "0.171.0",
+                        "source": "npm-registry",
+                        "verified": True,
+                        "path": "/opt/nexusdesk/codex",
+                        "credential": "sk-secret",
+                        "tenant": "tenant-a",
+                    },
+                    {"version": "not-a-version", "source": "npm-registry", "verified": True},
+                    {"version": "0.169.0", "source": "installed-cli", "verified": False},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    catalogue.configure_catalogue_path(target)
+    catalogue.clear_cache()
+    client, _ = _client(_settings())
+    body = _get(client, ADMIN_TOKEN).json()
+    assert body["codex_version_catalogue"] == [
+        {"version": "0.171.0", "source": "npm-registry", "verified": True},
+        {"version": "0.169.0", "source": "installed-cli", "verified": False},
+    ]
+    for marker in ("secret", "credential", "/opt", "tenant"):
+        assert marker not in str(body).lower()
+
+
+def test_catalogue_is_ttl_cached_and_degrades_on_malformed_snapshot() -> None:
+    """One read per TTL window; a broken file yields an empty catalogue, never an error."""
+    import time as _time
+
+    target = Path(__file__).parents[1] / "work" / "issue162-flags" / "ttl.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps({"versions": [{"version": "0.169.0", "source": "npm-registry", "verified": True}]}),
+        encoding="utf-8",
+    )
+    catalogue.configure_catalogue_path(target)
+    catalogue.clear_cache()
+    client, _ = _client(_settings())
+
+    assert _get(client, ADMIN_TOKEN).json()["codex_version_catalogue"] == [
+        {"version": "0.169.0", "source": "npm-registry", "verified": True}
+    ]
+    # Mutate the file without invalidating the cache: the first cached view wins.
+    target.write_text(json.dumps({"versions": []}), encoding="utf-8")
+    assert _get(client, ADMIN_TOKEN).json()["codex_version_catalogue"] == [
+        {"version": "0.169.0", "source": "npm-registry", "verified": True}
+    ]
+    # Expire the TTL and re-read.
+    with pytest.MonkeyPatch.context() as mp:
+        real_monotonic = _time.monotonic
+        mp.setattr(catalogue.time, "monotonic", lambda: real_monotonic() + catalogue.CACHE_TTL_SECONDS + 1)
+        assert _get(client, ADMIN_TOKEN).json()["codex_version_catalogue"] == []
+
+    # A malformed snapshot also degrades to an empty list.
+    target.write_text("not json", encoding="utf-8")
+    catalogue.clear_cache()
+    assert _get(client, ADMIN_TOKEN).json()["codex_version_catalogue"] == []

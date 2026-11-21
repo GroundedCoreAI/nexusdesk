@@ -43,6 +43,9 @@ from agent_platform.core_platform.extension_platform import (
     CapabilityContributionError,
     ExtensionRegistryError,
 )
+from agent_platform.core_platform.platform_services.codex_version_catalogue import (
+    get_catalogue,
+)
 from agent_platform.core_platform.platform_services.identity.access import (
     Admin,
     ExtensionAdmin,
@@ -182,14 +185,36 @@ class ChannelApplicationVersionInput(Input):
     application_version: int = Field(ge=1)
 
 
+class CodexCatalogueEntryOutput(BaseModel):
+    """One non-sensitive catalogue row (issue #162): version, source, verified.
+
+    There is deliberately no path, credential, tenant or host field here — the
+    catalogue is an informational hint, never an execution permission.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: str
+    source: str
+    verified: bool
+
+
 class ExecutionConfigFlagsOutput(BaseModel):
-    """Strict Phase 3 rollout flags (03 §7.4, R-25): exactly the two deployment
-    booleans, named verbatim like settings, frozen and extra-forbid."""
+    """Strict Phase 3 rollout flags (03 §7.4, R-25) plus Codex version metadata.
+
+    The two booleans remain verbatim deployment settings. The two added fields
+    are non-sensitive: ``allowed_codex_versions`` is the authoritative runtime
+    allowlist (empty means deny-all, exactly as the stage gate reads it) and
+    ``codex_version_catalogue`` is a TTL-cached, informational npm/installed
+    version snapshot. Model stays frozen and extra-forbid.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     execution_phase3_enabled: bool
     execution_orchestrator_enabled: bool
+    allowed_codex_versions: list[str] = Field(default_factory=list)
+    codex_version_catalogue: list[CodexCatalogueEntryOutput] = Field(default_factory=list)
 
 
 class ExecutionPreviewInput(BaseModel):
@@ -759,11 +784,26 @@ async def agent_execution_config_flags(request: Request, user: Reader):
     ``execution_*`` domain error; every state, including all-off, is a 200.
     The values are non-secret, tenant-agnostic deployment configuration
     (same disclosure level as ``summary_enabled`` in memory-config-caps).
+
+    Issue #162 adds two metadata fields only. The allowlist is projected
+    verbatim (empty still means deny-all); the catalogue comes from a local,
+    TTL-cached snapshot and never triggers a network call on the request path.
+    Neither field changes the execution gate — they only let the form render an
+    accurate version dropdown instead of a free-text box.
     """
     s = runtime(request).settings
     return ExecutionConfigFlagsOutput(
         execution_phase3_enabled=s.execution_phase3_enabled,
         execution_orchestrator_enabled=s.execution_orchestrator_enabled,
+        allowed_codex_versions=list(s.codex_allowed_versions),
+        codex_version_catalogue=[
+            CodexCatalogueEntryOutput(
+                version=entry.version,
+                source=entry.source,
+                verified=entry.verified,
+            )
+            for entry in get_catalogue()
+        ],
     )
 
 
