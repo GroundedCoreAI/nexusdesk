@@ -22,6 +22,9 @@ export interface CodexExecutionConfig {
   sandbox_mode: 'read-only';
   credential_ref: string | null;
   path_env: string;
+  /** Optional ModelGateway chat profile binding (issue #167). Both-or-neither. */
+  model_profile_id?: string | null;
+  model_profile_version?: number | null;
 }
 /** The 11 capability names the execution contract recognises, in CAPABILITY_ORDER. */
 export const EXECUTION_CAPABILITY_NAMES = [
@@ -122,6 +125,7 @@ export const DEFAULT_CODEX: CodexExecutionConfig = {
   protocol: 'cli_exec', version: '', executable: 'codex', timeout_seconds: 600,
   approval_mode: 'never', sandbox_mode: 'read-only', credential_ref: null,
   path_env: '/usr/local/bin:/usr/bin:/bin',
+  model_profile_id: null, model_profile_version: null,
 };
 const REACT_ALIASES: Array<keyof ReactExecutionConfig> = ['model_profile_id', 'model_profile_version', 'max_model_rounds'];
 /** Semantic view of the execution part of a draft; never mutates the draft. */
@@ -334,6 +338,13 @@ export function normalizeExecutionForEngine(config: AgentConfig, allowedCodexVer
     // it: `next` is only a shallow clone of `config`.
     if (allowedCodexVersions?.length)
       next.codex = { ...next.codex, version: allowedCodexVersions[0] };
+    // Issue #166: `credential_ref` is now a validated selection from the
+    // credentials library, not a free-text UUID. Preserve it exactly (the server
+    // canonicalizes it against the record at publish time) and preserve the
+    // ModelGateway profile binding from issue #167. Issue #168: PATH is
+    // deployment-owned, so any client value is replaced by the default and the
+    // runtime reads AGENT_CODEX_PATH_ENV instead of the published snapshot.
+    next.codex = { ...next.codex, path_env: DEFAULT_CODEX.path_env };
   } else {
     next.codex = undefined;
     if (config.react) {

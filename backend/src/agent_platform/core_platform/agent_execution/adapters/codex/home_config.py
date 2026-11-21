@@ -21,18 +21,28 @@ from ...workspace.execution_workdir import (
 
 CONFIG_FILE_NAME = "config.toml"
 WIRE_API = "responses"
+_WIRE_APIS = frozenset({"responses", "chat"})
 _PROVIDER_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 @dataclass(frozen=True)
 class CodexEngineHomeConfig:
-    """Deployment-owned provider metadata; no credential value can enter it."""
+    """Provider metadata for one private CODEX_HOME; no credential value can enter it.
+
+    The four deployment-global Settings fields build the legacy lane; the
+    ModelGateway resolver builds this same DTO per run from a profile route.
+    ``wire_api`` was a module constant in Stage A and is now per-route so a
+    provider whose upstream speaks ``chat`` instead of ``responses`` can be
+    onboarded without a code change. ``WIRE_API`` stays as the default constant
+    for compatibility with existing callers.
+    """
 
     model: str
     model_provider: str
     base_url: str
     env_key: str
+    wire_api: str = WIRE_API
 
     def __post_init__(self) -> None:
         if not _MODEL_ID.fullmatch(self.model):
@@ -44,6 +54,8 @@ class CodexEngineHomeConfig:
             raise ValueError("codex base_url must be a bare https URL")
         if self.env_key not in CODEX_CREDENTIAL_ENV_KEYS:
             raise ValueError("codex credential env_key is not in the closed allowlist")
+        if self.wire_api not in _WIRE_APIS:
+            raise ValueError("codex wire_api must be 'responses' or 'chat'")
 
     def to_toml(self) -> str:
         """Render a key-free TOML document with TOML-safe quoted strings."""
@@ -57,7 +69,7 @@ class CodexEngineHomeConfig:
                 f"name = {provider}",
                 f"base_url = {json.dumps(self.base_url)}",
                 f"env_key = {json.dumps(self.env_key)}",
-                f"wire_api = {json.dumps(WIRE_API)}",
+                f"wire_api = {json.dumps(self.wire_api)}",
                 "",
             )
         )

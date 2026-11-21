@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import Field, SecretStr, StringConstraints, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -236,6 +237,14 @@ class Settings(BaseSettings):
     # (measured exit 127). Deployment-specific because the interpreter lives in
     # different places per image; it is never derived from the host process.
     codex_path_env: str = "/usr/local/bin:/usr/bin:/bin"
+    # Deployment-level override for the LEGACY Codex lane's credential reference
+    # (env AGENT_CODEX_CREDENTIAL_REF). This is a UUID *reference* minted by the
+    # admin credential API, never a secret value. In the ModelGateway lane the
+    # reference comes from the connection's execution_credential_ref instead, so
+    # this override only applies when an Agent has no model profile pair.
+    # Changing it requires a backend restart. Excluded from the runtime
+    # fingerprint with the rest of the codex_* family (prefix-based exclusion).
+    codex_credential_ref: UUID | None = None
     # Stage A trusted target (P4/G4): the absolute in-container CLI path pinned by
     # the Runner allowlist. Empty by default, so no executable is registered and
     # every Codex start remains untrusted even if the descriptor is enabled.
@@ -509,6 +518,17 @@ class Settings(BaseSettings):
                         "tls_hosts must be a comma-separated list or a JSON array"
                     ) from None
             return [host.strip() for host in text.split(",") if host.strip()]
+        return value
+
+    @field_validator("codex_credential_ref", mode="before")
+    @classmethod
+    def empty_codex_credential_ref_is_absent(cls, value: object) -> object:
+        # Compose templates export ``AGENT_CODEX_CREDENTIAL_REF: ${...:-}``; an
+        # unset variable therefore arrives as an empty string. ``env_ignore_empty``
+        # is off in this deployment, so normalize an empty/blank value to the
+        # field's ``None`` default instead of failing UUID validation at startup.
+        if isinstance(value, str) and not value.strip():
+            return None
         return value
 
     @model_validator(mode="after")

@@ -20,9 +20,14 @@ import {
 } from '../../shared/api/client';
 import { Alert, Field } from '../../shared/components/ui';
 import { CapabilityPreview } from './CapabilityPreview';
+import type { ModelResource } from '../models/ModelsPage';
 
 /** Stable domain errors the execution endpoints answer with (03-technical-design.md §7.3). */
-const EXECUTION_ERROR_CODES = ['execution_phase3_disabled', 'execution_engine_unavailable', 'execution_configuration_invalid', 'execution_policy_unavailable'];
+const EXECUTION_ERROR_CODES = [
+  'execution_phase3_disabled', 'execution_engine_unavailable', 'execution_configuration_invalid',
+  'execution_policy_unavailable', 'execution_credential_unavailable',
+  'codex_credential_invalid', 'codex_model_profile_invalid',
+];
 /** Draft paths that belong to the execution contract; a 422 on these must stay pointable. */
 const EXECUTION_PATHS = ['engine', 'react', 'codex', 'disabled_capabilities', 'max_model_rounds', 'model_profile_id', 'model_profile_version'];
 
@@ -82,31 +87,22 @@ export function executionIssues(config: AgentConfig): string[] {
  * panel deliberately has no field, button or fallback that could display it.
  * It answers "where does the API key come from" without ever reading a key.
  */
-function CredentialSource({ credentialRef, canEdit }: { credentialRef: string | null; canEdit: boolean }) {
+function CredentialSource({ credentialRef, canEdit, items, failed }: {
+    credentialRef: string | null;
+    canEdit: boolean;
+    items: ExecutionCredentialSummary[] | null;
+    failed: boolean;
+}) {
     useTranslation();
-    const [items, setItems] = useState<ExecutionCredentialSummary[] | null>(null);
-    const [failed, setFailed] = useState(false);
-    useEffect(() => {
-        let active = true;
-        if (!credentialRef || !canEdit) {
-            setItems(null);
-            setFailed(false);
-            return () => { active = false; };
-        }
-        void listExecutionCredentials()
-            .then(response => { if (active) { setItems(response.items ?? []); setFailed(false); } })
-            .catch(() => { if (active) { setItems(null); setFailed(true); } });
-        return () => { active = false; };
-    }, [credentialRef, canEdit]);
     const record = credentialRef && items ? items.find(item => item.credential_ref === credentialRef) : undefined;
     return <div className="agent-setting-card agent-credential-source">
       <h3 className="agent-memory-group">{t('凭据来源（只读）')}</h3>
       <p className="agent-muted">{t('密钥由运维在凭据库中加密登记，运行时由凭据 Broker 一次性授权并注入子进程环境变量。')}</p>
       <p className="agent-muted">{t('Agent 配置只保存 credential_ref 引用；平台不存储、不展示、也不通过接口返回密钥明文。')}</p>
       {!canEdit && <p role="status" className="agent-muted">{t('仅管理员可查看凭据来源元信息。')}</p>}
-      {canEdit && !credentialRef && <p role="status" className="agent-muted">{t('未绑定凭据引用：请在凭据库中登记密钥后，将返回的 credential_ref 填入上方字段。')}</p>}
+      {canEdit && !credentialRef && <p role="status" className="agent-muted">{t('未绑定凭据引用：请从上方凭据库选择器中选择一条有效凭据。')}</p>}
       {canEdit && credentialRef && failed && <p role="status" className="agent-muted">{t('凭据元信息读取失败，请稍后重试。')}</p>}
-      {canEdit && credentialRef && items && !record && <p role="status" className="agent-muted">{t('未找到该引用对应的凭据，请核对 UUID 或联系运维。')}</p>}
+      {canEdit && credentialRef && items && !record && <p role="status" className="agent-muted">{t('未找到该引用对应的凭据，请从上方重新选择有效凭据。')}</p>}
       {record && <div className="agent-credential-meta">
         <Field label={t('名称')}><input readOnly aria-label={t('名称')} value={record.name ?? ''}/></Field>
         <Field label={t('类型')}><input readOnly aria-label={t('类型')} value={record.credential_type ?? ''}/></Field>
@@ -135,8 +131,10 @@ interface Props {
      * the server remains the authorization boundary (03 §8, R-25).
      */
     flags: ExecutionConfigFlags | null;
+    /** Published ModelGateway chat profiles, already loaded by AgentsPage (issue #167). */
+    profiles: ModelResource[] | null;
 }
-export function ExecutionConfigSection({ config, onChange, agentId, canEdit, busy, saveError, flags }: Props) {
+export function ExecutionConfigSection({ config, onChange, agentId, canEdit, busy, saveError, flags, profiles }: Props) {
     useTranslation();
     const [preview, setPreview] = useState<ExecutionPreview | null>(null);
     const [previewedConfig, setPreviewedConfig] = useState('');
@@ -158,6 +156,27 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
         engine: item,
     }));
     const codexReadOnly = !canEdit || busy || !phase3Entries;
+    // Q2/Q3: the customer form never accepts a free-text UUID or a PATH. Both
+    // selectors are populated from read-only server metadata; the server
+    // validates/canonicalizes the credential and injects the deployment PATH.
+    const [credentialItems, setCredentialItems] = useState<ExecutionCredentialSummary[] | null>(null);
+    const [credentialsFailed, setCredentialsFailed] = useState(false);
+    useEffect(() => {
+        let active = true;
+        if (!view.codex || !canEdit) {
+            setCredentialItems(null);
+            setCredentialsFailed(false);
+            return () => { active = false; };
+        }
+        void listExecutionCredentials()
+            .then(response => { if (active) { setCredentialItems(response.items ?? []); setCredentialsFailed(false); } })
+            .catch(() => { if (active) { setCredentialItems(null); setCredentialsFailed(true); } });
+        return () => { active = false; };
+    }, [view.codex, canEdit]);
+    const credentialChoices = (credentialItems ?? []).filter(
+        item => item.status === 'active' && (item.allowed_engines ?? []).includes('codex'));
+    const profileChoices = (profiles ?? []).filter(
+        item => item.enabled && item.published_version && item.spec?.operation === 'chat');
     // Issue #162 (maintainer follow-up): there is no Codex version control in
     // the UI. The deployment installs a single Codex binary, so a version
     // "choice" was fake — users saw many versions but only one was runnable.
@@ -239,15 +258,56 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
       <Field label={t('Codex 超时（秒）')}>
         <InputNumber aria-label={t('Codex 超时（秒）')} min={1} max={600} precision={0} value={view.codex.timeout_seconds} disabled={codexReadOnly} onChange={value => onChange(patchCodexConfig(config, { timeout_seconds: value || 1 }))}/>
       </Field>
-      <Field label={t('Codex 凭据引用（UUID）')}>
-        <Input aria-label={t('Codex 凭据引用（UUID）')} value={view.codex.credential_ref ?? ''} placeholder={t('仅存引用，不填密钥')} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { credential_ref: event.target.value || null }))}/>
+      <Field label={t('Codex 模型方案（模型网关）')}>
+        <Select
+          aria-label={t('Codex 模型方案（模型网关）')}
+          className="agent-codex-profile-select"
+          value={view.codex.model_profile_id ?? ''}
+          disabled={codexReadOnly}
+          options={[
+            { value: '', label: t('未绑定（使用部署默认）') },
+            ...profileChoices.map(item => ({
+              value: item.id,
+              label: `${item.name} · v${item.published_version}`,
+            })),
+            ...(view.codex.model_profile_id && !profileChoices.some(item => item.id === view.codex?.model_profile_id)
+              ? [{ value: view.codex.model_profile_id, label: `${view.codex.model_profile_id}${t('（未加载或不可用）')}` }]
+              : []),
+          ]}
+          onChange={value => {
+            const chosen = profileChoices.find(item => item.id === value);
+            onChange(patchCodexConfig(config, {
+              model_profile_id: chosen?.id ?? null,
+              model_profile_version: chosen?.published_version ?? null,
+            }));
+          }}
+        />
       </Field>
-      <Field label={t('Codex PATH')}>
-        <Input aria-label={t('Codex PATH')} value={view.codex.path_env} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { path_env: event.target.value }))}/>
+      <Field label={t('Codex 凭据（凭据库）')}>
+        <Select
+          aria-label={t('Codex 凭据（凭据库）')}
+          className="agent-codex-credential-select"
+          value={view.codex.credential_ref ?? ''}
+          disabled={codexReadOnly || credentialsFailed}
+          options={[
+            { value: '', label: t('未绑定凭据') },
+            ...credentialChoices.map(item => ({
+              value: item.credential_ref,
+              label: `${item.name} · ${item.status} · ${(item.allowed_engines ?? []).join('、')}`,
+            })),
+            ...(view.codex.credential_ref && !credentialChoices.some(item => item.credential_ref === view.codex?.credential_ref)
+              ? [{ value: view.codex.credential_ref, label: `${view.codex.credential_ref}${t('（未加载或不可用）')}` }]
+              : []),
+          ]}
+          onChange={value => onChange(patchCodexConfig(config, { credential_ref: value || null }))}
+        />
       </Field>
+      {credentialsFailed && <p role="status" className="agent-muted">{t('凭据库读取失败，请确认管理员权限或稍后重试。')}</p>}
+      {!credentialsFailed && credentialItems && !credentialChoices.length && <p role="status" className="agent-muted">{t('暂无可选凭据：请联系运维在凭据库中登记 Codex 凭据。')}</p>}
+      <p className="agent-muted">{t('Codex 模型与供应商由模型网关方案决定，PATH 与凭据由部署配置注入。')}</p>
       <p className="agent-muted">{t('Stage A 仅支持审批模式 never 与沙箱模式 read-only；会话恢复与人工审批未启用。')}</p>
     </div>
-    <CredentialSource credentialRef={view.codex.credential_ref} canEdit={canEdit}/>
+    <CredentialSource credentialRef={view.codex.credential_ref} canEdit={canEdit} items={credentialItems} failed={credentialsFailed}/>
     </>}
     {preview && phase3Entries && <CapabilityPreview preview={preview} disabledCapabilities={view.disabledCapabilities} onNarrow={(name, disabled) => onChange(toggleDisabledCapability(config, name, disabled))} canEdit={canEdit && !busy} stale={previewedConfig !== JSON.stringify(config)}/>}
   </section>;

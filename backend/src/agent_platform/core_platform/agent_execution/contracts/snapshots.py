@@ -141,12 +141,17 @@ _CREDENTIAL_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 _HOST_PATH_PATTERN = re.compile(r"^(?:/|\./|\.\./|~/|[A-Za-z]:[\\/])")
 
-# Stage A codex publishability (09 §4): two typed fields in the one new engine
-# block need a narrow, path-scoped exception to the recursive denylist. Both are
+# Stage A codex publishability (09 §4): typed fields in the one new engine
+# block need a narrow, path-scoped exception to the recursive denylist. They are
 # references/configuration, never secret material. The exception is keyed by the
 # *exact* snapshot path (serializer root or the one stored-column prefix) so a
 # smuggled ``credential_ref`` under any other key still fails closed.
-_TYPED_CODEX_FIELDS = frozenset({"credential_ref", "path_env"})
+# ``model_profile_id`` / ``model_profile_version`` are the optional ModelGateway
+# binding (Q3); whitelisting them here also pins their value shapes (UUID string
+# and positive int, never a bool or arbitrary string) during replay.
+_TYPED_CODEX_FIELDS = frozenset(
+    {"credential_ref", "path_env", "model_profile_id", "model_profile_version"}
+)
 
 
 def _typed_codex_field(path: tuple[str, ...]) -> str | None:
@@ -173,6 +178,25 @@ def _typed_codex_value_is_valid(field: str, value: object) -> bool:
         except (ValueError, AttributeError, TypeError):
             return False
         return True
+    if field == "model_profile_id":
+        # ``None`` (legacy lane), an in-process ``UUID`` (python-mode dump), or a
+        # parseable UUID string (jsonb read-back) are all valid; nothing else is.
+        if value is None or isinstance(value, UUID):
+            return True
+        if not isinstance(value, str):
+            return False
+        try:
+            UUID(value)
+        except (ValueError, AttributeError, TypeError):
+            return False
+        return True
+    if field == "model_profile_version":
+        # ``bool`` is an ``int`` subclass, so exclude it explicitly: a published
+        # profile version is a positive integer or absent (legacy lane).
+        if value is None:
+            return True
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+    # ``path_env`` (and any future typed field) keeps the original path-shape rule.
     if not isinstance(value, str) or "\x00" in value:
         return False
     entries = value.split(":")
@@ -231,10 +255,17 @@ def assert_snapshot_payload_clean(payload: object, path: tuple[str, ...] = ()) -
     if isinstance(payload, (UUID, datetime)):
         return
     typed_codex_field = _typed_codex_field(path)
+    # The optional ModelGateway binding contributes JSON scalars that are not
+    # strings: ``model_profile_version`` is an int and every optional field may
+    # be ``None``. Hold all typed fields (including the original ``path_env``
+    # and ``credential_ref``) to the same value whitelist, so a bool smuggled
+    # in as a version or a non-UUID profile id fails closed here rather than
+    # relying only on the strict DTO re-validation below. ``UUID`` objects
+    # returned by a python-mode dump already passed the identity check above.
     if (
         typed_codex_field is not None
         and not isinstance(payload, str)
-        and not (typed_codex_field == "credential_ref" and payload is None)
+        and not _typed_codex_value_is_valid(typed_codex_field, payload)
     ):
         raise ExecutionSnapshotError("snapshot_field_invalid", path) from None
     if isinstance(payload, str):

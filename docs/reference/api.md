@@ -40,7 +40,9 @@ data: {"output":"[演示模式] ...","error_code":null}
 
 HTTP 错误：401 无效令牌；404 运行不存在或不在当前租户；409 会话忙；422 输入不合法；429 容量不足；503 数据库不可用。
 
-运行 error_code：model_timeout、run_timeout、model_round_limit、tool_call_limit、repeated_tool_call、invalid_model_response、duplicate_tool_call_id、empty_model_response、model_output_too_large、worker_lost、queue_timeout、configuration_changed、execution_error。
+运行 error_code：model_timeout、run_timeout、model_round_limit、tool_call_limit、repeated_tool_call、invalid_model_response、duplicate_tool_call_id、empty_model_response、model_output_too_large、worker_lost、queue_timeout、configuration_changed、execution_credential_unavailable、execution_error。
+
+其中 `execution_credential_unavailable` 表示执行凭据 Broker 拒绝授权（引用不存在、已撤销、已轮换或引擎/工作区范围不符）；具体拒绝原因只写入 `execution_credential_audit`，不会出现在运行载荷中。`execution_error` 仍是无法归类的内部故障的兜底码。
 
 工具错误作为模型观察输入，本身不一定使运行失败。模型可以说明失败或在预算内改正参数。
 
