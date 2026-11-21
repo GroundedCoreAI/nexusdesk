@@ -268,7 +268,100 @@ class AgentService:
                 raise DomainError("execution_configuration_invalid", 409) from None
             raise DomainError("execution_engine_unavailable", 409) from None
 
+    async def validate_codex_credential(self, tenant, config, c) -> None:
+        """Issue #165 L1: refuse to publish a broken Codex credential chain.
+
+        Historically a stale, revoked, rotated-out or wrong-scope ``credential_ref``
+        published cleanly and only failed at run time, where the Broker denial
+        degraded to the opaque ``execution_error``. Resolve the effective reference
+        (Gateway connection in the Q3 lane, the published Codex block in the
+        legacy lane), then require an existing, active, codex-scoped record with
+        at least one allowed workspace. Only lifecycle metadata is selected —
+        never ``encrypted_secret``. The stored reference is canonicalized from
+        the DB row so a client cannot persist a look-alike value.
+        """
+        if config.engine.engine_id != "codex" or config.codex is None:
+            return
+        reference: object | None = config.codex.credential_ref
+        if config.codex.model_profile_id is not None and self.model_catalog is not None:
+            try:
+                snapshot = await self.model_catalog.resolve(
+                    tenant, config.codex.model_profile_id, config.codex.model_profile_version, c
+                )
+                routes = snapshot["routes"]
+                connection = routes[0]["connection"] if routes else {}
+                reference = connection.get("execution_credential_ref")
+            except (DomainError, KeyError, TypeError, AttributeError, IndexError):
+                raise DomainError("codex_credential_invalid", 409) from None
+        if reference is None or not str(reference):
+            raise DomainError("codex_credential_invalid", 409)
+        try:
+            ref_uuid = UUID(str(reference))
+        except (ValueError, TypeError, AttributeError):
+            raise DomainError("codex_credential_invalid", 409) from None
+        row = await one(
+            c,
+            "SELECT credential_ref, status, allowed_engines, allowed_workspaces "
+            "FROM execution_credentials WHERE credential_ref=:ref AND tenant_id=:t "
+            "ORDER BY version DESC LIMIT 1",
+            ref=ref_uuid,
+            t=tenant,
+        )
+        if row is None:
+            raise DomainError("codex_credential_invalid", 409)
+        try:
+            status = row["status"]
+            engines = row["allowed_engines"]
+            workspaces = row["allowed_workspaces"]
+            if isinstance(engines, str):
+                engines = json.loads(engines)
+            if isinstance(workspaces, str):
+                workspaces = json.loads(workspaces)
+            engine_ids = [str(item) for item in engines]
+            workspace_ids = list(workspaces)
+            canonical_ref = str(UUID(str(row["credential_ref"])))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise DomainError("codex_credential_invalid", 409) from None
+        if status != "active" or "codex" not in engine_ids or not workspace_ids:
+            raise DomainError("codex_credential_invalid", 409)
+        # ``CodexConfig`` is frozen; replace the block through the mutable
+        # business AgentConfig rather than bypassing pydantic immutability.
+        config.codex = config.codex.model_copy(
+            update={"credential_ref": canonical_ref}
+        )
+
     async def validate_model(self, tenant, config, c):
+        # Q3: a Codex Agent may OPT IN to a ModelGateway chat profile. The pair
+        # is optional so the legacy deployment-global lane stays publishable;
+        # when bound, every route must be a tool-calling chat model (the Codex CLI
+        # drives its turn with tools). React's MODEL_PROFILE_ENGINES requirement
+        # below is deliberately unchanged.
+        # Standalone/metadata-only services have no catalog. Skip the optional
+        # Q3 profile branch instead of dereferencing None; the legacy lane below
+        # still returns without requiring a profile.
+        if (
+            config.engine.engine_id == "codex"
+            and config.codex is not None
+            and config.codex.model_profile_id is not None
+            and self.model_catalog is not None
+        ):
+            try:
+                snapshot = await self.model_catalog.resolve(
+                    tenant, config.codex.model_profile_id, config.codex.model_profile_version, c
+                )
+                routes = snapshot["routes"]
+                valid = (
+                    snapshot["spec"]["operation"] == "chat"
+                    and bool(routes)
+                    and all(route["model"]["tool_calling"] for route in routes)
+                )
+            except (DomainError, KeyError, TypeError, AttributeError):
+                # A missing/disabled profile version or a malformed snapshot is a
+                # publish-time configuration error, not an internal exception.
+                valid = False
+            if not valid:
+                raise DomainError("codex_model_profile_invalid", 409)
+            return
         if config.engine.engine_id not in MODEL_PROFILE_ENGINES:
             # Nothing to resolve and nothing to compare: the engine's own
             # configuration selects the model, so no Gateway profile is part of
@@ -516,6 +609,10 @@ class AgentService:
             config = self.parse_config(agent["draft"])
             self.validate_execution(config)
             await self.validate_model(tenant, config, c)
+            # Issue #165 L1: validate the whole Codex credential chain before a
+            # version is written, so a stale/out-of-scope reference can no longer
+            # be published and only fail later as ``execution_error``.
+            await self.validate_codex_credential(tenant, config, c)
             if agent["archived"]:
                 raise DomainError("agent_archived", 409)
             tool_snapshot = await self.tools.resolve(tenant, config.tool_names, c)

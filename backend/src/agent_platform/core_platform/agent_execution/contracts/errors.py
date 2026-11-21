@@ -57,6 +57,16 @@ class ExecutionErrorCode(StrEnum):
     SIMULATED_PROCESS_FAILURE = "simulated_process_failure"
 
 
+# Run-side (legacy ``runtime_runs.error_code``) classification for an Execution
+# Credential Broker refusal. This is deliberately NOT an ``ExecutionErrorCode``:
+# it is the stable, secret-free code the orchestrator writes when a grant is
+# denied (missing, revoked, superseded, engine/workspace/scope denied). Before
+# issue #165 such refusals degraded to the sanitized ``execution_error``, which
+# gave the operator no way to distinguish a stale credential reference from an
+# internal fault. The denial reason itself stays in the audit table only.
+RUN_CODE_CREDENTIAL_UNAVAILABLE = "execution_credential_unavailable"
+
+
 _ERROR_CATALOG: dict[ExecutionErrorCode, tuple[ExecutionErrorCategory, str]] = {
     ExecutionErrorCode.INVALID_REQUEST: (
         ExecutionErrorCategory.CONFIGURATION_ERROR,

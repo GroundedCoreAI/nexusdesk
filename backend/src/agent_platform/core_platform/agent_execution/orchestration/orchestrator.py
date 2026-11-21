@@ -31,7 +31,9 @@ from ..contracts import (
 )
 from ..contracts.capabilities import NO_EXECUTION_RESTRICTIONS
 from ..contracts.config import ExecutionConfig
+from ..contracts.errors import RUN_CODE_CREDENTIAL_UNAVAILABLE
 from ..contracts.instructions import PreparedInstructions
+from ..credentials.broker import CredentialGrantDenied
 from ..host.runtime_host import RuntimeHost
 from ..instructions import resolve_instruction_provider
 from ..registry import AdapterRegistry
@@ -124,6 +126,14 @@ def _failed_outcome(legacy_error_code: str) -> ExecutionOutcome:
 def _safe_legacy_code(exception: BaseException) -> str:
     if isinstance(exception, AdapterExecutionError):
         return exception.error.code.value
+    # Issue #165: the Credential Broker raises a plain RuntimeError, so a stale,
+    # revoked or out-of-scope ``credential_ref`` used to fall through to the
+    # sanitized ``execution_error``. Classify it as a configuration refusal with
+    # a stable, translatable Run code while keeping the denial reason (and any
+    # secret material) out of the Run payload. The detailed reason is already
+    # recorded secret-free in ``execution_credential_audit``.
+    if isinstance(exception, CredentialGrantDenied):
+        return RUN_CODE_CREDENTIAL_UNAVAILABLE
     return "execution_error"
 
 
