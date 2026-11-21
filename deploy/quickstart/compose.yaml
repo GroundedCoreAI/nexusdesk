@@ -82,10 +82,11 @@ services:
       # either list empty means the registration stays disabled (05 §4). Stage B
       # (app-server) has no implementation in this phase and remains hardwired
       # off in the composition, so no switch is offered for it. A real codex
-      # execution additionally needs the CLI binary inside this image with
-      # AGENT_CODEX_PATH_ENV reaching it; the console in this phase has no
-      # codex selection entry, so these switches only change what the backend
-      # registry accepts.
+      # execution additionally needs the CLI binary inside this image.
+      # AGENT_CODEX_PATH_ENV IS read by the backend (Q5): the composition root
+      # passes it into the Codex adapter, which uses it as the single effective
+      # child PATH, overriding the per-Agent codex.path_env even for Agents that
+      # were published before this change. Changing it requires a backend restart.
       AGENT_CODEX_CLI_ENABLED: ${AGENT_CODEX_CLI_ENABLED:-false}
       AGENT_CODEX_STAGE_A_VERIFIED: ${AGENT_CODEX_STAGE_A_VERIFIED:-false}
       AGENT_CODEX_ALLOWED_VERSIONS: "${AGENT_CODEX_ALLOWED_VERSIONS:-[]}"
@@ -101,6 +102,11 @@ services:
       AGENT_CODEX_MODEL_PROVIDER: ${AGENT_CODEX_MODEL_PROVIDER:-deepseek}
       AGENT_CODEX_MODEL_BASE_URL: ${AGENT_CODEX_MODEL_BASE_URL:-https://api.deepseek.com/v1}
       AGENT_CODEX_CREDENTIAL_ENV_KEY: ${AGENT_CODEX_CREDENTIAL_ENV_KEY:-DEEPSEEK_API_KEY}
+      # Legacy-lane credential override. This is a UUID *reference* minted by the
+      # admin execution-credentials API, NEVER a secret value; no key belongs in
+      # this file or in any container env var. ModelGateway-bound Agents derive
+      # their reference from the connection instead. Requires a backend restart.
+      AGENT_CODEX_CREDENTIAL_REF: ${AGENT_CODEX_CREDENTIAL_REF:-}
       # D-3: the CLI target is a Node process, so the generic 512 MiB RLIMIT_AS
       # kills it before the first turn. Raise this together with the switches
       # above (>= 1073741824 required, 2147483648 recommended); the app refuses
