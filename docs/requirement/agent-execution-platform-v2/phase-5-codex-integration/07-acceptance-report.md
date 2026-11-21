@@ -1,6 +1,7 @@
 # Phase 5 · Codex Integration — Acceptance Report
 
-> Status: **Executed** — **scoped conditional pass for the R18 stdin-channel implementation only**. **Stage A full acceptance has NOT passed and Stage B is NOT unlocked.**
+> Status: **PASS (scope-limited) for Stage A** — closed by the evidence-bound records `../12-scope-limited-acceptance-record-20261118-phase4-6.md` (phase 4–6 scope-limited) and `../13-scope-limited-acceptance-record-20261120-phase7-stage-a.md` (Stage A end-to-end at SHA `63221a1fd3bad7562b351b7bbbd23e0c95500cb6`), with the signed Stage A unlock record in the final section of this report. **Stage B remains locked**; P5-IT-18, the separate Stage B unlock record, real release-like Codex environment items and high-risk enablement stay out of scope / unauthorized. All historical conclusions, numbers and text above are preserved unchanged.
+> Historical status (verbatim): **Executed** — **scoped conditional pass for the R18 stdin-channel implementation only**. **Stage A full acceptance has NOT passed and Stage B is NOT unlocked.**
 > Created: 2026-11-13; rewritten 2026-11-16 by the Phase 5 acceptance sub-agent after the R18 D21/D22 fixes.
 > Basis: `05-acceptance-plan.en.md` (A1–A12, M1–M2, C1–C10, and §6 decision rules), `06-test-report.md` (round-6 and round-6-follow-up evidence), `08-implementation-breakdown.md` (R10, R17, and R18).
 > Acceptance owner / executor: Phase 5 acceptance sub-agent (the same role; no fabricated product, QA, business, security, or SRE approval).

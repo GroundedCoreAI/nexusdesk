@@ -1,6 +1,7 @@
 # Phase 1 · 执行契约与注册中心 — 验收报告
 
-> 状态：R6/R11 独立 spec review 与 scoped quality review 均已 APPROVED；当前树 A1～A8 本地工程证据与 C1～C4 限定范围核对通过；**正式验收尚未通过 / 验收未完成**，CI、最终总体包评审、人工 UAT 与签字仍待完成
+> 状态：**通过（范围限定 / PASS scope-limited）** —— 按 `../11-scope-limited-acceptance-record-20261118.md` 于 2026-11-18 在目标 SHA `5170e140f10b117549cf54ba400131f5d7f95f69` 重新验收闭合，**非由后续合入追认**；依据、证据包与签署记录见文末「2026-11-18 范围限定验收执行补记（阶段 0–3）」。本报告历史原文、执行记录与测试数值一律保留，不追溯修改。
+> 历史状态（原文保留）：R6/R11 独立 spec review 与 scoped quality review 均已 APPROVED；当前树 A1～A8 本地工程证据与 C1～C4 限定范围核对通过；**正式验收尚未通过 / 验收未完成**，CI、最终总体包评审、人工 UAT 与签字仍待完成
 > 创建/定稿：2026-11-09
 > 依据：`05-acceptance-plan.md`（A1～A8、业务指标、C1～C4）、`06-test-report.md`（29/29 计划行通过）
 > 执行：local automation agent (not human signoff)；执行覆盖：2026-11-08 至 2026-11-09
@@ -131,3 +132,17 @@
 权威记录：`../11-scope-limited-acceptance-record-20261118.md`；证据包 `20261118T125822Z.tar.gz`，
 SHA256 `109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23`。
 本文件上文历史结论与数值不追溯修改；本补记仅追加当前范围限定结论。
+
+### 09 §10 模板要素补齐（2026-11-21 索引同步）
+
+> 本小节只补齐 `09` §10 附录模板字段；上文补记原文、本报告全部历史结论与测试数值均不改写。
+
+Environment: 受控共享生产 Linux 主机 `iZwz9hk5o1f6h2hs6kfetpZ`（Alibaba Cloud Linux 3，kernel 5.10.134，x86_64）；run-scoped 容器 / 端口 / 路径 / 凭据；同机生产服务零改动；目标 SHA `5170e140f10b117549cf54ba400131f5d7f95f69`（`integration`，PR #143 merge）。
+
+| Item | 依据 / 命令 | 结果 | 判定 | 证据 |
+|---|---|---|---|---|
+| 功能正确性与契约 / 终态语义、租户隔离、Secret、数据完整性、迁移与锁文件零漂移、回滚、副作用 / 清理 | 13 个 lane + `d9-switch-completeness` 专项 913 tests + 在线生产栈只读默认关闭核对 | 5,464 tests / 0 failures / 0 errors / 55 声明式 skip | **通过（范围限定）** | `11` §3–§4、§5 Phase 1 行；证据包 `20261118T125822Z.tar.gz`，SHA256 `109989c3c0a0ee4f9aa1bcc49b7ebc3b382f697de98461f4a6b3ee366e9a9d23` |
+| 单一验收负责人记录 | `11` §7 人工验收签署 | JackChow 于 2026-11-18（GMT+8）确认签署，无未完成签署项 | **通过** | `11` §7 |
+| CI run URL / CI 双跑 / 真实历史样本 / 性能基线 | 2026-11-18 范围修订 | superseded / 非范围，仅历史背景 | 非门禁 | `11` §1；本文件 §0 |
+
+Residuals: 高风险能力启用仍须独立安全与运维批准（未请求、未授权）；本阶段无其它未完成签署项。

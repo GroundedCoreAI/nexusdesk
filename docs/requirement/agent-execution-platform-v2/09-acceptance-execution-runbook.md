@@ -32,7 +32,8 @@
 | Phase 6 representative production replica migration | Only with a sanitized, representative dump you provide | A synthetic small fixture presented as representative |
 | Phase 3 C11 performance / latency sampling | Out of phase 0–3 stage scope (2026-11-18); no harness required for acceptance, historical note only | Not a stage gate; no production-equivalence claim needed for a phase pass |
 | Phase 5 real Codex / credentials / two tenants | Yes if the CLI is installed and authenticated | Real release-like credentials and Stage B Session/Resume (not implemented) |
-| Phase 0/1 acceptance-owner conclusion, independent security approval | No | Cannot be simulated by any machine or by any shared-host run; real/authorized historical samples are out of phase 0–3 scope (2026-11-18) |
+| Phase 0/1 acceptance-owner conclusion | Yes — closable by the kept gates plus one evidence-bound acceptance-owner record at a pinned SHA (Appendix B) | A later merge cannot retroactively ratify it; the conclusion must come from a new evidence-bound acceptance record (§0 Hard rule) |
+| Independent security / SRE approval for high-risk enablement | No | Cannot be simulated by any machine or by any shared-host run; it needs a named independent approver and cannot be self-issued by the acceptance owner (§8 E11) |
 
 **Hard rule:** a `07` conclusion is changed only by a new, evidence-bound acceptance record. This runbook
 appends evidence; it never rewrites an earlier conclusion.
@@ -960,7 +961,7 @@ ssh "$ACCEPT_HOST" "MODE=preflight REPO_URL='$REPO_URL' TARGET_SHA='$TARGET_SHA'
 | Phase 5 Codex Stage A | A1–A6, A11–A12, C1–C5, C9–C10 | D1, D2, D6; E9–E10 |
 | Phase 5 Stage B | A7–A10, C7 | Not runnable: not implemented; keep locked |
 | Phase 6 security/reliability/events | A1–A16, C1–C12 | D1, D2, D5, D8; E6–E7, E11 |
-| Phase 0/1 upstream | A1–A6 / A1–A8 | Closable via kept gates plus one acceptance-owner record on the shared host; CI provenance and real/authorized historical samples are out of stage scope (2026-11-18) |
+| Phase 0/1 upstream | A1–A6 / A1–A8 | Closable via kept gates plus one acceptance-owner record on the shared host; CI provenance and real/authorized historical samples are out of stage scope (2026-11-18); see §0, where the acceptance-owner conclusion and the independent security approval are now separate rows |
 
 Verdict mapping: a lane that only exercises controlled/deterministic doubles cannot upgrade a row whose
 acceptance criterion requires real provider/tenant/host evidence. Keep the row `partial` or `pending_env`.

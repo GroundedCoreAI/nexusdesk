@@ -47,7 +47,7 @@
 
 ## 4. 残留与边界
 
-- `pending_env`：D6 Codex 真二进制（无 CLI/凭据）；D9 live Compose off/on/rollback（共享生产机无书面变更审批、缓存镜像落后目标 SHA）；E1–E5（cgroup/quota/mount/PID/生产镜像演练，无 passwordless sudo、cgroup 控制器为空、`mountns=FAIL`）；E6/E7/E9/E10/E11（新测试/数据/授权/独立审批）。详见证据包 `05-pending-env.md`。
+- `pending_env`：D6 Codex 真二进制（无 CLI/凭据）；D9 live Compose off/on/rollback（共享生产机无书面变更审批、缓存镜像落后目标 SHA）；E1–E5（cgroup/quota/mount/PID/生产镜像演练，无 passwordless sudo、cgroup 控制器为空、`mountns=FAIL`）；E6/E7/E9/E10/E11（新测试/数据/授权/独立审批）。逐项登记见仓库内 [05-pending-env.md](05-pending-env.md)（2026-11-21 归档的登记清单，非原始执行证据）；原始证据包 `20261118T150343Z.tar.gz`（SHA256 `bbc979e7d999a274fb689dbc458367dcca3c61610006c0339207ebe7e9e8050c`，见本记录 §5）位于远程验收主机 `nexusdesk-accept` 的证据目录，此前未纳入本仓库版本控制。
 - 真实 API key/凭据未使用；所有 `AGENT_EXECUTION_*`/`CODEX_*` 保持默认关闭；`sandbox_required=true`、`network_default_deny=true`。
 - #133/#134/#136 等历史问题维持原状态；性能/样本/CI 类不再作为阶段门禁。
 - 高风险启用（Runtime Host、生产 Codex 路由、Stage B、不可信租户）需独立安全与运维审批，本记录不授权。
