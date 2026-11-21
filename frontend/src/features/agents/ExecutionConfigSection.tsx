@@ -158,6 +158,38 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
         engine: item,
     }));
     const codexReadOnly = !canEdit || busy || !phase3Entries;
+    // Issue #162: the catalogue is informational (which versions exist / are
+    // installed) while the allowlist is authoritative (which versions may
+    // actually run). Only allowlisted versions become selectable options;
+    // catalogue-only versions stay visible but disabled; a published value
+    // that is in neither stays on screen, flagged until changed back to an
+    // allowed one. No dropdown choice grants execution permission — the
+    // server's fail-closed gate is unchanged.
+    const allowedCodexVersions = flags?.allowed_codex_versions ?? [];
+    const catalogueEntries = flags?.codex_version_catalogue ?? [];
+    const catalogueVersions = new Set(catalogueEntries.map(entry => entry.version));
+    const currentCodexVersion = view.codex?.version ?? '';
+    const staleCodexVersion = !!currentCodexVersion
+      && !allowedCodexVersions.includes(currentCodexVersion)
+      && !catalogueVersions.has(currentCodexVersion);
+    const codexVersionOptions = [
+      {
+        label: t('已验证可运行'),
+        options: allowedCodexVersions.map(version => ({ value: version, label: version })),
+      },
+      {
+        label: t('未验证，需运维启用'),
+        options: catalogueEntries
+          .filter(entry => !allowedCodexVersions.includes(entry.version))
+          .map(entry => ({ value: entry.version, label: entry.version, disabled: true })),
+      },
+      ...(staleCodexVersion
+        ? [{
+            label: t('当前版本不可用'),
+            options: [{ value: currentCodexVersion, label: currentCodexVersion, disabled: true }],
+          }]
+        : []),
+    ];
     const previewPaths = locateExecutionErrors(previewError);
   const savePaths = locateExecutionErrors(saveError || '');
   const saveErrorIsExecution = EXECUTION_ERROR_CODES.some(code => (saveError || '').includes(code)) || savePaths.length > 0;
@@ -227,9 +259,17 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
     <div className="agent-setting-card">
       <h3 className="agent-memory-group">{t('Codex 配置')}</h3>
       <Field label={t('Codex 版本')}>
-        <Input aria-label={t('Codex 版本')} required value={view.codex.version} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { version: event.target.value }))}/>
+        <Select
+          aria-label={t('Codex 版本')}
+          className="agent-codex-version-select"
+          value={currentCodexVersion || undefined}
+          options={codexVersionOptions}
+          disabled={codexReadOnly}
+          onChange={value => onChange(patchCodexConfig(config, { version: String(value ?? '') }))}
+        />
       </Field>
-      <p className="agent-muted">{`${t('必填')} · ${t('请填写已部署并列入 AGENT_CODEX_ALLOWED_VERSIONS 的 Codex CLI 版本号，例如 0.169.0。')}`}</p>
+      <p className="agent-muted">{`${t('必填')} · ${t('仅可选择列入 AGENT_CODEX_ALLOWED_VERSIONS 且已验证可运行的版本；目录中的其他版本需运维启用后方可选择。')}`}</p>
+      {staleCodexVersion && <p role="status" className="agent-codex-version-stale">{t('当前 Codex 版本不在版本目录或白名单中，无法运行，请改选允许的版本。')}</p>}
       <Field label={t('Codex 可执行文件')}>
         <Input aria-label={t('Codex 可执行文件')} value={view.codex.executable} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { executable: event.target.value }))}/>
       </Field>

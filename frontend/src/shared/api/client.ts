@@ -399,15 +399,30 @@ export interface MemoryConfigCaps {
   memory_blacklist_auto_handoff: boolean;
 }
 /**
+ * One informational Codex version row exposed by the flags endpoint (issue #162).
+ * `verified` records whether npm officially confirmed the version; it never
+ * grants execution permission — the allowlist is the authoritative gate.
+ */
+export interface CodexVersionCatalogueEntry {
+  version: string;
+  source: string;
+  verified: boolean;
+}
+/**
  * Deployment-side Phase 3 switches exposed by GET /agents/execution-config-flags
- * (03-technical-design.md §7.4, R-25). The strict response carries exactly these
- * two booleans, named verbatim like the backend settings, and nothing else; the
- * frontend only uses them to decide which Phase 3 editing entries to show. It is
- * a presentation hint — the server remains the authorization boundary.
+ * (03-technical-design.md §7.4, R-25) plus the non-sensitive Codex version
+ * metadata added in issue #162. The two booleans decide which Phase 3 editing
+ * entries to show. `allowed_codex_versions` is the authoritative runtime
+ * allowlist (absent/empty = deny-all) and `codex_version_catalogue` is a
+ * TTL-cached informational snapshot. Neither grants execution permission:
+ * the server remains the authorization boundary. The metadata fields are
+ * optional so an older backend response still renders safely (fail-closed).
  */
 export interface ExecutionConfigFlags {
   execution_phase3_enabled: boolean;
   execution_orchestrator_enabled: boolean;
+  allowed_codex_versions?: string[];
+  codex_version_catalogue?: CodexVersionCatalogueEntry[];
 }
 export interface Agent { created_by?: string | null; industry?:string; tags?:string[]; is_example?:boolean; updated_at?: string; created_at?: string; id: string; name: string; description: string; draft: AgentConfig; draft_revision: number; published_version: number | null; archived?: boolean }
 export interface KnowledgeBase { id: string; name: string; document_count: number; enabled: boolean }
