@@ -94,6 +94,15 @@ export interface AgentConfig {
   memory_inject_max_items?: number | null;
   memory_search_limit?: number | null;
   memory_blacklist_auto_handoff?: boolean;
+  /**
+   * Editor-only memory of the React Chat binding the user held before switching
+   * to a CLI engine. The backend must clear React aliases on a CLI-engine draft
+   * (fail-closed, `extra="forbid"`), so an echo from the server cannot carry the
+   * binding back. This field is *never* sent to the server — `normalizeExecutionForEngine`
+   * strips it — and only ever recalls a value the user actually bound; no model
+   * profile is invented or injected here.
+   */
+  reactBindingMemory?: ReactExecutionConfig | null;
 }
 /**
  * Engine triples the UI can publish. The Codex CLI descriptor is registered by
@@ -182,6 +191,14 @@ export function patchReactConfig(config: AgentConfig, patch: Partial<ReactExecut
     if (field in config || !inReact) root[field] = value;
   }
   if (keepsReact) next.react = react as unknown as ReactExecutionConfig;
+  // Keep the CLI-save snapshot in step with the user's explicit choice: a
+  // freshly chosen binding is remembered, and clearing the picker must clear
+  // the memory too so an old profile is never resurrected on a later switch.
+  const remembered = currentReactBinding(next);
+  if (remembered)
+    next.reactBindingMemory = remembered;
+  else if ('model_profile_id' in patch)
+    delete next.reactBindingMemory;
   return next;
 }
 /** Update the typed Codex block only; it has no legacy root aliases to keep in step. */
@@ -189,6 +206,28 @@ export function patchCodexConfig(config: AgentConfig, patch: Partial<CodexExecut
   const codex = { ...(config.codex ?? DEFAULT_CODEX), ...patch };
   return { ...config, codex };
 }
+/**
+ * The React settings the editor is currently holding, read from whichever
+ * location has them (typed block first, then the legacy root aliases). Returns
+ * null unless a Chat profile is actually bound, so an empty/default React
+ * block is never mistaken for a remembered binding.
+ */
+export function currentReactBinding(config: AgentConfig): ReactExecutionConfig | null {
+  const root = config as unknown as Record<string, unknown>;
+  const react = config.react as unknown as Record<string, unknown> | null | undefined;
+  const pick = (field: keyof ReactExecutionConfig): unknown =>
+    react && react[field] !== undefined ? react[field] : root[field];
+  const modelProfileId = pick('model_profile_id') as string | null | undefined;
+  const modelProfileVersion = pick('model_profile_version') as number | null | undefined;
+  if (modelProfileId == null || modelProfileVersion == null)
+    return null;
+  return {
+    model_profile_id: modelProfileId,
+    model_profile_version: modelProfileVersion,
+    max_model_rounds: (pick('max_model_rounds') as number | undefined) ?? DEFAULT_REACT.max_model_rounds,
+  };
+}
+
 /**
  * Switch the active engine without destroying the other engine's settings.
  *
@@ -201,22 +240,51 @@ export function patchCodexConfig(config: AgentConfig, patch: Partial<CodexExecut
  * legacy React aliases. Keeping normalisation at the boundary — not inside the
  * switch — is what makes the switch lossless without ever sending an invalid
  * draft.
+ *
+ * A CLI-engine save is the one case the boundary cannot be lossless by itself:
+ * the backend clears the React block and the three root aliases on that engine,
+ * so the echoed draft carries no binding to switch back to. At the moment of
+ * switching *away* from React we therefore snapshot the user's current binding
+ * into `reactBindingMemory` (editor state only), and reseed from it when
+ * switching back if the draft no longer holds a binding. Nothing is fabricated:
+ * the memory is always a value the user had actually bound before the switch.
  */
 export function patchEngine(config: AgentConfig, engine: EngineIdentity): AgentConfig {
   const next: AgentConfig = { ...config, engine };
+  const bound = currentReactBinding(config);
   if (engine.engine_id === 'codex') {
     if (!next.codex) next.codex = { ...DEFAULT_CODEX };
-  } else if (!next.react) {
-    // A pre-Phase-3 draft keeps all of its React settings in the three legacy
-    // root aliases. Seeding the typed block from *those values*, rather than
-    // from empty defaults, is what makes a React -> Codex -> React round trip
-    // lossless: otherwise switching back silently dropped a bound Chat profile.
-    const root = config as unknown as Record<string, unknown>;
-    next.react = {
-      model_profile_id: (root.model_profile_id as string | null | undefined) ?? null,
-      model_profile_version: (root.model_profile_version as number | null | undefined) ?? null,
-      max_model_rounds: (root.max_model_rounds as number | undefined) ?? DEFAULT_REACT.max_model_rounds,
-    };
+    // Last moment the bound profile is still in editor state on a draft that
+    // will be saved with a CLI engine (and therefore stripped by the server).
+    if (bound) next.reactBindingMemory = bound;
+  } else {
+    const root = next as unknown as Record<string, unknown>;
+    const hasReactBinding = !!config.react && config.react.model_profile_id != null && config.react.model_profile_version != null;
+    if (!hasReactBinding) {
+      // Prefer the live root aliases, then the snapshot taken on the way out.
+      // A pre-Phase-3 draft keeps everything in the root aliases; a published
+      // Codex draft has those aliases cleared, so its remembered binding is
+      // the only lossless source. Either way a bound value is *restored*, never
+      // invented, and max_model_rounds keeps the user's last choice.
+      const memory = config.reactBindingMemory;
+      next.react = {
+        model_profile_id: (root.model_profile_id as string | null | undefined) ?? memory?.model_profile_id ?? null,
+        model_profile_version: (root.model_profile_version as number | null | undefined) ?? memory?.model_profile_version ?? null,
+        max_model_rounds: (root.max_model_rounds as number | undefined)
+          ?? memory?.max_model_rounds
+          ?? config.react?.max_model_rounds
+          ?? DEFAULT_REACT.max_model_rounds,
+      };
+      // The Chat 模型方案 picker is bound to the legacy root alias, and the
+      // CLI-save boundary cleared those aliases. Mirror the restored value back
+      // so the picker (and readExecution) see the same canonical value with no
+      // alias conflict.
+      if (root.model_profile_id == null && next.react.model_profile_id != null) {
+        root.model_profile_id = next.react.model_profile_id;
+        root.model_profile_version = next.react.model_profile_version;
+        root.max_model_rounds = next.react.max_model_rounds;
+      }
+    }
   }
   return next;
 }
@@ -236,6 +304,11 @@ export function patchEngine(config: AgentConfig, engine: EngineIdentity): AgentC
 export function normalizeExecutionForEngine(config: AgentConfig): AgentConfig {
   const engineId = config.engine?.engine_id ?? DEFAULT_ENGINE.engine_id;
   const next: AgentConfig = { ...config };
+  // `reactBindingMemory` is editor state, not a draft field. The backend rejects
+  // unknown keys (extra="forbid"), so it must never reach the wire; the user's
+  // binding itself is still restored into the typed block below when React is
+  // active, which is what actually gets published.
+  delete next.reactBindingMemory;
   const root = next as unknown as Record<string, unknown>;
   if (engineId === 'codex') {
     next.react = undefined;

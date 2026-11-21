@@ -1114,3 +1114,69 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
   }
   expect(keys.length).toBeGreaterThanOrEqual(40);
 });
+
+// Issue #161 — engine round-trip switch (react -> codex -> react) used to lose
+// the React Chat model binding. The backend clears the React block and the
+// three legacy aliases on a CLI-engine draft by design (fail-closed), so the
+// binding has to be preserved in editor state and restored on the way back.
+// These cases exercise the *saved* draft (not just the in-memory preview body
+// the P7-UI-02 case checks) through save -> publish -> reload.
+test('I161-01 (issue #161) engine round trip keeps the React Chat binding through save, publish and reload', async ({ page }) => {
+  const PROFILE = '6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f';
+  const harness = await open(page, { draft: legacyDraft(), preview: () => previewBody() });
+  const choose = async (label: string) => {
+    await page.getByLabel('选择 Engine').click();
+    await page.locator('.ant-select-item-option-content', { hasText: label }).click();
+  };
+  // Baseline: the react draft has the Chat profile bound.
+  await expect(page.getByLabel('Chat 模型方案')).toHaveValue(PROFILE);
+
+  // Switch to codex and SAVE there. At this boundary the backend normalizer
+  // must strip the React block and neutralise the three aliases (the P7 422
+  // fix), so the echoed draft itself no longer carries the binding.
+  await choose('codex / cli_exec / v1');
+  await page.getByLabel('Codex 版本').fill('0.169.0');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  const savedCodex = harness.saves[0].config as Record<string, unknown>;
+  expect((savedCodex.engine as Record<string, unknown>).engine_id).toBe('codex');
+  expect(savedCodex.react).toBeUndefined();
+  expect(savedCodex.model_profile_id).toBeNull();
+  expect(savedCodex.model_profile_version).toBeNull();
+  expect(savedCodex.max_model_rounds).toBe(6);
+  // Codex's own fields are preserved symmetrically (P7-UI-02 version bug).
+  expect((savedCodex.codex as Record<string, unknown>).version).toBe('0.169.0');
+
+  // Switching back to react must restore the user's own binding, never an
+  // empty picker — this is the exact regression the in-memory-only case misses.
+  await choose('react / native / v1');
+  await expect(page.getByLabel('Chat 模型方案')).toHaveValue(PROFILE);
+
+  // The saved/published snapshot now carries the binding in both forms.
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(2);
+  const savedReact = harness.saves[1].config as Record<string, unknown>;
+  expect(savedReact.model_profile_id).toBe(PROFILE);
+  expect(savedReact.model_profile_version).toBe(3);
+  expect((savedReact.react as Record<string, unknown>).model_profile_id).toBe(PROFILE);
+
+  await page.getByRole('button', { name: '发布', exact: true }).click();
+  await expect.poll(() => harness.calls.filter(call => call === 'POST /agents/agent-1/publish').length).toBe(1);
+  // A full browser reload re-fetches the draft; the binding must still be there.
+  await page.reload();
+  await expect(page.getByLabel('Agent 名称', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Chat 模型方案')).toHaveValue(PROFILE);
+});
+
+test('I161-02 (issue #161) publishing a React draft with no Chat profile is blocked with a clear message', async ({ page }) => {
+  const harness = await open(page, {
+    draft: legacyDraft({ model_profile_id: null, model_profile_version: null }),
+    preview: () => previewBody(),
+  });
+  await page.getByRole('button', { name: '发布', exact: true }).click();
+  // The guard is fail-closed: it stops before any save or publish request and
+  // names the missing profile in the user's own language.
+  const alert = page.locator('.agent-workspace > .alert.error');
+  await expect(alert).toContainText('请先选择已发布的 Chat 配置方案');
+  expect(harness.calls.filter(call => call === 'POST /agents/agent-1/publish')).toHaveLength(0);
+});

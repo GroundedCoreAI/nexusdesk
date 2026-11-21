@@ -4,7 +4,7 @@ import { t, number, errorText } from '../../i18n/index';
 import { useEffect, useRef, useState } from 'react';
 import { Avatar, Button, Card, Checkbox, ConfigProvider, Drawer, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Radio, Select, Space, Spin, Splitter, Switch, Tag, Tooltip } from 'antd';
 import { ApartmentOutlined, ArrowLeftOutlined, CommentOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
-import { api, patch, post, put, engineUsesPlatformModel, normalizeExecutionForEngine, type Agent, type AgentConfig, type EvaluationReportPage, type ExecutionConfigFlags, type KnowledgeBase, type MemoryConfigCaps, type Tool } from '../../shared/api/client';
+import { api, patch, post, put, currentReactBinding, engineUsesPlatformModel, normalizeExecutionForEngine, readExecution, type Agent, type AgentConfig, type EvaluationReportPage, type ExecutionConfigFlags, type KnowledgeBase, type MemoryConfigCaps, type ReactExecutionConfig, type Tool } from '../../shared/api/client';
 import { Alert, Field, time, toast, useAccess, useAction, useResource } from '../../shared/components/ui';
 import { useCatalogOptions } from '../models/useCatalogOptions';
 import { AgentModelPicker } from './AgentModelPicker';
@@ -21,6 +21,50 @@ export interface PageResult<T> {
     page_size: number;
 }
 const initialConfig = (): AgentConfig => withMemoryDefaults({ system_prompt: t('你是一个专业、友好的智能助手。请准确理解用户需求，并提供清晰可靠的帮助。'), tool_names: ['knowledge_search', 'propose_ticket', 'memory_search'], knowledge_base_ids: [], max_model_rounds: 6, model_profile_id: null, model_profile_version: null, reply_language: "auto" });
+// A CLI-engine save is normalised by the backend so the draft it echoes back
+// has no React block and null root aliases — by design (fail-closed). The user's
+// pre-switch Chat profile therefore cannot survive on the server; keep it in
+// this browser keyed by agent id so a later switch back (even after a full
+// reload) restores what the user actually bound, never a fabricated profile.
+const REACT_BINDING_STORAGE_KEY = 'nexusdesk.agent-react-binding.v1';
+function bindingStore(): Record<string, ReactExecutionConfig> {
+    try {
+        const raw = localStorage.getItem(REACT_BINDING_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, ReactExecutionConfig> : {};
+    }
+    catch {
+        return {};
+    }
+}
+function rememberReactBinding(agentId: string | null | undefined, binding: ReactExecutionConfig | null): void {
+    if (!agentId)
+        return;
+    try {
+        const store = bindingStore();
+        if (binding?.model_profile_id != null && binding.model_profile_version != null)
+            store[agentId] = binding;
+        else
+            delete store[agentId];
+        localStorage.setItem(REACT_BINDING_STORAGE_KEY, JSON.stringify(store));
+    }
+    catch {
+        // Storage disabled/quota: the in-memory snapshot still covers the
+        // current session; this is only a best-effort reload durability layer.
+    }
+}
+function withRememberedBinding(agentId: string | undefined, draft: AgentConfig): AgentConfig {
+    if (!agentId)
+        return draft;
+    const remembered = bindingStore()[agentId];
+    if (remembered?.model_profile_id == null || remembered.model_profile_version == null)
+        return draft;
+    // Restore only when the loaded draft itself has no binding (the CLI save
+    // boundary cleared it). Never overwrite a binding the user currently holds.
+    const hasBinding = (draft.model_profile_id != null && draft.model_profile_version != null)
+        || (draft.react?.model_profile_id != null && draft.react?.model_profile_version != null);
+    return hasBinding ? draft : { ...draft, reactBindingMemory: remembered };
+}
 const groups = () => ([['basic', t("基本信息")], ['model', t("模型配置")], ['prompt', t("行为指令")], ['tools', t("工具")], ['knowledge', t("知识库")], ['memory', t("记忆")], ['runtime', t("运行参数")], ['execution', t("执行与能力")]] as const);
 const labels = (): Record<string, string> => ({ system_prompt: t("行为指令"), tool_names: t("工具"), knowledge_base_ids: t("知识库"), max_model_rounds: t("最大模型轮次"), model_profile_id: t("模型方案"), model_profile_version: t("模型方案版本"), reply_language: t("回复语言"), summary_enabled: t("滚动摘要"), memory_enabled: t("启用客户长期记忆"), memory_read_enabled: t("读取记忆"), memory_write: t("自动写入记忆"), memory_types: t("记忆类型"), memory_search_enabled: t("启用 memory_search 检索"), memory_write_mode: t("写入策略"), memory_inject_max_items: t("单次注入上限"), memory_search_limit: t("检索返回上限"), memory_blacklist_auto_handoff: t("黑名单客户自动转人工") });
 type MemoryType = "profile" | "preference" | "event";
@@ -246,7 +290,7 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         update();
         return () => root.removeEventListener('scroll', update);
     }, [editor, view]);
-    function apply(agent: Agent) { const draft = withMemoryDefaults(agent.draft); setSelected(agent); setName(agent.name); setDescription(agent.description); setConfig(draft); setIndustry(agent.industry || ''); setTags(agent.tags || []); setIsExample(!!agent.is_example); setPreset(null); setSaved(JSON.stringify({ name: agent.name, description: agent.description, config: draft, industry: agent.industry || '', tags: agent.tags || [], is_example: !!agent.is_example })); setSavedAt(agent.updated_at || ''); }
+    function apply(agent: Agent) { const draft = withRememberedBinding(agent.id, withMemoryDefaults(agent.draft)); setSelected(agent); setName(agent.name); setDescription(agent.description); setConfig(draft); setIndustry(agent.industry || ''); setTags(agent.tags || []); setIsExample(!!agent.is_example); setPreset(null); setSaved(JSON.stringify({ name: agent.name, description: agent.description, config: draft, industry: agent.industry || '', tags: agent.tags || [], is_example: !!agent.is_example })); setSavedAt(agent.updated_at || ''); }
     function applyMemoryPreset(key: string) {
         const presetValue = memoryPresets().find(p => p.key === key);
         if (!presetValue)
@@ -325,9 +369,17 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         // The editor may hold both engine blocks while the user switches back
         // and forth; the wire contract accepts exactly one. Normalise at the
         // boundary so a save can never be rejected for an editor-only shape.
+        // Before the CLI boundary clears the React aliases, keep the user's
+        // binding in this browser so switching back stays lossless after reload.
+        const bindingToRemember = () => engineUsesPlatformModel(config)
+            ? currentReactBinding(config)
+            : (config.reactBindingMemory ?? null);
+        rememberReactBinding(selected?.id, bindingToRemember());
         const wireConfig = normalizeExecutionForEngine(config);
         const body = { name: name.trim(), description: description.trim(), config: wireConfig, industry, tags, is_example: isExample };
         const agent = selected ? await put<Agent>(`/agents/${selected.id}`, { ...body, revision: selected.draft_revision }) : await post<Agent>('/agents', body);
+        if (!selected)
+            rememberReactBinding(agent.id, bindingToRemember());
         apply(agent);
         setSavedAt(new Date().toISOString());
         if (targetId === 'new')
@@ -339,7 +391,11 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         // one to publish. A CLI engine owns its provider/model in its own
         // config, and the server normalises its legacy aliases to null, so a
         // React-only gate here made every Codex Agent unpublishable (P7 defect).
-        if (publish && engineUsesPlatformModel(config) && (!config.model_profile_id || !config.model_profile_version)) {
+        // Read the *effective* React binding (typed block or legacy aliases),
+        // not one physical location: a restored/published draft may carry it in
+        // either form, and both must be empty before the publish is blocked.
+        const reactToPublish = engineUsesPlatformModel(config) ? readExecution(config).react : null;
+        if (publish && engineUsesPlatformModel(config) && (!reactToPublish?.model_profile_id || !reactToPublish?.model_profile_version)) {
             setView('config');
             setMobileTab('config');
             setActiveSection('model');
