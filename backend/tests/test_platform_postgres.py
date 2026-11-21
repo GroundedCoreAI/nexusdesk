@@ -1,10 +1,10 @@
 import asyncio
-import os
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 import pytest_asyncio
+from conftest import require_test_database_url
 from pydantic import SecretStr
 from sqlalchemy import text
 
@@ -16,9 +16,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 @pytest_asyncio.fixture
 async def platform():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("Requires a migrated PostgreSQL test database")
+    url = require_test_database_url()
     settings = Settings(
         database_url=url,
         tenant_id="test-" + str(uuid4()),

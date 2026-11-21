@@ -1,8 +1,8 @@
 import asyncio
-import os
 
 import pytest
 import pytest_asyncio
+from conftest import require_test_database_url
 
 from agent_platform.core_platform.extension_platform import (
     CapabilityRegistry,
@@ -16,9 +16,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 @pytest_asyncio.fixture
 async def runtime_state_service():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("Set TEST_DATABASE_URL to a migrated, dedicated PostgreSQL test database")
+    url = require_test_database_url()
     settings = Settings(database_url=url, embedded_worker=False)
     engine = create_engine(settings)
     try:
