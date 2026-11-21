@@ -4,7 +4,7 @@ import { t, number, errorText } from '../../i18n/index';
 import { useEffect, useRef, useState } from 'react';
 import { Avatar, Button, Card, Checkbox, ConfigProvider, Drawer, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Radio, Select, Space, Spin, Splitter, Switch, Tag, Tooltip } from 'antd';
 import { ApartmentOutlined, ArrowLeftOutlined, CommentOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
-import { api, patch, post, put, type Agent, type AgentConfig, type EvaluationReportPage, type ExecutionConfigFlags, type KnowledgeBase, type MemoryConfigCaps, type Tool } from '../../shared/api/client';
+import { api, patch, post, put, engineUsesPlatformModel, normalizeExecutionForEngine, type Agent, type AgentConfig, type EvaluationReportPage, type ExecutionConfigFlags, type KnowledgeBase, type MemoryConfigCaps, type Tool } from '../../shared/api/client';
 import { Alert, Field, time, toast, useAccess, useAction, useResource } from '../../shared/components/ui';
 import { useCatalogOptions } from '../models/useCatalogOptions';
 import { AgentModelPicker } from './AgentModelPicker';
@@ -322,7 +322,11 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         }));
     }
     async function save() {
-        const body = { name: name.trim(), description: description.trim(), config, industry, tags, is_example: isExample };
+        // The editor may hold both engine blocks while the user switches back
+        // and forth; the wire contract accepts exactly one. Normalise at the
+        // boundary so a save can never be rejected for an editor-only shape.
+        const wireConfig = normalizeExecutionForEngine(config);
+        const body = { name: name.trim(), description: description.trim(), config: wireConfig, industry, tags, is_example: isExample };
         const agent = selected ? await put<Agent>(`/agents/${selected.id}`, { ...body, revision: selected.draft_revision }) : await post<Agent>('/agents', body);
         apply(agent);
         setSavedAt(new Date().toISOString());
@@ -331,7 +335,11 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         return agent;
     }
     function submit(publish = false) {
-        if (publish && (!config.model_profile_id || !config.model_profile_version)) {
+        // D-1 parity: only engines that bind a platform Chat profile require
+        // one to publish. A CLI engine owns its provider/model in its own
+        // config, and the server normalises its legacy aliases to null, so a
+        // React-only gate here made every Codex Agent unpublishable (P7 defect).
+        if (publish && engineUsesPlatformModel(config) && (!config.model_profile_id || !config.model_profile_version)) {
             setView('config');
             setMobileTab('config');
             setActiveSection('model');
@@ -461,7 +469,9 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
     {selected && <div className="agent-evaluation-banner"><div><span className="agent-nav-eyebrow">{t("评测概览")}</span><strong>{latestEvaluation ? t("最近评测：v{{v0}} · {{v1}}/{{v2}} 通过", { v0: latestEvaluation.agent_version, v1: latestEvaluationPassed, v2: latestEvaluationTotal }) : t("尚未运行评测")}</strong><small>{latestEvaluation ? time(latestEvaluation.created_at) : t("运行评测后查看发布版本的质量结果")}</small>{dirty && <small>{t("评测运行于已发布版本 v{{v0}}，不包含当前草稿修改。", { v0: selected.published_version ?? '—' })}</small>}{latestEvaluation && selected.published_version && latestEvaluation.agent_version !== selected.published_version && <small>{t("评测结果对应 v{{v0}}，与当前发布版本不一致，建议重新评测。", { v0: latestEvaluation.agent_version })}</small>}</div><Button onClick={() => setView('evaluation')}>{t("查看评测")}</Button></div>}
     <Splitter className={`agent-splitter mobile-${mobileTab}`}><Splitter.Panel defaultSize="55%" min="30%" className="agent-config-panel"><form ref={form} onSubmit={e => { e.preventDefault(); submit(); }} className="agent-config-form"><div className="agent-form-intro"><span>{t("配置工作台")}</span><h2>{t("定义你的 Agent")}</h2><p>{t("设置角色、连接能力，让每一次回答更符合预期。")}</p></div><Alert error={models.error || tools.error || bases.error}/>{!admin && <p className="agent-muted">{t("当前为只读角色")}</p>}{selected?.archived && <p className="agent-muted">{t("此 Agent 已归档，请返回列表恢复后编辑。")}</p>}<fieldset disabled={!admin || action.busy || selected?.archived}>
     <section id="agent-basic"><h2>{t("基本信息")}</h2><div className="agent-setting-card"><Field label={t("名称")}><input ref={nameInput} aria-label={t("Agent 名称")} required maxLength={100} value={name} onChange={e => setName(e.target.value)}/></Field><Field label={t("简介")}><textarea aria-label={t("Agent 简介")} rows={2} maxLength={1000} value={description} onChange={e => setDescription(e.target.value)} placeholder={t("介绍这个 Agent 的职责和擅长的工作")}/></Field></div><div className="agent-setting-card"><Field label={t("所属行业")}><select aria-label={t("所属行业")} value={industry} onChange={e => setIndustry(e.target.value)}><option value="">{t("未分类")}</option>{INDUSTRIES.map(v => <option key={v} value={v}>{industryLabel(v)}</option>)}</select></Field><Field label={t("用途标签")}><Select mode="multiple" virtual={false} aria-label={t("用途标签")} value={tags} onChange={setTags} options={PURPOSES.map(v => ({ value: v, label: purposeLabel(v) }))} disabled={!admin || action.busy || selected?.archived} style={{ width: '100%' }} placeholder={t("选择用途标签")}/></Field><Checkbox checked={isExample} disabled={!admin || action.busy || selected?.archived} onChange={e => setIsExample(e.target.checked)}>{t("案例数据")}</Checkbox></div></section>
-    <section id="agent-model"><h2>{t("模型配置")}</h2><AgentModelPicker key={selected?.id || 'new'} config={config} onChange={setConfig} profiles={models.data} refresh={models.refresh} onConfigure={onConfigureModels} disabled={!admin || action.busy || !!selected?.archived}/></section>
+    <section id="agent-model"><h2>{t("模型配置")}</h2>{engineUsesPlatformModel(config)
+      ? <AgentModelPicker key={selected?.id || 'new'} config={config} onChange={setConfig} profiles={models.data} refresh={models.refresh} onConfigure={onConfigureModels} disabled={!admin || action.busy || !!selected?.archived}/>
+      : <div className="agent-setting-card"><p className="agent-muted">{t("当前 Engine 由自身配置决定模型与凭据，不使用平台 Chat 模型方案；发布前无需在此绑定方案。")}</p></div>}</section>
     <section id="agent-prompt"><h2>{t("行为指令")}</h2><p className="agent-section-description">{t("告诉 Agent 应该扮演什么角色、如何思考和回答。")}</p><div className="agent-setting-card agent-prompt-card"><textarea aria-label={t("行为指令")} required maxLength={16000} rows={6} value={config.system_prompt} onChange={e => setConfig({ ...config, system_prompt: e.target.value })} placeholder={t("描述角色、任务目标与回答要求\u2026")}/><div className="agent-input-footer"><span>{t("清晰的指令有助于获得稳定的回答")}</span><span>{number(config.system_prompt.length)} / 16,000</span></div></div></section>
     {(['tools', 'knowledge'] as const).map(kind => <section id={`agent-${kind}`} key={kind}><div className="agent-section-heading"><h2>{kind === 'tools' ? t("工具") : t("知识库")}</h2><Button type="text" icon={<PlusOutlined aria-hidden/>} disabled={!admin || action.busy || selected?.archived} onClick={() => { setPickQuery(''); setPicker(kind); }}>{t("添加")}</Button></div><div className="agent-setting-card">{(kind === 'tools' ? config.tool_names : config.knowledge_base_ids).length ? (kind === 'tools' ? config.tool_names : config.knowledge_base_ids).map(id => <div className="agent-binding" key={id}><span>{kind === 'tools' ? id : bases.data?.find(b => b.id === id)?.name || id}</span><Button type="text" disabled={!admin || action.busy || selected?.archived} onClick={() => toggle(kind === 'tools' ? 'tool_names' : 'knowledge_base_ids', id)}>{t("移除")}</Button></div>) : <div className="agent-binding-empty">{t("点击「添加」选择")}{kind === 'tools' ? t("可调用的工具") : t("可访问的知识库")}</div>}</div></section>)}
     <section id="agent-memory"><h2>{t("记忆")}</h2><p className="agent-section-description">{t("配置 Agent 的对话记忆与客户长期记忆，保存后新会话生效。")}</p>

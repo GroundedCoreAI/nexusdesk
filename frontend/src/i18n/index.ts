@@ -38,6 +38,60 @@ i18n.on('languageChanged',()=>{try{localStorage.setItem(LOCALE_KEY,locale());}ca
 updateDocument();
 export const number=(value:number,options?:Intl.NumberFormatOptions)=>new Intl.NumberFormat(locale(),options).format(value);
 export function dateTime(value:string) { const date=new Date(value); return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(locale(),{dateStyle:'medium',timeStyle:'medium',hour12:false}).format(date); }
+/**
+ * A strict-schema rejection arrives as `422 · <JSON array of {loc,msg,type}>`.
+ * Flattening that to one generic sentence hid *which* field failed and implied
+ * every 422 was a missing required field, which is simply not true (extra
+ * inputs, enum mismatches and cross-field value errors are 422s too).
+ * These helpers recover the contract paths and translate the framework text,
+ * while leaving any unrecognised server message verbatim for bug reports.
+ */
+const VALIDATION_MESSAGE_KEYS:Record<string,string>={
+  'Field required':'此项为必填',
+  'String should have at least 1 character':'不能为空',
+  'Input should be a valid integer':'需要填写整数',
+  'Input should be a valid number':'需要填写数字',
+  'Input should be a valid string':'需要填写文本',
+  'Input should be a valid boolean':'需要填写布尔值',
+  'Input should be a valid UUID':'需要填写有效的 UUID',
+  'Extra inputs are not permitted':'不支持此字段，请删除',
+  'Value error, legacy React fields are only valid for the react engine':'当前 Engine 不支持旧版 React 字段，请清除模型方案或切回 React Engine',
+  'Value error, react configuration is only valid for the react engine':'当前 Engine 不支持旧版 React 字段，请清除模型方案或切回 React Engine',
+};
+const VALIDATION_MESSAGE_PATTERNS:Array<[RegExp,string]>=[
+  [/^String should have at most (\d+) characters?$/,'文本长度不能超过 {{v0}} 个字符'],
+  [/^String should have at least (\d+) characters?$/,'文本长度至少 {{v0}} 个字符'],
+  [/^Input should be greater than or equal to (-?\d+(?:\.\d+)?)$/,'数值不能小于 {{v0}}'],
+  [/^Input should be less than or equal to (-?\d+(?:\.\d+)?)$/,'数值不能大于 {{v0}}'],
+  [/^Input should be '[^']*'(?:, '[^']*')*(?: or '[^']*')?$/,'取值必须是允许值之一'],
+  [/^Input should be (?:a valid|an instance of)/,'取值格式不正确'],
+];
+function localizeValidationMessage(msg:string):string {
+  const exact=VALIDATION_MESSAGE_KEYS[msg];
+  if(exact&&i18n.exists(exact))return t(exact);
+  for(const [pattern,key] of VALIDATION_MESSAGE_PATTERNS){
+    const match=pattern.exec(msg);
+    // `v0` is only meaningful for the numeric/length families; the enum and
+    // generic families take no placeholder, and i18next ignores the extra one.
+    if(match&&i18n.exists(key))return t(key,{v0:match[1]});
+  }
+  return msg;
+}
+/** Field-level, localised lines for a structured 422; empty for any other body. */
+export function validationFieldErrors(message:string):string[] {
+  const raw=/^422 · ([\s\S]*)$/.exec(message||'')?.[1];
+  if(!raw)return [];
+  let parsed:unknown;
+  try{parsed=JSON.parse(raw);}catch{return [];}
+  if(!Array.isArray(parsed))return [];
+  return parsed.flatMap(item=>{
+    const location=(item as {loc?:unknown}).loc;
+    if(!Array.isArray(location))return [];
+    const path=location.filter(segment=>typeof segment==='string'&&segment!=='body'&&segment!=='config').join('.');
+    if(!path)return [];
+    return [t('字段 {{v0}}：{{v1}}',{v0:path,v1:localizeValidationMessage(String((item as {msg?:unknown}).msg??''))})];
+  });
+}
 export function errorText(message:string) {
   const code=message.match(/^(?:\d{3} · )?([a-z][a-z0-9_]+)$/)?.[1];
   const known:Record<string,string>={
@@ -93,7 +147,12 @@ export function errorText(message:string) {
     identity_session_required:t('当前凭据不支持成员会话管理。'),
   };
   if(code)return `${t(known[code]||'请求失败，请重试或联系管理员')} (${message})`;
-  if(/^422 ·/.test(message))return `${t('请检查必填项和输入格式')} (422)`;
+  if(/^422 ·/.test(message)){
+    const fields=validationFieldErrors(message);
+    // Structured rejections name the exact field and the reason. Only a 422
+    // whose body is not a pydantic detail list falls back to the old sentence.
+    return fields.length?`${t('请检查以下字段的必填项与输入格式')}\n${fields.join('\n')}`:`${t('请检查必填项和输入格式')} (422)`;
+  }
   return i18n.exists(message)?t(message):message;
 }
 export default i18n;

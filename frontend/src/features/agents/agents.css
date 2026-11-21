@@ -61,3 +61,10 @@
 .agent-schema-row>span { overflow-wrap:anywhere; }
 @media(max-width:600px){ .agent-capability-row { grid-template-columns:minmax(0,1fr) auto; } }
 #agent-execution .alert { white-space:pre-line; }
+/* A structured 422 renders one field per line; keep those lines visible in the
+   workspace-level alert too, not only inside the execution section. */
+.agent-workspace > .alert.error { white-space:pre-line; }
+.agent-credential-source { margin-top:16px; }
+.agent-credential-meta { margin-top:16px; padding-top:4px; border-top:1px solid #eaecf2; }
+.agent-credential-meta .field > span { font-size:12px; color:#6b7282; }
+.agent-credential-meta .ant-tag { width:max-content; }

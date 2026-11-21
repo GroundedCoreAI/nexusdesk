@@ -104,6 +104,18 @@ function legacyDraft(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** The registered Stage A Codex triple and a publishable typed Codex block. */
+const CODEX_ENGINE = { engine_id: 'codex', protocol_id: 'cli_exec', adapter_version: 'v1' };
+const CODEX_BLOCK = {
+  protocol: 'cli_exec', version: '0.169.0', executable: 'codex', timeout_seconds: 600,
+  approval_mode: 'never', sandbox_mode: 'read-only', credential_ref: null as string | null,
+  path_env: '/usr/local/bin:/usr/bin:/bin',
+};
+/** A published-agent draft on the Codex engine, with React aliases still set. */
+function codexDraft(overrides: Record<string, unknown> = {}) {
+  return legacyDraft({ engine: CODEX_ENGINE, codex: { ...CODEX_BLOCK }, ...overrides });
+}
+
 /** Preview response shaped exactly like 03-technical-design.md §7.2. */
 function previewBody(reasons: Record<string, string> = {}) {
   return {
@@ -138,6 +150,8 @@ interface Options {
   flags?: { execution_phase3_enabled: boolean; execution_orchestrator_enabled: boolean };
   /** Status code the flags endpoint answers with, to exercise fail-closed gating. */
   flagsStatus?: number;
+  /** Admin-only credential metadata behind GET /execution-credentials (T-07). */
+  credentials?: unknown;
 }
 
 interface Harness {
@@ -180,6 +194,10 @@ async function editor(page: import('@playwright/test').Page, options: Options): 
     if (path === '/agents/catalog') {
       return route.fulfill({ json: { items: [agent], total: 1, page: 1, page_size: 12 } });
     }
+    // Admin-only metadata endpoint: `public_metadata()` only, never a secret.
+    if (path === '/execution-credentials') {
+      return route.fulfill({ json: options.credentials ?? { items: [] } });
+    }
     if (path === '/agents/agent-1' && method === 'PUT') {
       const body = request.postDataJSON() as Record<string, unknown>;
       harness.saves.push(body);
@@ -188,18 +206,23 @@ async function editor(page: import('@playwright/test').Page, options: Options): 
       }
       // Mirrors the real service: the stored draft is the validated model, so it
       // carries the canonical execution fields plus the legacy root aliases.
+      // A CLI engine draft has no React block at all — echoing one here would
+      // hide a wire-shape regression the real normalizer would reject.
       const config = body.config as Record<string, unknown>;
+      const engineId = (config.engine as Record<string, unknown> | undefined)?.engine_id ?? 'react';
       const react = (config.react ?? {}) as Record<string, unknown>;
-      const canonical = {
+      const canonical: Record<string, unknown> = {
         ...config,
         engine: config.engine ?? ENGINE,
-        react: {
-          model_profile_id: react.model_profile_id ?? config.model_profile_id ?? null,
-          model_profile_version: react.model_profile_version ?? config.model_profile_version ?? null,
-          max_model_rounds: react.max_model_rounds ?? config.max_model_rounds ?? 6,
-        },
         disabled_capabilities: config.disabled_capabilities ?? [],
       };
+      canonical.react = engineId === 'react'
+        ? {
+            model_profile_id: react.model_profile_id ?? config.model_profile_id ?? null,
+            model_profile_version: react.model_profile_version ?? config.model_profile_version ?? null,
+            max_model_rounds: react.max_model_rounds ?? config.max_model_rounds ?? 6,
+          }
+        : undefined;
       agent = { ...agent, name: body.name, description: body.description, draft: canonical, draft_revision: 2 };
       return route.fulfill({ json: agent });
     }
@@ -410,6 +433,98 @@ test('P5-FE-02 phase3 off hides the engine selector and keeps codex fields read-
   await expect(page.getByLabel('Engine 三元组')).toHaveValue('codex / cli_exec / v1');
   await expect(page.getByLabel('Codex 版本')).toBeDisabled();
   await expect(page.getByLabel('Codex PATH')).toHaveValue('/usr/bin');
+});
+
+/**
+ * P7 UI defect set — the six blockers reported while editing a published Agent.
+ * These are contract-level UI evidence against the same mocked `/api/v1/**`:
+ * the wire shape, the engine-switch state machine, field-level 422 copy and the
+ * read-only credential provenance. None of them grants anything server-side.
+ */
+const FIELD_422 = [
+  { loc: ['body', 'config', 'codex', 'version'], msg: 'String should have at least 1 character', type: 'string_too_short' },
+  { loc: ['body', 'config', 'system_prompt'], msg: 'Field required', type: 'missing' },
+];
+const CREDENTIAL_REF = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const CREDENTIAL_META = {
+  credential_ref: CREDENTIAL_REF, tenant_id: 'test', name: 'DeepSeek 生产密钥',
+  credential_type: 'api_key', key_version: 'v1', version: 2, status: 'active',
+  allowed_engines: ['codex'], allowed_workspaces: ['*'],
+  created_at: '2026-11-20T00:00:00Z', updated_at: '2026-11-20T00:00:00Z',
+  rotated_at: null, revoked_at: null,
+};
+
+test('P7-UI-01 (bug 2/3) a Codex preview carries neither legacy React aliases nor a react block', async ({ page }) => {
+  const harness = await open(page, { draft: codexDraft(), preview: () => previewBody() });
+  await page.getByRole('button', { name: '预览能力' }).click();
+  await expect.poll(() => harness.previews.length).toBe(1);
+  const config = harness.previews[0].config as Record<string, unknown>;
+  expect(config.react).toBeUndefined();
+  expect(config.model_profile_id).toBeNull();
+  expect(config.model_profile_version).toBeNull();
+  expect(config.max_model_rounds).toBe(6);
+  expect((config.codex as Record<string, unknown>).version).toBe('0.169.0');
+  // No "legacy React fields are only valid for the react engine" rejection.
+  await expect(section(page).locator('[role="alert"]')).toHaveCount(0);
+});
+
+test('P7-UI-02 (bug 3/4) switching React -> Codex -> React -> Codex loses nothing', async ({ page }) => {
+  const harness = await open(page, { preview: () => previewBody() });
+  const choose = async (label: string) => {
+    await page.getByLabel('选择 Engine').click();
+    await page.locator('.ant-select-item-option-content', { hasText: label }).click();
+  };
+  await choose('codex / cli_exec / v1');
+  await expect(page.getByLabel('Chat 模型方案')).toHaveCount(0);
+  await expect(section(page).locator('[role="alert"]')).toHaveCount(0);
+  await page.getByLabel('Codex 版本').fill('0.169.0');
+  await choose('react / native / v1');
+  // No model_profile_id / model_profile_version alias conflict on the way back.
+  await expect(section(page).locator('[role="alert"]')).toHaveCount(0);
+  await expect(page.getByLabel('Chat 模型方案')).toHaveValue('6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f');
+  await choose('codex / cli_exec / v1');
+  // The version typed before the round trip is still there, so switching back
+  // to Codex no longer resets it to an empty string (the old blocker).
+  await expect(page.getByLabel('Codex 版本')).toHaveValue('0.169.0');
+  await page.getByRole('button', { name: '预览能力' }).click();
+  await expect.poll(() => harness.previews.length).toBe(1);
+  const config = harness.previews[0].config as Record<string, unknown>;
+  expect(config.react).toBeUndefined();
+  expect((config.codex as Record<string, unknown>).version).toBe('0.169.0');
+});
+
+test('P7-UI-03 (bug 1) a structured 422 names each field instead of a vague sentence', async ({ page }) => {
+  const harness = await open(page, { saveStatus: 422, saveError: FIELD_422 });
+  await page.getByLabel('Agent 简介').fill('触发一次保存');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  const alert = page.locator('.agent-workspace > .alert.error');
+  await expect(alert).toContainText('请检查以下字段的必填项与输入格式');
+  await expect(alert).toContainText('codex.version');
+  await expect(alert).toContainText('不能为空');
+  await expect(alert).toContainText('system_prompt');
+  await expect(alert).toContainText('此项为必填');
+  await expect(alert).not.toContainText('请检查必填项和输入格式 (422)');
+  await expect(alert).not.toContainText('422 ·');
+});
+
+test('P7-UI-04 (bug 6) the Codex credential source shows admin metadata but no secret', async ({ page }) => {
+  const harness = await open(page, {
+    draft: codexDraft({ codex: { ...CODEX_BLOCK, credential_ref: CREDENTIAL_REF } }),
+    credentials: { items: [CREDENTIAL_META] },
+  });
+  const card = section(page).locator('.agent-credential-source');
+  await expect(card.getByRole('heading', { name: '凭据来源（只读）' })).toBeVisible();
+  await expect(card.locator('input[aria-label="名称"]')).toHaveValue('DeepSeek 生产密钥');
+  await expect(card.locator('input[aria-label="允许引擎"]')).toHaveValue('codex');
+  await expect(card.getByText('active', { exact: true })).toBeVisible();
+  await expect(card.getByText('平台不存储、不展示、也不通过接口返回密钥明文。', { exact: false })).toBeVisible();
+  const text = await card.innerText();
+  expect(text).not.toContain('sk-');
+  expect(text).not.toContain('encrypted_secret');
+  expect(harness.calls.filter(call => call === 'GET /execution-credentials').length).toBeGreaterThan(0);
+  // The panel is read-only by contract: never a write to the credential API.
+  expect(harness.calls.filter(call => /execution-credentials/.test(call) && !call.startsWith('GET'))).toEqual([]);
 });
 
 test('P3-FE-05 preview posts the unsaved draft and stays read-only', async ({ page }) => {
@@ -935,6 +1050,24 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '{{v0}} 与 {{v1}} 取值不一致，请保留其中一处后再保存。',
     OFF_HINT,
     MISCONFIG_HINT,
+    // P7 UI defect set: field-level 422 copy, engine-aware model hint, and the
+    // read-only credential provenance. All four locales must carry them.
+    '请检查以下字段的必填项与输入格式', '此项为必填', '不能为空',
+    '需要填写整数', '需要填写数字', '需要填写文本', '需要填写布尔值',
+    '需要填写有效的 UUID', '不支持此字段，请删除',
+    '文本长度不能超过 {{v0}} 个字符', '文本长度至少 {{v0}} 个字符',
+    '数值不能小于 {{v0}}', '数值不能大于 {{v0}}',
+    '取值必须是允许值之一', '取值格式不正确',
+    '当前 Engine 不支持旧版 React 字段，请清除模型方案或切回 React Engine',
+    '当前 Engine 由自身配置决定模型与凭据，不使用平台 Chat 模型方案；发布前无需在此绑定方案。',
+    '请填写已部署并列入 AGENT_CODEX_ALLOWED_VERSIONS 的 Codex CLI 版本号，例如 0.169.0。',
+    '凭据来源（只读）',
+    '密钥由运维在凭据库中加密登记，运行时由凭据 Broker 一次性授权并注入子进程环境变量。',
+    'Agent 配置只保存 credential_ref 引用；平台不存储、不展示、也不通过接口返回密钥明文。',
+    '未绑定凭据引用：请在凭据库中登记密钥后，将返回的 credential_ref 填入上方字段。',
+    '未找到该引用对应的凭据，请核对 UUID 或联系运维。',
+    '仅管理员可查看凭据来源元信息。', '凭据元信息读取失败，请稍后重试。',
+    '允许引擎', '密钥版本',
   ];
   for (const key of keys) {
     for (const language of Object.keys(DICTIONARIES)) {

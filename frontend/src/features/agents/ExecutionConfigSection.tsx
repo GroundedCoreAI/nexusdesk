@@ -5,6 +5,7 @@ import { Button, Input, InputNumber, Select, Tag } from 'antd';
 import {
   DEFAULT_ENGINE,
   SUPPORTED_ENGINES,
+  listExecutionCredentials,
   patchCodexConfig,
   patchEngine,
   patchReactConfig,
@@ -14,6 +15,7 @@ import {
   type AgentConfig,
   type ExecutionCapabilityName,
   type ExecutionConfigFlags,
+  type ExecutionCredentialSummary,
   type ExecutionPreview,
 } from '../../shared/api/client';
 import { Alert, Field } from '../../shared/components/ui';
@@ -69,6 +71,52 @@ export function executionIssues(config: AgentConfig): string[] {
     issues.push(`engine.engine_id — ${t('所选 Engine 未注册或已停用，无法预览或发布。')}`);
   }
   return issues;
+}
+
+/**
+ * Read-only provenance for the credential a published Codex block references.
+ *
+ * `GET /execution-credentials` is admin-only and returns `public_metadata()`
+ * only: identifiers, name, type, scope and lifecycle. The plaintext secret
+ * lives in the deployment vault and no endpoint returns it (T-07), so this
+ * panel deliberately has no field, button or fallback that could display it.
+ * It answers "where does the API key come from" without ever reading a key.
+ */
+function CredentialSource({ credentialRef, canEdit }: { credentialRef: string | null; canEdit: boolean }) {
+    useTranslation();
+    const [items, setItems] = useState<ExecutionCredentialSummary[] | null>(null);
+    const [failed, setFailed] = useState(false);
+    useEffect(() => {
+        let active = true;
+        if (!credentialRef || !canEdit) {
+            setItems(null);
+            setFailed(false);
+            return () => { active = false; };
+        }
+        void listExecutionCredentials()
+            .then(response => { if (active) { setItems(response.items ?? []); setFailed(false); } })
+            .catch(() => { if (active) { setItems(null); setFailed(true); } });
+        return () => { active = false; };
+    }, [credentialRef, canEdit]);
+    const record = credentialRef && items ? items.find(item => item.credential_ref === credentialRef) : undefined;
+    return <div className="agent-setting-card agent-credential-source">
+      <h3 className="agent-memory-group">{t('凭据来源（只读）')}</h3>
+      <p className="agent-muted">{t('密钥由运维在凭据库中加密登记，运行时由凭据 Broker 一次性授权并注入子进程环境变量。')}</p>
+      <p className="agent-muted">{t('Agent 配置只保存 credential_ref 引用；平台不存储、不展示、也不通过接口返回密钥明文。')}</p>
+      {!canEdit && <p role="status" className="agent-muted">{t('仅管理员可查看凭据来源元信息。')}</p>}
+      {canEdit && !credentialRef && <p role="status" className="agent-muted">{t('未绑定凭据引用：请在凭据库中登记密钥后，将返回的 credential_ref 填入上方字段。')}</p>}
+      {canEdit && credentialRef && failed && <p role="status" className="agent-muted">{t('凭据元信息读取失败，请稍后重试。')}</p>}
+      {canEdit && credentialRef && items && !record && <p role="status" className="agent-muted">{t('未找到该引用对应的凭据，请核对 UUID 或联系运维。')}</p>}
+      {record && <div className="agent-credential-meta">
+        <Field label={t('名称')}><input readOnly aria-label={t('名称')} value={record.name ?? ''}/></Field>
+        <Field label={t('类型')}><input readOnly aria-label={t('类型')} value={record.credential_type ?? ''}/></Field>
+        <Field label={t('状态')}><Tag color={record.status === 'active' ? 'green' : 'default'}>{record.status}</Tag></Field>
+        <Field label={t('密钥版本')}><input readOnly aria-label={t('密钥版本')} value={record.key_version ?? ''}/></Field>
+        <Field label={t('版本')}><input readOnly aria-label={t('版本')} value={`v${record.version ?? ''}`}/></Field>
+        <Field label={t('允许引擎')}><input readOnly aria-label={t('允许引擎')} value={(record.allowed_engines ?? []).join('、')}/></Field>
+        <Field label={t('创建时间')}><input readOnly aria-label={t('创建时间')} value={record.created_at ?? ''}/></Field>
+      </div>}
+    </div>;
 }
 
 interface Props {
@@ -175,11 +223,13 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
       <p className="agent-muted">{t('Chat 模型方案在「模型配置」区块中选择，与轮次同属 React Engine 的配置。')}</p>
       {phase3Entries && <p className="agent-muted">{t('禁用能力只会收窄服务端计算结果，不能授予任何能力。')}</p>}
     </div>
-    {view.codex && <div className="agent-setting-card">
+    {view.codex && <>
+    <div className="agent-setting-card">
       <h3 className="agent-memory-group">{t('Codex 配置')}</h3>
       <Field label={t('Codex 版本')}>
-        <Input aria-label={t('Codex 版本')} value={view.codex.version} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { version: event.target.value }))}/>
+        <Input aria-label={t('Codex 版本')} required value={view.codex.version} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { version: event.target.value }))}/>
       </Field>
+      <p className="agent-muted">{`${t('必填')} · ${t('请填写已部署并列入 AGENT_CODEX_ALLOWED_VERSIONS 的 Codex CLI 版本号，例如 0.169.0。')}`}</p>
       <Field label={t('Codex 可执行文件')}>
         <Input aria-label={t('Codex 可执行文件')} value={view.codex.executable} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { executable: event.target.value }))}/>
       </Field>
@@ -193,7 +243,9 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
         <Input aria-label={t('Codex PATH')} value={view.codex.path_env} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { path_env: event.target.value }))}/>
       </Field>
       <p className="agent-muted">{t('Stage A 仅支持审批模式 never 与沙箱模式 read-only；会话恢复与人工审批未启用。')}</p>
-    </div>}
+    </div>
+    <CredentialSource credentialRef={view.codex.credential_ref} canEdit={canEdit}/>
+    </>}
     {preview && phase3Entries && <CapabilityPreview preview={preview} disabledCapabilities={view.disabledCapabilities} onNarrow={(name, disabled) => onChange(toggleDisabledCapability(config, name, disabled))} canEdit={canEdit && !busy} stale={previewedConfig !== JSON.stringify(config)}/>}
   </section>;
 }
