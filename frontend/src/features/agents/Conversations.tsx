@@ -1,4 +1,4 @@
-import { t } from '../../i18n/index';
+import { errorText, t } from '../../i18n/index';
 import { useEffect, useRef, useState } from 'react';
 import { Avatar, Button, Empty, Input, Modal, Pagination, Select, Space, Spin, Table, Tag } from 'antd';
 import { PlusOutlined, RobotOutlined, SendOutlined, ToolOutlined } from '@ant-design/icons';
@@ -76,7 +76,7 @@ export function AgentChat({ agent }: {
     <Alert error={action.error.includes('agent_model_required') ? t("已发布版本尚未配置模型，请在 Agent 配置中选择模型方案并重新发布。") : action.error || detail.error}/>{detail.error && <Button onClick={detail.refresh}>{t("重试加载")}</Button>}
     {!cid ? <div className="agent-chat-welcome"><Avatar size={72} shape="square" icon={<RobotOutlined aria-hidden/>}/><h2>{agent?.name || t("你的 Agent")}</h2><p>{t("从一个问题开始，看看 Agent 如何回应。")}</p><div className="agent-chat-suggestions">{[t("介绍一下你能做什么"), t("我需要你的帮助")].map(text => <Button key={text} disabled={!available} onClick={() => setInput(text)}>{text}<span aria-hidden>↗</span></Button>)}</div></div> : detail.data ? <Messages key={cid} detail={detail.data} follow pending={live?.text || ''} reasoning={live?.reasoning || ''} liveRunId={active?.id || pendingRun} onTrace={setTraceRun}/> : <div className="agent-chat-welcome"><Spin /></div>}
     {busy && <div className="agent-run-state"><Space><Spin size="small"/><span>{active?.status === 'queued' ? t("正在排队\u2026") : t("正在生成回答\u2026")}</span></Space><Button type="text" disabled={action.busy} onClick={() => void action.run(async () => { await post(`/runs/${active?.id || pendingRun}/cancel`); detail.refresh(); }, '')}>{t("停止生成")}</Button></div>}
-    {currentRun?.status === 'failed' && <Alert error={t("运行失败：{{v0}}", { v0: currentRun.error_code || t("请重试") })}/>}{currentRun?.status === 'cancelled' && <p className="agent-muted">{t("本次运行已取消")}</p>}
+    {currentRun?.status === 'failed' && <Alert error={t("运行失败：{{v0}}", { v0: currentRun.error_code ? errorText(currentRun.error_code) : t("请重试") })}/>}{currentRun?.status === 'cancelled' && <p className="agent-muted">{t("本次运行已取消")}</p>}
     {detail.data?.actions.filter(a => a.status === 'pending').map(a => <div className="agent-pending-action" key={a.id}><strong>{t("待确认工单：")}{a.payload.title}</strong><p>{a.payload.description}</p><Space><Button disabled={!operator || busy || action.busy} onClick={() => void action.run(async () => { await post(`/actions/${a.id}/decision`, { approve: true }); detail.refresh(); }, '')}>{t("确认创建")}</Button><Button disabled={!operator || busy || action.busy} onClick={() => void action.run(async () => { await post(`/actions/${a.id}/decision`, { approve: false }); detail.refresh(); }, '')}>{t("拒绝")}</Button></Space></div>)}
     {detail.data && detail.data.mode !== 'bot' && <p className="agent-chat-note">{t("当前会话为「")}<Badge value={detail.data.mode}/>{t("」，请在会话工作台继续处理，或新建试聊。")}</p>}
     <form className="agent-composer" onSubmit={e => { e.preventDefault(); if (canSend && input.trim())

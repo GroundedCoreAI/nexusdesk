@@ -449,7 +449,12 @@ test('P5-FE-02 phase3 off hides the engine selector and keeps codex fields read-
   // No version control exists at all, enabled or disabled.
   await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
   await expect(page.locator('.agent-codex-version-select')).toHaveCount(0);
-  await expect(page.getByLabel('Codex PATH')).toHaveValue('/usr/bin');
+  // Q5: PATH is deployment-owned, never a customer-editable field.
+  await expect(page.getByLabel('Codex PATH')).toHaveCount(0);
+  // Q2/Q3: no free-text UUID; the two read-only selectors remain read-only.
+  await expect(section(page).locator('input[aria-label="Codex 凭据引用（UUID）"]')).toHaveCount(0);
+  await expect(section(page).locator('.agent-codex-credential-select')).toBeVisible();
+  await expect(section(page).locator('.agent-codex-profile-select')).toBeVisible();
 });
 
 /**
@@ -1057,7 +1062,8 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '预览结果由服务端计算，不会创建运行，也不会授予执行权限。',
     '运行 Engine 与能力由服务端注册表和策略决定，这里只能查看与收窄。',
     '选择 Engine', 'Codex 配置', 'Codex 可执行文件', 'Codex 超时（秒）',
-    'Codex 凭据引用（UUID）', '仅存引用，不填密钥', 'Codex PATH',
+    'Codex 凭据引用（UUID）', 'Chat 模型方案', '未绑定（使用部署默认）', '未绑定凭据',
+    'Codex 模型方案（模型网关）', 'Codex 凭据（凭据库）',
     'Stage A 仅支持审批模式 never 与沙箱模式 read-only；会话恢复与人工审批未启用。',
     'Phase 3 执行能力尚未启用，无法预览。',
     '所选 Engine 未注册或已停用，无法预览或发布。',
@@ -1075,14 +1081,21 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '数值不能小于 {{v0}}', '数值不能大于 {{v0}}',
     '取值必须是允许值之一', '取值格式不正确',
     '当前 Engine 不支持旧版 React 字段，请清除模型方案或切回 React Engine',
-    '当前 Engine 由自身配置决定模型与凭据，不使用平台 Chat 模型方案；发布前无需在此绑定方案。',
+    '当前 Engine 的模型与供应商在「执行与能力」中通过模型网关方案选择，PATH 与凭据由部署配置注入；此处无需绑定 Chat 方案。',
+    'Codex 模型与供应商由模型网关方案决定，PATH 与凭据由部署配置注入。',
+    '凭据库读取失败，请确认管理员权限或稍后重试。',
+    '暂无可选凭据：请联系运维在凭据库中登记 Codex 凭据。',
+    '执行凭据已失效或不在允许范围内，请联系运维核对凭据库并重新绑定有效凭据。',
+    'Codex 凭据引用无效，发布已阻止，请重新选择有效凭据。',
+    'Codex 模型方案无效或不支持工具调用，请检查模型网关配置。',
+    '运行遇到未分类的内部故障，请重试或联系管理员。',
     // Issue #162 (maintainer follow-up): the version UI and all of its markers
     // were removed, so none of those keys may be required from the locales.
     '凭据来源（只读）',
     '密钥由运维在凭据库中加密登记，运行时由凭据 Broker 一次性授权并注入子进程环境变量。',
     'Agent 配置只保存 credential_ref 引用；平台不存储、不展示、也不通过接口返回密钥明文。',
-    '未绑定凭据引用：请在凭据库中登记密钥后，将返回的 credential_ref 填入上方字段。',
-    '未找到该引用对应的凭据，请核对 UUID 或联系运维。',
+    '未绑定凭据引用：请从上方凭据库选择器中选择一条有效凭据。',
+    '未找到该引用对应的凭据，请从上方重新选择有效凭据。',
     '仅管理员可查看凭据来源元信息。', '凭据元信息读取失败，请稍后重试。',
     '允许引擎', '密钥版本',
   ];
@@ -1105,7 +1118,14 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
   // its sentence to all four locales, or this stays red.
   const executionCodes = Object.keys(table).filter(code => code.startsWith('execution_')).sort();
   expect(executionCodes, 'the execution_* codes in errorText changed shape')
-    .toEqual(['execution_configuration_invalid', 'execution_engine_unavailable', 'execution_phase3_disabled', 'execution_policy_unavailable']);
+    .toEqual([
+      'execution_configuration_invalid',
+      'execution_credential_unavailable',
+      'execution_engine_unavailable',
+      'execution_error',
+      'execution_phase3_disabled',
+      'execution_policy_unavailable',
+    ]);
   const untranslated: string[] = [];
   for (const [code, sentence] of Object.entries(table)) {
     const placeholders = (value: string) => JSON.stringify([...value.matchAll(/{{\s*(\w+)\s*}}/g)].map(match => match[1]).sort());
@@ -1209,11 +1229,14 @@ test('I162-01 (issue #162) the Codex version control is gone while other Codex f
   await expect(page.getByLabel('Codex 版本')).toHaveCount(0);
   await expect(page.locator('.agent-codex-version-select')).toHaveCount(0);
   await expect(page.locator('.agent-codex-version-stale')).toHaveCount(0);
-  // The remaining Codex settings are still present and editable.
+  // The remaining Codex settings are still present; the free-text credential
+  // UUID input and the PATH input are gone (issues #166 / #168).
   await expect(page.getByLabel('Codex 可执行文件')).toBeVisible();
   await expect(page.getByLabel('Codex 超时（秒）')).toBeVisible();
-  await expect(page.getByLabel('Codex 凭据引用（UUID）')).toBeVisible();
-  await expect(page.getByLabel('Codex PATH')).toBeVisible();
+  await expect(page.getByLabel('Codex PATH')).toHaveCount(0);
+  await expect(section(page).locator('input[aria-label="Codex 凭据引用（UUID）"]')).toHaveCount(0);
+  await expect(section(page).locator('.agent-codex-credential-select')).toBeVisible();
+  await expect(section(page).locator('.agent-codex-profile-select')).toBeVisible();
 });
 
 test('I162-02 (issue #162) selecting the codex engine saves the flag allowlist version', async ({ page }) => {

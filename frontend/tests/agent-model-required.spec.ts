@@ -71,7 +71,7 @@ test('a Codex engine agent publishes without a platform Chat model profile', asy
   await page.goto('/#/agents/agent-1/config');
   // The React-only model picker is not offered to a CLI engine.
   await expect(page.getByLabel('Chat 模型方案')).toHaveCount(0);
-  await expect(page.getByText('当前 Engine 由自身配置决定模型与凭据', { exact: false })).toBeVisible();
+  await expect(page.getByText('此处无需绑定 Chat 方案', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: /发\s*布/, exact: true }).click();
   await expect.poll(() => mutations).toContain('POST /agents/agent-1/publish');
   await expect(page.getByText('请先选择已发布的 Chat 配置方案')).toHaveCount(0);
