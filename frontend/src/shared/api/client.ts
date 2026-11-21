@@ -140,7 +140,11 @@ export function readExecution(config: AgentConfig): ExecutionView {
   for (const field of REACT_ALIASES) {
     const legacyValue = field in legacy ? legacy[field] : undefined;
     const modernValue = react && field in modern ? modern[field] : undefined;
-    if (legacyValue !== undefined && modernValue !== undefined && JSON.stringify(legacyValue) !== JSON.stringify(modernValue)) {
+    // Legacy root aliases are a React-engine concept. On a CLI engine both the
+    // aliases and a leftover React block are neutralised at the wire boundary,
+    // so a disagreement between them is not a conflict the user must resolve —
+    // reporting it made switching engines look broken (P7 defect set).
+    if (engine.engine_id === 'react' && legacyValue !== undefined && modernValue !== undefined && JSON.stringify(legacyValue) !== JSON.stringify(modernValue)) {
       conflicts.push(field);
     }
     const value = modernValue !== undefined ? modernValue : legacyValue;
@@ -186,25 +190,84 @@ export function patchCodexConfig(config: AgentConfig, patch: Partial<CodexExecut
   return { ...config, codex };
 }
 /**
- * Switch engine and drop the block that no longer belongs to it.
+ * Switch the active engine without destroying the other engine's settings.
  *
- * The server enforces the same mutual exclusion; clearing the legacy React root
- * aliases here prevents a stale non-default value from rejecting the publish.
+ * The editor keeps both typed blocks while the user switches back and forth, so
+ * a Codex version or a bound model profile is not lost on a round trip (a
+ * switch used to reset the Codex version to an empty string, which then failed
+ * the strict version field). Which block is actually *submitted* is decided by
+ * `normalizeExecutionForEngine` at the save/preview boundary: `ExecutionConfig`
+ * accepts exactly one engine block, and a CLI engine must not carry non-default
+ * legacy React aliases. Keeping normalisation at the boundary — not inside the
+ * switch — is what makes the switch lossless without ever sending an invalid
+ * draft.
  */
 export function patchEngine(config: AgentConfig, engine: EngineIdentity): AgentConfig {
   const next: AgentConfig = { ...config, engine };
-  const root = next as unknown as Record<string, unknown>;
   if (engine.engine_id === 'codex') {
+    if (!next.codex) next.codex = { ...DEFAULT_CODEX };
+  } else if (!next.react) {
+    // A pre-Phase-3 draft keeps all of its React settings in the three legacy
+    // root aliases. Seeding the typed block from *those values*, rather than
+    // from empty defaults, is what makes a React -> Codex -> React round trip
+    // lossless: otherwise switching back silently dropped a bound Chat profile.
+    const root = config as unknown as Record<string, unknown>;
+    next.react = {
+      model_profile_id: (root.model_profile_id as string | null | undefined) ?? null,
+      model_profile_version: (root.model_profile_version as number | null | undefined) ?? null,
+      max_model_rounds: (root.max_model_rounds as number | undefined) ?? DEFAULT_REACT.max_model_rounds,
+    };
+  }
+  return next;
+}
+
+/**
+ * Canonicalise the execution part of a draft for the engine that is active in
+ * it. Called immediately before a save or preview request, never on the editor's
+ * own state: the UI may hold both blocks, the wire payload may not.
+ *
+ * - CLI engine: drop the React block and neutralise the three legacy root
+ *   aliases (the normalizer rejects non-default React aliases on a CLI engine).
+ * - React engine: drop the Codex block and keep root aliases in step with the
+ *   typed React block, so no "取值不一致" conflict can be published. A legacy
+ *   draft with no typed block keeps its root aliases exactly as they are — they
+ *   are its only source of React settings.
+ */
+export function normalizeExecutionForEngine(config: AgentConfig): AgentConfig {
+  const engineId = config.engine?.engine_id ?? DEFAULT_ENGINE.engine_id;
+  const next: AgentConfig = { ...config };
+  const root = next as unknown as Record<string, unknown>;
+  if (engineId === 'codex') {
     next.react = undefined;
-    next.codex = config.codex ?? { ...DEFAULT_CODEX };
     root.model_profile_id = null;
     root.model_profile_version = null;
     root.max_model_rounds = DEFAULT_REACT.max_model_rounds;
+    if (!next.codex) next.codex = { ...DEFAULT_CODEX };
   } else {
     next.codex = undefined;
-    if (!next.react) next.react = { ...DEFAULT_REACT };
+    if (config.react) {
+      // Mirror the typed block into the legacy aliases, so the wire can never
+      // carry the conflicting pair the backend normalizer rejects.
+      const react = config.react;
+      next.react = react;
+      root.model_profile_id = react.model_profile_id;
+      root.model_profile_version = react.model_profile_version;
+      root.max_model_rounds = react.max_model_rounds;
+    } else {
+      // A legacy draft has no typed block: its root aliases ARE the config and
+      // must survive untouched (an absent `react` key lets the server rebuild it
+      // from them). A `null` block is dropped for the same reason.
+      next.react = undefined;
+    }
   }
   return next;
+}
+
+/** Engines whose publish validation binds a platform Chat model profile. */
+export const MODEL_PROFILE_ENGINES: readonly string[] = ['react'];
+/** Mirrors the backend D-1 gate: only these engines need a model profile to publish. */
+export function engineUsesPlatformModel(config: AgentConfig): boolean {
+  return MODEL_PROFILE_ENGINES.includes(config.engine?.engine_id ?? DEFAULT_ENGINE.engine_id);
 }
 /** Narrow one capability; unchecking only removes a prior local narrowing. */
 export function toggleDisabledCapability(config: AgentConfig, name: ExecutionCapabilityName, disabled: boolean): AgentConfig {
@@ -218,9 +281,40 @@ export function toggleDisabledCapability(config: AgentConfig, name: ExecutionCap
  * Ask the server what a draft *would* resolve to. The request body is the strict
  * `{agent_id, config}` pair: effective/declared/available/policy fields are
  * computed server-side and are never sent, and the response grants nothing.
+ * The draft is normalised for its active engine first, so a preview can never
+ * reject an editor-only round trip between two engine blocks (P7 defect set).
  */
 export function previewExecution(agentId: string | null, config: AgentConfig) {
-  return post<ExecutionPreview>('/agents/execution-preview', { agent_id: agentId, config });
+  return post<ExecutionPreview>('/agents/execution-preview', {
+    agent_id: agentId,
+    config: normalizeExecutionForEngine(config),
+  });
+}
+
+/** Non-secret administrative metadata for one execution credential (T-07). */
+export interface ExecutionCredentialSummary {
+  credential_ref: string;
+  tenant_id: string;
+  name: string;
+  credential_type: string;
+  key_version: string;
+  version: number;
+  status: string;
+  allowed_engines: string[];
+  allowed_workspaces: string[];
+  created_at: string;
+  updated_at: string;
+  rotated_at: string | null;
+  revoked_at: string | null;
+}
+/**
+ * Admin-only read of credential metadata. The endpoint returns
+ * `public_metadata()` only: identifiers, name, type, scope and lifecycle — never
+ * the secret value, the encrypted blob or the deployment env var that injects
+ * it. Used solely to resolve a `credential_ref` into something a human can read.
+ */
+export function listExecutionCredentials() {
+  return api<{ items: ExecutionCredentialSummary[] }>('/execution-credentials');
 }
 /** Platform-side memory capability caps exposed by GET /agents/memory-config-caps. */
 export interface MemoryConfigCaps {
