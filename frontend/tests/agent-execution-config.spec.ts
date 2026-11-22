@@ -167,6 +167,12 @@ interface Options {
   flagsStatus?: number;
   /** Admin-only credential metadata behind GET /execution-credentials (T-07). */
   credentials?: unknown;
+  /** Gateway models page; default has one tool-calling model on a ready connection. */
+  gatewayModels?: unknown;
+  /** Gateway connections page; default has a Codex-capable HTTPS connection. */
+  gatewayConnections?: unknown;
+  /** Gateway profiles page; omit to use the default chat profile. */
+  gatewayProfiles?: unknown;
 }
 
 interface Harness {
@@ -274,8 +280,20 @@ async function editor(page: import('@playwright/test').Page, options: Options): 
     if (path === `/runs/${RECORD_RUN_ID}/events`) {
       return route.fulfill({ contentType: 'text/event-stream', body: RUN_EVENT_STREAM });
     }
-    if (path.startsWith('/model-gateway/catalog/')) {
-      return route.fulfill({ json: { items: [{ id: '6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f', name: '线上方案', enabled: true, published_version: 3, spec: { operation: 'chat' } }], total: 1 } });
+    if (path.startsWith('/model-gateway/catalog/profiles')) {
+      return route.fulfill({ json: options.gatewayProfiles ?? {
+        items: [{ id: '6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f', name: '线上方案', enabled: true, published_version: 3, spec: { operation: 'chat', model_id: 'model-ready' } }], total: 1,
+      } });
+    }
+    if (path.startsWith('/model-gateway/catalog/models')) {
+      return route.fulfill({ json: options.gatewayModels ?? {
+        items: [{ id: 'model-ready', name: 'Ready', enabled: true, published_version: 1, spec: { tool_calling: true, connection_id: 'conn-ready' } }], total: 1,
+      } });
+    }
+    if (path.startsWith('/model-gateway/catalog/connections')) {
+      return route.fulfill({ json: options.gatewayConnections ?? {
+        items: [{ id: 'conn-ready', name: 'Ready', enabled: true, published_version: 1, spec: { base_url: 'https://api.example.com', execution_credential_ref: CREDENTIAL_REF } }], total: 1,
+      } });
     }
     if (path === '/tools' || path === '/knowledge-bases' || path === '/modules') return route.fulfill({ json: [] });
     return route.fulfill({ json: {} });
@@ -567,6 +585,49 @@ test('UI-04 the capability preview, its narrowing checkboxes and the config sche
   expect(harness.calls.filter(call => call === 'POST /agents/execution-preview')).toEqual([]);
 });
 
+test('UI-05 only Codex-capable gateway profiles are offered; a demo connection is filtered out', async ({ page }) => {
+  const PROFILE = '6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f';
+  // Same shape as the acceptance host: one published chat profile whose model
+  // sits on a demo connection with no execution_credential_ref and no HTTPS URL.
+  await open(page, {
+    draft: codexDraft(),
+    gatewayProfiles: { items: [{ id: PROFILE, name: '客服快速问答', enabled: true, published_version: 1, spec: { operation: 'chat', model_id: 'demo-model' } }], total: 1 },
+    gatewayModels: { items: [{ id: 'demo-model', name: 'Demo', enabled: true, published_version: 1, spec: { tool_calling: true, connection_id: 'demo-conn' } }], total: 1 },
+    gatewayConnections: { items: [{ id: 'demo-conn', name: 'Demo', enabled: true, published_version: null, spec: { base_url: '', protocol: 'demo' } }], total: 1 },
+  });
+  const picker = page.getByLabel('Codex 模型方案（模型网关）');
+  await expect(picker).toBeVisible();
+  // The unusable profile never reaches the option list; only the unbound entry remains.
+  await picker.click();
+  await expect(page.locator('.ant-select-item-option-content', { hasText: '客服快速问答' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(section(page).getByText('暂无可用于代码任务的模型方案：模型网关连接尚未配置运行凭据或工具调用能力，请联系管理员。')).toBeVisible();
+});
+
+test('UI-06 a capable gateway profile stays selectable', async ({ page }) => {
+  const harness = await open(page, { draft: codexDraft() });
+  const picker = page.getByLabel('Codex 模型方案（模型网关）');
+  await picker.click();
+  await expect(page.locator('.ant-select-item-option-content', { hasText: '线上方案 · v3' })).toBeVisible();
+  await page.locator('.ant-select-item-option-content', { hasText: '线上方案 · v3' }).click();
+  await expect(section(page).getByText('暂无可用于代码任务的模型方案：模型网关连接尚未配置运行凭据或工具调用能力，请联系管理员。')).toHaveCount(0);
+  await page.getByLabel('Agent 简介').fill('绑定可用的模型方案');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => harness.saves.length).toBe(1);
+  const codex = (harness.saves[0].config as Record<string, unknown>).codex as Record<string, unknown>;
+  expect(codex.model_profile_id).toBe('6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f');
+  expect(codex.model_profile_version).toBe(3);
+});
+
+test('UI-07 the credential-invalid error points at configuration instead of a removed picker', async ({ page }) => {
+  await open(page, { saveStatus: 409, saveError: 'codex_credential_invalid' });
+  await page.getByLabel('Agent 简介').fill('触发一次发布拒绝');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect(section(page).locator('[role="alert"]')).toContainText(
+    'Codex 运行凭据无效或未配置，发布已阻止，请联系管理员核对凭据库或模型网关连接配置。');
+  await expect(section(page).locator('[role="alert"]')).not.toContainText('请重新选择有效凭据');
+});
+
 test('P3-FE-11 a rejected save points at the offending execution field', async ({ page }) => {
   await open(page, { saveStatus: 409 });
   await page.getByLabel('Agent 简介').fill('触发一次保存');
@@ -749,6 +810,10 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '代码任务的模型在下方「执行与能力」中选择，其余运行细节由平台统一处理；此处无需绑定 Chat 方案。',
     '执行凭据已失效或不在允许范围内，请联系运维核对凭据库并重新绑定有效凭据。',
     'Codex 模型方案无效或不支持工具调用，请检查模型网关配置。',
+    'Codex 运行凭据无效或未配置，发布已阻止，请联系管理员核对凭据库或模型网关连接配置。',
+    '暂无可用于代码任务的模型方案：模型网关连接尚未配置运行凭据或工具调用能力，请联系管理员。',
+    'Codex 运行凭据无效或未配置，发布已阻止，请联系管理员核对凭据库或模型网关连接配置。',
+    '暂无可用于代码任务的模型方案：模型网关连接尚未配置运行凭据或工具调用能力，请联系管理员。',
     '运行遇到未分类的内部故障，请重试或联系管理员。',
   ];
   for (const key of keys) {
