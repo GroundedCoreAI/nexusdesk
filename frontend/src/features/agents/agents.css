@@ -68,3 +68,14 @@
 .agent-credential-meta { margin-top:16px; padding-top:4px; border-top:1px solid #eaecf2; }
 .agent-credential-meta .field > span { font-size:12px; color:#6b7282; }
 .agent-credential-meta .ant-tag { width:max-content; }
+
+/* Execution section: one calm surface, no nested grey cards, no developer triples. */
+.agent-execution-card{background:#fff;border:1px solid #e8eaf0;border-radius:10px;padding:6px 18px;margin-top:12px}
+.agent-execution-card .field{padding:14px 0;border-bottom:1px solid #f0f1f5;margin:0}
+.agent-execution-card .field:last-child{border-bottom:0}
+.agent-execution-card .field>span{display:block;margin-bottom:8px;font-size:12px;color:#6b7282}
+.agent-execution-card .ant-select{width:100%}
+.agent-execution-hint{margin:10px 0 14px;font-size:12px;color:#7c8290;line-height:1.8}
+.agent-execution-identity{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid #f0f1f5;font-size:13px;color:#6b7282}
+.agent-execution-identity strong{font-weight:600;color:#3d4352;overflow-wrap:anywhere;text-align:right}
+#agent-execution .agent-section-description{margin-bottom:14px}

@@ -1,25 +1,19 @@
 import { errorText, t } from '../../i18n/index';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, InputNumber, Select, Tag } from 'antd';
+import { InputNumber, Select } from 'antd';
 import {
-  DEFAULT_ENGINE,
   SUPPORTED_ENGINES,
   listExecutionCredentials,
   patchCodexConfig,
   patchEngine,
   patchReactConfig,
-  previewExecution,
   readExecution,
-  toggleDisabledCapability,
   type AgentConfig,
-  type ExecutionCapabilityName,
   type ExecutionConfigFlags,
   type ExecutionCredentialSummary,
-  type ExecutionPreview,
 } from '../../shared/api/client';
 import { Alert, Field } from '../../shared/components/ui';
-import { CapabilityPreview } from './CapabilityPreview';
 import type { ModelResource } from '../models/ModelsPage';
 
 /** Stable domain errors the execution endpoints answer with (03-technical-design.md §7.3). */
@@ -63,8 +57,9 @@ export function locateExecutionErrors(message: string): string[] {
 
 /**
  * Blockers for the execution part of the current draft, each prefixed with the
- * field path the server contract uses, so an alias conflict or an unregistered
- * triple can be pointed at instead of being silently resolved (FR-2, AC-2, M2).
+ * field path the server contract uses. Operator-facing: a draft can only be
+ * previewed or published when the engine is registered and the two legacy
+ * React aliases agree (FR-2, AC-2, M2).
  */
 export function executionIssues(config: AgentConfig): string[] {
   const view = readExecution(config);
@@ -78,41 +73,32 @@ export function executionIssues(config: AgentConfig): string[] {
   return issues;
 }
 
+/** Friendly, business-facing name for a registered engine. The triple stays a wire identity only. */
+function engineLabel(engineId: string): string {
+  if (engineId === 'react')
+    return t('对话模型（平台内置）');
+  if (engineId === 'codex')
+    return t('代码任务（命令行）');
+  return engineId;
+}
+
 /**
- * Read-only provenance for the credential a published Codex block references.
- *
- * `GET /execution-credentials` is admin-only and returns `public_metadata()`
- * only: identifiers, name, type, scope and lifecycle. The plaintext secret
- * lives in the deployment vault and no endpoint returns it (T-07), so this
- * panel deliberately has no field, button or fallback that could display it.
- * It answers "where does the API key come from" without ever reading a key.
+ * The credential library can legitimately hold several versions of the same
+ * named credential; the duplication is operational metadata, not a set of
+ * different choices. Collapse by the fields a customer could distinguish so
+ * the platform can bind one automatically without a confusing picker.
  */
-function CredentialSource({ credentialRef, canEdit, items, failed }: {
-    credentialRef: string | null;
-    canEdit: boolean;
-    items: ExecutionCredentialSummary[] | null;
-    failed: boolean;
-}) {
-    useTranslation();
-    const record = credentialRef && items ? items.find(item => item.credential_ref === credentialRef) : undefined;
-    return <div className="agent-setting-card agent-credential-source">
-      <h3 className="agent-memory-group">{t('凭据来源（只读）')}</h3>
-      <p className="agent-muted">{t('密钥由运维在凭据库中加密登记，运行时由凭据 Broker 一次性授权并注入子进程环境变量。')}</p>
-      <p className="agent-muted">{t('Agent 配置只保存 credential_ref 引用；平台不存储、不展示、也不通过接口返回密钥明文。')}</p>
-      {!canEdit && <p role="status" className="agent-muted">{t('仅管理员可查看凭据来源元信息。')}</p>}
-      {canEdit && !credentialRef && <p role="status" className="agent-muted">{t('未绑定凭据引用：请从上方凭据库选择器中选择一条有效凭据。')}</p>}
-      {canEdit && credentialRef && failed && <p role="status" className="agent-muted">{t('凭据元信息读取失败，请稍后重试。')}</p>}
-      {canEdit && credentialRef && items && !record && <p role="status" className="agent-muted">{t('未找到该引用对应的凭据，请从上方重新选择有效凭据。')}</p>}
-      {record && <div className="agent-credential-meta">
-        <Field label={t('名称')}><input readOnly aria-label={t('名称')} value={record.name ?? ''}/></Field>
-        <Field label={t('类型')}><input readOnly aria-label={t('类型')} value={record.credential_type ?? ''}/></Field>
-        <Field label={t('状态')}><Tag color={record.status === 'active' ? 'green' : 'default'}>{record.status}</Tag></Field>
-        <Field label={t('密钥版本')}><input readOnly aria-label={t('密钥版本')} value={record.key_version ?? ''}/></Field>
-        <Field label={t('版本')}><input readOnly aria-label={t('版本')} value={`v${record.version ?? ''}`}/></Field>
-        <Field label={t('允许引擎')}><input readOnly aria-label={t('允许引擎')} value={(record.allowed_engines ?? []).join('、')}/></Field>
-        <Field label={t('创建时间')}><input readOnly aria-label={t('创建时间')} value={record.created_at ?? ''}/></Field>
-      </div>}
-    </div>;
+function distinctCredentials(items: ExecutionCredentialSummary[] | null): ExecutionCredentialSummary[] {
+  const seen = new Set<string>();
+  return (items ?? []).filter(item => {
+    if (item.status !== 'active' || !(item.allowed_engines ?? []).includes('codex'))
+      return false;
+    const key = `${item.name}|${item.credential_type}`;
+    if (seen.has(key))
+      return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 interface Props {
@@ -126,9 +112,7 @@ interface Props {
     saveError?: string;
     /**
      * Deployment switches from `GET /agents/execution-config-flags` (03 §7.4).
-     * Null while loading or after a failed read, which fails closed: the Phase
-     * 3 specific editing entries stay hidden. They only drive UI visibility —
-     * the server remains the authorization boundary (03 §8, R-25).
+     * Null while loading or after a failed read, which fails closed.
      */
     flags: ExecutionConfigFlags | null;
     /** Published ModelGateway chat profiles, already loaded by AgentsPage (issue #167). */
@@ -136,34 +120,25 @@ interface Props {
 }
 export function ExecutionConfigSection({ config, onChange, agentId, canEdit, busy, saveError, flags, profiles }: Props) {
     useTranslation();
-    const [preview, setPreview] = useState<ExecutionPreview | null>(null);
-    const [previewedConfig, setPreviewedConfig] = useState('');
-    const [previewError, setPreviewError] = useState('');
-    const [previewing, setPreviewing] = useState(false);
     const view = readExecution(config);
     const issues = executionIssues(config);
     // R-25 declarative gating, synthesized from the raw pair per the FR-9
-    // matrix (03 §7.4): `execution_phase3_enabled` decides whether the Phase 3
-    // editing entries exist at all (null fails closed); the pair
-    // on+orchestrator-off is a deployment misconfiguration that keeps the
-    // read-only view but must warn instead of pretending success.
+    // matrix (03 §7.4). The server remains the authorization boundary.
     const phase3Entries = !!flags && flags.execution_phase3_enabled;
     const phase3Off = !!flags && !flags.execution_phase3_enabled;
     const misconfigured = !!flags && flags.execution_phase3_enabled && !flags.execution_orchestrator_enabled;
-    const engineText = `${view.engine.engine_id} / ${view.engine.protocol_id} / ${view.engine.adapter_version}`;
-    const engineOptions = SUPPORTED_ENGINES.map(item => ({
-        value: `${item.engine_id} / ${item.protocol_id} / ${item.adapter_version}`,
-        engine: item,
-    }));
+    const engineOptions = SUPPORTED_ENGINES.map(item => ({ value: item.engine_id, label: engineLabel(item.engine_id) }));
     const codexReadOnly = !canEdit || busy || !phase3Entries;
-    // Q2/Q3: the customer form never accepts a free-text UUID or a PATH. Both
-    // selectors are populated from read-only server metadata; the server
-    // validates/canonicalizes the credential and injects the deployment PATH.
+
+    // Q2/Q3/Q5: neither the credential UUID nor the child PATH is a customer
+    // field. The credential library is read only so a valid reference can be
+    // bound automatically; its plaintext secret never reaches the browser.
     const [credentialItems, setCredentialItems] = useState<ExecutionCredentialSummary[] | null>(null);
     const [credentialsFailed, setCredentialsFailed] = useState(false);
+    const codexActive = !!view.codex;
     useEffect(() => {
         let active = true;
-        if (!view.codex || !canEdit) {
+        if (!codexActive || !canEdit) {
             setCredentialItems(null);
             setCredentialsFailed(false);
             return () => { active = false; };
@@ -172,143 +147,93 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
             .then(response => { if (active) { setCredentialItems(response.items ?? []); setCredentialsFailed(false); } })
             .catch(() => { if (active) { setCredentialItems(null); setCredentialsFailed(true); } });
         return () => { active = false; };
-    }, [view.codex, canEdit]);
-    const credentialChoices = (credentialItems ?? []).filter(
-        item => item.status === 'active' && (item.allowed_engines ?? []).includes('codex'));
+    }, [codexActive, canEdit]);
+
+    const credentialChoices = useMemo(() => distinctCredentials(credentialItems), [credentialItems]);
+    const currentRef = view.codex?.credential_ref ?? null;
+    const boundCredential = credentialChoices.find(item => item.credential_ref === currentRef);
+    // Bind the first platform-managed credential on entering the Codex lane so
+    // publish validation (issue #165 L1) succeeds without asking the customer
+    // to understand credential UUIDs. A chosen, still-valid reference is kept.
+    useEffect(() => {
+        if (!view.codex || !canEdit || busy || !credentialChoices.length)
+            return;
+        if (currentRef && boundCredential)
+            return;
+        const first = credentialChoices[0];
+        if (first && first.credential_ref !== currentRef)
+            onChange(patchCodexConfig(config, { credential_ref: first.credential_ref }));
+    }, [view.codex, canEdit, busy, credentialChoices, currentRef, boundCredential, config, onChange]);
+
     const profileChoices = (profiles ?? []).filter(
         item => item.enabled && item.published_version && item.spec?.operation === 'chat');
-    // Issue #162 (maintainer follow-up): there is no Codex version control in
-    // the UI. The deployment installs a single Codex binary, so a version
-    // "choice" was fake — users saw many versions but only one was runnable.
-    // The version is instead injected from the authoritative deployment
-    // allowlist at the save/preview wire boundary (see
-    // `normalizeExecutionForEngine`), so new drafts and stale drafts alike
-    // always carry a legal version without the user having to pick one.
-    const previewPaths = locateExecutionErrors(previewError);
-  const savePaths = locateExecutionErrors(saveError || '');
-  const saveErrorIsExecution = EXECUTION_ERROR_CODES.some(code => (saveError || '').includes(code)) || savePaths.length > 0;
-  const executionSaveError = saveErrorIsExecution ? (saveError || '') : '';
-  // Each part is translated on its own: the shared mapping only recognises a
-  // message that is exactly one stable code, so a joined block must never be
-  // handed to it as a whole.
-  const shown = [...issues, ...previewPaths, ...(executionSaveError && !previewPaths.length ? [executionSaveError] : [])].filter(Boolean).map(errorText).join('\n');
-    // A preview belongs to the draft it was taken from, so it does not survive
-    // a switch to another agent.
-    useEffect(() => { setPreview(null); setPreviewError(''); setPreviewedConfig(''); }, [agentId]);
-    async function runPreview() {
-        setPreviewing(true);
-        setPreviewError('');
-        try {
-            setPreview(await previewExecution(agentId, config, flags?.allowed_codex_versions));
-            setPreviewedConfig(JSON.stringify(config));
-        }
-        catch (error) {
-            setPreview(null);
-            setPreviewedConfig('');
-            setPreviewError(error instanceof Error ? error.message : t('预览能力失败，请重试。'));
-        }
-        finally {
-            setPreviewing(false);
-        }
-    }
+    const savePaths = locateExecutionErrors(saveError || '');
+    const saveErrorIsExecution = EXECUTION_ERROR_CODES.some(code => (saveError || '').includes(code)) || savePaths.length > 0;
+    const executionSaveError = saveErrorIsExecution ? (saveError || '') : '';
+    const shown = [...issues, ...savePaths, ...(executionSaveError && !savePaths.length ? [executionSaveError] : [])]
+        .filter(Boolean).map(errorText).join('\n');
+    // A draft switch must not keep an error from a different agent.
+    useEffect(() => { setCredentialItems(null); }, [agentId]);
+
     return <section id="agent-execution">
-    <div className="agent-section-heading"><h2>{t('执行与能力')}</h2>{phase3Entries && <Button onClick={runPreview} loading={previewing}>{t('预览能力')}</Button>}</div>
-    <p className="agent-section-description">{t('运行 Engine 与能力由服务端注册表和策略决定，这里只能查看与收窄。')}</p>
-    {phase3Off && <p role="status" className="agent-muted">{t('当前部署未启用 Phase 3 执行能力，能力预览与能力收窄入口已隐藏；React 配置与历史记录不受影响。')}</p>}
-    {misconfigured && <p role="status" className="agent-muted">{t('部署配置错误：execution_phase3_enabled 已启用而 execution_orchestrator_enabled 未启用，能力预览会失败，请联系运维核对配置。')}</p>}
-    <Alert error={shown || previewError}/>
-    <div className="agent-setting-card">
-      <h3 className="agent-memory-group">{t('执行配置')}</h3>
-      <Field label={t('Engine 三元组')}>
-        <div className="agent-execution-engine">
-          <input readOnly value={engineText} aria-label={t('Engine 三元组')}/>
-          <Tag color={view.engineKnown ? 'green' : 'red'}>{view.engineKnown ? t('已注册') : t('未注册')}</Tag>
-        </div>
-      </Field>
-      {phase3Entries && <Field label={t('选择 Engine')}>
+    <div className="agent-section-heading"><h2>{t('执行与能力')}</h2></div>
+    <p className="agent-section-description">{t('选择 Agent 的运行方式；密钥、路径等细节由平台统一处理。')}</p>
+    {phase3Off && <p role="status" className="agent-muted">{t('当前部署未启用代码执行能力，运行方式不可切换；平台对话模型不受影响。')}</p>}
+    {misconfigured && <p role="status" className="agent-muted">{t('执行服务暂不可用，请联系运维核对部署配置。')}</p>}
+    <Alert error={shown}/>
+    <div className="agent-execution-card">
+      {phase3Entries && <Field label={t('运行方式')}>
         <Select
-          aria-label={t('选择 Engine')}
-          className="agent-execution-engine-select"
-          value={engineText}
+          aria-label={t('运行方式')}
+          value={view.engine.engine_id}
           options={engineOptions}
           disabled={!canEdit || busy}
           onChange={value => {
-            const chosen = engineOptions.find(item => item.value === value);
-            if (chosen) onChange(patchEngine(config, chosen.engine));
+            const chosen = SUPPORTED_ENGINES.find(item => item.engine_id === value);
+            if (chosen) onChange(patchEngine(config, chosen));
           }}
         />
       </Field>}
-      <p className="agent-muted">{view.engineKnown ? t('缺省即 {{v0}}，旧 Agent 无需重新发布。', { v0: `${DEFAULT_ENGINE.engine_id}/${DEFAULT_ENGINE.protocol_id}/${DEFAULT_ENGINE.adapter_version}` }) : t('所选 Engine 未注册或已停用，无法预览或发布。')}</p>
+      {view.react && <>
+        <Field label={t('最大模型轮次')}>
+          <InputNumber aria-label={t('最大模型轮次')} min={1} max={30} precision={0} value={view.react.max_model_rounds} disabled={!canEdit || busy} onChange={value => onChange(patchReactConfig(config, { max_model_rounds: value || 1 }))}/>
+        </Field>
+        <p className="agent-execution-hint">{t('一次回答中最多调用模型的次数，范围 1–30。')}</p>
+        <p className="agent-execution-hint">{t('模型方案在「模型配置」中选择。')}</p>
+      </>}
+      {view.codex && <>
+        <Field label={t('Codex 模型方案（模型网关）')}>
+          <Select
+            aria-label={t('Codex 模型方案（模型网关）')}
+            value={view.codex.model_profile_id ?? ''}
+            disabled={codexReadOnly}
+            options={[
+              { value: '', label: t('未绑定（使用部署默认）') },
+              ...profileChoices.map(item => ({
+                value: item.id,
+                label: `${item.name} · v${item.published_version}`,
+              })),
+              ...(view.codex.model_profile_id && !profileChoices.some(item => item.id === view.codex?.model_profile_id)
+                ? [{ value: view.codex.model_profile_id, label: `${view.codex.model_profile_id}${t('（未加载或不可用）')}` }]
+                : []),
+            ]}
+            onChange={value => {
+              const chosen = profileChoices.find(item => item.id === value);
+              onChange(patchCodexConfig(config, {
+                model_profile_id: chosen?.id ?? null,
+                model_profile_version: chosen?.published_version ?? null,
+              }));
+            }}
+          />
+        </Field>
+        <div className="agent-execution-identity">
+          <span>{t('运行身份')}</span>
+          <strong>{boundCredential?.name ?? (credentialsFailed ? t('读取失败，请稍后重试') : t('平台统一配置'))}</strong>
+        </div>
+        <p className="agent-execution-hint">{t('代码任务的模型与运行身份由平台统一配置，无需手动填写密钥或路径。')}</p>
+        {credentialsFailed && <p role="status" className="agent-execution-hint">{t('运行身份信息读取失败，请联系管理员或稍后重试。')}</p>}
+        {!credentialsFailed && credentialItems && !credentialChoices.length && <p role="status" className="agent-execution-hint">{t('平台尚未登记可用的代码任务身份，请联系管理员。')}</p>}
+      </>}
     </div>
-    <div className="agent-setting-card">
-      <h3 className="agent-memory-group">{t('React 配置')}</h3>
-      {view.react ? <Field label={t('最大模型轮次')}>
-        <InputNumber aria-label={t('最大模型轮次')} min={1} max={30} precision={0} value={view.react.max_model_rounds} disabled={!canEdit || busy} onChange={value => onChange(patchReactConfig(config, { max_model_rounds: value || 1 }))}/>
-      </Field> : <p className="agent-muted">{t('非 React Engine 不使用 React 轮次配置。')}</p>}
-      <p className="agent-muted">{t('限制单次运行的模型调用轮数，范围 1–30。')}</p>
-      <p className="agent-muted">{t('Chat 模型方案在「模型配置」区块中选择，与轮次同属 React Engine 的配置。')}</p>
-      {phase3Entries && <p className="agent-muted">{t('禁用能力只会收窄服务端计算结果，不能授予任何能力。')}</p>}
-    </div>
-    {view.codex && <>
-    <div className="agent-setting-card">
-      <h3 className="agent-memory-group">{t('Codex 配置')}</h3>
-      <Field label={t('Codex 可执行文件')}>
-        <Input aria-label={t('Codex 可执行文件')} value={view.codex.executable} disabled={codexReadOnly} onChange={event => onChange(patchCodexConfig(config, { executable: event.target.value }))}/>
-      </Field>
-      <Field label={t('Codex 超时（秒）')}>
-        <InputNumber aria-label={t('Codex 超时（秒）')} min={1} max={600} precision={0} value={view.codex.timeout_seconds} disabled={codexReadOnly} onChange={value => onChange(patchCodexConfig(config, { timeout_seconds: value || 1 }))}/>
-      </Field>
-      <Field label={t('Codex 模型方案（模型网关）')}>
-        <Select
-          aria-label={t('Codex 模型方案（模型网关）')}
-          className="agent-codex-profile-select"
-          value={view.codex.model_profile_id ?? ''}
-          disabled={codexReadOnly}
-          options={[
-            { value: '', label: t('未绑定（使用部署默认）') },
-            ...profileChoices.map(item => ({
-              value: item.id,
-              label: `${item.name} · v${item.published_version}`,
-            })),
-            ...(view.codex.model_profile_id && !profileChoices.some(item => item.id === view.codex?.model_profile_id)
-              ? [{ value: view.codex.model_profile_id, label: `${view.codex.model_profile_id}${t('（未加载或不可用）')}` }]
-              : []),
-          ]}
-          onChange={value => {
-            const chosen = profileChoices.find(item => item.id === value);
-            onChange(patchCodexConfig(config, {
-              model_profile_id: chosen?.id ?? null,
-              model_profile_version: chosen?.published_version ?? null,
-            }));
-          }}
-        />
-      </Field>
-      <Field label={t('Codex 凭据（凭据库）')}>
-        <Select
-          aria-label={t('Codex 凭据（凭据库）')}
-          className="agent-codex-credential-select"
-          value={view.codex.credential_ref ?? ''}
-          disabled={codexReadOnly || credentialsFailed}
-          options={[
-            { value: '', label: t('未绑定凭据') },
-            ...credentialChoices.map(item => ({
-              value: item.credential_ref,
-              label: `${item.name} · ${item.status} · ${(item.allowed_engines ?? []).join('、')}`,
-            })),
-            ...(view.codex.credential_ref && !credentialChoices.some(item => item.credential_ref === view.codex?.credential_ref)
-              ? [{ value: view.codex.credential_ref, label: `${view.codex.credential_ref}${t('（未加载或不可用）')}` }]
-              : []),
-          ]}
-          onChange={value => onChange(patchCodexConfig(config, { credential_ref: value || null }))}
-        />
-      </Field>
-      {credentialsFailed && <p role="status" className="agent-muted">{t('凭据库读取失败，请确认管理员权限或稍后重试。')}</p>}
-      {!credentialsFailed && credentialItems && !credentialChoices.length && <p role="status" className="agent-muted">{t('暂无可选凭据：请联系运维在凭据库中登记 Codex 凭据。')}</p>}
-      <p className="agent-muted">{t('Codex 模型与供应商由模型网关方案决定，PATH 与凭据由部署配置注入。')}</p>
-      <p className="agent-muted">{t('Stage A 仅支持审批模式 never 与沙箱模式 read-only；会话恢复与人工审批未启用。')}</p>
-    </div>
-    <CredentialSource credentialRef={view.codex.credential_ref} canEdit={canEdit} items={credentialItems} failed={credentialsFailed}/>
-    </>}
-    {preview && phase3Entries && <CapabilityPreview preview={preview} disabledCapabilities={view.disabledCapabilities} onNarrow={(name, disabled) => onChange(toggleDisabledCapability(config, name, disabled))} canEdit={canEdit && !busy} stale={previewedConfig !== JSON.stringify(config)}/>}
   </section>;
 }
