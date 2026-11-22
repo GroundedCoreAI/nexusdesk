@@ -2598,7 +2598,6 @@
   "未找到该引用对应的凭据，请从上方重新选择有效凭据。": "No credential matches this reference; select a valid one from the picker above.",
   "当前 Engine 的模型与供应商在「执行与能力」中通过模型网关方案选择，PATH 与凭据由部署配置注入；此处无需绑定 Chat 方案。": "This Engine selects its model and provider through a ModelGateway profile in Execution & Capabilities; PATH and credentials are deployment-owned. No Chat profile binding is needed here.",
   "执行凭据已失效或不在允许范围内，请联系运维核对凭据库并重新绑定有效凭据。": "The execution credential is expired or out of scope; ask operations to check the credential library and rebind a valid one.",
-  "Codex 凭据引用无效，发布已阻止，请重新选择有效凭据。": "Invalid Codex credential reference; publish was blocked. Select a valid credential.",
   "Codex 模型方案无效或不支持工具调用，请检查模型网关配置。": "The Codex model profile is invalid or does not support tool calling; check the model gateway configuration.",
   "运行遇到未分类的内部故障，请重试或联系管理员。": "The run hit an unclassified internal fault. Retry or contact your administrator.",
   "Codex 模型方案（模型网关）": "Codex model profile (ModelGateway)",
@@ -2617,5 +2616,7 @@
   "运行身份信息读取失败，请联系管理员或稍后重试。": "Runtime identity could not be loaded. Please ask your administrator or retry later.",
   "平台尚未登记可用的代码任务身份，请联系管理员。": "No code task identity is registered. Please contact your administrator.",
   "代码任务的模型在下方「执行与能力」中选择，其余运行细节由平台统一处理；此处无需绑定 Chat 方案。": "Choose the code task model under Execution and capabilities below. Other runtime details are managed by the platform; no Chat plan is needed here.",
-  "运行方式": "Runtime"
+  "运行方式": "Runtime",
+  "Codex 运行凭据无效或未配置，发布已阻止，请联系管理员核对凭据库或模型网关连接配置。": "The Codex runtime credential is invalid or missing. Publishing was blocked; ask an administrator to check the credential library or the model gateway connection.",
+  "暂无可用于代码任务的模型方案：模型网关连接尚未配置运行凭据或工具调用能力，请联系管理员。": "No model plan is available for code tasks: the gateway connection has no runtime credential or tool-calling capability. Contact an administrator."
 }

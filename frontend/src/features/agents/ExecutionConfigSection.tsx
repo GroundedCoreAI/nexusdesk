@@ -14,6 +14,7 @@ import {
   type ExecutionCredentialSummary,
 } from '../../shared/api/client';
 import { Alert, Field } from '../../shared/components/ui';
+import { useCatalogOptions } from '../models/useCatalogOptions';
 import type { ModelResource } from '../models/ModelsPage';
 
 /** Stable domain errors the execution endpoints answer with (03-technical-design.md §7.3). */
@@ -165,8 +166,35 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
             onChange(patchCodexConfig(config, { credential_ref: first.credential_ref }));
     }, [view.codex, canEdit, busy, credentialChoices, currentRef, boundCredential, config, onChange]);
 
-    const profileChoices = (profiles ?? []).filter(
-        item => item.enabled && item.published_version && item.spec?.operation === 'chat');
+    // A published chat profile is not automatically a runnable Codex profile:
+    // the Gateway lane requires the primary connection to carry both a valid
+    // execution credential reference and a bare HTTPS upstream address. The
+    // backend enforces this at publish; filter the same chain here so the form
+    // never offers a profile that can only end in codex_credential_invalid.
+    const gatewayModels = useCatalogOptions('models', codexActive);
+    const gatewayConnections = useCatalogOptions('connections', codexActive);
+    const profileChoices = useMemo(() => {
+        const modelById = new Map((gatewayModels.data ?? []).map(item => [item.id, item]));
+        const connectionById = new Map((gatewayConnections.data ?? []).map(item => [item.id, item]));
+        return (profiles ?? []).filter(item => {
+            if (!item.enabled || !item.published_version || item.spec?.operation !== 'chat')
+                return false;
+            const model = modelById.get(String(item.spec?.model_id ?? ''));
+            if (!model || model.spec?.tool_calling !== true)
+                return false;
+            const connection = connectionById.get(String(model.spec?.connection_id ?? ''));
+            if (!connection)
+                return false;
+            const spec = connection.spec as Record<string, unknown>;
+            const credentialRef = spec?.execution_credential_ref;
+            const base = typeof spec?.codex_base_url === 'string' && spec.codex_base_url
+                ? spec.codex_base_url : spec?.base_url;
+            if (typeof credentialRef !== 'string' || !credentialRef.trim()
+                || typeof base !== 'string' || !base.startsWith('https://'))
+                return false;
+            return true;
+        });
+    }, [profiles, gatewayModels.data, gatewayConnections.data]);
     const savePaths = locateExecutionErrors(saveError || '');
     const saveErrorIsExecution = EXECUTION_ERROR_CODES.some(code => (saveError || '').includes(code)) || savePaths.length > 0;
     const executionSaveError = saveErrorIsExecution ? (saveError || '') : '';
@@ -231,6 +259,7 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
           <strong>{boundCredential?.name ?? (credentialsFailed ? t('读取失败，请稍后重试') : t('平台统一配置'))}</strong>
         </div>
         <p className="agent-execution-hint">{t('代码任务的模型与运行身份由平台统一配置，无需手动填写密钥或路径。')}</p>
+        {profiles && gatewayModels.data && gatewayConnections.data && !profileChoices.length && <p role="status" className="agent-execution-hint">{t('暂无可用于代码任务的模型方案：模型网关连接尚未配置运行凭据或工具调用能力，请联系管理员。')}</p>}
         {credentialsFailed && <p role="status" className="agent-execution-hint">{t('运行身份信息读取失败，请联系管理员或稍后重试。')}</p>}
         {!credentialsFailed && credentialItems && !credentialChoices.length && <p role="status" className="agent-execution-hint">{t('平台尚未登记可用的代码任务身份，请联系管理员。')}</p>}
       </>}
