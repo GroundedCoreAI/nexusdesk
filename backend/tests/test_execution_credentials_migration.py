@@ -83,7 +83,8 @@ def test_0071_revision_chain_is_a_single_head_on_0070():
     assert migration.revision == REVISION
     assert migration.down_revision == PREVIOUS_REVISION
     assert migration.branch_labels is None and migration.depends_on is None
-    assert scripts.get_heads() == [REVISION]
+    # Phase 6-2 adds 0072/0073 on top of this 0071 baseline (still one head).
+    assert scripts.get_heads() == ["0073_execution_parser_diag"]
     assert len(REVISION) <= 32
 
 
@@ -131,7 +132,9 @@ def test_0071_downgrade_refuses_populated_credentials_before_dropping(monkeypatc
 def test_0071_chain_versions_grants_and_data_preserving_downgrade(migration_database):
     url = migration_database
     migrate(url, PREVIOUS_REVISION)
-    assert migrate(url, "head").returncode == 0
+    # Stay on the 0071 revision here: the assertion below validates this test's
+    # own 0071 contract in isolation, while 0072/0073 now sit beyond it.
+    assert migrate(url, REVISION).returncode == 0
     assert query(url, "SELECT version_num FROM alembic_version")[0][0] == REVISION
     assert migrate(url, "head").returncode == 0
 

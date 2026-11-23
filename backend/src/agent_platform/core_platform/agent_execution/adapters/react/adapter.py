@@ -22,6 +22,7 @@ from ...contracts import (
     ensure_handle_identity,
     ensure_request_identity,
 )
+from ...events.diagnostics import ParserDiagnosticCollector
 from ...orchestration.execution_context import ExecutionContext, build_execution_request
 from ...orchestration.execution_lifecycle import ExecutionOutcome
 from .error_mapper import ReactErrorMapping, map_execution_error, map_protocol_error
@@ -78,11 +79,13 @@ class _Execution:
         request: ExecutionRequest,
         handle: ExecutionHandle,
         queue_capacity: int,
+        *,
+        diagnostics: ParserDiagnosticCollector | None = None,
     ) -> None:
         self.context = context
         self.request = request
         self.handle = handle
-        self.mapper = ReactEventMapper(request)
+        self.mapper = ReactEventMapper(request, diagnostics=diagnostics)
         self.queue_capacity = queue_capacity
         self.queue: deque[AgentEvent | _StreamFailure] = deque()
         self.condition = asyncio.Condition()
@@ -118,10 +121,12 @@ class ReactAdapter:
         runtime_factory: RuntimeFactory,
         *,
         queue_capacity: int = 1,
+        diagnostics: ParserDiagnosticCollector | None = None,
     ) -> None:
         self._context = context
         self._runtime_factory = runtime_factory
         self._queue_capacity = queue_capacity
+        self._diagnostics = diagnostics
         self._execution: _Execution | None = None
         self._owned_tasks: set[asyncio.Task[Any]] = set()
 
@@ -164,7 +169,13 @@ class ReactAdapter:
             provider_session_id=request.engine_session_id,
             process_id=None,
         )
-        execution = _Execution(self._context, request, handle, self._queue_capacity)
+        execution = _Execution(
+            self._context,
+            request,
+            handle,
+            self._queue_capacity,
+            diagnostics=self._diagnostics,
+        )
         execution.task = self._create_task(self._run(execution))
         self._execution = execution
         return handle

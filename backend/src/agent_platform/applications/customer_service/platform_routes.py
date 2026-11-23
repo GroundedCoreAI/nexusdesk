@@ -8,10 +8,11 @@ from urllib.parse import quote
 from uuid import UUID
 
 import annotated_types
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from agent_platform.applications.security_audit import (
@@ -56,6 +57,10 @@ from agent_platform.core_platform.platform_services.identity.access import (
 )
 from agent_platform.core_platform.platform_services.persistence.store import DomainError, many
 from agent_platform.core_platform.platform_services.persistence.store import audit as audit_record
+from agent_platform.core_platform.platform_services.tenant_isolation.service import (
+    resolve_scope,
+    scope_predicate,
+)
 from agent_platform.core_platform.tool_gateway.service import HttpTool, ToolInput
 from agent_platform.extension_contracts import CapabilityManifest
 
@@ -1744,3 +1749,744 @@ async def effective_policy(request: Request, user: Reader):
             "tool_allowed_hosts",
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 6-2 · Execution Governance Observability (T-1 ~ T-8, R-1 ~ R-3)
+# ---------------------------------------------------------------------------
+# Every endpoint in this section is Admin-only and read-only. All rows come
+# from native SQL over the existing governance tables; no execution state is
+# mutated, no publish side effect is triggered, no Prometheus/metrics surface
+# is introduced, and no raw parser sample or Secret is ever selected.
+
+_GOV_MAX_FILTER_CHARS = 200
+_GOV_FENCING_REASONS = frozenset(
+    {"owner_mismatch", "stale_epoch", "lease_lost", "run_terminal", "run_missing"}
+)
+_GOV_FENCING_OPERATIONS = frozenset(
+    {
+        "snapshot",
+        "append",
+        "finish",
+        "heartbeat",
+        "usage",
+        "tool_replay",
+        "process",
+        "workdir",
+        "resource_release",
+    }
+)
+_GOV_CLEANUP_CATEGORIES = frozenset({"failed", "unconfirmed_cancel"})
+_GOV_USAGE_KINDS = frozenset({"chain", "duplicate"})
+_GOV_PARSER_CATEGORIES = frozenset(
+    {"malformed", "unknown_schema", "unknown_type", "size_limit", "critical_terminal"}
+)
+_GOV_CREDENTIAL_ACTIONS = frozenset(
+    {"created", "rotated", "revoked", "grant_issued", "grant_denied", "grant_used"}
+)
+
+
+def _gov_pagination(page: str | None, page_size: str | None) -> tuple[int, int, int]:
+    def parse(raw: str | None, default: int, maximum: int | None) -> int:
+        if raw is None or raw == "":
+            return default
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "invalid_pagination") from None
+        if value < 1 or (maximum is not None and value > maximum):
+            raise HTTPException(400, "invalid_pagination")
+        return value
+
+    number = parse(page, 1, None)
+    size = parse(page_size, 20, 100)
+    return number, size, (number - 1) * size
+
+
+def _gov_time(raw: str | None):
+    if raw is None or raw == "":
+        return None
+    if len(raw) > 64:
+        raise HTTPException(400, "invalid_time_range")
+    try:
+        value = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "invalid_time_range") from None
+    # A timestamp without an explicit offset is interpreted as UTC (noqa: FURB162).
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _gov_choice(raw: str | None, allowed: frozenset[str], default: str | None = None):
+    if raw is None or raw == "":
+        return default
+    if raw not in allowed:
+        raise HTTPException(400, "invalid_filter")
+    return raw
+
+
+def _gov_text(raw: str | None) -> str | None:
+    if raw is None or raw == "":
+        return None
+    if len(raw) > _GOV_MAX_FILTER_CHARS:
+        raise HTTPException(400, "invalid_filter")
+    return raw
+
+
+def _gov_uuid(raw: str | None) -> UUID | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return UUID(str(raw))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "invalid_filter") from None
+
+
+def _gov_tenant_clause(
+    user_tenant: str, requested: str | None, alias: str = "", *, allow_null: bool = False
+) -> tuple[str, dict[str, object]]:
+    """Tenant predicate; a request for another tenant fails closed to no rows."""
+    if requested and requested != user_tenant:
+        return "1=0", {}
+    column = f"{alias}.tenant_id" if alias else "tenant_id"
+    expression = f"{column}=:gov_tenant"
+    if allow_null:
+        expression = f"({alias}.id IS NULL OR {expression})" if alias else expression
+    return expression, {"gov_tenant": user_tenant}
+
+
+def _gov_scope_clause(request: Request, user_tenant: str, alias: str = "r"):
+    """Trusted business/workspace scope for a LEFT JOIN runtime_runs alias."""
+    scope = resolve_scope(user_tenant, getattr(request.state, "business_scope", None))
+    clause, params = scope_predicate(scope, alias)
+    return f"({alias}.id IS NULL OR {clause})", params
+
+
+def _gov_extra_scope_clause(business: str | None, workspace: str | None, alias: str = "r"):
+    parts: list[str] = []
+    params: dict[str, object] = {}
+    if business:
+        parts.append(f"{alias}.business_id=:gov_business")
+        params["gov_business"] = business
+    if workspace:
+        parts.append(f"{alias}.workspace_id=:gov_workspace")
+        params["gov_workspace"] = workspace
+    return (" AND ".join(parts) if parts else "1=1"), params
+
+
+def _gov_scope_view(business_id: object, workspace_id: object):
+    if business_id is None and workspace_id is None:
+        return None
+    return {"business_id": business_id, "workspace_id": workspace_id}
+
+
+def _gov_db_error(exc: Exception) -> HTTPException:
+    logger.warning("execution governance query failed: %s", type(exc).__name__)
+    return HTTPException(400, "governance_query_failed")
+
+
+@router.get("/observability/execution/fencing-denials")
+async def governance_fencing_denials(
+    request: Request,
+    user: Admin,
+    from_: Annotated[str | None, Query(alias="from", max_length=64)] = None,
+    to: Annotated[str | None, Query(max_length=64)] = None,
+    reason: Annotated[str | None, Query(max_length=64)] = None,
+    operation: Annotated[str | None, Query(max_length=64)] = None,
+    tenant_id: Annotated[str | None, Query(max_length=128)] = None,
+    business_scope: Annotated[str | None, Query(max_length=128)] = None,
+    workspace: Annotated[str | None, Query(max_length=128)] = None,
+    page: Annotated[str | None, Query(max_length=16)] = None,
+    page_size: Annotated[str | None, Query(max_length=16)] = None,
+):
+    number, size, offset = _gov_pagination(page, page_size)
+    start, end = _gov_time(from_), _gov_time(to)
+    reason_v = _gov_choice(reason, _GOV_FENCING_REASONS)
+    operation_v = _gov_choice(operation, _GOV_FENCING_OPERATIONS)
+    business_v, workspace_v = _gov_text(business_scope), _gov_text(workspace)
+    clauses, params = ["1=1"], {}
+    if start is not None:
+        clauses.append("d.created_at>=:gov_from")
+        params["gov_from"] = start
+    if end is not None:
+        clauses.append("d.created_at<=:gov_to")
+        params["gov_to"] = end
+    if reason_v:
+        clauses.append("d.reason=:gov_reason")
+        params["gov_reason"] = reason_v
+    if operation_v:
+        clauses.append("d.operation=:gov_operation")
+        params["gov_operation"] = operation_v
+    tenant_sql, tenant_params = _gov_tenant_clause(user.tenant, tenant_id, "r", allow_null=True)
+    clauses.append(tenant_sql)
+    params.update(tenant_params)
+    scope_sql, scope_params = _gov_scope_clause(request, user.tenant)
+    clauses.append(scope_sql)
+    params.update(scope_params)
+    extra_sql, extra_params = _gov_extra_scope_clause(business_v, workspace_v)
+    if extra_sql != "1=1":
+        clauses.append(extra_sql)
+        params.update(extra_params)
+    where = " WHERE " + " AND ".join(clauses)
+    join = " FROM execution_fencing_denials d LEFT JOIN runtime_runs r ON r.id=d.run_id "
+    try:
+        async with runtime(request).engine.connect() as conn:
+            total = int(await conn.scalar(text("SELECT count(*)" + join + where), params) or 0)
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            """SELECT d.run_id,d.operation,d.reason,d.stale_owner,
+                             d.stale_lease_epoch,d.current_owner,d.current_lease_epoch,
+                             d.created_at,r.tenant_id,r.business_id,r.workspace_id"""
+                            + join
+                            + where
+                            + " ORDER BY d.created_at DESC,d.run_id LIMIT :gov_limit OFFSET :gov_offset"
+                        ),
+                        {**params, "gov_limit": size, "gov_offset": offset},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as exc:
+        raise _gov_db_error(exc) from None
+    items = [
+        {
+            "run_id": str(row["run_id"]),
+            "operation": row["operation"],
+            "reason": row["reason"],
+            "stale_owner": str(row["stale_owner"]) if row["stale_owner"] else None,
+            "stale_lease_epoch": row["stale_lease_epoch"],
+            "current_owner": str(row["current_owner"]) if row["current_owner"] else None,
+            "current_lease_epoch": row["current_lease_epoch"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "tenant_id": row["tenant_id"],
+            "scope": _gov_scope_view(row["business_id"], row["workspace_id"]),
+            "deployment_level": row["tenant_id"] is None,
+        }
+        for row in rows
+    ]
+    return {"items": items, "total": total, "page": number, "page_size": size}
+
+
+@router.get("/observability/execution/cleanup-failures")
+async def governance_cleanup_failures(
+    request: Request,
+    user: Admin,
+    category: Annotated[str | None, Query(max_length=64)] = None,
+    from_: Annotated[str | None, Query(alias="from", max_length=64)] = None,
+    to: Annotated[str | None, Query(max_length=64)] = None,
+    tenant_id: Annotated[str | None, Query(max_length=128)] = None,
+    business_scope: Annotated[str | None, Query(max_length=128)] = None,
+    workspace: Annotated[str | None, Query(max_length=128)] = None,
+    page: Annotated[str | None, Query(max_length=16)] = None,
+    page_size: Annotated[str | None, Query(max_length=16)] = None,
+):
+    number, size, offset = _gov_pagination(page, page_size)
+    category_v = _gov_choice(category, _GOV_CLEANUP_CATEGORIES)
+    start, end = _gov_time(from_), _gov_time(to)
+    business_v, workspace_v = _gov_text(business_scope), _gov_text(workspace)
+    clauses: list[str] = []
+    params: dict[str, object] = {}
+    if category_v is None:
+        clauses.append(
+            "(r.cleanup_status='failed' OR (r.cancel_requested_at IS NOT NULL"
+            " AND r.cancel_confirmed_at IS NULL))"
+        )
+    elif category_v == "failed":
+        clauses.append("r.cleanup_status='failed'")
+    else:
+        clauses.append("r.cancel_requested_at IS NOT NULL AND r.cancel_confirmed_at IS NULL")
+    if start is not None:
+        clauses.append("r.cleanup_updated_at>=:gov_from")
+        params["gov_from"] = start
+    if end is not None:
+        clauses.append("r.cleanup_updated_at<=:gov_to")
+        params["gov_to"] = end
+    tenant_sql, tenant_params = _gov_tenant_clause(user.tenant, tenant_id, "r")
+    clauses.append(tenant_sql)
+    params.update(tenant_params)
+    scope_sql, scope_params = _gov_scope_clause(request, user.tenant)
+    clauses.append(scope_sql)
+    params.update(scope_params)
+    extra_sql, extra_params = _gov_extra_scope_clause(business_v, workspace_v)
+    if extra_sql != "1=1":
+        clauses.append(extra_sql)
+        params.update(extra_params)
+    where = " WHERE " + " AND ".join(clauses)
+    join = " FROM runtime_runs r "
+    try:
+        async with runtime(request).engine.connect() as conn:
+            total = int(await conn.scalar(text("SELECT count(*)" + join + where), params) or 0)
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            """SELECT r.id,r.cleanup_status,r.cleanup_updated_at,
+                             r.cancel_requested_at,r.cancel_confirmed_at,
+                             r.tenant_id,r.business_id,r.workspace_id"""
+                            + join
+                            + where
+                            + " ORDER BY r.cleanup_updated_at DESC NULLS LAST,r.id"
+                            " LIMIT :gov_limit OFFSET :gov_offset"
+                        ),
+                        {**params, "gov_limit": size, "gov_offset": offset},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as exc:
+        raise _gov_db_error(exc) from None
+    items = []
+    for row in rows:
+        category_value = (
+            "failed" if row["cleanup_status"] == "failed" else "unconfirmed_cancel"
+        )
+        items.append(
+            {
+                "run_id": str(row["id"]),
+                "category": category_value,
+                "cleanup_status": row["cleanup_status"],
+                "cleanup_updated_at": (
+                    row["cleanup_updated_at"].isoformat() if row["cleanup_updated_at"] else None
+                ),
+                "cancel_requested_at": (
+                    row["cancel_requested_at"].isoformat() if row["cancel_requested_at"] else None
+                ),
+                "cancel_confirmed_at": (
+                    row["cancel_confirmed_at"].isoformat() if row["cancel_confirmed_at"] else None
+                ),
+                "tenant_id": row["tenant_id"],
+                "scope": _gov_scope_view(row["business_id"], row["workspace_id"]),
+            }
+        )
+    return {"items": items, "total": total, "page": number, "page_size": size}
+
+
+@router.get("/observability/execution/outbox")
+async def governance_outbox(
+    request: Request,
+    user: Admin,
+    tenant_id: Annotated[str | None, Query(max_length=128)] = None,
+    business_scope: Annotated[str | None, Query(max_length=128)] = None,
+    workspace: Annotated[str | None, Query(max_length=128)] = None,
+    page: Annotated[str | None, Query(max_length=16)] = None,
+    page_size: Annotated[str | None, Query(max_length=16)] = None,
+):
+    """Read-only Outbox metrics. No dispatch/reconcile/publish side effect."""
+    number, size, offset = _gov_pagination(page, page_size)
+    business_v, workspace_v = _gov_text(business_scope), _gov_text(workspace)
+    clauses, params = [], {}
+    tenant_sql, tenant_params = _gov_tenant_clause(user.tenant, tenant_id, "r")
+    clauses.append(tenant_sql)
+    params.update(tenant_params)
+    scope_sql, scope_params = _gov_scope_clause(request, user.tenant)
+    clauses.append(scope_sql)
+    params.update(scope_params)
+    extra_sql, extra_params = _gov_extra_scope_clause(business_v, workspace_v)
+    if extra_sql != "1=1":
+        clauses.append(extra_sql)
+        params.update(extra_params)
+    where = " WHERE " + " AND ".join(clauses)
+    join = " FROM runtime_event_outbox o JOIN runtime_runs r ON r.id=o.run_id "
+    try:
+        async with runtime(request).engine.connect() as conn:
+            pending = int(
+                await conn.scalar(
+                    text("SELECT count(*)" + join + where + " AND o.status='pending'"), params
+                )
+                or 0
+            )
+            oldest = await conn.scalar(
+                text("SELECT MIN(o.available_at)" + join + where + " AND o.status='pending'"),
+                params,
+            )
+            stall = await conn.scalar(
+                text(
+                    "SELECT EXTRACT(EPOCH FROM (now()-MIN(o.available_at)))"
+                    + join
+                    + where
+                    + " AND o.status='pending'"
+                ),
+                params,
+            )
+            published_24h = int(
+                await conn.scalar(
+                    text(
+                        "SELECT count(*)"
+                        + join
+                        + where
+                        + " AND o.status='published'"
+                        + " AND o.published_at>=now()-interval '24 hours'"
+                    ),
+                    params,
+                )
+                or 0
+            )
+            error_where = where + " AND o.status='pending' AND o.last_error IS NOT NULL"
+            total = int(
+                await conn.scalar(text("SELECT count(*)" + join + error_where), params) or 0
+            )
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            """SELECT o.run_id,o.seq,o.attempts,o.available_at,o.last_error"""
+                            + join
+                            + error_where
+                            + " ORDER BY o.available_at,o.run_id,o.seq"
+                            " LIMIT :gov_limit OFFSET :gov_offset"
+                        ),
+                        {**params, "gov_limit": size, "gov_offset": offset},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as exc:
+        raise _gov_db_error(exc) from None
+    last_errors = [
+        {
+            "run_id": str(row["run_id"]),
+            "seq": row["seq"],
+            "attempts": row["attempts"],
+            "available_at": row["available_at"].isoformat() if row["available_at"] else None,
+            "last_error": str(row["last_error"] or "")[:_GOV_MAX_FILTER_CHARS],
+        }
+        for row in rows
+    ]
+    return {
+        "pending_count": pending,
+        "oldest_available_at": oldest.isoformat() if oldest else None,
+        "stall_seconds": float(stall) if stall is not None else None,
+        "last_errors": last_errors,
+        "published_24h": published_24h,
+        "total": total,
+        "page": number,
+        "page_size": size,
+    }
+
+
+@router.get("/observability/execution/usage-conflicts")
+async def governance_usage_conflicts(
+    request: Request,
+    user: Admin,
+    from_: Annotated[str | None, Query(alias="from", max_length=64)] = None,
+    to: Annotated[str | None, Query(max_length=64)] = None,
+    run_id: Annotated[str | None, Query(max_length=64)] = None,
+    tenant_id: Annotated[str | None, Query(max_length=128)] = None,
+    kind: Annotated[str | None, Query(max_length=32)] = None,
+    business_scope: Annotated[str | None, Query(max_length=128)] = None,
+    workspace: Annotated[str | None, Query(max_length=128)] = None,
+    page: Annotated[str | None, Query(max_length=16)] = None,
+    page_size: Annotated[str | None, Query(max_length=16)] = None,
+):
+    """Supersession links and duplicate-source evidence; never re-aggregates usage."""
+    number, size, offset = _gov_pagination(page, page_size)
+    start, end = _gov_time(from_), _gov_time(to)
+    run_v = _gov_uuid(run_id)
+    kind_v = _gov_choice(kind, _GOV_USAGE_KINDS)
+    # tenant_id/business_scope/workspace are accepted for contract symmetry;
+    # this table carries tenant_id only, so scope filtering is tenant-based.
+    clauses, params = [], {}
+    tenant_sql, tenant_params = _gov_tenant_clause(user.tenant, tenant_id, "u")
+    clauses.append(tenant_sql)
+    params.update(tenant_params)
+    if start is not None:
+        clauses.append("u.created_at>=:gov_from")
+        params["gov_from"] = start
+    if end is not None:
+        clauses.append("u.created_at<=:gov_to")
+        params["gov_to"] = end
+    if run_v is not None:
+        clauses.append("u.run_id=:gov_run")
+        params["gov_run"] = run_v
+    base_where = " WHERE " + " AND ".join(clauses)
+    chain_select = (
+        "SELECT u.id,u.run_id,u.tenant_id,u.source,u.source_event_id,u.supersedes_id,"
+        "u.usage,u.cost,u.is_estimate,u.created_at,'chain' AS kind"
+        " FROM runtime_usage_ledger u" + base_where + " AND u.supersedes_id IS NOT NULL"
+    )
+    dup_select = (
+        "SELECT u.id,u.run_id,u.tenant_id,u.source,u.source_event_id,u.supersedes_id,"
+        "u.usage,u.cost,u.is_estimate,u.created_at,'duplicate' AS kind"
+        " FROM runtime_usage_ledger u" + base_where
+        + " AND EXISTS (SELECT 1 FROM runtime_usage_ledger v"
+        " WHERE v.run_id=u.run_id AND v.source=u.source AND v.id<>u.id)"
+    )
+    if kind_v == "chain":
+        combined = chain_select
+    elif kind_v == "duplicate":
+        combined = dup_select
+    else:
+        combined = chain_select + " UNION ALL " + dup_select
+    cte = " WITH gov_all AS (" + combined + ") "
+    try:
+        async with runtime(request).engine.connect() as conn:
+            total = int(
+                await conn.scalar(text(cte + "SELECT count(*) FROM gov_all"), params) or 0
+            )
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            cte
+                            + """SELECT id,run_id,tenant_id,source,source_event_id,
+                               supersedes_id,usage,cost,is_estimate,created_at,kind
+                               FROM gov_all ORDER BY created_at DESC,id
+                               LIMIT :gov_limit OFFSET :gov_offset"""
+                        ),
+                        {**params, "gov_limit": size, "gov_offset": offset},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as exc:
+        raise _gov_db_error(exc) from None
+    items = [
+        {
+            "run_id": str(row["run_id"]),
+            "tenant_id": row["tenant_id"],
+            "source": row["source"],
+            "source_event_id": row["source_event_id"],
+            "supersedes_id": str(row["supersedes_id"]) if row["supersedes_id"] else None,
+            "usage": row["usage"],
+            "cost": str(row["cost"]) if row["cost"] is not None else None,
+            "is_estimate": row["is_estimate"],
+            "kind": row["kind"],
+        }
+        for row in rows
+    ]
+    return {"items": items, "total": total, "page": number, "page_size": size}
+
+
+@router.get("/observability/execution/replay-gaps")
+async def governance_replay_gaps(
+    request: Request,
+    user: Admin,
+    from_: Annotated[str | None, Query(alias="from", max_length=64)] = None,
+    to: Annotated[str | None, Query(max_length=64)] = None,
+    run_id: Annotated[str | None, Query(max_length=64)] = None,
+    tenant_id: Annotated[str | None, Query(max_length=128)] = None,
+    business_scope: Annotated[str | None, Query(max_length=128)] = None,
+    workspace: Annotated[str | None, Query(max_length=128)] = None,
+    page: Annotated[str | None, Query(max_length=16)] = None,
+    page_size: Annotated[str | None, Query(max_length=16)] = None,
+):
+    number, size, offset = _gov_pagination(page, page_size)
+    start, end = _gov_time(from_), _gov_time(to)
+    run_v = _gov_uuid(run_id)
+    business_v, workspace_v = _gov_text(business_scope), _gov_text(workspace)
+    clauses, params = [], {}
+    tenant_sql, tenant_params = _gov_tenant_clause(user.tenant, tenant_id, "g")
+    clauses.append(tenant_sql)
+    params.update(tenant_params)
+    scope_sql, scope_params = _gov_scope_clause(request, user.tenant)
+    clauses.append(scope_sql)
+    params.update(scope_params)
+    extra_sql, extra_params = _gov_extra_scope_clause(business_v, workspace_v)
+    if extra_sql != "1=1":
+        clauses.append(extra_sql)
+        params.update(extra_params)
+    if start is not None:
+        clauses.append("g.created_at>=:gov_from")
+        params["gov_from"] = start
+    if end is not None:
+        clauses.append("g.created_at<=:gov_to")
+        params["gov_to"] = end
+    if run_v is not None:
+        clauses.append("g.run_id=:gov_run")
+        params["gov_run"] = run_v
+    where = " WHERE " + " AND ".join(clauses)
+    join = " FROM execution_replay_gap_events g LEFT JOIN runtime_runs r ON r.id=g.run_id "
+    try:
+        async with runtime(request).engine.connect() as conn:
+            total = int(await conn.scalar(text("SELECT count(*)" + join + where), params) or 0)
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            """SELECT g.id,g.run_id,g.requested_cursor_seq,
+                             g.retention_floor_seq,g.reason_code,g.created_at,
+                             g.tenant_id,r.business_id,r.workspace_id"""
+                            + join
+                            + where
+                            + " ORDER BY g.created_at DESC,g.id"
+                            " LIMIT :gov_limit OFFSET :gov_offset"
+                        ),
+                        {**params, "gov_limit": size, "gov_offset": offset},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as exc:
+        raise _gov_db_error(exc) from None
+    items = [
+        {
+            "id": str(row["id"]),
+            "run_id": str(row["run_id"]),
+            "requested_cursor_seq": row["requested_cursor_seq"],
+            "retention_floor_seq": row["retention_floor_seq"],
+            "reason_code": row["reason_code"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "tenant_id": row["tenant_id"],
+            "scope": _gov_scope_view(row["business_id"], row["workspace_id"]),
+        }
+        for row in rows
+    ]
+    return {"items": items, "total": total, "page": number, "page_size": size}
+
+
+@router.get("/observability/execution/parser-diagnostics")
+async def governance_parser_diagnostics(
+    request: Request,
+    user: Admin,
+    from_: Annotated[str | None, Query(alias="from", max_length=64)] = None,
+    to: Annotated[str | None, Query(max_length=64)] = None,
+    category: Annotated[str | None, Query(max_length=64)] = None,
+    tenant_id: Annotated[str | None, Query(max_length=128)] = None,
+    business_scope: Annotated[str | None, Query(max_length=128)] = None,
+    workspace: Annotated[str | None, Query(max_length=128)] = None,
+    bucket: Annotated[str | None, Query(max_length=16)] = None,
+    page: Annotated[str | None, Query(max_length=16)] = None,
+    page_size: Annotated[str | None, Query(max_length=16)] = None,
+):
+    """Classified counts only. Raw samples and Secrets are never selected."""
+    number, size, offset = _gov_pagination(page, page_size)
+    start, end = _gov_time(from_), _gov_time(to)
+    category_v = _gov_choice(category, _GOV_PARSER_CATEGORIES)
+    business_v, workspace_v = _gov_text(business_scope), _gov_text(workspace)
+    if _gov_text(bucket) not in (None, "hour", "day"):
+        raise HTTPException(400, "invalid_filter")
+    clauses, params = [], {}
+    if tenant_id and tenant_id != user.tenant:
+        clauses.append("1=0")
+    else:
+        # A missing tenant means deployment-level; it is visible to any admin.
+        clauses.append("(d.tenant_id IS NULL OR d.tenant_id=:gov_tenant)")
+        params["gov_tenant"] = user.tenant
+    scope_sql, scope_params = _gov_scope_clause(request, user.tenant)
+    clauses.append(scope_sql)
+    params.update(scope_params)
+    extra_sql, extra_params = _gov_extra_scope_clause(business_v, workspace_v)
+    if extra_sql != "1=1":
+        clauses.append(extra_sql)
+        params.update(extra_params)
+    if start is not None:
+        clauses.append("d.bucket_start>=:gov_from")
+        params["gov_from"] = start
+    if end is not None:
+        clauses.append("d.bucket_start<=:gov_to")
+        params["gov_to"] = end
+    if category_v:
+        clauses.append("d.category=:gov_category")
+        params["gov_category"] = category_v
+    where = " WHERE " + " AND ".join(clauses)
+    join = " FROM execution_parser_diagnostics d LEFT JOIN runtime_runs r ON r.id=d.run_id "
+    try:
+        async with runtime(request).engine.connect() as conn:
+            total = int(await conn.scalar(text("SELECT count(*)" + join + where), params) or 0)
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            """SELECT d.bucket_start,d.category,d.reason_code,d.count,
+                             d.tenant_id,d.run_id"""
+                            + join
+                            + where
+                            + " ORDER BY d.bucket_start DESC,d.category,d.id"
+                            " LIMIT :gov_limit OFFSET :gov_offset"
+                        ),
+                        {**params, "gov_limit": size, "gov_offset": offset},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as exc:
+        raise _gov_db_error(exc) from None
+    items = [
+        {
+            "bucket_start": (
+                row["bucket_start"].isoformat() if row["bucket_start"] else None
+            ),
+            "category": row["category"],
+            "reason_code": str(row["reason_code"] or "")[:_GOV_MAX_FILTER_CHARS],
+            "count": row["count"],
+            "tenant_id": row["tenant_id"],
+            "run_id": str(row["run_id"]) if row["run_id"] else None,
+        }
+        for row in rows
+    ]
+    return {"items": items, "total": total, "page": number, "page_size": size}
+
+
+@router.get("/observability/execution/credential-audit")
+async def governance_credential_audit(
+    request: Request,
+    user: Admin,
+    action: Annotated[str | None, Query(max_length=64)] = None,
+    from_: Annotated[str | None, Query(alias="from", max_length=64)] = None,
+    to: Annotated[str | None, Query(max_length=64)] = None,
+    tenant_id: Annotated[str | None, Query(max_length=128)] = None,
+    page: Annotated[str | None, Query(max_length=16)] = None,
+    page_size: Annotated[str | None, Query(max_length=16)] = None,
+):
+    """Secret-free credential audit. Tenant-only filtering (no business scope)."""
+    number, size, offset = _gov_pagination(page, page_size)
+    action_v = _gov_choice(action, _GOV_CREDENTIAL_ACTIONS)
+    start, end = _gov_time(from_), _gov_time(to)
+    clauses, params = [], {}
+    tenant_sql, tenant_params = _gov_tenant_clause(user.tenant, tenant_id, "a")
+    clauses.append(tenant_sql)
+    params.update(tenant_params)
+    if action_v:
+        clauses.append("a.action=:gov_action")
+        params["gov_action"] = action_v
+    if start is not None:
+        clauses.append("a.created_at>=:gov_from")
+        params["gov_from"] = start
+    if end is not None:
+        clauses.append("a.created_at<=:gov_to")
+        params["gov_to"] = end
+    where = " WHERE " + " AND ".join(clauses)
+    join = " FROM execution_credential_audit a "
+    try:
+        async with runtime(request).engine.connect() as conn:
+            total = int(await conn.scalar(text("SELECT count(*)" + join + where), params) or 0)
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            """SELECT a.id,a.credential_ref,a.action,a.outcome,
+                             a.reason_code,a.actor,a.created_at,a.tenant_id"""
+                            + join
+                            + where
+                            + " ORDER BY a.created_at DESC,a.id"
+                            " LIMIT :gov_limit OFFSET :gov_offset"
+                        ),
+                        {**params, "gov_limit": size, "gov_offset": offset},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as exc:
+        raise _gov_db_error(exc) from None
+    items = [
+        {
+            "id": str(row["id"]),
+            "credential_ref": str(row["credential_ref"]) if row["credential_ref"] else None,
+            "action": row["action"],
+            "outcome": row["outcome"],
+            "reason_code": str(row["reason_code"] or "")[:_GOV_MAX_FILTER_CHARS],
+            "actor": str(row["actor"] or "")[:_GOV_MAX_FILTER_CHARS],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "tenant_id": row["tenant_id"],
+        }
+        for row in rows
+    ]
+    return {"items": items, "total": total, "page": number, "page_size": size}

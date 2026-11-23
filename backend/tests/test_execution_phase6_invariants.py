@@ -24,7 +24,8 @@ P6 = REPO / "docs/requirement/agent-execution-platform-v2/phase-6-security-relia
 
 def test_single_migration_head_and_revision_lengths():
     heads = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads()
-    assert heads == ["0071_execution_credential"]
+    # Phase 6-2 planned migrations 0072/0073 append to the 0071 baseline.
+    assert heads == ["0073_execution_parser_diag"]
     assert all(len(head) <= 32 for head in heads)
 
 

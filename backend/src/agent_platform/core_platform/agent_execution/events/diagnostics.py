@@ -11,7 +11,8 @@ cannot recursively create an event storm (02 FR-15).
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -143,3 +144,99 @@ class ParserDiagnosticCollector:
             return encoded.decode("utf-8", "ignore")
         except Exception:  # noqa: BLE001 - unsafe diagnostics stay private.
             return None
+
+
+@dataclass(frozen=True, slots=True)
+class PersistedParserDiagnostic:
+    """A bucketed, Secret-free row ready for ``execution_parser_diagnostics``.
+
+    Deliberately has no ``sample`` field: raw samples and Secrets never leave
+    this process, let alone reach the database or the admin UI (R-4).
+    """
+
+    category: str
+    reason_code: str | None
+    tenant_id: str | None
+    run_id: UUID | None
+    bucket_start: datetime
+    count: int
+
+
+class ParserDiagnosticSink:
+    """Buffer classified counts for bounded, best-effort persistence.
+
+    ``accept`` is synchronous and allocation-only so it can be used directly
+    as the collector's sink without any I/O on the parser hot path. It reads
+    only stable classification fields from a :class:`ParserDiagnostic` and
+    never touches ``sample``; the reason code is a bounded, lower-cased code
+    derived from the engine/protocol identifiers. ``drain`` hands aggregated
+    rows to an async flush loop, and the buffer is hard-capped so a parser
+    event storm cannot grow memory without bound.
+    """
+
+    def __init__(
+        self,
+        *,
+        bucket_seconds: float = 60.0,
+        max_keys: int = 5000,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        if bucket_seconds <= 0:
+            raise ValueError("bucket_seconds must be positive")
+        if max_keys < 1:
+            raise ValueError("max_keys must be positive")
+        self._bucket_seconds = bucket_seconds
+        self._max_keys = max_keys
+        self._clock = clock or time.time
+        self._buffer: dict[tuple, PersistedParserDiagnostic] = {}
+
+    def accept(self, diagnostic: ParserDiagnostic, tenant_id: str | None = None) -> None:
+        if tenant_id is None:
+            # Lazy import avoids coupling the parser path to the tenant
+            # control plane at module import time.
+            from agent_platform.core_platform.platform_services.tenant_isolation.context import (
+                current_scope,
+            )
+
+            scope = current_scope()
+            tenant_id = scope.tenant_id if scope is not None else None
+        bucket = int(self._clock() // self._bucket_seconds) * int(self._bucket_seconds)
+        key = (
+            tenant_id,
+            diagnostic.run_id,
+            diagnostic.category,
+            self._reason_code(diagnostic),
+            bucket,
+        )
+        existing = self._buffer.get(key)
+        if existing is not None:
+            self._buffer[key] = replace(existing, count=existing.count + 1)
+            return
+        if len(self._buffer) >= self._max_keys:
+            return  # Bounded: drop rather than grow past the cap.
+        self._buffer[key] = PersistedParserDiagnostic(
+            category=diagnostic.category,
+            reason_code=self._reason_code(diagnostic),
+            tenant_id=tenant_id,
+            run_id=diagnostic.run_id,
+            bucket_start=datetime.fromtimestamp(bucket, UTC),
+            count=1,
+        )
+
+    def drain(self) -> list[PersistedParserDiagnostic]:
+        rows = list(self._buffer.values())
+        self._buffer.clear()
+        return rows
+
+    @staticmethod
+    def _reason_code(diagnostic: ParserDiagnostic) -> str | None:
+        parts = [diagnostic.category]
+        for value in (diagnostic.engine_id, diagnostic.protocol_id):
+            token = "".join(
+                char
+                for char in str(value).lower()
+                if char.isascii()
+                and (char.isdigit() or "a" <= char <= "z" or char in "._-")
+            )[:30]
+            parts.append(token or "unknown")
+        return ":".join(parts)[:120]

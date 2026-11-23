@@ -1052,3 +1052,189 @@ export const markNotificationRead = (id: string) =>
   post<{ id: string; read_at: string }>(`/notifications/${id}/read`);
 export const markAllNotificationsRead = () => post<{ updated: number }>('/notifications/read-all');
 export const acknowledgeNotification = (id: string) => post<{ id: string; status: string }>(`/notifications/${id}/acknowledge`);
+
+// Phase 6-2 · Execution governance observability (03-technical-design.md §2).
+// Every model below is read-only and Secret-free by contract: identifiers,
+// bounded reason codes and counts only — never an event payload, a raw parser
+// sample, a key or an encrypted/plaintext credential. Request failures are
+// surfaced by useResource as a stable error/empty state (fail-closed); nothing
+// in this layer fabricates a healthy value or falls back to a Reader view.
+
+/** Common server-side page envelope shared by the governance list endpoints. */
+export interface GovernancePage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/**
+ * Tenant/scope attached to a governance row. Some source tables have no
+ * `tenant_id` and are joined to `runtime_runs`; an orphaned join yields null,
+ * which the UI renders as 部署级. The object form covers a joined
+ * business/workspace scope; the string form covers a flattened scope.
+ */
+export type GovernanceScope = string | null | Record<string, unknown>;
+
+/** SIG-1 · GET /observability/execution/fencing-denials. */
+export interface FencingDenialRow {
+  run_id: string;
+  operation: string;
+  reason: string;
+  stale_owner: string | null;
+  stale_lease_epoch: number | null;
+  current_owner: string | null;
+  current_lease_epoch: number | null;
+  created_at: string;
+  tenant_id: string | null;
+  scope: GovernanceScope;
+  /** Additive backend marker: true iff the run_id had no joined tenant. */
+  deployment_level?: boolean;
+}
+
+/** SIG-3 · GET /observability/execution/cleanup-failures. */
+export interface CleanupFailureRow {
+  run_id: string;
+  category: 'failed' | 'unconfirmed_cancel' | string;
+  cleanup_status: string;
+  cleanup_updated_at: string | null;
+  cancel_requested_at: string | null;
+  cancel_confirmed_at: string | null;
+  tenant_id: string | null;
+  scope: GovernanceScope;
+}
+
+/** SIG-4 · one bounded `last_error` row of GET /observability/execution/outbox. */
+export interface OutboxLastError {
+  run_id: string;
+  seq: number;
+  attempts: number;
+  available_at: string;
+  /** Bounded, redacted delivery error — never an event payload. */
+  last_error: string | null;
+}
+/** SIG-4 · aggregate metrics + paged failure detail. */
+export interface OutboxView {
+  pending_count: number;
+  oldest_available_at: string | null;
+  stall_seconds: number | null;
+  last_errors: OutboxLastError[];
+  published_24h: number;
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** SIG-5 · GET /observability/execution/replay-gaps. */
+export interface ReplayGapRow {
+  id: string;
+  run_id: string;
+  requested_cursor_seq: number;
+  retention_floor_seq: number;
+  reason_code: string;
+  created_at: string;
+  tenant_id: string | null;
+  scope: GovernanceScope;
+}
+
+/** SIG-6 · GET /observability/execution/usage-conflicts. */
+export interface UsageConflictRow {
+  run_id: string;
+  tenant_id: string | null;
+  source: string;
+  source_event_id: string;
+  supersedes_id: string | null;
+  /** Usage/cost are display-only aggregates; never a secret or raw sample. */
+  usage: unknown;
+  cost: unknown;
+  is_estimate: boolean | null;
+  kind: 'chain' | 'duplicate' | string;
+}
+
+/** SIG-7 · GET /observability/execution/parser-diagnostics (counts only, D-class excluded). */
+export interface ParserDiagnosticRow {
+  bucket_start: string;
+  category: string;
+  reason_code: string | null;
+  count: number;
+  tenant_id: string | null;
+  run_id: string | null;
+}
+
+/** SIG-8 · GET /observability/execution/credential-audit (public audit fields only). */
+export interface CredentialAuditRow {
+  id: string | number;
+  credential_ref: string;
+  action: string;
+  outcome: string | null;
+  reason_code: string | null;
+  actor: string | null;
+  created_at: string;
+  tenant_id: string | null;
+}
+
+/** Optional filters shared by the governance list endpoints. */
+export interface GovernanceQuery {
+  from?: string;
+  to?: string;
+  run_id?: string;
+  reason?: string;
+  operation?: string;
+  action?: string;
+  category?: string;
+  kind?: string;
+  bucket?: string;
+  tenant_id?: string;
+  business_scope?: string;
+  workspace?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export type GovernanceEndpoint =
+  | 'fencing-denials'
+  | 'cleanup-failures'
+  | 'outbox'
+  | 'replay-gaps'
+  | 'usage-conflicts'
+  | 'parser-diagnostics'
+  | 'credential-audit';
+
+const GOVERNANCE_BASE = '/observability/execution';
+
+/**
+ * Build a governance endpoint path from typed filters. Used both by the typed
+ * loaders below and by `useResource` in the governance panel, so the wire shape
+ * has a single source of truth. Empty/undefined filters are omitted.
+ */
+export function governancePath(endpoint: GovernanceEndpoint, query: GovernanceQuery = {}): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    params.set(key, String(value));
+  }
+  const search = params.toString();
+  return `${GOVERNANCE_BASE}/${endpoint}${search ? `?${search}` : ''}`;
+}
+
+/** SIG-1 · typed loader; the UI calls the same path through `useResource`. */
+export const getFencingDenials = (query: GovernanceQuery = {}, signal?: AbortSignal) =>
+  api<GovernancePage<FencingDenialRow>>(governancePath('fencing-denials', query), { signal });
+/** SIG-3 */
+export const getCleanupFailures = (query: GovernanceQuery = {}, signal?: AbortSignal) =>
+  api<GovernancePage<CleanupFailureRow>>(governancePath('cleanup-failures', query), { signal });
+/** SIG-4 */
+export const getOutbox = (query: GovernanceQuery = {}, signal?: AbortSignal) =>
+  api<OutboxView>(governancePath('outbox', query), { signal });
+/** SIG-5 */
+export const getReplayGaps = (query: GovernanceQuery = {}, signal?: AbortSignal) =>
+  api<GovernancePage<ReplayGapRow>>(governancePath('replay-gaps', query), { signal });
+/** SIG-6 */
+export const getUsageConflicts = (query: GovernanceQuery = {}, signal?: AbortSignal) =>
+  api<GovernancePage<UsageConflictRow>>(governancePath('usage-conflicts', query), { signal });
+/** SIG-7 · counts/redacted reason codes only. */
+export const getParserDiagnostics = (query: GovernanceQuery = {}, signal?: AbortSignal) =>
+  api<GovernancePage<ParserDiagnosticRow>>(governancePath('parser-diagnostics', query), { signal });
+/** SIG-8 · `action` defaults to `revoked`, the audit's focus action. */
+export const getCredentialAudit = (query: GovernanceQuery = {}, signal?: AbortSignal) =>
+  api<GovernancePage<CredentialAuditRow>>(governancePath('credential-audit', { action: 'revoked', ...query }), { signal });

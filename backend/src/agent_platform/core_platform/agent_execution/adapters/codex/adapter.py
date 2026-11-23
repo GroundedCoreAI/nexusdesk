@@ -47,6 +47,7 @@ from ...contracts import (
     ensure_handle_identity,
     ensure_request_identity,
 )
+from ...events.diagnostics import ParserDiagnosticCollector
 from ...host.host_models import (
     MAX_STDIN_PAYLOAD_BYTES,
     ProcessResult,
@@ -175,6 +176,7 @@ class CodexCliAdapter:
         id_factory: object | None = None,
         provider_resolver: object | None = None,
         path_env: str | None = None,
+        diagnostics: ParserDiagnosticCollector | None = None,
     ) -> None:
         self._host = host
         # Internal Fencing evidence captured from the claimed ExecutionContext;
@@ -191,6 +193,7 @@ class CodexCliAdapter:
         # lane). Q5: deployment-owned PATH wins over the published path_env.
         self._provider_resolver = provider_resolver
         self._path_env = path_env
+        self._diagnostics = diagnostics
         self._config = config
         self._gate = gate
         self._root = workdir_root
@@ -414,6 +417,7 @@ class CodexCliAdapter:
             trace_id=self._request.trace_id if self._request is not None else None,
             clock=self._clock,
             id_factory=self._id_factory,
+            diagnostics=self._diagnostics,
         )
         try:
             for line in result.stdout.splitlines():

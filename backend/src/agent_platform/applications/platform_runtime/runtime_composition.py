@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from asyncpg import PostgresError
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from agent_platform.business_capabilities.approval.capability import ApprovalCapability
@@ -83,6 +84,10 @@ from agent_platform.core_platform.agent_execution.credentials.repository import 
 )
 from agent_platform.core_platform.agent_execution.credentials.vault import (
     ExecutionCredentialVault,
+)
+from agent_platform.core_platform.agent_execution.events.diagnostics import (
+    ParserDiagnosticCollector,
+    ParserDiagnosticSink,
 )
 from agent_platform.core_platform.agent_execution.events.outbox import OutboxDispatcher
 from agent_platform.core_platform.agent_execution.host.docker_sandbox_provider import (
@@ -596,6 +601,7 @@ def _codex_adapters(
     runtime_host: RuntimeHost | None,
     execution_broker=None,
     codex_provider_resolver: CodexProviderResolver | None = None,
+    diagnostics: ParserDiagnosticCollector | None = None,
 ) -> tuple[
     tuple[AdapterDescriptor, Callable[[], AgentEngineAdapter]],
     tuple[AdapterDescriptor, Callable[[], AgentEngineAdapter]],
@@ -683,6 +689,7 @@ def _codex_adapters(
             credential_broker=execution_broker,
             history=context.history,
             ownership=ownership,
+            diagnostics=diagnostics,
         )
 
     def app_server_factory() -> AgentEngineAdapter:
@@ -743,7 +750,15 @@ def _build_execution_orchestrator(
 
     settings = settings or Settings(_env_file=None)
     adapters = adapters or _execution_adapter_registry()
-    adapters.register(_react_adapter_descriptor(settings), ReactAdapterFactory(runtime_factory))
+    # Phase 6-2 SIG-7: the Host assembly owns the one parser-diagnostic
+    # collector. Thread it into both adapter families so real malformed events
+    # reach the sink; when there is no Host (API/non-runtime workers) this stays
+    # ``None`` and the mappers keep their fail-closed, diagnostic-free path.
+    collector = getattr(execution_runtime, "parser_diagnostics", None)
+    adapters.register(
+        _react_adapter_descriptor(settings),
+        ReactAdapterFactory(runtime_factory, diagnostics=collector),
+    )
     # Phase 5: both Codex protocols share the ``codex`` engine. Registration is
     # unconditional so the pairing is enumerable, but ``enabled`` follows the
     # deployment gate, and the App-Server descriptor is always disabled while
@@ -751,7 +766,11 @@ def _build_execution_orchestrator(
     # warm targets below stay exactly one React entry (R-46).
     codex_runtime_host = execution_runtime.host if execution_runtime is not None else None
     for descriptor, factory in _codex_adapters(
-        settings, codex_runtime_host, execution_broker, codex_provider_resolver
+        settings,
+        codex_runtime_host,
+        execution_broker,
+        codex_provider_resolver,
+        diagnostics=collector,
     ):
         # Registering a disabled descriptor is legal and is what keeps the
         # Engine/Protocol pairing enumerable; resolution still fails closed with
@@ -889,6 +908,12 @@ class ExecutionRuntimeSubsystem:
     retention_days: int = 30
     retention_cleanup_enabled: bool = False
     retention_interval_seconds: float = 60.0
+    # Phase 6-2 SIG-7 / T-8: the collector is a real, wired instance with a
+    # bounded Secret-free sink and a periodic flush loop. Raw samples stay off
+    # (execution_parser_raw_sample_enabled=false); the sink never reads them.
+    parser_diagnostics: ParserDiagnosticCollector | None = None
+    parser_diagnostics_sink: ParserDiagnosticSink | None = None
+    parser_diagnostics_flush_seconds: float = 60.0
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
     async def recover_on_startup(self) -> None:
@@ -952,6 +977,12 @@ class ExecutionRuntimeSubsystem:
             self._tasks.append(
                 asyncio.create_task(self._retention_loop(), name="execution-retention")
             )
+        if self.parser_diagnostics_sink is not None and self.repository is not None:
+            self._tasks.append(
+                asyncio.create_task(
+                    self._parser_diagnostics_flush_loop(), name="execution-parser-diagnostics"
+                )
+            )
 
     async def aclose(self) -> None:
         """Stop loops, then the Host's stop-admission->drain machine (T14 order).
@@ -963,6 +994,8 @@ class ExecutionRuntimeSubsystem:
         values require a deployment stop-timeout change (03 §4.3), which the
         compose files document.
         """
+        # Final best-effort diagnostics flush before stopping the loop.
+        await self._flush_parser_diagnostics()
         for task in self._tasks:
             task.cancel()
         if self._tasks:
@@ -1018,6 +1051,40 @@ class ExecutionRuntimeSubsystem:
                     )
             except Exception:  # noqa: BLE001 - retry on the next tick.
                 logger.warning("execution event retention deferred")
+
+    async def _parser_diagnostics_flush_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.parser_diagnostics_flush_seconds)
+            await self._flush_parser_diagnostics()
+
+    async def _flush_parser_diagnostics(self) -> None:
+        """Persist bounded classified counts; never persist samples or Secrets."""
+        if self.parser_diagnostics_sink is None or self.repository is None:
+            return
+        rows = self.parser_diagnostics_sink.drain()
+        if not rows:
+            return
+        try:
+            async with self.repository.engine.begin() as conn:
+                for row in rows:
+                    await conn.execute(
+                        text(
+                            """INSERT INTO execution_parser_diagnostics
+                               (id,tenant_id,run_id,category,reason_code,count,bucket_start)
+                               VALUES (gen_random_uuid(),:tenant,:run,:category,
+                                       :reason,:count,:bucket)"""
+                        ),
+                        {
+                            "tenant": row.tenant_id,
+                            "run": row.run_id,
+                            "category": row.category,
+                            "reason": row.reason_code,
+                            "count": row.count,
+                            "bucket": row.bucket_start,
+                        },
+                    )
+        except Exception:  # noqa: BLE001 - diagnostics are best-effort only.
+            logger.warning("execution parser diagnostics persistence deferred")
 
     async def operational_stats(self) -> dict[str, int | None]:
         """Bounded metrics surface for the composition health check."""
@@ -1166,6 +1233,15 @@ def _build_execution_runtime_subsystem(
             # Persistence/trigger/security stay on; publication stays pending
             # and recoverable instead of silently disabling the Outbox.
             logger.error("execution outbox enabled without an acknowledged bus")
+    # Phase 6-2 SIG-7: a real collector with a Secret-free bounded sink. Raw
+    # samples stay disabled by the existing setting; no new switch is added.
+    parser_sink = ParserDiagnosticSink()
+    parser_collector = ParserDiagnosticCollector(
+        sink=parser_sink.accept,
+        raw_samples_enabled=settings.execution_parser_raw_sample_enabled,
+        max_sample_bytes=settings.execution_parser_sample_max_bytes,
+        max_per_minute=settings.execution_parser_max_diagnostics_per_minute,
+    )
     return ExecutionRuntimeSubsystem(
         host=host,
         workspace=workspace,
@@ -1181,6 +1257,8 @@ def _build_execution_runtime_subsystem(
         retention_days=settings.execution_event_retention_days,
         retention_cleanup_enabled=settings.execution_event_cleanup_enabled,
         retention_interval_seconds=settings.execution_event_cleanup_interval_seconds,
+        parser_diagnostics=parser_collector,
+        parser_diagnostics_sink=parser_sink,
     )
 
 

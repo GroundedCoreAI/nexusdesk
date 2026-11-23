@@ -1,7 +1,8 @@
 # NexusDesk Agent 执行平台 v2 · 分阶段规划文档
 
-> 状态：Phase 0/1 已按 `11-scope-limited-acceptance-record-20261118.md` 于 2026-11-18 重新验收闭合，判定 **通过（范围限定 / PASS scope-limited）**；该闭合来自新的证据约束验收记录（13 lanes / 5,464 tests / 0 failures）与单一验收负责人签署，**非由后续合入追认**，Phase 0/1 的 07 历史原文与测试数值一律保留。后续各阶段报告保留各自边界。Phase 5 Stage A（`codex/cli_exec/v1`）已于 2026-11-20 完成**范围限定**端到端验收（PASS scope-limited），由单一验收负责人 JackChow 签署，权威记录 `13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`；Stage A 在 quickstart 单租户演示范围的解锁记录见 `phase-5-codex-integration/07-acceptance-report.md` 末章。容器内需 `bwrap` 沙箱的工具调用受 Docker 默认 seccomp 阻断，登记为部署加固边界；Stage B 仍锁定，P5-IT-18 与 Stage B 独立解锁记录仍未满足；生产 Codex 路由、不可信多租户等高风险启用未请求、未授权。Phase 6 01～05 与双语 08 已于 2026-11-16 按代码现实核查并批准直接继续开发；不声称 Phase 6 已实施、测试、验收或获准不可信开放。Phase 7 暂缓。
+> 状态：Phase 0/1 已按 `11-scope-limited-acceptance-record-20261118.md` 于 2026-11-18 重新验收闭合，判定 **通过（范围限定 / PASS scope-limited）**；该闭合来自新的证据约束验收记录（13 lanes / 5,464 tests / 0 failures）与单一验收负责人签署，**非由后续合入追认**，Phase 0/1 的 07 历史原文与测试数值一律保留。后续各阶段报告保留各自边界。Phase 5 Stage A（`codex/cli_exec/v1`）已于 2026-11-20 完成**范围限定**端到端验收（PASS scope-limited），由单一验收负责人 JackChow 签署，权威记录 `13-scope-limited-acceptance-record-20261120-phase7-stage-a.md`；Stage A 在 quickstart 单租户演示范围的解锁记录见 `phase-5-codex-integration/07-acceptance-report.md` 末章。容器内需 `bwrap` 沙箱的工具调用受 Docker 默认 seccomp 阻断，登记为部署加固边界；Stage B 仍锁定，P5-IT-18 与 Stage B 独立解锁记录仍未满足；生产 Codex 路由、不可信多租户等高风险启用未请求、未授权。Phase 6 01～05 与双语 08 已于 2026-11-16 按代码现实核查并批准直接继续开发；不声称 Phase 6 已实施、测试、验收或获准不可信开放。Phase 6-2（执行治理可观测性）于 2026-11-22 生成双语 01～05 与 08 文档范围基线，**未实施、未测试、未验收**；仅补统一治理查询 API 与可视化 UI，不改执行语义、不开放不可信多租户、不引入 Prometheus。Phase 7 暂缓。
 > 创建：2026-11-02
+> 修订：2026-11-22（新增 Phase 6-2 `phase-6-2-execution-governance-observability/` 双语 01～05 + 08 文档范围基线：把 Phase 6 FR-16 可运维性的 8 类治理信号补上统一 admin-only 查询 API 与「运行与审计」页内执行治理 tab；状态明确为未实施/未测试/未验收，06/07 报告不预写。本修订不改写任何历史结论或测试数值）
 > 修订：2026-11-21（Phase 0/1 状态行按 11 号记录同步为「通过（范围限定）」，明确「非由后续合入追认」；同步 Review 指引；09 §0 表格拆行，区分「验收负责人结论可闭合」与「独立安全批准不可由机器产出」；Phase 4/5 的 07 状态行按 12/13 号记录同步；归档 `05-pending-env.md` 登记清单并补齐证据包链接与 SHA256。本修订不改写任何历史结论、执行记录或测试数值）
 > 修订：2026-11-20（Phase 5 Stage A 收口：修正本行「Stage A 完整验收未通过」的过期表述，登记 `13` 已签署的范围限定验收记录与 `07` Stage A 解锁记录；明确容器内 bwrap 沙箱边界、Stage B 与高风险启用仍锁定；CD `.env` 版本号回写陷阱由 PR #157 关闭。Phase 0/1 正式验收缺口不因本修订追认完成）
 > 修订：2026-11-18（阶段 0–3 验收范围限定：性能/容量/p50/p95/C11 延迟、配对样本与样本数、≤5%/≤50ms、CI provenance/最终 PR head 双跑/CI run URL、真实或授权历史样本、多样本/大数据量均不作为阶段验收门禁，仅作历史记录或范围外说明；保留功能正确性、开关完备性、租户隔离、Secret、数据完整性、迁移、终态/副作用、无 P0/P1 与单一验收记录；高风险能力启用仍为独立审批；阶段 0–3 非破坏性 lane 接受受控共享生产主机）
@@ -41,6 +42,7 @@
 | Phase 4 | Runtime Host、进程监管与 Workspace | 外部 Engine 的受管进程和隔离工作目录 | P1 | ~3–4 周 | [phase-4-runtime-host-workspace/](phase-4-runtime-host-workspace/) |
 | Phase 5 | Codex 集成 | 以 CLI、再以 App-Server 验证多协议架构 | P1 | ~8 周（A/B 串行） | [phase-5-codex-integration/](phase-5-codex-integration/) |
 | Phase 6 | 安全、可靠性与事件治理 | 达到不可信多租户执行的生产门槛 | P1 | ~4–6 周 | [phase-6-security-reliability-events/](phase-6-security-reliability-events/) |
+| Phase 6-2 | 执行治理可观测性 | 把 FR-16 治理信号补上统一 admin 查询 API 与可视化入口 | P2（文档基线，未实施） | 重新排期后按容量评审 | [phase-6-2-execution-governance-observability/](phase-6-2-execution-governance-observability/) |
 | Phase 7 | 高级 Engine 能力与规模化 | 按独立能力切片扩展生态、治理与成本 | P4（暂缓） | 重新排期后按切片评审 | [phase-7-advanced-engines-scale/](phase-7-advanced-engines-scale/) |
 
 > **Phase 7 暂缓说明（2026-11-07）**：本阶段不进入实施、测试或验收；FR-1～FR-11 以最低优先级 P4 issue #110～#120 跟踪，明确重新激活前不作为交付承诺。

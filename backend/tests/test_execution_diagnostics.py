@@ -7,14 +7,19 @@ diagnostic path can recursively emit another diagnostic.
 """
 
 from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
+from agent_platform.applications.platform_runtime import runtime_composition
+from agent_platform.core_platform.agent_execution.adapters.codex.adapter import CodexCliAdapter
 from agent_platform.core_platform.agent_execution.adapters.codex.events import (
     CodexEventMapper,
     CodexEventParser,
 )
+from agent_platform.core_platform.agent_execution.adapters.react.adapter import _Execution
 from agent_platform.core_platform.agent_execution.adapters.react.event_mapper import (
     ReactEventMapper,
 )
@@ -219,3 +224,62 @@ def test_react_mapper_still_maps_valid_events():
     assert event.payload == {"note": "ok"}
     assert records == []
     assert event.timestamp.tzinfo == UTC and isinstance(event.timestamp, datetime)
+
+
+# --- SIG-7 wiring: collector reaches the real adapter/mapper path ----------
+
+
+def test_composition_wires_parser_collector_into_react_and_codex_factories():
+    """The Host-owned collector must reach both factory families (the T-8 bug
+    was a collector that existed but was never passed to any mapper)."""
+    collector, _records = _collector()
+    fake_runtime = SimpleNamespace(
+        parser_diagnostics=collector,
+        host=None,
+        workspace=object(),
+    )
+    registry = runtime_composition._execution_adapter_registry()
+    runtime_composition._build_execution_orchestrator(
+        SimpleNamespace(), registry, execution_runtime=fake_runtime
+    )
+
+    react_factory = registry._registrations[("react", "native", "v1")][1]
+    assert react_factory._diagnostics is collector
+    codex_factory = registry._registrations[("codex", "cli_exec", "v1")][1]
+    closure_values = [cell.cell_contents for cell in (codex_factory.__closure__ or ())]
+    assert any(value is collector for value in closure_values)
+
+    # Off state (no runtime subsystem) stays diagnostic-free: zero regression.
+    off_registry = runtime_composition._execution_adapter_registry()
+    runtime_composition._build_execution_orchestrator(SimpleNamespace(), off_registry)
+    off_react = off_registry._registrations[("react", "native", "v1")][1]
+    assert off_react._diagnostics is None
+
+
+@pytest.mark.asyncio
+async def test_react_adapter_threads_diagnostics_into_its_mapper():
+    """The collector survives ReactAdapter -> _Execution -> ReactEventMapper."""
+    collector, _records = _collector()
+    execution = _Execution(SimpleNamespace(), _request(), SimpleNamespace(), 1, diagnostics=collector)
+    assert execution.mapper._diagnostics is collector
+
+    # And a malformed native event still reaches the sink through that mapper.
+    with pytest.raises(AdapterExecutionError):
+        execution.mapper.map("extension.note", {"event_id": "collision"})
+    assert any(record.category == "malformed" for record in _records)
+
+
+def test_codex_adapter_receives_diagnostics_from_factory():
+    """The CLI factory hands the collector to CodexCliAdapter, which feeds it to
+    the CodexEventMapper it builds in ``_stream``."""
+    collector, _records = _collector()
+    adapter = CodexCliAdapter(
+        SimpleNamespace(),
+        config=SimpleNamespace(),
+        gate=SimpleNamespace(),
+        workdir_root=Path("/tmp"),
+        resource_policy=SimpleNamespace(),
+        diagnostics=collector,
+    )
+    assert adapter._diagnostics is collector
+

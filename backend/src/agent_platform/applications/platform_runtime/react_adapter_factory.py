@@ -4,6 +4,9 @@ from agent_platform.core_platform.agent_execution.adapters.react.adapter import 
     ReactAdapter,
     RuntimeFactory,
 )
+from agent_platform.core_platform.agent_execution.events.diagnostics import (
+    ParserDiagnosticCollector,
+)
 from agent_platform.core_platform.agent_execution.orchestration.execution_context import (
     capture_execution_context,
 )
@@ -12,8 +15,18 @@ from agent_platform.core_platform.agent_execution.orchestration.execution_contex
 class ReactAdapterFactory:
     """Capture ContextVar synchronously; Runtime construction remains in the runner."""
 
-    def __init__(self, runtime_factory: RuntimeFactory) -> None:
+    def __init__(
+        self,
+        runtime_factory: RuntimeFactory,
+        *,
+        diagnostics: ParserDiagnosticCollector | None = None,
+    ) -> None:
         self._runtime_factory = runtime_factory
+        self._diagnostics = diagnostics
 
     def __call__(self) -> ReactAdapter:
-        return ReactAdapter(capture_execution_context(), self._runtime_factory)
+        return ReactAdapter(
+            capture_execution_context(),
+            self._runtime_factory,
+            diagnostics=self._diagnostics,
+        )
