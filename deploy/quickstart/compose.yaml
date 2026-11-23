@@ -46,6 +46,11 @@ services:
       # bundles: zh-CN (default), zh-TW, en, hi. First-boot only:
       # NEXUSDESK_SEED_LOCALE=en docker compose ... up on a fresh volume.
       AGENT_SEED_LOCALE: ${NEXUSDESK_SEED_LOCALE:-zh-CN}
+      # Synthetic execution-governance demo rows for the 执行治理 panel. Seeded
+      # on every quickstart startup (idempotent, preserves operator edits); set
+      # NEXUSDESK_SEED_EXECUTION_GOVERNANCE_DEMO=false for a clean panel.
+      # Synthetic demo data only, never acceptance evidence.
+      AGENT_SEED_EXECUTION_GOVERNANCE_DEMO: ${NEXUSDESK_SEED_EXECUTION_GOVERNANCE_DEMO:-true}
       AGENT_MODEL_BACKEND: demo
       AGENT_TENANT_ID: local
       # Extra names and IP addresses for the self-signed certificate, so a browser
@@ -108,7 +113,7 @@ services:
       AGENT_CODEX_MODEL: ${AGENT_CODEX_MODEL:-deepseek-flash}
       AGENT_CODEX_MODEL_PROVIDER: ${AGENT_CODEX_MODEL_PROVIDER:-deepseek}
       AGENT_CODEX_MODEL_BASE_URL: ${AGENT_CODEX_MODEL_BASE_URL:-https://api.deepseek.com/v1}
-      AGENT_CODEX_CREDENTIAL_ENV_KEY: ${AGENT_CODEX_CREDENTIAL_ENV_KEY:-DEEPSEEK_API_KEY}
+      AGENT_CODEX_CREDENTIAL_ENV_KEY: ${AGENT_CODEX_CREDENTIAL_ENV_KEY:-OPENAI_API_KEY}
       # Legacy-lane credential override. This is a UUID *reference* minted by the
       # admin execution-credentials API, NEVER a secret value; no key belongs in
       # this file or in any container env var. ModelGateway-bound Agents derive

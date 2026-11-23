@@ -16,6 +16,7 @@ import boto3
 import httpx
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
+from alembic.util.exc import CommandError
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError
 from sqlalchemy import text
@@ -26,6 +27,8 @@ from agent_platform.core_platform.platform_services.persistence.store import man
 from .registry import CollectorContext, CollectorError
 
 BACKEND_ROOT = Path(__file__).resolve().parents[5]
+# Bound the ancestor walk so a broken install cannot scan the whole filesystem.
+_CONFIG_SEARCH_DEPTH = 8
 MODEL_PROBE_ACTION = "model.connection.probed"
 HTTP_PROBE_TIMEOUT = 3.0
 
@@ -45,9 +48,52 @@ async def pg_connection(ctx: CollectorContext) -> dict:
     return {"latency_ms": int((time.monotonic() - started) * 1000)}
 
 
+def _alembic_config_candidates() -> list[Path]:
+    """Where to look for ``alembic.ini``, most specific first.
+
+    In the source tree the config sits next to ``BACKEND_ROOT``. In an installed
+    wheel the module lives under ``site-packages``, so ``BACKEND_ROOT`` is a
+    venv directory with no config; walking ancestors reaches the app root.
+    """
+
+    module_dir = Path(__file__).resolve().parent
+    roots = [BACKEND_ROOT, *module_dir.parents[:_CONFIG_SEARCH_DEPTH]]
+    candidates: list[Path] = []
+    for root in roots:
+        root = root.resolve()
+        if root not in candidates:
+            candidates.append(root)
+    return candidates
+
+
+def _resolve_alembic_config() -> AlembicConfig:
+    for root in _alembic_config_candidates():
+        ini = root / "alembic.ini"
+        if not ini.is_file():
+            continue
+        try:
+            config = AlembicConfig(str(ini))
+            location = config.get_main_option("script_location")
+        except CommandError:
+            continue
+        if not location:
+            continue
+        migrations = Path(location)
+        if not migrations.is_absolute():
+            migrations = root / migrations
+        if migrations.is_dir():
+            return config
+    raise CollectorError("alembic_config_missing")
+
+
 def _alembic_heads() -> list[str]:
-    config = AlembicConfig(str(BACKEND_ROOT / "alembic.ini"))
-    return list(ScriptDirectory.from_config(config).get_heads())
+    config = _resolve_alembic_config()
+    try:
+        return list(ScriptDirectory.from_config(config).get_heads())
+    except CommandError as exc:
+        raise CollectorError(
+            "alembic_config_missing", error_code=type(exc).__name__
+        ) from None
 
 
 async def pg_migration(ctx: CollectorContext) -> dict:

@@ -144,6 +144,19 @@ def seed_execution_platform():
     )
 
 
+def seed_execution_governance():
+    """Load the opt-in synthetic governance demo dataset.
+
+    Explicit operator choice only (``AGENT_SEED_EXECUTION_GOVERNANCE_DEMO``).
+    The module is idempotent, preserves operator edits, and never emits a
+    real secret or an acceptance claim.
+    """
+    subprocess.run(
+        [sys.executable, "-m", "agent_platform.applications.seed_execution_governance"],
+        check=True,
+    )
+
+
 def seed_service_applications() -> bool:
     """Install immutable service application examples. Idempotent.
 
@@ -261,6 +274,10 @@ def main(mode):
         if settings.seed_industries:
             seed_industry_cases(settings)
             seed_memory_demo()
+        if settings.seed_execution_governance_demo:
+            # Migrate plus this flag is an explicit operator opt-in to synthetic
+            # governance demo rows; the default stays clean.
+            seed_execution_governance()
         print("Migrations and configured storage checks completed.", flush=True)
         return
     subprocess.run([sys.executable, "-m", "agent_platform.applications.seed"], check=True)
@@ -270,6 +287,8 @@ def main(mode):
         seed_industry_cases(settings)
     seed_memory_demo()
     seed_execution_platform()
+    if settings.seed_execution_governance_demo:
+        seed_execution_governance()
     authority = render_nginx_config(settings)
     print(
         "NexusDesk quickstart: https://localhost:8080 — local demonstration only\n"

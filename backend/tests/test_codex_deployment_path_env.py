@@ -47,7 +47,7 @@ _HOME_CONFIG = CodexEngineHomeConfig(
     model="deepseek-flash",
     model_provider="deepseek",
     base_url="https://api.deepseek.com/v1",
-    env_key="DEEPSEEK_API_KEY",
+    env_key="OPENAI_API_KEY",
 )
 
 

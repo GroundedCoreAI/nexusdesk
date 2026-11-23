@@ -93,7 +93,7 @@ def test_quickstart_execution_switches_default_fail_closed():
         "${AGENT_CODEX_MODEL_BASE_URL:-https://api.deepseek.com/v1}"
     )
     assert env["AGENT_CODEX_CREDENTIAL_ENV_KEY"] == (
-        "${AGENT_CODEX_CREDENTIAL_ENV_KEY:-DEEPSEEK_API_KEY}"
+        "${AGENT_CODEX_CREDENTIAL_ENV_KEY:-OPENAI_API_KEY}"
     )
     # D-3: the ceiling is parameterized but keeps the generic default, so a
     # deployment that never enables Codex is byte-identical to before.

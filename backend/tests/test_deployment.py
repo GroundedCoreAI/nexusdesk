@@ -93,6 +93,40 @@ def test_quickstart_bootstrap_installs_execution_demo(monkeypatch):
     ]
 
 
+def test_execution_governance_demo_flag_defaults_off_and_is_env_overridable(monkeypatch):
+    """Synthetic governance rows are opt-in; production stays clean by default."""
+
+    assert configuration().seed_execution_governance_demo is False
+    monkeypatch.setenv("AGENT_SEED_EXECUTION_GOVERNANCE_DEMO", "true")
+    assert (
+        Settings(
+            _env_file=None,
+            database_url="postgresql+asyncpg://test:test@localhost/test",
+        ).seed_execution_governance_demo
+        is True
+    )
+
+
+def test_seed_execution_governance_emits_the_expected_subprocess_command(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        bootstrap,
+        "subprocess",
+        SimpleNamespace(run=lambda command, check: calls.append((command, check))),
+    )
+    bootstrap.seed_execution_governance()
+    assert calls == [
+        (
+            [
+                sys.executable,
+                "-m",
+                "agent_platform.applications.seed_execution_governance",
+            ],
+            True,
+        )
+    ]
+
+
 def test_service_application_examples_default_on_and_are_env_overridable(monkeypatch):
     """The v2 example catalog is independent from the optional industry cases."""
 
