@@ -35,7 +35,10 @@ class Connection(Contract):
     # upstream directly, so these describe that transport, not Gateway.invoke().
     execution_credential_ref: UUID | None = None
     codex_base_url: str | None = Field(default=None, max_length=500)
-    codex_wire_api: Literal["responses", "chat"] | None = None
+    # Codex 0.169+ supports only the Responses wire protocol; ``chat`` was
+    # removed and is rejected here so a connection cannot store a value the
+    # engine can never run.
+    codex_wire_api: Literal["responses"] | None = None
     codex_model_provider: str | None = Field(default=None, max_length=64)
 
     @field_validator("codex_base_url")

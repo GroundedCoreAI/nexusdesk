@@ -45,7 +45,7 @@ _HOME_CONFIG = CodexEngineHomeConfig(
     model="deepseek-flash",
     model_provider="deepseek",
     base_url="https://api.deepseek.com/v1",
-    env_key="DEEPSEEK_API_KEY",
+    env_key="OPENAI_API_KEY",
 )
 
 
@@ -62,9 +62,22 @@ def test_rendered_config_is_key_free_and_uses_responses():
     rendered = _HOME_CONFIG.to_toml()
     assert 'model = "deepseek-flash"' in rendered
     assert 'base_url = "https://api.deepseek.com/v1"' in rendered
-    assert 'env_key = "DEEPSEEK_API_KEY"' in rendered
+    assert 'env_key = "OPENAI_API_KEY"' in rendered
     assert 'wire_api = "responses"' in rendered
     assert "CANARY_VALUE" not in rendered
+
+
+def test_chat_wire_api_is_rejected_before_a_run_starts():
+    """Codex 0.169+ aborts at config parse when ``wire_api = "chat"``."""
+
+    with pytest.raises(ValueError, match="no longer supports"):
+        CodexEngineHomeConfig(
+            model="deepseek-flash",
+            model_provider="deepseek",
+            base_url="https://api.deepseek.com/v1",
+            env_key="OPENAI_API_KEY",
+            wire_api="chat",
+        )
 
 
 def test_env_key_allowlist_is_closed():

@@ -33,7 +33,10 @@ __all__ = ["CodexProviderPlan", "CodexProviderResolver", "CodexRouteError"]
 _CODEX_ENV_KEY = "OPENAI_API_KEY"
 _PROVIDER_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _NON_PROVIDER_CHAR = re.compile(r"[^A-Za-z0-9_-]")
-_WIRE_APIS = frozenset({"responses", "chat"})
+# Codex 0.169+ removed ``chat``: the CLI aborts before the first turn when
+# ``config.toml`` carries it. Accepting it here would publish a profile that
+# can only fail at run time as the opaque ``engine_unavailable``.
+_WIRE_APIS = frozenset({"responses"})
 
 
 class CodexRouteError(RuntimeError):
@@ -163,7 +166,10 @@ class CodexProviderResolver:
         _require_bare_https(base_url)
         self._assert_host_allowed(base_url)
         if wire_api not in _WIRE_APIS:
-            raise CodexRouteError("codex_route_missing")
+            # ``chat`` used to be accepted; the installed CLI now rejects it
+            # outright, so name the unsupported protocol instead of reporting
+            # a generic missing route.
+            raise CodexRouteError("codex_wire_api_unsupported")
         credential_ref: UUID | None = None
         if credential_raw is not None:
             try:

@@ -58,12 +58,25 @@ def _gateway_snapshot(reference: UUID | None) -> dict:
         "routes": [
             {
                 "connection": {
-                    "execution_credential_ref": (
-                        str(reference) if reference is not None else None
-                    )
+                    "execution_credential_ref": (str(reference) if reference is not None else None)
                 }
             }
         ]
+    }
+
+
+def _model_snapshot(wire_api: str | None = "responses") -> dict:
+    return {
+        "spec": {"operation": "chat"},
+        "routes": [
+            {
+                "model": {"tool_calling": True},
+                "connection": {
+                    "execution_credential_ref": str(_REF),
+                    "codex_wire_api": wire_api,
+                },
+            }
+        ],
     }
 
 
@@ -221,6 +234,44 @@ def test_missing_catalog_skips_gateway_profile_branch_for_credentials() -> None:
     _validate(conn, config)
 
     assert conn.calls[0][1]["ref"] == _REF
+    assert config.codex is not None
+    assert config.codex.credential_ref == str(_REF)
+
+
+def test_gateway_profile_with_chat_wire_api_is_rejected_at_publish() -> None:
+    """Codex 0.169+ removed ``chat``; publishing it would fail every run."""
+
+    catalog = _FakeCatalog(_model_snapshot(wire_api="chat"))
+    config = _config("codex", str(_REF), gateway_profile_id=str(_PROFILE_ID))
+
+    with pytest.raises(DomainError) as exc:
+        asyncio.run(_service(catalog).validate_model(_TENANT, config, object()))
+    assert exc.value.code == "codex_model_profile_invalid"
+
+
+def test_gateway_profile_with_responses_wire_api_is_accepted_at_publish() -> None:
+    catalog = _FakeCatalog(_model_snapshot(wire_api="responses"))
+    config = _config("codex", str(_REF), gateway_profile_id=str(_PROFILE_ID))
+
+    asyncio.run(_service(catalog).validate_model(_TENANT, config, object()))
+
+
+def test_credential_must_allow_the_agent_workspace() -> None:
+    conn = _FakeConn(_row(allowed_workspaces=["other-workspace"]))
+    config = _config("codex", str(_REF))
+
+    with pytest.raises(DomainError) as exc:
+        asyncio.run(
+            _service().validate_codex_credential(_TENANT, config, conn, workspace_id="default")
+        )
+    assert exc.value.code == "codex_credential_invalid"
+
+
+def test_credential_for_the_agent_workspace_is_accepted() -> None:
+    conn = _FakeConn(_row(allowed_workspaces=["default"]))
+    config = _config("codex", str(_REF))
+
+    asyncio.run(_service().validate_codex_credential(_TENANT, config, conn, workspace_id="default"))
     assert config.codex is not None
     assert config.codex.credential_ref == str(_REF)
 

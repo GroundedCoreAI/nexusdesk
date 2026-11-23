@@ -21,7 +21,11 @@ from ...workspace.execution_workdir import (
 
 CONFIG_FILE_NAME = "config.toml"
 WIRE_API = "responses"
-_WIRE_APIS = frozenset({"responses", "chat"})
+# The pinned Codex CLI removed ``chat`` (0.169+): writing it makes the CLI
+# abort at config parse with "wire_api = 'chat' is no longer supported", which
+# the adapter can only report as the opaque ``engine_unavailable``. Only the
+# wire protocol the installed binary actually accepts may be rendered.
+_WIRE_APIS = frozenset({"responses"})
 _PROVIDER_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
@@ -50,12 +54,18 @@ class CodexEngineHomeConfig:
         if not _PROVIDER_ID.fullmatch(self.model_provider):
             raise ValueError("codex model provider must be a bounded identifier")
         parsed = urlparse(self.base_url)
-        if parsed.scheme != "https" or not parsed.netloc or any(ch.isspace() for ch in self.base_url):
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or any(ch.isspace() for ch in self.base_url)
+        ):
             raise ValueError("codex base_url must be a bare https URL")
         if self.env_key not in CODEX_CREDENTIAL_ENV_KEYS:
             raise ValueError("codex credential env_key is not in the closed allowlist")
         if self.wire_api not in _WIRE_APIS:
-            raise ValueError("codex wire_api must be 'responses' or 'chat'")
+            raise ValueError(
+                "codex wire_api must be 'responses'; the pinned Codex CLI no longer supports 'chat'"
+            )
 
     def to_toml(self) -> str:
         """Render a key-free TOML document with TOML-safe quoted strings."""

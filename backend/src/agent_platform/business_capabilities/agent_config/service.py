@@ -268,7 +268,9 @@ class AgentService:
                 raise DomainError("execution_configuration_invalid", 409) from None
             raise DomainError("execution_engine_unavailable", 409) from None
 
-    async def validate_codex_credential(self, tenant, config, c) -> None:
+    async def validate_codex_credential(
+        self, tenant, config, c, *, workspace_id: str | None = None
+    ) -> None:
         """Issue #165 L1: refuse to publish a broken Codex credential chain.
 
         Historically a stale, revoked, rotated-out or wrong-scope ``credential_ref``
@@ -276,8 +278,9 @@ class AgentService:
         degraded to the opaque ``execution_error``. Resolve the effective reference
         (Gateway connection in the Q3 lane, the published Codex block in the
         legacy lane), then require an existing, active, codex-scoped record with
-        at least one allowed workspace. Only lifecycle metadata is selected —
-        never ``encrypted_secret``. The stored reference is canonicalized from
+        at least one allowed workspace, and the Agent's own workspace when it is
+        known. Only lifecycle metadata is selected — never ``encrypted_secret``.
+        The stored reference is canonicalized from
         the DB row so a client cannot persist a look-alike value.
         """
         if config.engine.engine_id != "codex" or config.codex is None:
@@ -324,11 +327,11 @@ class AgentService:
             raise DomainError("codex_credential_invalid", 409) from None
         if status != "active" or "codex" not in engine_ids or not workspace_ids:
             raise DomainError("codex_credential_invalid", 409)
+        if workspace_id and str(workspace_id) not in workspace_ids:
+            raise DomainError("codex_credential_invalid", 409)
         # ``CodexConfig`` is frozen; replace the block through the mutable
         # business AgentConfig rather than bypassing pydantic immutability.
-        config.codex = config.codex.model_copy(
-            update={"credential_ref": canonical_ref}
-        )
+        config.codex = config.codex.model_copy(update={"credential_ref": canonical_ref})
 
     async def validate_model(self, tenant, config, c):
         # Q3: a Codex Agent may OPT IN to a ModelGateway chat profile. The pair
@@ -354,6 +357,13 @@ class AgentService:
                     snapshot["spec"]["operation"] == "chat"
                     and bool(routes)
                     and all(route["model"]["tool_calling"] for route in routes)
+                    # The pinned Codex CLI accepts only the Responses wire
+                    # protocol; a connection still carrying ``chat`` (removed
+                    # in Codex 0.169) would abort at run time.
+                    and all(
+                        (route.get("connection") or {}).get("codex_wire_api") in (None, "responses")
+                        for route in routes
+                    )
                 )
             except (DomainError, KeyError, TypeError, AttributeError):
                 # A missing/disabled profile version or a malformed snapshot is a
@@ -612,7 +622,9 @@ class AgentService:
             # Issue #165 L1: validate the whole Codex credential chain before a
             # version is written, so a stale/out-of-scope reference can no longer
             # be published and only fail later as ``execution_error``.
-            await self.validate_codex_credential(tenant, config, c)
+            await self.validate_codex_credential(
+                tenant, config, c, workspace_id=agent.get("workspace_id")
+            )
             if agent["archived"]:
                 raise DomainError("agent_archived", 409)
             tool_snapshot = await self.tools.resolve(tenant, config.tool_names, c)

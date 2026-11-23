@@ -299,7 +299,7 @@ def test_codex_transport_overrides_are_honoured():
     snap = _snapshot(
         connection_overrides={
             "codex_base_url": "https://api.openai.com/v1",
-            "codex_wire_api": "chat",
+            "codex_wire_api": "responses",
             "codex_model_provider": "openai",
         }
     )
@@ -307,11 +307,21 @@ def test_codex_transport_overrides_are_honoured():
     plan = asyncio.run(resolver.resolve(_TENANT, _PROFILE_ID, 2))
 
     assert plan.home_config.base_url == "https://api.openai.com/v1"
-    assert plan.home_config.wire_api == "chat"
+    assert plan.home_config.wire_api == "responses"
     assert plan.home_config.model_provider == "openai"
-    assert 'wire_api = "chat"' in plan.home_config.to_toml()
+    assert 'wire_api = "responses"' in plan.home_config.to_toml()
     assert 'base_url = "https://api.openai.com/v1"' in plan.home_config.to_toml()
     assert catalog.address_calls[0]["base_url"] == "https://api.openai.com/v1"
+
+
+def test_chat_wire_api_is_rejected_by_resolution():
+    """Codex 0.169+ removed ``chat``; it must not reach a published profile."""
+
+    snap = _snapshot(connection_overrides={"codex_wire_api": "chat"})
+    resolver, _ = _resolver(snap)
+    with pytest.raises(CodexRouteError) as caught:
+        asyncio.run(resolver.resolve(_TENANT, _PROFILE_ID, 1))
+    assert caught.value.code == "codex_wire_api_unsupported"
 
 
 def test_resolver_rejects_a_non_bare_https_override():
@@ -333,7 +343,7 @@ def test_connection_contract_validates_codex_transport_metadata():
     good = Connection(
         name="qwen",
         codex_base_url=_BASE_URL,
-        codex_wire_api="chat",
+        codex_wire_api="responses",
         codex_model_provider=_PROVIDER,
         execution_credential_ref=_CREDENTIAL_REF,
     )
@@ -345,6 +355,7 @@ def test_connection_contract_validates_codex_transport_metadata():
         ("codex_model_provider", "9bad"),
         ("codex_model_provider", "bad name"),
         ("codex_wire_api", "grpc"),
+        ("codex_wire_api", "chat"),
         ("execution_credential_ref", "not-a-uuid"),
     ):
         with pytest.raises(ValidationError):
