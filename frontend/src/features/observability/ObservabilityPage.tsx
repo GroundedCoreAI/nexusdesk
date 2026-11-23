@@ -1,6 +1,6 @@
 import { t } from '../../i18n/index';
 import { useState, type ReactNode } from 'react';
-import { Button, Popconfirm, Select, Space, Table, Tag } from 'antd';
+import { Button, Popconfirm, Select, Space, Table, Tabs, Tag } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
     retryExtensionEvent,
@@ -18,6 +18,7 @@ import {
     type Summary,
 } from '../../shared/api/client';
 import { Alert, Badge, Panel, Trace, time, useAccess, useAction, useResource } from '../../shared/components/ui';
+import { ExecutionGovernancePanel } from './ExecutionGovernancePanel';
 
 interface Paged<T> {
     items: T[];
@@ -288,6 +289,10 @@ export function ObservabilityPage() {
     const [selected, setSelected] = useState<string | null>(null);
     const gateways = useResource<GatewaySummary>('/observability/gateways', 5000);
     const correlation = useResource<Record<string, unknown>>(selected ? `/observability/runs/${selected}/trace` : null);
+    // Page-local tabs only (R-7): hashRouter and the global navigation stay
+    // untouched. The governance pane is mounted solely when it is both active
+    // and the viewer is admin, so other tabs / roles issue zero governance calls.
+    const [activeTab, setActiveTab] = useState('overview');
 
     const runColumns: TableColumnsType<Run> = [
         {
@@ -395,7 +400,16 @@ export function ObservabilityPage() {
         },
     ];
 
-    return <>
+    return (
+        <Tabs
+            activeKey={activeTab}
+            onChange={setActiveTab}
+            destroyOnHidden
+            items={[
+                {
+                    key: 'overview',
+                    label: t('运行总览'),
+                    children: <>
         <Alert error={eventAction.error || extensions.error || extensionEvents.error || gateways.error || correlation.error || summary.error || runs.error || audit.error || memory.error || memoryAlerts.error}/>
         <Metrics value={summary.data}/>
         <Panel title={t("记忆观测")} action={
@@ -531,5 +545,16 @@ export function ObservabilityPage() {
                     setAuditPageSize(size);
                 })}/>
         </Panel>}
-    </>;
+                    </>,
+                },
+                ...(admin ? [{
+                    key: 'governance',
+                    label: t('执行治理'),
+                    // Conditional children + destroyOnHidden guarantee the
+                    // governance component unmounts when the tab is left.
+                    children: activeTab === 'governance' ? <ExecutionGovernancePanel/> : null,
+                }] : []),
+            ]}
+        />
+    );
 }

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -29,6 +30,39 @@ def authorize(user: Reader):
 
 
 router = APIRouter(tags=["runtime"], dependencies=[Depends(authorize)])
+logger = logging.getLogger(__name__)
+
+# Phase 6-2 SIG-5 / T-7: the gap audit is a bounded side-car of the SSE 409
+# branch. Its write is time-boxed and every failure is swallowed so the public
+# 409 status, body and X-Event-Retention-Floor header stay byte-identical.
+_REPLAY_GAP_WRITE_TIMEOUT_SECONDS = 1.0
+
+
+async def _record_replay_gap(
+    request: Request, tenant: str, run_id: UUID, cursor_seq: int, floor: int
+) -> None:
+    """Best-effort, payload-free gap audit; never raises to the SSE caller."""
+
+    async def write() -> None:
+        engine = request.app.state.runtime.repository.engine
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """INSERT INTO execution_replay_gap_events
+                       (id,run_id,tenant_id,requested_cursor_seq,retention_floor_seq,
+                        reason_code,created_at)
+                       VALUES (gen_random_uuid(),:run_id,:tenant,:cursor,:floor,
+                               'cursor_below_floor',now())"""
+                ),
+                {
+                    "run_id": run_id,
+                    "tenant": tenant,
+                    "cursor": cursor_seq,
+                    "floor": floor,
+                },
+            )
+
+    await asyncio.wait_for(write(), timeout=_REPLAY_GAP_WRITE_TIMEOUT_SECONDS)
 
 
 @router.get("/ready")
@@ -105,6 +139,12 @@ async def stream_events(
     floor = int(run_row.get("event_retention_floor_seq") or 0)
     if retention_gap(cursor_after, floor):
         # Explicit gap, never a silent earliest-available reset (FR-13/R-10).
+        # Phase 6-2 SIG-5: bounded, best-effort audit only. Failures are
+        # swallowed; the 409 contract below is unchanged.
+        try:
+            await _record_replay_gap(request, tenant, run_id, cursor_after, floor)
+        except Exception:  # noqa: BLE001 - audit isolation; never block the 409.
+            logger.warning("execution replay gap audit deferred run_id=%s", run_id)
         raise HTTPException(
             409,
             "event_replay_gap",
