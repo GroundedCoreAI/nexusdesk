@@ -43,7 +43,7 @@ must be re-affirmed on the new head.
 ### 2. `credential_env_key` allowlist is closed and mismatch fails closed
 
 - `CODEX_CREDENTIAL_ENV_KEYS` in `contracts/config.py` is a deployment-owned frozenset
-  (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY`); clients cannot add keys.
+  (`OPENAI_API_KEY`); clients cannot add keys.
 - `CodexEngineHomeConfig` validates the key against that set before rendering the
   key-free `config.toml`, and `write_private_engine_config` writes the same declared
   name into `env_key` (`adapters/codex/home_config.py`).

@@ -96,14 +96,14 @@ def test_renderer_rejects_non_https_and_injection_shaped_values():
             model="deepseek-flash",
             model_provider="deepseek",
             base_url="http://api.deepseek.com/v1",
-            env_key="DEEPSEEK_API_KEY",
+            env_key="OPENAI_API_KEY",
         )
     with pytest.raises(ValueError, match="identifier"):
         CodexEngineHomeConfig(
             model='deepseek"\nunsafe',
             model_provider="deepseek",
             base_url="https://api.deepseek.com/v1",
-            env_key="DEEPSEEK_API_KEY",
+            env_key="OPENAI_API_KEY",
         )
 
 

@@ -36,7 +36,7 @@ _HOME_CONFIG = CodexEngineHomeConfig(
     model="deepseek-flash",
     model_provider="deepseek",
     base_url="https://api.deepseek.com/v1",
-    env_key="DEEPSEEK_API_KEY",
+    env_key="OPENAI_API_KEY",
 )
 _GATE = CodexStageGate(
     cli_enabled=True,
@@ -140,7 +140,7 @@ def test_adapter_passes_reference_and_explicit_audience(tmp_path: Path):
         "protocol_id": "cli_exec",
         "workspace_id": "workspace-p6",
     }
-    assert call["spec"].credential_env_key == "DEEPSEEK_API_KEY"
+    assert call["spec"].credential_env_key == "OPENAI_API_KEY"
     assert _CANARY not in repr(call["spec"])
 
 
@@ -166,8 +166,8 @@ def test_adapter_fails_closed_without_broker_or_workspace(tmp_path: Path):
 
 
 def test_secret_maps_to_declared_key_and_never_serializes():
-    bound = _with_credential_env(_spec("DEEPSEEK_API_KEY"), _CANARY)
-    assert bound.environment["DEEPSEEK_API_KEY"] == _CANARY
+    bound = _with_credential_env(_spec("OPENAI_API_KEY"), _CANARY)
+    assert bound.environment["OPENAI_API_KEY"] == _CANARY
     assert "EXECUTION_CREDENTIAL" not in bound.environment
     assert bound.credential_env_key is None
     assert _CANARY not in repr(bound)

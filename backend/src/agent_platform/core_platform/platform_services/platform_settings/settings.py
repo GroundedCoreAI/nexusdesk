@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # a knowledge/agent showcase, not part of the service-application lifecycle.
     # Off by default so production stays clean; deploy/quickstart enables it.
     seed_industries: bool = False
+    # Opt-in synthetic governance demo dataset for the execution platform. It
+    # seeds fencing/usage/replay/parser/credential-audit rows so the 执行治理
+    # panel has representative data. Default off: quickstart/production stay
+    # clean unless an operator explicitly enables it. Never acceptance evidence.
+    seed_execution_governance_demo: bool = False
     # Bootstrap installs code-owned immutable service application examples when
     # enabled. Seeds never update an existing example or a copied user application.
     service_app_examples_enabled: bool = True
@@ -255,7 +260,7 @@ class Settings(BaseSettings):
     codex_model: str = "deepseek-flash"
     codex_model_provider: str = "deepseek"
     codex_model_base_url: str = "https://api.deepseek.com/v1"
-    codex_credential_env_key: str = "DEEPSEEK_API_KEY"
+    codex_credential_env_key: str = "OPENAI_API_KEY"
     model_timeout_seconds: float = Field(default=30, gt=0)
 
     # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
