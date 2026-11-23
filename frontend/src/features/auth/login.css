@@ -1,81 +1,332 @@
-.login-page{min-height:100dvh;display:grid;grid-template-columns:56% 44%;background:#fff;color:#252936;font-family:Inter,"Microsoft YaHei",sans-serif}
-.login-brand-panel{position:relative;min-height:100dvh;overflow:hidden;color:white;background:#101936 url('/images/login-orbit.png') center center/cover no-repeat;padding:40px 48px;display:flex;flex-direction:column}
-/* The nexusdesk wordmark lives in the shared BrandMark component (see
-   src/shared/components/brand-mark.css); the login panel just supplies a slot. */
-.login-story{margin-top:clamp(28px,8.8vh,88px);position:relative;z-index:1}.login-story h1{font-size:clamp(28px,3vw,48px);font-weight:500;line-height:1.45;letter-spacing:1px;margin:0 0 16px}.login-story p{font-size:clamp(14px,1.4vw,21px);color:#d1d5ed;line-height:1.7;margin:0;letter-spacing:1px}
-/* Pushed to the bottom by margin-top:auto. A fixed padding-top used to hold this
-   down instead, which forced the panel taller than short viewports. */
-.login-brand-footer{margin-top:auto;font-size:13px;letter-spacing:2px;color:#c0c7e2}
-.login-form-panel{min-width:0;position:relative;display:flex;flex-direction:column;justify-content:center;padding:clamp(40px,10vh,100px) clamp(32px,6vw,104px) clamp(28px,8.8vh,88px)}
-.login-language{position:absolute;right:30px;top:30px}.login-form-inner{width:100%;max-width:440px;margin:auto}.login-form-inner header h2{font-size:36px;line-height:1.3;margin:0 0 12px;font-weight:600;letter-spacing:-.6px}.login-form-inner header p{font-size:16px;line-height:1.7;color:#9297ab;margin:0 0 32px}
-.login-form-inner .ant-tabs-nav{margin-bottom:32px}.login-form-inner .ant-tabs-tab{min-width:112px;justify-content:center;padding-bottom:14px;font-size:15px}.login-form-inner .ant-form-item{margin-bottom:24px}.login-form-inner .ant-form-item-label>label{font-size:14px}.login-form-inner .ant-input-affix-wrapper{min-height:50px;border-radius:8px;padding:10px 16px}.login-form-inner .ant-input-prefix{margin-right:12px;color:#777f9c}.login-form-inner .ant-input{font-size:14px}.login-form-inner .login-submit{height:52px;border-radius:8px;font-size:16px;margin-top:4px;box-shadow:0 8px 24px #6562ff18}.login-submit .anticon{margin-left:12px}.login-help{font-size:12px;line-height:1.8;text-align:center;color:#9297ab;margin:18px 0 24px}
-.login-notice{margin-bottom:20px;font-size:12px}.login-providers{min-height:250px}.login-providers>p{color:#9297ab;line-height:1.8}.login-providers>.ant-btn{height:50px;margin:8px 0;text-align:left;justify-content:flex-start}.login-providers>.ant-btn .anticon:last-child{margin-left:auto}.login-service{margin-top:24px;color:#9297ab;font-size:12px}.login-service summary{cursor:pointer;text-align:center;margin-bottom:12px}.login-service>.ant-btn{margin-top:10px}.login-development{display:block;margin:12px auto 0;font-size:12px}.login-form-panel>footer{position:absolute;bottom:32px;right:40px;color:#9297ab;font-size:12px;letter-spacing:1px}
-.auth-loading{--brand-ink:#141518;--brand-gradient:linear-gradient(100deg,#141518 5%,#3d38b8 100%);--brand-dot:radial-gradient(circle at 32% 30%,#e8e9ff,#6f6bff 45%,#4b46d6);min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:24px;background:#fafbff}.auth-loading .ant-alert{max-width:500px}
-@media(min-width:1800px){.login-form-inner{max-width:460px}.login-story{margin-top:120px}}
-@media(max-width:1000px){.login-page{grid-template-columns:46% 54%}.login-brand-panel{padding:32px 28px}.login-story{margin-top:clamp(24px,7vh,76px)}.login-story h1{font-size:30px}.login-form-panel{padding-left:36px;padding-right:36px}}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
 
-/* Short viewports: the split layout is width-based, so a 1024x600 window kept the
-   full-height paddings and overflowed. Compress vertical rhythm by height. */
-@media(max-height:760px){
-  .login-brand-panel{padding-top:28px;padding-bottom:28px}
-  .login-form-panel{padding-top:36px;padding-bottom:32px}
-  .login-form-inner header h2{font-size:30px}
-  .login-form-inner header p{margin-bottom:20px}
-  .login-form-inner .ant-tabs-nav{margin-bottom:20px}
-  .login-form-inner .ant-tabs-tab{padding-bottom:10px}
-  .login-form-inner .ant-form-item{margin-bottom:16px}
-  .login-form-inner .ant-input-affix-wrapper{min-height:44px}
-  .login-form-inner .login-submit{height:46px}
-  .login-help{margin:12px 0 16px}
-  .login-service{margin-top:16px}
-  .login-providers{min-height:0}
-  .login-form-panel>footer{position:static;margin-top:20px;text-align:right}
+:root{
+  --nexus-navy:#030B2D;
+  --nexus-blue:#125BFF;
+  --nexus-cyan:#00CFFF;
+  --nexus-surface:#F5F7FC;
+  --nexus-ink:#172746;
+  --nexus-muted:#71809C;
+  --nexus-border:#DCE5F5;
 }
-@media(max-height:620px){
-  .login-brand-panel{padding-top:22px;padding-bottom:22px}
-  .login-story{margin-top:22px}
-  .login-story h1{font-size:24px;margin-bottom:8px}
-  .login-story p{font-size:13px}
-  .login-form-panel{padding-top:28px;padding-bottom:24px}
-  .login-form-inner header h2{font-size:26px;margin-bottom:8px}
-  .login-form-inner header p{margin-bottom:16px}
-  .login-form-inner .ant-tabs-nav{margin-bottom:16px}
-  .login-form-inner .ant-form-item{margin-bottom:12px}
-  .login-form-inner .ant-input-affix-wrapper{min-height:40px}
-  .login-form-inner .login-submit{height:42px}
-  .login-form-panel>footer{margin-top:14px}
+.login-page{
+  position:relative;
+  isolation:isolate;
+  width:100%;
+  min-height:100svh;
+  overflow:hidden;
+  color:var(--nexus-ink);
+  background:var(--nexus-navy);
+  font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+}
+.login-backdrop{
+  position:absolute;
+  z-index:-2;
+  inset:0;
+  background-image:url('/images/nexusdesk-login-bg.webp');
+  background-size:cover;
+  background-position:center center;
+  background-repeat:no-repeat;
+}
+.login-page::before{
+  content:"";
+  position:absolute;
+  z-index:-1;
+  inset:0;
+  pointer-events:none;
+  background:
+    linear-gradient(90deg,rgba(3,11,45,.13) 0%,rgba(3,11,45,.04) 48%,rgba(245,249,255,.10) 100%),
+    linear-gradient(0deg,rgba(3,11,45,.16),transparent 28%);
+}
+.login-layout{
+  position:relative;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(390px,440px);
+  align-items:center;
+  gap:clamp(44px,5.5vw,100px);
+  width:100%;
+  min-height:100svh;
+  padding:clamp(34px,5.8vw,92px) clamp(34px,7.6vw,128px);
+}
+.login-brand-panel{
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  align-self:stretch;
+  min-width:0;
+  color:#fff;
+  padding:clamp(18px,2.3vw,36px) 0 clamp(8px,1.2vw,20px);
+}
+.login-brand-top{display:flex;align-items:center;transform:translateY(-36px)}
+.login-brand-top .brand-mark__subtitle{color:#fff;opacity:.9}
+.login-story{
+  width:min(100%,850px);
+  margin:auto 0;
+  padding:clamp(44px,7vh,92px) 0;
+  transform:translateY(-64px);
+}
+.login-story h1{
+  margin:0;
+  color:#F8FBFF;
+  font-size:clamp(38px,4.05vw,66px);
+  line-height:1.12;
+  letter-spacing:-2.2px;
+  font-weight:700;
+  white-space:nowrap;
+  text-shadow:0 3px 24px rgba(0,14,65,.18);
+}
+.login-story h1 span{
+  color:#00CFFF;
+  text-shadow:0 0 26px rgba(0,207,255,.28);
+}
+.login-story>p{
+  margin:18px 0 0;
+  color:rgba(236,245,255,.94);
+  font-size:clamp(17px,1.55vw,25px);
+  letter-spacing:1px;
+  line-height:1.65;
+}
+.login-story-rule{
+  width:160px;
+  height:3px;
+  margin:28px 0 36px;
+  border-radius:10px;
+  background:linear-gradient(90deg,#00CFFF,#125BFF 75%,transparent);
+  box-shadow:0 0 18px rgba(0,207,255,.3);
+}
+.login-features{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  width:min(100%,720px);
+}
+.login-feature{
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:7px;
+  min-width:0;
+  padding:0 12px;
+  color:#F1F7FF;
+  text-align:center;
+}
+.login-feature-icon{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:34px;
+  color:#DCEEFF;
+  font-size:29px;
+  filter:drop-shadow(0 0 8px rgba(0,170,255,.28));
+}
+.login-feature-title{font-size:15px;font-weight:500;white-space:nowrap}
+.login-feature-caption{font-size:12px;color:rgba(213,230,255,.78);letter-spacing:1px}
+.login-feature-divider{
+  position:absolute;
+  top:2px;
+  right:0;
+  width:1px;
+  height:76px;
+  background:rgba(220,237,255,.42);
+}
+.login-brand-footer{
+  display:flex;
+  align-items:center;
+  gap:11px;
+  color:rgba(244,249,255,.9);
+  font-size:12px;
+  letter-spacing:.2px;
+}
+.login-brand-footer .anticon{font-size:19px}
+.login-brand-footer i,.login-card-footer i{
+  width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.7;
+}
+.login-form-panel{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-width:0;
+}
+.login-language{
+  position:fixed;
+  top:24px;
+  right:clamp(20px,2.3vw,40px);
+  z-index:5;
+  color:#fff;
+}
+.login-card{
+  width:100%;
+  padding:clamp(28px,2.5vw,42px) clamp(26px,2.5vw,40px) 24px;
+  border:1px solid rgba(255,255,255,.82);
+  border-radius:18px;
+  background:rgba(255,255,255,.94);
+  box-shadow:0 24px 70px rgba(15,63,145,.18),0 4px 16px rgba(28,74,143,.06);
+  backdrop-filter:blur(18px);
+}
+.login-card-header{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:12px;
+  margin-bottom:22px;
+}
+.login-card-header .brand-mark{--brand-ink:#0C1B43;--brand-gradient:linear-gradient(100deg,#0C1B43,#1D3974)}
+.login-card-header .brand-mark__subtitle{display:none}
+.login-card-header h2{
+  margin:0;
+  color:#172746;
+  font-size:18px;
+  line-height:1.5;
+  font-weight:600;
+  letter-spacing:1px;
+}
+.login-tabs .ant-tabs-nav{margin:0 0 22px}
+.login-tabs .ant-tabs-tab{
+  justify-content:center;
+  flex:1;
+  padding:0 0 12px;
+  font-size:14px;
+}
+.login-tabs .ant-tabs-nav-list{width:100%}
+.login-tabs .ant-tabs-tab-btn{width:100%;text-align:center}
+.login-tabs .ant-tabs-ink-bar{height:2px!important;background:linear-gradient(90deg,#125BFF,#00CFFF)}
+.login-card .ant-form-item{margin-bottom:14px}
+.login-card .ant-input-affix-wrapper{
+  min-height:46px;
+  padding:8px 13px;
+  border-radius:9px;
+  border-color:#D7E1F2;
+  box-shadow:0 1px 2px rgba(12,39,91,.02);
+}
+.login-card .ant-input-affix-wrapper:hover{border-color:#7CA8FF}
+.login-card .ant-input-affix-wrapper-focused{
+  border-color:#347AFF;
+  box-shadow:0 0 0 3px rgba(18,91,255,.10);
+}
+.login-card .ant-input-prefix{margin-right:11px;color:#657A9F;font-size:16px}
+.login-card .ant-input{font-size:14px;color:#172746}
+.login-card .ant-input::placeholder{color:#9AA8C0}
+.login-form-options{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin:1px 0 19px;
+  color:#33496F;
+  font-size:13px;
+}
+.login-form-options .ant-checkbox-wrapper{font-size:13px;color:#33496F}
+.login-no-reset{color:#8B98AF;font-size:11px}
+.login-submit.ant-btn{
+  height:46px;
+  border:0;
+  border-radius:9px;
+  background:linear-gradient(100deg,#125BFF 0%,#087FFF 54%,#00BFEF 100%);
+  box-shadow:0 7px 18px rgba(18,91,255,.18);
+  color:#fff;
+  font-size:15px;
+  font-weight:600;
+  letter-spacing:1px;
+}
+.login-submit.ant-btn:hover{background:linear-gradient(100deg,#2670FF,#00CFFF)!important;transform:translateY(-1px)}
+.login-submit .anticon{margin-left:8px}
+.login-card .ant-divider{margin:18px 0;color:#8292AF;font-size:12px}
+.login-card .ant-divider::before,.login-card .ant-divider::after{border-color:#E0E8F4}
+.login-github.ant-btn{
+  height:44px;
+  border-radius:9px;
+  border-color:#D7E1F2;
+  color:#172746;
+  font-size:14px;
+  font-weight:500;
+}
+.login-github.ant-btn:hover{border-color:#83AFFF!important;color:#125BFF!important}
+.login-providers,.login-token-panel{min-height:235px}
+.login-providers>p,.login-token-panel>p{
+  margin:0 0 16px;
+  color:#7C8AA5;
+  font-size:13px;
+  line-height:1.7;
+}
+.login-providers>.ant-btn{height:46px;margin:7px 0;text-align:left;justify-content:flex-start}
+.login-providers>.ant-btn .anticon:last-child{margin-left:auto}
+.login-token-panel .login-submit{margin-top:18px}
+.login-notice{margin-bottom:14px;font-size:12px}
+.login-development{display:block;margin:12px auto 0}
+.login-card-footer{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  margin-top:22px;
+  color:#71809C;
+  font-size:10px;
+  letter-spacing:.2px;
+}
+.login-page-footer{display:none}
+
+/* Tablet: keep the split composition but reclaim width for the card. */
+@media(max-width:1100px){
+  .login-layout{
+    grid-template-columns:minmax(0,1fr) minmax(350px,400px);
+    gap:34px;
+    padding:36px 42px;
+  }
+  .login-story h1{font-size:clamp(34px,4vw,48px);letter-spacing:-1.5px}
+  .login-story>p{font-size:17px}
+  .login-card{padding:28px 24px 20px}
 }
 
-/* Stacked layout. Previously this relied on `min-height:calc(100dvh - 220px)`,
-   a magic number that under-estimated the brand block and pushed the login
-   button below the fold on small phones. */
-@media(max-width:700px){
-  .login-page{display:flex;flex-direction:column;min-height:100dvh}
-  .login-brand-panel{flex:0 0 auto;min-height:0;padding:22px 24px 26px;background-position:center 28%}
-  /* The large logo shrinks via .brand-mark--lg rules in brand-mark.css. */
-  .login-story{margin-top:22px}.login-story h1{font-size:24px;margin-bottom:8px}.login-story p{font-size:12px}
+/* Mobile: stack the brand statement above a fully usable form. */
+@media(max-width:760px){
+  .login-page{overflow:auto;background:#06194E}
+  .login-backdrop{
+    background-size:auto 620px;
+    background-position:top left;
+  }
+  .login-page::before{
+    background:linear-gradient(180deg,rgba(3,11,45,.10) 0%,rgba(3,11,45,.52) 330px,#F5F7FC 590px);
+  }
+  .login-layout{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:26px;
+    min-height:100svh;
+    padding:22px 20px 26px;
+  }
+  .login-brand-panel{padding:8px 0 0;min-height:0}
+  .login-brand-top{transform:none}
+  .login-brand-top .brand-mark--lg .brand-glyph{width:38px;height:38px}
+  .login-brand-top .brand-mark--lg .brand-mark__word{font-size:27px}
+  .login-story{padding:26px 0 0;margin:0;transform:none}
+  .login-story h1{font-size:clamp(29px,7vw,40px);white-space:normal;letter-spacing:-1px}
+  .login-story>p{font-size:14px;margin-top:9px}
+  .login-story-rule{margin:16px 0 18px;width:110px}
+  .login-features{width:100%}
+  .login-feature{padding:0 5px;gap:4px}
+  .login-feature-icon{font-size:22px;height:27px}
+  .login-feature-title{font-size:11px}
+  .login-feature-caption{font-size:10px}
+  .login-feature-divider{height:56px}
   .login-brand-footer{display:none}
-  .login-form-panel{flex:1 1 auto;min-height:0;justify-content:flex-start;padding:28px 24px 36px}
-  .login-language{top:16px;right:16px}
-  .login-form-inner header h2{font-size:28px}.login-form-inner header p{font-size:14px;margin-bottom:20px}
-  .login-form-panel>footer{position:static;margin-top:24px;text-align:center}
+  .login-form-panel{display:block}
+  .login-language{top:16px;right:16px;color:#fff}
+  .login-card{padding:25px 22px 20px;border-radius:16px}
+  .login-card-header{margin-bottom:15px;gap:8px}
+  .login-card-header h2{font-size:16px}
+  .login-tabs .ant-tabs-nav{margin-bottom:17px}
+  .login-card-footer{margin-top:18px}
+  .login-page-footer{display:block;text-align:center;margin-top:18px;color:#7C8AA5;font-size:11px}
 }
-/* Small phones: the decorative tagline yields to the form so the primary action
-   stays on the first screen. */
-@media(max-width:700px) and (max-height:700px){
-  .login-brand-panel{padding:16px 20px 18px}
-  /* Large logo shrinks further via .brand-mark--lg rules in brand-mark.css. */
-  .login-story{display:none}
-  .login-form-panel{padding:20px 20px 28px}
-  .login-form-inner header h2{font-size:23px;margin-bottom:6px}
-  .login-form-inner header p{display:none}
-  .login-form-inner .ant-tabs-nav{margin-bottom:14px}
-  .login-form-inner .ant-form-item{margin-bottom:12px}
-  .login-form-inner .ant-input-affix-wrapper{min-height:42px}
-  .login-form-inner .login-submit{height:44px}
-  .login-help{margin:10px 0 12px}
-  .login-service{margin-top:12px}
-  .login-form-panel>footer{margin-top:16px}
+@media(max-width:390px){
+  .login-layout{padding-left:15px;padding-right:15px}
+  .login-card{padding-left:17px;padding-right:17px}
+  .login-story h1{font-size:28px}
+  .login-feature-title{font-size:10px}
 }
-
-.login-page{padding:0;margin:0;max-width:none;width:100%}.login-form-inner header{display:block;border:0;padding:0;margin:0;background:transparent;height:auto;min-height:0}
+@media(prefers-reduced-motion:reduce){
+  .login-submit.ant-btn{transition:none}
+  .login-submit.ant-btn:hover{transform:none}
+}
