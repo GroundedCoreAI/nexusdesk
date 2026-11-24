@@ -644,3 +644,35 @@ def test_composition_threads_the_resolver_and_deployment_settings(monkeypatch):
     assert adapter._path_env == settings.codex_path_env
     assert adapter._credential_ref == settings.codex_credential_ref
     assert not hasattr(adapter, "_deployment_credential_ref")
+
+
+def test_console_managed_host_is_accepted_by_the_codex_lane():
+    """A host admitted through the console must also resolve for Codex.
+
+    Regression: the resolver's defence-in-depth check only consulted the
+    deployment allowlist, so a console-managed host passed
+    ``validate_effective_address`` and was then rejected with
+    ``codex_host_not_allowed`` (surfaced as invalid_request on a Run).
+    """
+
+    managed_host = "managed.example"
+    snap = _snapshot(base_url=f"https://{managed_host}/v1")
+    settings = _settings()
+    settings.model_gateway_ui_allowed_hosts = True
+    resolver, catalog = _resolver(snap, settings)
+
+    class _ManagedHosts:
+        def enabled(self) -> bool:
+            return True
+
+        async def effective(self, tenant: str) -> frozenset[str]:
+            assert tenant == _TENANT
+            return frozenset({managed_host})
+
+        async def ensure_resolution(self, host: str) -> tuple[str, ...]:
+            assert host == managed_host
+            return ("203.0.113.10",)
+
+    catalog.hosts = _ManagedHosts()
+    plan = asyncio.run(resolver.resolve(_TENANT, _PROFILE_ID, 1))
+    assert plan.home_config.base_url == f"https://{managed_host}/v1"

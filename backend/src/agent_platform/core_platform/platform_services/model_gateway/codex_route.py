@@ -203,11 +203,26 @@ class CodexProviderResolver:
             )
         except DomainError:
             raise CodexRouteError("codex_host_not_allowed") from None
-        # Defense in depth against a catalog double that skips validation: the
-        # resolver's own settings carry the same deployment allowlist.
+        # Defense in depth against a catalog double that skips validation. The
+        # resolver must check the same *effective* allowlist that
+        # validate_effective_address uses: the deployment list plus the
+        # switch-gated, tenant-scoped console-managed hosts. Checking only the
+        # deployment half rejects hosts that were deliberately admitted through
+        # the console (and made the Codex lane report invalid_request).
         allowed = getattr(self._settings, "model_gateway_allowed_hosts", None)
         if not allowed or "*" in allowed:
             return
-        host = urlsplit(base_url).hostname or ""
-        if host.lower() not in {str(item).lower() for item in allowed}:
-            raise CodexRouteError("codex_host_not_allowed")
+        host = (urlsplit(base_url).hostname or "").lower()
+        if host in {str(item).lower() for item in allowed}:
+            return
+        hosts = getattr(self._catalog, "hosts", None)
+        enabled = getattr(hosts, "enabled", None)
+        effective = getattr(hosts, "effective", None)
+        if callable(enabled) and callable(effective) and enabled():
+            try:
+                managed = await effective(tenant_id)
+            except Exception:  # noqa: BLE001 - fail closed like the catalog path.
+                managed = frozenset()
+            if host in {str(item).lower() for item in managed}:
+                return
+        raise CodexRouteError("codex_host_not_allowed")
