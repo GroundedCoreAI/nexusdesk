@@ -2732,5 +2732,6 @@
   "智能协作": "Intelligent collaboration",
   "开源开放": "Open and transparent",
   "自主可控": "Self-controlled",
-  "灵活扩展": "Flexible extensibility"
+  "灵活扩展": "Flexible extensibility",
+  "该密钥将同时用于模型对话与代码任务（Codex）；保存后即可在 Agent 中把本渠道的模型方案用于代码任务，无需其他配置。": "This key is used for both chat and code tasks (Codex). After saving, the model profile on this channel is immediately usable for code tasks in an Agent; no other setup is needed."
 }

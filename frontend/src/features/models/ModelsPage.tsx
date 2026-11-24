@@ -234,6 +234,7 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
             {credentialMode === 'direct' ? <>
               <Field label="API Key"><input type="password" value={apiKey} disabled={clearKey} onChange={e => setApiKey(e.target.value)} autoComplete="new-password" placeholder={selected?.credential_source === 'stored' ? t('已配置，留空保留原密钥') : t('填写供应商的 API Key')} /></Field>
               <p className="hint">{t('密钥加密保存，保存后不再显示原文。')}</p>
+              {credentialMode === 'direct' && <p className="hint">{t('该密钥将同时用于模型对话与代码任务（Codex）；保存后即可在 Agent 中把本渠道的模型方案用于代码任务，无需其他配置。')}</p>}
               {selected?.credential_source === 'stored' && <label className="check"><input type="checkbox" checked={clearKey} onChange={e => { setClearKey(e.target.checked); setApiKey(''); }}/>{t('清除已保存的 API Key')}</label>}
             </> : <Field label={t('凭据环境变量')}><input required value={credentialRef} onChange={e => updateCredentialRef(e.target.value)} placeholder="AGENT_MODEL_SECRET_…" autoComplete="off" /></Field>}
           </div>}

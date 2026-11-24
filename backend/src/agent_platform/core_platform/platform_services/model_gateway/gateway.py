@@ -50,10 +50,15 @@ class ConnectionLimit:
 
 
 class ModelGateway:
-    def __init__(self, engine, settings, client):
+    def __init__(self, engine, settings, client, execution_key_file=None):
         self.engine, self.settings, self.client = engine, settings, client
         self.hosts = HostAllowlistStore(engine, settings)
-        self.catalog = Catalog(engine, settings, hosts=self.hosts)
+        self.catalog = Catalog(
+            engine,
+            settings,
+            hosts=self.hosts,
+            auto_codex_credentials=execution_key_file,
+        )
         self.governance = Governance(self)
         self.limits = {
             op: asyncio.Semaphore(settings.model_gateway_concurrency) for op in OPERATIONS

@@ -1386,6 +1386,7 @@ async def runtime_services(
                 tool_client=client,
                 tool_network_policy=tool_policy,
                 adapter_registry=adapters,
+                execution_key_file=settings.execution_credential_key_file,
             )
             platform.extensions = extensions
             platform.ui_extensions = ui_extensions
