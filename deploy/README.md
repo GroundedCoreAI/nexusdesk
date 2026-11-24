@@ -97,6 +97,15 @@ AGENT_CODEX_PATH_ENV=/opt/nexusdesk/codex/node/bin:/opt/nexusdesk/codex/bin:/usr
 
 `AGENT_CODEX_MODEL`、`AGENT_CODEX_MODEL_PROVIDER`、`AGENT_CODEX_MODEL_BASE_URL` 与 `AGENT_CODEX_CREDENTIAL_ENV_KEY` 只描述无密钥 provider 元数据；平台会在每次执行的私有 `CODEX_HOME` 中生成 `config.toml`，`env_key` 只是变量名。禁止挂载 `~/.codex`、`auth.json`、`~/.codex/.env` 或整个 `/home/nexus`，也不要把真实密钥写进 `.env` 或 compose。要让配置在 CD 重新部署后仍然生效，把上述变量写入 `deploy/quickstart/.env`（compose 每次都会从该目录自动读取）。
 
+### 模型渠道的出站主机白名单
+
+模型网关只允许连接 `AGENT_MODEL_GATEWAY_ALLOWED_HOSTS` 中列出的主机（JSON 数组，默认包含 OpenAI、Anthropic、Gemini、DeepSeek、百炼、豆包、Moonshot、智谱、混元、小米等预设渠道地址）。新增自定义 OpenAI 兼容渠道时，如果服务地址的主机不在列表中，保存会返回 `model_address_not_allowed`。
+
+- 体验模式：在 `deploy/quickstart/.env` 写入 `AGENT_MODEL_GATEWAY_ALLOWED_HOSTS=["www.duckcoding.ai"]`，然后 `docker compose -f deploy/quickstart/compose.yaml up -d app`。`["*"]` 会关闭主机名检查，仅建议临时排障使用。
+- 生产：在 `deploy/production/.env` 设置同一个变量后重启 `api`。
+- 界面维护：默认关闭。部署方设置 `AGENT_MODEL_GATEWAY_UI_ALLOWED_HOSTS=true` 后，管理员可在「模型网关 → 出站主机」添加公网 HTTPS 域名；应用白名单是追加的，环境变量白名单仍始终生效。
+- 值必须是 JSON 数组。白名单只校验主机名（如 `www.duckcoding.ai`），是否带 `/v1` 由供应商的兼容接口约定决定。
+
 ## 生产部署：复用外部中间件
 
 ```sh

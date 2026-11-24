@@ -414,6 +414,11 @@ class Settings(BaseSettings):
         "api.hunyuan.cloud.tencent.com",
         "api.xiaomimimo.com",
     ]
+    # Phase 1 of the model-gateway egress-host feature: when enabled, admins
+    # may add public HTTPS hosts from the console. The deployment list above
+    # stays authoritative; managed hosts are additive and are ignored entirely
+    # while this switch is off (fail closed).
+    model_gateway_ui_allowed_hosts: bool = False
     model_gateway_concurrency: int = Field(default=8, ge=1, le=64)
     model_credential_key_file: Path = Path("data/credentials/master.key")
     model_gateway_media_bytes: int = Field(default=5_000_000, ge=1024, le=25_000_000)

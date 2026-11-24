@@ -27,7 +27,7 @@ from agent_platform.core_platform.platform_services.platform_settings.settings i
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 BACKEND = Path(__file__).resolve().parents[1]
-HEAD = "0074_codex_wire_api_backfill"
+HEAD = "0075_gateway_allowed_hosts"
 CANARY = "CANARY-SECRET-DO-NOT-LEAK-9f8a7b"
 
 GOV_PATHS = [
@@ -49,12 +49,15 @@ async def test_it1_migration_head_chain_is_single_and_additive():
     assert scripts.get_heads() == [HEAD]
     rev72 = scripts.get_revision("0072_execution_replay_gap")
     rev73 = scripts.get_revision("0073_execution_parser_diag")
+    rev74 = scripts.get_revision("0074_codex_wire_api_backfill")
     rev_head = scripts.get_revision(HEAD)
     assert rev72.down_revision == "0071_execution_credential"
     assert rev73.down_revision == "0072_execution_replay_gap"
-    # 0074 appends the Codex wire-api backfill on top of the Phase 6-2 head.
-    assert rev_head.down_revision == "0073_execution_parser_diag"
-    assert all(len(r.revision) <= 32 for r in (rev72, rev73, rev_head))
+    # 0074 appends the Codex wire-api backfill; 0075 appends the UI-managed
+    # egress-host table on top of it.
+    assert rev74.down_revision == "0073_execution_parser_diag"
+    assert rev_head.down_revision == "0074_codex_wire_api_backfill"
+    assert all(len(r.revision) <= 32 for r in (rev72, rev73, rev74, rev_head))
 
 
 @pytest.fixture

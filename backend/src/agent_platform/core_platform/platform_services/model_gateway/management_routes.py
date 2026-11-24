@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_platform.core_platform.platform_services.identity.access import Admin, Reader
 from agent_platform.core_platform.platform_services.persistence.store import (
@@ -34,6 +35,36 @@ Resource = Literal[
 
 def service(request):
     return request.app.state.runtime.groups.runtime.gateway.governance
+
+
+def gateway_service(request):
+    return request.app.state.runtime.groups.runtime.gateway
+
+
+class AllowedHostInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    host: str = Field(min_length=1, max_length=500)
+
+
+@router.get("/allowed-hosts")
+async def allowed_hosts(request: Request, user: Admin):
+    gateway = gateway_service(request)
+    return {
+        "enabled": gateway.hosts.enabled(),
+        "deployment": list(gateway.settings.model_gateway_allowed_hosts),
+        "managed": await gateway.hosts.list(user.tenant),
+    }
+
+
+@router.post("/allowed-hosts", status_code=201)
+async def add_allowed_host(body: AllowedHostInput, request: Request, user: Admin):
+    return await gateway_service(request).hosts.add(user.tenant, user.actor, body.host)
+
+
+@router.delete("/allowed-hosts/{host}")
+async def remove_allowed_host(host: str, request: Request, user: Admin):
+    await gateway_service(request).hosts.remove(user.tenant, user.actor, host)
+    return {"removed": host}
 
 
 @router.get("/catalog/{kind}")

@@ -45,7 +45,9 @@ def _deny(reason: str) -> DestinationDecision:
     return DestinationDecision(False, reason)
 
 
-def _address_class(value: str) -> str | None:
+def classify_address(value: str) -> str | None:
+    """Classify one resolved address as metadata/private/unparsable or public."""
+
     try:
         address = ipaddress.ip_address(value)
     except ValueError:
@@ -78,7 +80,7 @@ def decide_destination(
         return _deny("dns_unresolved")
     reason: str | None = None
     for value in resolved_ips:
-        classification = _address_class(value)
+        classification = classify_address(value)
         if classification == "metadata":
             return _deny("egress_metadata_address")
         if classification is not None:

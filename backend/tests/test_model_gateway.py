@@ -628,3 +628,76 @@ async def test_embedding_queue_does_not_block_chat(gateway_platform):
         finally:
             release.set()
             await task
+
+
+async def test_allowed_hosts_management_switch_and_effective_list(gateway_platform, monkeypatch):
+    """UI-managed hosts are additive, switch-gated, audited and fail closed."""
+
+    client, services, _settings = gateway_platform
+    gateway = services.groups.runtime.gateway
+
+    listing = (await client.get(ROOT + "/allowed-hosts")).json()
+    assert listing["enabled"] is False
+    assert "api.openai.com" in listing["deployment"]
+
+    response = await client.post(ROOT + "/allowed-hosts", json={"host": "www.duckcoding.ai"})
+    assert response.status_code == 409
+    assert "model_host_management_disabled" in response.text
+
+    async def public_resolution(host, *, resolver=None):
+        return ("93.184.216.34",)
+
+    monkeypatch.setattr(
+        "agent_platform.core_platform.platform_services.model_gateway."
+        "host_allowlist.resolve_public",
+        public_resolution,
+    )
+    gateway.settings.model_gateway_ui_allowed_hosts = True
+
+    response = await client.post(
+        ROOT + "/allowed-hosts", json={"host": "https://www.duckcoding.ai/v1"}
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["host"] == "www.duckcoding.ai"
+
+    duplicate = await client.post(ROOT + "/allowed-hosts", json={"host": "www.duckcoding.ai"})
+    assert duplicate.status_code == 409
+    assert "model_host_exists" in duplicate.text
+
+    viewer = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=client._transport.app),
+        base_url="http://test",
+        headers={"Authorization": "Bearer platform-viewer"},
+    )
+    async with viewer:
+        assert (await viewer.get(ROOT + "/allowed-hosts")).status_code == 403
+
+    assert await gateway.hosts.effective("another-tenant") == frozenset()
+    with pytest.raises(DomainError):
+        await gateway.catalog.validate_effective_address(
+            "another-tenant",
+            {"protocol": "openai_compatible", "base_url": "https://www.duckcoding.ai/v1"},
+        )
+
+    connection = await client.post(
+        ROOT + "/connections",
+        json={
+            "name": "duck",
+            "protocol": "openai_compatible",
+            "base_url": "https://www.duckcoding.ai/v1",
+        },
+    )
+    assert connection.status_code == 201, connection.text
+
+    removed = await client.delete(ROOT + "/allowed-hosts/www.duckcoding.ai")
+    assert removed.status_code == 200, removed.text
+    again = await client.post(
+        ROOT + "/connections",
+        json={
+            "name": "duck-2",
+            "protocol": "openai_compatible",
+            "base_url": "https://www.duckcoding.ai/v1",
+        },
+    )
+    assert again.status_code == 400
+    assert "model_address_not_allowed" in again.text

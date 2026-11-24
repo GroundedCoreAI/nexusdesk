@@ -14,7 +14,7 @@ async def discover_models(gateway, tenant, identifier):
     spec = row["spec"]
     if spec["protocol"] != "openai_compatible":
         raise DomainError("model_discovery_not_supported", 422)
-    gateway.catalog.validate_address(spec)
+    await gateway.catalog.validate_effective_address(tenant, spec)
     credential = await gateway.catalog.credential_for(tenant, identifier, spec)
     headers = {"Authorization": "Bearer " + credential} if credential else {}
     try:

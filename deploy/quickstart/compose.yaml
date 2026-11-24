@@ -52,6 +52,15 @@ services:
       # Synthetic demo data only, never acceptance evidence.
       AGENT_SEED_EXECUTION_GOVERNANCE_DEMO: ${NEXUSDESK_SEED_EXECUTION_GOVERNANCE_DEMO:-true}
       AGENT_MODEL_BACKEND: demo
+      # Model-gateway egress allowlist (JSON array). A custom OpenAI-compatible
+      # provider must be listed here or saving its connection answers
+      # model_address_not_allowed; ["*"] disables the hostname check. Set the
+      # same key in deploy/quickstart/.env to add providers without editing this
+      # file (compose interpolates that file for every ${...} below).
+      AGENT_MODEL_GATEWAY_ALLOWED_HOSTS: '${AGENT_MODEL_GATEWAY_ALLOWED_HOSTS:-["localhost","127.0.0.1","api.openai.com","api.anthropic.com","generativelanguage.googleapis.com","api.deepseek.com","ark.cn-beijing.volces.com","dashscope.aliyuncs.com","api.moonshot.cn","open.bigmodel.cn","api.hunyuan.cloud.tencent.com","api.xiaomimimo.com"]}'
+      # Opt in to console-managed egress hosts (public HTTPS only). Off by
+      # default; the deployment list above remains authoritative.
+      AGENT_MODEL_GATEWAY_UI_ALLOWED_HOSTS: ${AGENT_MODEL_GATEWAY_UI_ALLOWED_HOSTS:-false}
       AGENT_TENANT_ID: local
       # Extra names and IP addresses for the self-signed certificate, so a browser
       # reaching the demo over a LAN address gets a name match. Comma-separated,

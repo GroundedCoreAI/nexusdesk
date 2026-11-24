@@ -22,6 +22,7 @@ from .adapters import demo, from_messages, invoke_http, stream_chat_http
 from .catalog import Catalog
 from .contracts import OPERATIONS, ChatRequest
 from .governance import Governance
+from .host_allowlist import HostAllowlistStore
 from .thinking import reasoning_fields
 
 AUDIO = {"audio/wav", "audio/mpeg", "audio/ogg", "audio/webm"}
@@ -51,7 +52,8 @@ class ConnectionLimit:
 class ModelGateway:
     def __init__(self, engine, settings, client):
         self.engine, self.settings, self.client = engine, settings, client
-        self.catalog = Catalog(engine, settings)
+        self.hosts = HostAllowlistStore(engine, settings)
+        self.catalog = Catalog(engine, settings, hosts=self.hosts)
         self.governance = Governance(self)
         self.limits = {
             op: asyncio.Semaphore(settings.model_gateway_concurrency) for op in OPERATIONS
@@ -65,7 +67,7 @@ class ModelGateway:
             # workflow is to verify a connection before enabling it.
             row = await self.catalog.get(c, tenant, "connections", identifier)
         spec, started = row["spec"], time.monotonic()
-        self.catalog.validate_address(spec)
+        await self.catalog.validate_effective_address(tenant, spec)
         status, error = "available", None
         try:
             if spec["protocol"] != "demo":
@@ -414,7 +416,7 @@ class ModelGateway:
                 current_connection = await self.catalog.get(
                     c, tenant, "connections", route["connection_id"], True
                 )
-            self.catalog.validate_address(route["connection"])
+            await self.catalog.validate_effective_address(tenant, route["connection"])
             limit = self.connections.setdefault(route["connection_id"], ConnectionLimit())
             async with limit.slot(current_connection["spec"]["concurrency"]):
                 if route["connection"]["protocol"] == "demo":

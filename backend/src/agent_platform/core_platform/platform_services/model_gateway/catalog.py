@@ -15,14 +15,16 @@ from agent_platform.core_platform.platform_services.persistence.store import (
 
 from .contracts import Connection, Model, Profile
 from .credentials import CredentialVault
+from .host_allowlist import HostAllowlistStore
 from .thinking import provider_parameters
 
 SCHEMAS = {"connections": Connection, "models": Model, "profiles": Profile}
 
 
 class Catalog:
-    def __init__(self, engine, settings):
+    def __init__(self, engine, settings, hosts=None):
         self.engine, self.settings = engine, settings
+        self.hosts = hosts or HostAllowlistStore(engine, settings)
         self.vault = CredentialVault(settings.model_credential_key_file)
 
     async def annotate_credentials(self, tenant, rows, connection=None):
@@ -59,22 +61,18 @@ class Catalog:
             return self.vault.decrypt(secret["encrypted_secret"], tenant, identifier, spec)
         return self.credential(row["spec"])
 
-    def validate_address(self, spec):
+    def _parse_address(self, spec):
+        """Shape checks shared by the deployment and managed allowlists."""
         if spec["protocol"] == "demo":
-            return
+            return None
         try:
             url = urlsplit(spec["base_url"])
             _ = url.port
         except ValueError:
             raise DomainError("invalid_model_address") from None
-        # A single "*" entry disables the hostname allowlist (deployment opt-in for
-        # arbitrary providers). Scheme, embedded credentials, query and fragment
-        # checks still apply, and plain http stays loopback-only.
-        allowed = self.settings.model_gateway_allowed_hosts
         if (
             url.scheme not in ("http", "https")
             or not url.hostname
-            or ("*" not in allowed and url.hostname.lower() not in allowed)
             or url.username
             or url.password
             or url.query
@@ -83,6 +81,38 @@ class Catalog:
             raise DomainError("model_address_not_allowed")
         if url.scheme == "http" and url.hostname not in ("localhost", "127.0.0.1", "::1"):
             raise DomainError("model_connection_requires_https")
+        return url
+
+    def validate_address(self, spec):
+        url = self._parse_address(spec)
+        if url is None:
+            return
+        # A single "*" entry disables the hostname allowlist (deployment opt-in
+        # for arbitrary providers). Shape checks above still apply.
+        allowed = self.settings.model_gateway_allowed_hosts
+        if "*" not in allowed and url.hostname.lower() not in allowed:
+            raise DomainError("model_address_not_allowed")
+
+    async def validate_effective_address(self, tenant, spec):
+        """Apply the deployment list, then the switch-gated managed list.
+
+        The deployment list wins and keeps its exact semantics. A host that is
+        not deployment-listed may pass only when UI-managed hosts are enabled
+        for this tenant and the host names a public DNS address right now.
+        """
+
+        try:
+            self.validate_address(spec)
+            return
+        except DomainError as exc:
+            if exc.code != "model_address_not_allowed":
+                raise
+        if not self.hosts.enabled():
+            raise DomainError("model_address_not_allowed")
+        host = urlsplit(spec["base_url"]).hostname.lower()
+        if host not in await self.hosts.effective(tenant):
+            raise DomainError("model_address_not_allowed")
+        await self.hosts.ensure_resolution(host)
 
     def credential(self, spec):
         ref = spec.get("credential_ref")
@@ -120,7 +150,7 @@ class Catalog:
 
     async def validate(self, c, tenant, kind, spec):
         if kind == "connections":
-            self.validate_address(spec)
+            await self.validate_effective_address(tenant, spec)
         if kind == "models":
             connection = await self.get(c, tenant, "connections", spec["connection_id"], True)
             if connection["spec"]["protocol"] == "openai_compatible" and set(spec["operations"]) - {
@@ -249,7 +279,7 @@ class Catalog:
                 spec["require_tools"] and not ms["tool_calling"]
             ):
                 raise DomainError("model_capability_mismatch")
-            self.validate_address(connection["spec"])
+            await self.validate_effective_address(tenant, connection["spec"])
             provider_parameters({"connection": connection["spec"], "model": ms}, spec["parameters"])
             # Credentials are resolved at call time, so rotation does not alter profile versions.
             routes.append(
