@@ -1,7 +1,7 @@
 # Phase 1 · UI-managed model egress hosts — Technical Design
 
 > Verified against the current tree on 2026-11-24: latest migration
-> `0074_codex_wire_api_backfill`, allowlist in
+> `0075_gateway_allowed_hosts`, allowlist in
 > `platform_services/model_gateway/catalog.py::validate_address`, management
 > routes in `model_gateway/management_routes.py`, console navigation in
 > `frontend/src/features/models/ModelsPage.tsx`.
