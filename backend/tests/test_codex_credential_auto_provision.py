@@ -36,14 +36,19 @@ def _settings(key_file: Path, **overrides) -> Settings:
     )
 
 
-def _make_catalog(url: str, key_file: Path) -> Catalog:
+def _make_catalog(url: str, key_file: Path, execution_key_file: Path | None = None) -> Catalog:
     # create_engine(Settings()) reads AGENT_DATABASE_URL; point it at the
     # disposable migration database for the duration of the test process.
     os.environ["AGENT_DATABASE_URL"] = url.replace("postgresql://", "postgresql+asyncpg://")
     settings = _settings(key_file)
     engine = create_engine(settings)
     hosts = HostAllowlistStore(engine, settings)
-    return Catalog(engine, settings, hosts=hosts, auto_codex_credentials=key_file)
+    return Catalog(
+        engine,
+        settings,
+        hosts=hosts,
+        auto_codex_credentials=execution_key_file if execution_key_file is not None else key_file,
+    )
 
 
 def _connection(name: str, api_key: str, **extra) -> Connection:
@@ -174,5 +179,23 @@ def test_demo_channel_does_not_provision_credential(migration_database, tmp_path
         )
 
     saved = asyncio.run(run())
+    assert saved["spec"].get("execution_credential_ref") is None
+    assert query(url, "SELECT count(*) FROM execution_credentials")[0][0] == 0
+
+
+def test_missing_execution_key_keeps_channel_save_working(migration_database, tmp_path):
+    """Unprovisioned CLI lane must not break ordinary gateway channel saves."""
+    url = migration_database
+    migrate(url, "head")
+    key_file = tmp_path / "keys"
+    key_file.mkdir()
+    (key_file / "master.key").write_bytes(Fernet.generate_key())
+    missing_execution_key = key_file / "execution.key"
+    assert not missing_execution_key.exists()
+    catalog = _make_catalog(url, key_file / "master.key", missing_execution_key)
+
+    saved = asyncio.run(
+        catalog.save(TENANT, "admin", "connections", _connection("custom", "sk-1"))
+    )
     assert saved["spec"].get("execution_credential_ref") is None
     assert query(url, "SELECT count(*) FROM execution_credentials")[0][0] == 0

@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -222,14 +223,19 @@ class Catalog:
                 # Auto-provision the Codex execution credential so a channel the
                 # admin created with a direct API Key becomes usable as a Codex
                 # model profile without exposing vault internals. Skipped for
-                # demo channels, environment-credential channels, deployments
-                # without an execution key file. An explicitly bound reference
-                # is rotated (not replaced) when the key changes, keeping it
-                # stable for already-published snapshots. Runs on the caller's
-                # connection so the channel and credential commit together.
+                # demo channels, environment-credential channels, and deployments
+                # where the execution key file has not been provisioned (the
+                # setting has a default path even when the CLI lane is unused),
+                # so an ordinary channel save never fails on a missing key.
+                # An explicitly bound reference is rotated (not replaced) when
+                # the key changes, keeping it stable for already-published
+                # snapshots. Runs on the caller's connection so the channel and
+                # credential commit together.
+                key_file = self.auto_codex_credentials
                 if (
                     body.api_key is not None
-                    and self.auto_codex_credentials is not None
+                    and key_file is not None
+                    and Path(key_file).is_file()
                     and spec.get("protocol") != "demo"
                 ):
                     existing_ref = None
@@ -244,7 +250,7 @@ class Catalog:
                         c,
                         tenant=tenant,
                         actor=actor,
-                        key_file=self.auto_codex_credentials,
+                        key_file=key_file,
                         name=f"codex-{body.name}",
                         secret=body.api_key.get_secret_value(),
                         existing_ref=existing_ref,
