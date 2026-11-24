@@ -83,8 +83,9 @@ def test_0071_revision_chain_is_a_single_head_on_0070():
     assert migration.revision == REVISION
     assert migration.down_revision == PREVIOUS_REVISION
     assert migration.branch_labels is None and migration.depends_on is None
-    # Phase 6-2 adds 0072/0073 on top of this 0071 baseline (still one head).
-    assert scripts.get_heads() == ["0073_execution_parser_diag"]
+    # Phase 6-2 adds 0072/0073 and the Codex backfill 0074 on top of this 0071
+    # baseline (still one head).
+    assert scripts.get_heads() == ["0074_codex_wire_api_backfill"]
     assert len(REVISION) <= 32
 
 
