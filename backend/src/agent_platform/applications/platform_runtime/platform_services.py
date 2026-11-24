@@ -65,6 +65,7 @@ class PlatformServices:
         tool_client=None,
         tool_network_policy: ToolEgressPolicy | None = None,
         adapter_registry: AdapterRegistry | None = None,
+        execution_key_file=None,
     ):
         self.engine, self.repository, self.settings, self.snapshot = (
             engine,
@@ -89,7 +90,9 @@ class PlatformServices:
         self.approval = ApprovalService(engine, self.event_bus)
         self.tool_contributions = (ApprovalToolContribution(self.approval),)
         self.policy = ExecutionPolicy(self.tools, contributions)
-        self.gateway = ModelGateway(engine, settings, model_client)
+        self.gateway = ModelGateway(
+            engine, settings, model_client, execution_key_file=execution_key_file
+        )
         self.agents = AgentService(
             engine,
             self.tools,

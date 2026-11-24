@@ -1,7 +1,7 @@
 import json
 import os
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from agent_platform.core_platform.platform_services.persistence.store import (
     DomainError,
@@ -13,6 +13,7 @@ from agent_platform.core_platform.platform_services.persistence.store import (
     transaction,
 )
 
+from .codex_credential_sync import ensure_codex_credential
 from .contracts import Connection, Model, Profile
 from .credentials import CredentialVault
 from .host_allowlist import HostAllowlistStore
@@ -22,10 +23,16 @@ SCHEMAS = {"connections": Connection, "models": Model, "profiles": Profile}
 
 
 class Catalog:
-    def __init__(self, engine, settings, hosts=None):
+    def __init__(self, engine, settings, hosts=None, auto_codex_credentials=None):
         self.engine, self.settings = engine, settings
         self.hosts = hosts or HostAllowlistStore(engine, settings)
         self.vault = CredentialVault(settings.model_credential_key_file)
+        # Opt-in bridge: when the deployment has an execution credential key
+        # file, saving a channel with a direct API Key also registers a
+        # codex-scoped execution credential and fills execution_credential_ref.
+        # ``None`` keeps the legacy behaviour (no auto-provision) so callers
+        # that do not own the execution vault stay unchanged.
+        self.auto_codex_credentials = auto_codex_credentials
 
     async def annotate_credentials(self, tenant, rows, connection=None):
         async with transaction(self.engine, connection) as c:
@@ -178,6 +185,18 @@ class Catalog:
                     raise DomainError("profile_operation_is_immutable")
             await self.validate(c, tenant, kind, spec)
             if kind == "connections":
+                previous = (
+                    await self.get(c, tenant, "connections", identifier)
+                    if identifier is not None
+                    else None
+                )
+                # The auto-provisioned reference is server-owned metadata. An
+                # update whose body omits it must not silently drop the binding;
+                # inherit the stored value unless the body explicitly sets one.
+                if previous is not None and spec.get("execution_credential_ref") is None:
+                    inherited = previous["spec"].get("execution_credential_ref")
+                    if inherited is not None:
+                        spec["execution_credential_ref"] = inherited
                 if body.api_key is not None and (body.clear_api_key or body.credential_ref):
                     raise DomainError("model_credential_conflict", 422)
                 if body.api_key is not None:
@@ -185,12 +204,11 @@ class Catalog:
                     if not value.strip() or any(ch in value for ch in "\r\n"):
                         raise DomainError("invalid_model_credential", 422)
                 if (
-                    identifier is not None
+                    previous is not None
                     and body.api_key is None
                     and not body.clear_api_key
                     and not body.credential_ref
                 ):
-                    previous = await self.get(c, tenant, kind, identifier)
                     stored = await one(
                         c,
                         "SELECT connection_id FROM gateway_credentials WHERE tenant_id=:t AND connection_id=:id",
@@ -201,6 +219,37 @@ class Catalog:
                         previous["spec"][key] != spec[key] for key in ("base_url", "protocol")
                     ):
                         raise DomainError("model_credential_reentry_required", 409)
+                # Auto-provision the Codex execution credential so a channel the
+                # admin created with a direct API Key becomes usable as a Codex
+                # model profile without exposing vault internals. Skipped for
+                # demo channels, environment-credential channels, deployments
+                # without an execution key file. An explicitly bound reference
+                # is rotated (not replaced) when the key changes, keeping it
+                # stable for already-published snapshots. Runs on the caller's
+                # connection so the channel and credential commit together.
+                if (
+                    body.api_key is not None
+                    and self.auto_codex_credentials is not None
+                    and spec.get("protocol") != "demo"
+                ):
+                    existing_ref = None
+                    if previous is not None:
+                        raw_ref = previous["spec"].get("execution_credential_ref")
+                        if raw_ref:
+                            try:
+                                existing_ref = UUID(str(raw_ref))
+                            except (ValueError, TypeError, AttributeError):
+                                existing_ref = None
+                    new_ref = await ensure_codex_credential(
+                        c,
+                        tenant=tenant,
+                        actor=actor,
+                        key_file=self.auto_codex_credentials,
+                        name=f"codex-{body.name}",
+                        secret=body.api_key.get_secret_value(),
+                        existing_ref=existing_ref,
+                    )
+                    spec["execution_credential_ref"] = str(new_ref)
             if identifier is None:
                 row = await one(
                     c,
