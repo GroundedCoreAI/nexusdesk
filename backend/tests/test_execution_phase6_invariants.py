@@ -24,8 +24,9 @@ P6 = REPO / "docs/requirement/agent-execution-platform-v2/phase-6-security-relia
 
 def test_single_migration_head_and_revision_lengths():
     heads = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads()
-    # 0072/0073 append to the 0071 baseline; 0074 appends the Codex wire-api backfill.
-    assert heads == ["0074_codex_wire_api_backfill"]
+    # 0072/0073 append to the 0071 baseline; 0074 appends the Codex wire-api
+    # backfill and 0075 appends the UI-managed egress-host table.
+    assert heads == ["0075_gateway_allowed_hosts"]
     assert all(len(head) <= 32 for head in heads)
 
 

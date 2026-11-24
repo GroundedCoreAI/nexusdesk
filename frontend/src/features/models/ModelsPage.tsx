@@ -1,5 +1,5 @@
 import { t, errorText } from '../../i18n/index';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, patch, post, put, token } from '../../shared/api/client';
 import { Alert, Empty, Field, Panel, useAccess, useAction, useResource } from '../../shared/components/ui';
 import { AppstoreOutlined, SearchOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -9,6 +9,7 @@ import { GatewayReports } from './GatewayReports';
 import { useCatalogOptions } from './useCatalogOptions';
 import './models.css';
 import { ProviderModelField } from './ProviderModelField';
+import { AllowedHostsPanel } from './AllowedHostsPanel';
 export interface ModelResource {
     id: string;
     name: string;
@@ -20,7 +21,7 @@ export interface ModelResource {
     credential_source?: 'stored' | 'environment' | 'none';
 }
 type Kind = 'connections' | 'models' | 'profiles';
-type Workspace = Kind | 'playground' | 'logs' | 'monitor' | ManagementSection;
+type Workspace = Kind | 'playground' | 'logs' | 'monitor' | 'allowed_hosts' | ManagementSection;
 const root = '/model-gateway';
 const templates = (): Record<Kind, object> => ({
     connections: { name: t('演示连接'), protocol: 'demo', base_url: '', credential_ref: null, concurrency: 8 },
@@ -45,7 +46,7 @@ function editorSpec(kind: Kind, spec: Record<string, unknown>) {
         parameters: spec.operation === 'chat' ? { temperature: null, max_tokens: null, thinking: null, ...parameters } : parameters,
     };
 }
-const labels = (): Record<Workspace, string> => ({ connections: t("渠道管理"), models: t("模型广场"), profiles: t("配置方案"), playground: t("模型体验"), logs: t("调用日志"), monitor: t("监控概览"), access_keys: t("访问密钥"), sensitive_words: t("敏感词库"), alert_rules: t("告警管理"), quota: t("配额管理") });
+const labels = (): Record<Workspace, string> => ({ connections: t("渠道管理"), models: t("模型广场"), profiles: t("配置方案"), playground: t("模型体验"), logs: t("调用日志"), monitor: t("监控概览"), allowed_hosts: t("出站主机"), access_keys: t("访问密钥"), sensitive_words: t("敏感词库"), alert_rules: t("告警管理"), quota: t("配额管理") });
 const resourceNames = (): Record<Kind, string> => ({ connections: t("渠道"), models: t("模型"), profiles: t("配置方案") });
 const operations = (): Record<string, string> => ({ chat: t("对话生成"), embed: t("文本向量"), rerank: t("重排序"), transcribe: t("语音识别"), synthesize: t("语音合成"), recognize: t("图像识别") });
 function ResourceTable({ rows, kind, admin, onSelect, onProbe, onDelete }: {
@@ -185,11 +186,25 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
     const currentPage = page;
     const pageRows = visible;
     const managing = workspace === 'connections' || workspace === 'models' || workspace === 'profiles';
+    // A rejected save names the exact host; admins can allow it inline when the
+    // deployment enabled console-managed hosts.
+    const blockedHost = useMemo(() => {
+        if (!admin || !(action.error || '').includes('model_address_not_allowed'))
+            return '';
+        try {
+            const body = JSON.parse(editor) as Record<string, unknown>;
+            const raw = String(body.base_url || '');
+            return raw ? new URL(raw).hostname.toLowerCase() : '';
+        }
+        catch {
+            return '';
+        }
+    }, [admin, action.error, editor]);
     return <div className="model-gateway">
     {contextHolder}
     {profiles.data && !profiles.error && !profiles.data.some(row => row.enabled && row.published_version && row.spec.operation === 'chat') && <AntAlert showIcon type="info" style={{marginBottom: 16}} title={t('尚未配置可用的对话模型')} description={t('平台可以先启动。请添加供应商连接和 Chat 模型，发布配置方案后绑定到 Agent，即可开始对话。')} />}
     {!editorOpen && <Alert error={action.error || list.error || connections.error || models.error || profiles.error} notice={action.notice}/>}
-    <div className="gateway-nav" aria-label={t("模型网关功能")}>{(['models', 'connections', 'profiles', 'playground', 'logs', 'monitor', ...(admin ? ['access_keys', 'sensitive_words', 'alert_rules', 'quota'] : [])] as Workspace[]).map(k => <button aria-pressed={workspace === k} className={workspace === k ? 'active' : ''} key={k} disabled={action.busy} onClick={() => navigate(k)}>{labels()[k]}</button>)}<button className="gateway-refresh" aria-label={t("刷新资源")} onClick={refresh}><ReloadOutlined /></button></div>
+    <div className="gateway-nav" aria-label={t("模型网关功能")}>{(['models', 'connections', 'profiles', 'playground', 'logs', 'monitor', ...(admin ? ['allowed_hosts', 'access_keys', 'sensitive_words', 'alert_rules', 'quota'] : [])] as Workspace[]).map(k => <button aria-pressed={workspace === k} className={workspace === k ? 'active' : ''} key={k} disabled={action.busy} onClick={() => navigate(k)}>{labels()[k]}</button>)}<button className="gateway-refresh" aria-label={t("刷新资源")} onClick={refresh}><ReloadOutlined /></button></div>
     {managing && <div className={`gateway-catalog ${kind === 'models' ? 'with-filters' : ''}`}>
     {kind === 'models' && <section className="gateway-filters" aria-label={t("模型筛选")}><div className="row"><h2>{t("模型筛选")}</h2><button className="text-button" onClick={() => { setStatus('all'); setCapability('all'); setConnectionFilter('all'); setQuery(''); }}>{t("重置")}</button></div><h3>{t("模型能力")}</h3><div className="gateway-filter-chips">{Object.entries({ all: t("全部"), ...operations() }).map(([key, label]) => <button key={key} aria-pressed={capability === key} className={capability === key ? 'active' : ''} onClick={() => setCapability(key)}>{label}</button>)}</div><h3>{t("接入渠道")}</h3><select aria-label={t("筛选接入渠道")} value={connectionFilter} onChange={e => setConnectionFilter(e.target.value)}><option value="all">{t("全部渠道")}</option>{connections.data?.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select><h3>{t("工具调用")}</h3><p className="hint">{t("支持工具调用的模型会在卡片中显示能力标签。")}</p><div className="gateway-guide"><strong>{t("接入模型的三个步骤")}</strong><p>{t("创建渠道 \u2192 登记模型 \u2192 发布配置方案")}</p><button className="text-button" onClick={() => navigate('connections')}>{t("前往渠道管理 \u2192")}</button></div></section>}
     <div className="gateway-catalog-content">
@@ -202,6 +217,10 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
     </div></div>}
     <Drawer title={selected ? `${admin ? t("编辑") : t("查看")} · ${selected.name}` : t("新建{{v0}}", { v0: resourceNames()[kind] })} open={editorOpen} onClose={() => setEditorOpen(false)} size={560} className="gateway-editor" destroyOnHidden>
     <Alert error={action.error} notice={action.notice}/>
+      {kind === 'connections' && blockedHost && <div className="gateway-fields">
+        <p className="hint">{t('该主机未在允许列表中：{{v0}}', { v0: blockedHost })}</p>
+        <div className="actions"><button type="button" className="secondary" disabled={action.busy} onClick={() => void action.run(async () => { await post(`${root}/allowed-hosts`, { host: blockedHost }); }, t('已允许该主机，请重新保存渠道。'))}>{t('允许此主机后重试')}</button></div>
+      </div>}
       <form onSubmit={e => { e.preventDefault(); void action.run(async () => { const body = JSON.parse(editor) as Record<string, unknown>;
           if (kind === 'connections') {
             if ('api_key' in body || 'clear_api_key' in body) throw new Error(t('请在 API Key 输入框填写密钥'));
@@ -229,6 +248,7 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
       {selected && kind === 'models' && <ModelPolicyForm key={selected.id} modelId={selected.id} admin={admin}/>}
       {selected && admin && <div className="gateway-extra"><Popconfirm title={t("移除资源？被其他资源或发布版本引用时无法移除。")} onConfirm={() => action.run(async () => { await api(`${root}/resources/${kind}/${selected.id}?revision=${selected.revision}`, { method: 'DELETE' }); setEditorOpen(false); setSelected(null); refresh(); }, t("资源已移除"))}><button disabled={action.busy} className="secondary">{t("删除资源")}</button></Popconfirm></div>}
     </Drawer>
+    {workspace === 'allowed_hosts' && admin && <AllowedHostsPanel/>}
     {workspace === 'playground' && <Panel title={t("模型试用台")}>
       <div className="gateway-playground">
       <form onSubmit={e => {

@@ -164,7 +164,7 @@ class CodexProviderResolver:
             raise CodexRouteError("codex_route_missing") from None
 
         _require_bare_https(base_url)
-        self._assert_host_allowed(base_url)
+        await self._assert_host_allowed(tenant_id, base_url)
         if wire_api not in _WIRE_APIS:
             # ``chat`` used to be accepted; the installed CLI now rejects it
             # outright, so name the unsupported protocol instead of reporting
@@ -190,15 +190,17 @@ class CodexProviderResolver:
             raise CodexRouteError("codex_route_missing") from None
         return CodexProviderPlan(home_config=home_config, credential_ref=credential_ref)
 
-    def _assert_host_allowed(self, base_url: str) -> None:
-        """Let ``model_gateway_allowed_hosts`` govern the Codex transport too."""
+    async def _assert_host_allowed(self, tenant_id: str, base_url: str) -> None:
+        """Let the deployment and UI-managed host lists govern Codex too."""
 
-        # validate_address owns the scheme, embedded-credential, query and
-        # fragment checks plus the allowlist. A non-demo protocol is forced so a
-        # real Codex upstream address can never skip the allowlist via the
-        # demo-protocol early return.
+        # validate_effective_address owns the scheme, embedded-credential,
+        # query and fragment checks plus both allowlists. A non-demo protocol is
+        # forced so a real Codex upstream address can never skip the allowlist
+        # via the demo-protocol early return.
         try:
-            self._catalog.validate_address({"protocol": "openai_compatible", "base_url": base_url})
+            await self._catalog.validate_effective_address(
+                tenant_id, {"protocol": "openai_compatible", "base_url": base_url}
+            )
         except DomainError:
             raise CodexRouteError("codex_host_not_allowed") from None
         # Defense in depth against a catalog double that skips validation: the
