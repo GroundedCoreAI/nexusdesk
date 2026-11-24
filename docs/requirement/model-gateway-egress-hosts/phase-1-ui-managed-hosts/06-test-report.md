@@ -20,6 +20,7 @@
 | Frontend typecheck | `npm run typecheck` | pass |
 | Frontend build | `npm run build` | pass |
 | Compose render | `docker compose config` | both allowlist variables present |
+| CI (push, 674b8ad) | [run 45406197775](https://github.com/GroundedCoreAI/nexusdesk/actions/runs/45406197775) | all five jobs success |
 
 ## 2. Case Results
 
@@ -60,7 +61,6 @@
 
 ## 5. Not Executed
 
-- Full CI (push/PR) has not run yet.
 - Browser end-to-end flows (Playwright) were not run; the UI was validated by
   typecheck/build and code review only.
 - Phase 1 acceptance (`05`) is pending.
