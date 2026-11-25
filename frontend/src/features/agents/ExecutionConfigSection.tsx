@@ -135,36 +135,37 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
     // field. The credential library is read only so a valid reference can be
     // bound automatically; its plaintext secret never reaches the browser.
     const [credentialItems, setCredentialItems] = useState<ExecutionCredentialSummary[] | null>(null);
-    const [credentialsFailed, setCredentialsFailed] = useState(false);
     const codexActive = !!view.codex;
     useEffect(() => {
         let active = true;
         if (!codexActive || !canEdit) {
             setCredentialItems(null);
-            setCredentialsFailed(false);
             return () => { active = false; };
         }
         void listExecutionCredentials()
-            .then(response => { if (active) { setCredentialItems(response.items ?? []); setCredentialsFailed(false); } })
-            .catch(() => { if (active) { setCredentialItems(null); setCredentialsFailed(true); } });
+            .then(response => { if (active) { setCredentialItems(response.items ?? []); } })
+            .catch(() => { if (active) { setCredentialItems(null); } });
         return () => { active = false; };
     }, [codexActive, canEdit]);
 
     const credentialChoices = useMemo(() => distinctCredentials(credentialItems), [credentialItems]);
     const currentRef = view.codex?.credential_ref ?? null;
-    const boundCredential = credentialChoices.find(item => item.credential_ref === currentRef);
     // Bind the first platform-managed credential on entering the Codex lane so
     // publish validation (issue #165 L1) succeeds without asking the customer
     // to understand credential UUIDs. A chosen, still-valid reference is kept.
+    // This is a hidden legacy-lane fallback for the published config, never a
+    // customer-facing identity display: the gateway lane resolves the actual
+    // runtime credential from the selected profile's connection at run time.
     useEffect(() => {
         if (!view.codex || !canEdit || busy || !credentialChoices.length)
             return;
-        if (currentRef && boundCredential)
+        const currentValid = credentialChoices.some(item => item.credential_ref === currentRef);
+        if (currentRef && currentValid)
             return;
         const first = credentialChoices[0];
         if (first && first.credential_ref !== currentRef)
             onChange(patchCodexConfig(config, { credential_ref: first.credential_ref }));
-    }, [view.codex, canEdit, busy, credentialChoices, currentRef, boundCredential, config, onChange]);
+    }, [view.codex, canEdit, busy, credentialChoices, currentRef, config, onChange]);
 
     // A published chat profile is not automatically a runnable Codex profile:
     // the Gateway lane requires the primary connection to carry both a valid
@@ -254,14 +255,8 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
             }}
           />
         </Field>
-        <div className="agent-execution-identity">
-          <span>{t('运行身份')}</span>
-          <strong>{boundCredential?.name ?? (credentialsFailed ? t('读取失败，请稍后重试') : t('平台统一配置'))}</strong>
-        </div>
         <p className="agent-execution-hint">{t('代码任务的模型与运行身份由平台统一配置，无需手动填写密钥或路径。')}</p>
         {profiles && gatewayModels.data && gatewayConnections.data && !profileChoices.length && <p role="status" className="agent-execution-hint">{t('暂无可用于代码任务的模型方案：模型网关连接尚未配置运行凭据或工具调用能力，请联系管理员。')}</p>}
-        {credentialsFailed && <p role="status" className="agent-execution-hint">{t('运行身份信息读取失败，请联系管理员或稍后重试。')}</p>}
-        {!credentialsFailed && credentialItems && !credentialChoices.length && <p role="status" className="agent-execution-hint">{t('平台尚未登记可用的代码任务身份，请联系管理员。')}</p>}
       </>}
     </div>
   </section>;
