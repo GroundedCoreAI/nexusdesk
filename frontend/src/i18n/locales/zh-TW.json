@@ -806,6 +806,7 @@
   "清除已保存的 API Key": "清除已儲存的 API Key",
   "请在 API Key 输入框填写密钥": "請在 API Key 輸入框填寫金鑰",
   "支持直接填写 API Key，也可使用环境变量。Embedding 模型需声明 embedding_dimension、vector_space；语音合成需声明 voices。": "支援直接填寫 API Key，也可使用環境變數。Embedding 模型需宣告 embedding_dimension、vector_space；語音合成需宣告 voices。",
+  "这些 Codex 字段留空即自动回退：codex_base_url 用上方服务地址，codex_wire_api 用 responses，codex_model_provider 用渠道名称。直接填 API Key 会自动生成 Codex 执行凭据；credential_ref 仅用于网关出站，无需填写。": "這些 Codex 欄位留空即自動回退：codex_base_url 使用上方服務地址，codex_wire_api 使用 responses，codex_model_provider 使用渠道名稱。直接填寫 API Key 會自動產生 Codex 執行憑證；credential_ref 僅供閘道出站使用，無需填寫。",
   "从渠道选择模型": "從渠道選擇模型",
   "正在获取模型列表…": "正在取得模型清單…",
   "刷新模型列表": "重新整理模型清單",

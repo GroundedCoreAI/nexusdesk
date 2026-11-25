@@ -806,6 +806,7 @@
   "清除已保存的 API Key": "सहेजी गई API Key हटाएँ",
   "请在 API Key 输入框填写密钥": "API Key फ़ील्ड में कुंजी दर्ज करें",
   "支持直接填写 API Key，也可使用环境变量。Embedding 模型需声明 embedding_dimension、vector_space；语音合成需声明 voices。": "सीधे API Key दर्ज करें या पर्यावरण चर का उपयोग करें। एम्बेडिंग मॉडल के लिए embedding_dimension और vector_space तथा वाक् संश्लेषण के लिए voices आवश्यक हैं।",
+  "这些 Codex 字段留空即自动回退：codex_base_url 用上方服务地址，codex_wire_api 用 responses，codex_model_provider 用渠道名称。直接填 API Key 会自动生成 Codex 执行凭据；credential_ref 仅用于网关出站，无需填写。": "ये Codex फ़ील्ड खाली छोड़ने पर अपने आप वापस आ जाते हैं: codex_base_url ऊपर दिए गए सर्विस एड्रेस का, codex_wire_api responses का, और codex_model_provider चैनल नाम का उपयोग करता है। API Key सीधे दर्ज करने पर Codex एक्सिक्यूशन क्रेडेंशियल अपने आप बन जाता है; credential_ref सिर्फ़ गेटवे आउटबाउंड के लिए है, इसे भरने की ज़रूरत नहीं है।",
   "从渠道选择模型": "प्रदाता का मॉडल चुनें",
   "正在获取模型列表…": "मॉडल सूची लोड हो रही है…",
   "刷新模型列表": "मॉडल सूची रीफ़्रेश करें",
