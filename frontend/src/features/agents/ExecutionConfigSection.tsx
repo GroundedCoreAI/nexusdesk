@@ -1,5 +1,5 @@
 import { errorText, t } from '../../i18n/index';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { InputNumber, Select } from 'antd';
 import {
@@ -118,8 +118,11 @@ interface Props {
     flags: ExecutionConfigFlags | null;
     /** Published ModelGateway chat profiles, already loaded by AgentsPage (issue #167). */
     profiles: ModelResource[] | null;
+    /** The React Chat profile picker, hosted by AgentsPage but rendered here so
+     * engine selection and its dependent model choice live in one section. */
+    modelPicker?: ReactNode;
 }
-export function ExecutionConfigSection({ config, onChange, agentId, canEdit, busy, saveError, flags, profiles }: Props) {
+export function ExecutionConfigSection({ config, onChange, agentId, canEdit, busy, saveError, flags, profiles, modelPicker }: Props) {
     useTranslation();
     const view = readExecution(config);
     const issues = executionIssues(config);
@@ -204,9 +207,7 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
     // A draft switch must not keep an error from a different agent.
     useEffect(() => { setCredentialItems(null); }, [agentId]);
 
-    return <section id="agent-execution">
-    <div className="agent-section-heading"><h2>{t('执行与能力')}</h2></div>
-    <p className="agent-section-description">{t('选择 Agent 的运行方式；密钥、路径等细节由平台统一处理。')}</p>
+    return <div id="agent-execution" className="agent-execution-merged">
     {phase3Off && <p role="status" className="agent-muted">{t('当前部署未启用代码执行能力，运行方式不可切换；平台对话模型不受影响。')}</p>}
     {misconfigured && <p role="status" className="agent-muted">{t('执行服务暂不可用，请联系运维核对部署配置。')}</p>}
     <Alert error={shown}/>
@@ -224,11 +225,11 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
         />
       </Field>}
       {view.react && <>
+        {modelPicker}
         <Field label={t('最大模型轮次')}>
           <InputNumber aria-label={t('最大模型轮次')} min={1} max={30} precision={0} value={view.react.max_model_rounds} disabled={!canEdit || busy} onChange={value => onChange(patchReactConfig(config, { max_model_rounds: value || 1 }))}/>
         </Field>
         <p className="agent-execution-hint">{t('一次回答中最多调用模型的次数，范围 1–30。')}</p>
-        <p className="agent-execution-hint">{t('模型方案在「模型配置」中选择。')}</p>
       </>}
       {view.codex && <>
         <Field label={t('Codex 模型方案（模型网关）')}>
@@ -255,9 +256,9 @@ export function ExecutionConfigSection({ config, onChange, agentId, canEdit, bus
             }}
           />
         </Field>
-        <p className="agent-execution-hint">{t('代码任务的模型与运行身份由平台统一配置，无需手动填写密钥或路径。')}</p>
+        <p className="agent-execution-hint">{t('代码任务在此处选择 Codex 模型方案，其余运行细节由平台统一处理；此处无需绑定 Chat 方案。')}</p>
         {profiles && gatewayModels.data && gatewayConnections.data && !profileChoices.length && <p role="status" className="agent-execution-hint">{t('暂无可用于代码任务的模型方案：模型网关连接尚未配置运行凭据或工具调用能力，请联系管理员。')}</p>}
       </>}
     </div>
-  </section>;
+  </div>;
 }

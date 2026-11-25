@@ -2729,5 +2729,8 @@
   "开源开放": "Open and transparent",
   "自主可控": "Self-controlled",
   "灵活扩展": "Flexible extensibility",
-  "该密钥将同时用于模型对话与代码任务（Codex）；保存后即可在 Agent 中把本渠道的模型方案用于代码任务，无需其他配置。": "This key is used for both chat and code tasks (Codex). After saving, the model profile on this channel is immediately usable for code tasks in an Agent; no other setup is needed."
+  "该密钥将同时用于模型对话与代码任务（Codex）；保存后即可在 Agent 中把本渠道的模型方案用于代码任务，无需其他配置。": "This key is used for both chat and code tasks (Codex). After saving, the model profile on this channel is immediately usable for code tasks in an Agent; no other setup is needed.",
+  "模型与运行": "Model & runtime",
+  "选择运行方式，再配置该方式的模型方案；密钥、路径等细节由平台统一处理。": "Choose how the Agent runs, then configure the model plan for that mode; keys and paths are managed by the platform.",
+  "代码任务在此处选择 Codex 模型方案，其余运行细节由平台统一处理；此处无需绑定 Chat 方案。": "For code tasks, choose a Codex model plan here; all other runtime details are managed by the platform, and no Chat plan binding is needed."
 }
