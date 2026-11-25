@@ -550,8 +550,9 @@ test('UI-02 the customer never sees a credential picker, a credential source or 
   await expect(section(page).locator('.agent-credential-source')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '凭据来源（只读）' })).toHaveCount(0);
   await expect(page.getByLabel('密钥版本')).toHaveCount(0);
-  // A friendly platform-managed identity line replaces all of the above.
-  await expect(section(page).getByText('运行身份', { exact: true })).toBeVisible();
+  // The runtime identity is resolved from the selected gateway profile's
+  // connection at run time, so no legacy credential name is displayed here.
+  await expect(section(page).getByText('运行身份', { exact: true })).toHaveCount(0);
   const text = await section(page).innerText();
   expect(text).not.toContain('sk-');
   expect(text).not.toContain('encrypted_secret');
@@ -569,7 +570,9 @@ test('UI-03 a valid platform credential is bound automatically without a custome
   await expect.poll(() => harness.saves.length).toBe(1);
   const codex = (harness.saves[0].config as Record<string, unknown>).codex as Record<string, unknown>;
   expect(codex.credential_ref).toBe(CREDENTIAL_REF);
-  await expect(section(page).getByText('DeepSeek 生产密钥')).toBeVisible();
+  // The auto-bound reference stays in the published config for the legacy
+  // lane, but the credential name is no longer shown as a runtime identity.
+  await expect(section(page).getByText('DeepSeek 生产密钥')).toHaveCount(0);
 });
 
 test('UI-04 the capability preview, its narrowing checkboxes and the config schema are gone', async ({ page }) => {
@@ -790,12 +793,10 @@ const UNTRANSLATED_ERROR_COPY = ['model_not_configured'];
 test('P3-FE-13 every new execution key exists in all four locales', () => {
   const keys = [
     '执行与能力', '运行方式', '最大模型轮次', 'Codex 模型方案（模型网关）',
-    '对话模型（平台内置）', '代码任务（命令行）', '运行身份', '平台统一配置',
+    '对话模型（平台内置）', '代码任务（命令行）',
     '选择 Agent 的运行方式；密钥、路径等细节由平台统一处理。',
     '一次回答中最多调用模型的次数，范围 1–30。', '模型方案在「模型配置」中选择。',
     '代码任务的模型与运行身份由平台统一配置，无需手动填写密钥或路径。',
-    '运行身份信息读取失败，请联系管理员或稍后重试。',
-    '平台尚未登记可用的代码任务身份，请联系管理员。',
     '未绑定（使用部署默认）', '执行配置不合法，请检查标记的字段。', '字段 {{v0}}：{{v1}}',
     '所选 Engine 未注册或已停用，无法预览或发布。',
     '{{v0}} 与 {{v1}} 取值不一致，请保留其中一处后再保存。',
