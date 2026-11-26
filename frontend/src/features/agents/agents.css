@@ -76,4 +76,9 @@
 .agent-execution-card .field>span{display:block;margin-bottom:8px;font-size:12px;color:#6b7282}
 .agent-execution-card .ant-select{width:100%}
 .agent-execution-hint{margin:10px 0 14px;font-size:12px;color:#7c8290;line-height:1.8}
-#agent-execution .agent-section-description{margin-bottom:14px}
+.agent-model-runtime .agent-execution-card{margin-top:4px}
+.agent-model-runtime .agent-execution-card>.agent-setting-card{background:transparent;padding:0;border:0;border-radius:0}
+.agent-model-runtime .agent-execution-card>.agent-setting-card .field{padding:14px 0;border-bottom:1px solid #f0f1f5;margin:0}
+.agent-model-runtime .agent-execution-card>.agent-setting-card .field:last-child{border-bottom:0}
+.agent-model-runtime .agent-execution-card>.agent-setting-card .field>span{display:block;margin-bottom:8px;font-size:12px;color:#6b7282}
+.agent-model-runtime .agent-execution-card>.agent-setting-card .ant-select{width:100%}

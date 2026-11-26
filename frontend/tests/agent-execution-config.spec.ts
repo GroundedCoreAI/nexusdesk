@@ -706,7 +706,9 @@ for (const language of ['zh-CN', 'zh-TW', 'en', 'hi']) {
     await expect(section(page).getByText(tr(language, OFF_HINT))).toBeVisible();
     await expect(page.getByLabel(tr(language, '运行方式'))).toHaveCount(0);
     if (language === 'en' || language === 'hi') {
-      expect(await section(page).innerText()).not.toMatch(/[㐀-鿿]/);
+      // Only platform copy must be translated; a mock profile name is user data.
+      const hint = section(page).getByText(tr(language, OFF_HINT));
+      expect(await hint.innerText()).not.toMatch(/[㐀-鿿]/);
     }
   });
   test(`P3-FE-18 ${language} translates the deployment misconfiguration hint`, async ({ page }) => {
@@ -714,7 +716,8 @@ for (const language of ['zh-CN', 'zh-TW', 'en', 'hi']) {
     await open(page, { flags: { execution_phase3_enabled: true, execution_orchestrator_enabled: false } }, language);
     await expect(section(page).getByText(tr(language, MISCONFIG_HINT))).toBeVisible();
     if (language === 'en' || language === 'hi') {
-      expect(await section(page).innerText()).not.toMatch(/[㐀-鿿]/);
+      const hint = section(page).getByText(tr(language, MISCONFIG_HINT));
+      expect(await hint.innerText()).not.toMatch(/[㐀-鿿]/);
     }
   });
 }
@@ -792,11 +795,11 @@ const UNTRANSLATED_ERROR_COPY = ['model_not_configured'];
 
 test('P3-FE-13 every new execution key exists in all four locales', () => {
   const keys = [
-    '执行与能力', '运行方式', '最大模型轮次', 'Codex 模型方案（模型网关）',
+    '模型与运行', '运行方式', '最大模型轮次', 'Codex 模型方案（模型网关）',
     '对话模型（平台内置）', '代码任务（命令行）',
-    '选择 Agent 的运行方式；密钥、路径等细节由平台统一处理。',
-    '一次回答中最多调用模型的次数，范围 1–30。', '模型方案在「模型配置」中选择。',
-    '代码任务的模型与运行身份由平台统一配置，无需手动填写密钥或路径。',
+    '选择运行方式，再配置该方式的模型方案；密钥、路径等细节由平台统一处理。',
+    '一次回答中最多调用模型的次数，范围 1–30。',
+    '代码任务在此处选择 Codex 模型方案，其余运行细节由平台统一处理；此处无需绑定 Chat 方案。',
     '未绑定（使用部署默认）', '执行配置不合法，请检查标记的字段。', '字段 {{v0}}：{{v1}}',
     '所选 Engine 未注册或已停用，无法预览或发布。',
     '{{v0}} 与 {{v1}} 取值不一致，请保留其中一处后再保存。',
@@ -808,7 +811,6 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     '数值不能小于 {{v0}}', '数值不能大于 {{v0}}',
     '取值必须是允许值之一', '取值格式不正确',
     '当前 Engine 不支持旧版 React 字段，请清除模型方案或切回 React Engine',
-    '代码任务的模型在下方「执行与能力」中选择，其余运行细节由平台统一处理；此处无需绑定 Chat 方案。',
     '执行凭据已失效或不在允许范围内，请联系运维核对凭据库并重新绑定有效凭据。',
     'Codex 模型方案无效或不支持工具调用，请检查模型网关配置。',
     'Codex 运行凭据无效或未配置，发布已阻止，请联系管理员核对凭据库或模型网关连接配置。',
@@ -850,7 +852,7 @@ test('P3-FE-13 every new execution key exists in all four locales', () => {
     if (missing) untranslated.push(code);
   }
   for (const code of untranslated) expect(UNTRANSLATED_ERROR_COPY).toContain(code);
-  expect(keys.length).toBeGreaterThanOrEqual(40);
+  expect(keys.length).toBeGreaterThanOrEqual(39);
 });
 
 test('I161-01 (issue #161) engine round trip keeps the React Chat binding through save, publish and reload', async ({ page }) => {
