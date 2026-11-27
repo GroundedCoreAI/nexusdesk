@@ -40,6 +40,10 @@ PERMISSIONS = {
     "approval.read": "View approval requests",
     "approval.manage": "Create and decide approval requests",
     "memory.read": "View customer memory",
+    "skill.read": "View the global Skill capability library",
+    "skill.manage": "Create and edit Skill drafts",
+    "skill.test": "Execute Skill tests",
+    "skill.publish": "Publish and roll back Skill versions",
 }
 
 _OPERATOR = {
@@ -54,6 +58,8 @@ _OPERATOR = {
     "approval.read",
     "evaluation.read",
     "observability.read",
+    "skill.read",
+    "skill.test",
 }
 
 _VIEWER = {
@@ -65,6 +71,7 @@ _VIEWER = {
     "approval.read",
     "evaluation.read",
     "observability.read",
+    "skill.read",
 }
 
 ROLE_PERMISSIONS = {

@@ -75,6 +75,19 @@ def test_seed_industries_defaults_off_and_is_env_overridable(monkeypatch):
     )
 
 
+def test_seed_sample_skills_defaults_off_and_is_env_overridable(monkeypatch):
+    # Sample Skills are demo content; a production migrate must not install them.
+    assert configuration().seed_sample_skills is False
+    monkeypatch.setenv("AGENT_SEED_SAMPLE_SKILLS", "true")
+    assert (
+        Settings(
+            _env_file=None,
+            database_url="postgresql+asyncpg://test:test@localhost/test",
+        ).seed_sample_skills
+        is True
+    )
+
+
 def test_quickstart_bootstrap_installs_execution_demo(monkeypatch):
     """The phases 0-6 demo dataset is wired into quickstart, not production migrate."""
 

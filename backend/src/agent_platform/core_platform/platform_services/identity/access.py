@@ -42,6 +42,10 @@ class Principal:
     session_id: str | None = None
     business_id: str | None = None
     workspace_id: str | None = None
+    # Human-readable label for the account (enterprise_users.name /
+    # staff_accounts.name). None for machine principals such as service tokens,
+    # which have no user record behind them.
+    display_name: str | None = None
 
     @property
     def permissions(self) -> frozenset[str]:
@@ -98,6 +102,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 session_id=str(session["session_id"]),
                 business_id=business_id,
                 workspace_id=workspace_id,
+                display_name=session["name"],
             )
             await _validate_business_scope(request)
             # R-13: expose the resolved trusted principal to application-level
@@ -140,6 +145,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 business_id=business_id,
                 workspace_id=workspace_id,
                 session_id=str(session["id"]),
+                display_name=session["name"],
             )
             await _validate_business_scope(request)
             # R-13: expose the resolved trusted principal to application-level
@@ -180,7 +186,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
         async with identity_bindings(request).engine.connect() as c:
             staff = await one(
                 c,
-                "SELECT id,role FROM staff_accounts WHERE tenant_id=:t AND token_hash=:hash AND enabled",
+                "SELECT id,name,role FROM staff_accounts WHERE tenant_id=:t AND token_hash=:hash AND enabled",
                 t=settings.tenant_id,
                 hash=digest,
             )
@@ -192,6 +198,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
                 auth_source="service_credential",
                 business_id=business_id,
                 workspace_id=workspace_id,
+                display_name=staff["name"],
             )
             await _validate_business_scope(request)
             # R-13: expose the resolved trusted principal to application-level

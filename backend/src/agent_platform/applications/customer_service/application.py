@@ -11,6 +11,12 @@ from agent_platform.business_capabilities.knowledge.routes import router as know
 from agent_platform.business_capabilities.memory.routes import router as memory_router
 from agent_platform.business_capabilities.open_platform.routes import management as open_management
 from agent_platform.business_capabilities.open_platform.routes import public as open_public
+from agent_platform.business_capabilities.skill_library.routes import (
+    router as skill_library_router,
+)
+from agent_platform.business_capabilities.skill_library.routes import (
+    templates_router as skill_templates_router,
+)
 from agent_platform.core_platform.platform_services.monitoring.routes import (
     router as notifications_router,
 )
@@ -33,6 +39,8 @@ def register_customer_service_routes(
     app.include_router(router, prefix=api_prefix)
     app.include_router(platform_router, prefix=api_prefix)
     app.include_router(knowledge_router, prefix=api_prefix)
+    app.include_router(skill_library_router, prefix=api_prefix)
+    app.include_router(skill_templates_router, prefix=api_prefix)
     app.include_router(runtime_router, prefix=api_prefix)
     app.include_router(execution_credential_router, prefix=api_prefix)
     app.include_router(memory_router, prefix=api_prefix)

@@ -388,6 +388,7 @@ async def me(user: Reader):
         "tenant": user.tenant,
         "role": user.role,
         "actor": user.actor,
+        "name": user.display_name,
         "user_id": user.user_id,
         "auth_source": user.auth_source,
         "session_id": user.session_id,

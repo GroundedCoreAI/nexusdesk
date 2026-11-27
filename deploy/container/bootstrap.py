@@ -133,6 +133,15 @@ def seed_memory_demo():
     subprocess.run([sys.executable, "-m", "agent_platform.applications.seed_memory_acceptance"], check=True)
 
 
+def seed_sample_skills():
+    """Load the sample Skill corpus. Idempotent; samples needing a dependency this
+    deployment lacks stay drafts instead of faking a published row."""
+    subprocess.run(
+        [sys.executable, "-m", "agent_platform.applications.seed_sample_skills"],
+        check=True,
+    )
+
+
 def seed_execution_platform():
     """Load the formal execution platform demo dataset (phases 0-6).
 
@@ -274,6 +283,8 @@ def main(mode):
         if settings.seed_industries:
             seed_industry_cases(settings)
             seed_memory_demo()
+        if settings.seed_sample_skills:
+            seed_sample_skills()
         if settings.seed_execution_governance_demo:
             # Migrate plus this flag is an explicit operator opt-in to synthetic
             # governance demo rows; the default stays clean.
@@ -287,6 +298,10 @@ def main(mode):
         seed_industry_cases(settings)
     seed_memory_demo()
     seed_execution_platform()
+    if settings.seed_sample_skills:
+        # After the execution dataset so any model profile it creates already
+        # exists and the samples can be published rather than left as drafts.
+        seed_sample_skills()
     if settings.seed_execution_governance_demo:
         seed_execution_governance()
     authority = render_nginx_config(settings)

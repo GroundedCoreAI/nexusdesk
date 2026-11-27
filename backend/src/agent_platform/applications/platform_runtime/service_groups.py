@@ -36,6 +36,7 @@ class BusinessCapabilityServices:
     vector_index: object
     knowledge_workspace: object
     retrieval: object
+    skill_library: object
     memory: object
     memory_store: object
     conversations: object
@@ -94,6 +95,7 @@ def build_service_groups(services: object) -> PlatformServiceGroups:
             vector_index=services.vector_index,
             knowledge_workspace=services.knowledge_workspace,
             retrieval=services.retrieval,
+            skill_library=services.skill_library,
             memory=services.memory,
             memory_store=services.memory_store,
             conversations=services.conversations,

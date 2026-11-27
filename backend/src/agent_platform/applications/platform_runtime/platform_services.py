@@ -30,6 +30,7 @@ from agent_platform.business_capabilities.memory.service import MemoryService
 from agent_platform.business_capabilities.memory.store import TsVectorStore
 from agent_platform.business_capabilities.memory.tools import MemoryToolContribution
 from agent_platform.business_capabilities.open_platform.service import OpenPlatform
+from agent_platform.business_capabilities.skill_library.service import SkillLibraryService
 from agent_platform.core_platform.agent_execution.registry import AdapterRegistry
 from agent_platform.core_platform.platform_services.access_control.service import MemberDirectory
 from agent_platform.core_platform.platform_services.events import DurableEventBus
@@ -105,6 +106,14 @@ class PlatformServices:
             engine, settings, model_client, self.vector_index, self.gateway
         )
         self.retrieval = Retrieval(engine, self.knowledge, self.vector_index, self.gateway)
+        self.skill_library = SkillLibraryService(
+            engine,
+            settings,
+            gateway=self.gateway,
+            retrieval=self.retrieval,
+            tools=self.tools,
+            tool_workspace=self.tool_workspace,
+        )
         self.memory = MemoryService(engine, settings)
         # Phase 3 retrieval store. The keyword implementation is always safe;
         # ``platform_runtime.runtime_composition.runtime_services`` replaces it with

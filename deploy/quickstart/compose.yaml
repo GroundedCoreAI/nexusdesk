@@ -41,6 +41,9 @@ services:
       AGENT_ENVIRONMENT: production
       AGENT_QUICKSTART_MODE: "true"
       AGENT_SEED_INDUSTRIES: "true"
+      # Eight sample Skills for the capability library, so it is not empty on a
+      # first login. Idempotent; a sample without its dependency stays a draft.
+      AGENT_SEED_SAMPLE_SKILLS: ${NEXUSDESK_SEED_SAMPLE_SKILLS:-true}
       AGENT_SERVICE_APP_EXAMPLES_ENABLED: ${NEXUSDESK_SERVICE_APP_EXAMPLES_ENABLED:-true}
       # Language of the seeded memory demo datasets, matching the console i18n
       # bundles: zh-CN (default), zh-TW, en, hi. First-boot only:

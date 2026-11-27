@@ -78,6 +78,11 @@ Nine industry case sets are also preloaded: 9 knowledge bases, 18 Agent drafts, 
 Every resource name carries the `[案例]` (case) prefix, and the agent list can be filtered with
 Scope → Cases only.
 
+The capability library starts with eight sample Skills — customer intent, order lookup, invoice
+extraction, sales analysis, refund policy, customer profile, code generation and task flow — so it
+is never empty on a first login. They are ordinary records: open, edit, test or re-publish them
+like your own.
+
 > **Security note**
 >
 > Quickstart mode uses a mock model and does not represent real answer quality. The default

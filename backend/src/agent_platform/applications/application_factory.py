@@ -305,7 +305,8 @@ def create_app(
 
     @app.exception_handler(DomainError)
     async def domain_error(request: Request, exc: DomainError):
-        return JSONResponse(status_code=exc.status, content={"detail": exc.code})
+        detail = getattr(exc, "detail", exc.code)
+        return JSONResponse(status_code=exc.status, content={"detail": detail})
 
     @app.exception_handler(BusyError)
     async def busy_error(request: Request, exc: BusyError):
