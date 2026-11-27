@@ -11,7 +11,7 @@ test('real backend: create, publish, trial conversation, records, versions and a
  const model=await (await request.post('/api/v1/model-gateway/models',{data:{name:`联调-${stamp}`,connection_id:conn.id,model_name:'demo',operations:['chat'],tool_calling:true},headers:auth})).json();
  const profile=await (await request.post('/api/v1/model-gateway/profiles',{data:{name:`方案-${stamp}`,model_id:model.id,operation:'chat'},headers:auth})).json();
  expect((await request.post(`/api/v1/model-gateway/profiles/${profile.id}/publish`,{data:{revision:1},headers:auth})).status()).toBe(200);
- await page.goto('/#/overview');await page.getByRole('navigation').getByRole('button',{name:'Agent 管理'}).click();
+ await page.goto('/#/overview');await page.getByRole('navigation').getByRole('button',{name:'AI 员工'}).click();await page.getByRole('navigation').getByRole('button',{name:'Agent 管理'}).click();
  await page.getByRole('button',{name:'新增 Agent'}).click();await page.getByLabel('Agent 名称').fill(name);await page.getByLabel('Agent 简介').fill('用于验证新版配置工作台与试聊记录。');
  await page.getByLabel('Chat 模型方案').selectOption(profile.id);
  await page.getByRole('button',{name:/发\s*布/,exact:true}).click();await expect(page.getByText('已发布 v1',{exact:true})).toBeVisible();

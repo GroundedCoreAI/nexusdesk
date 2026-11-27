@@ -5,7 +5,8 @@ test('model connection, publication, invocation and Agent binding', async ({ pag
   const name = `测试模型-${stamp}`;
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/#/overview');
+  await page.getByRole('navigation').getByRole('button', { name: '资源中心' }).click();
   await page.getByRole('navigation').getByRole('button', { name: '模型网关' }).click();
   await page.getByRole('button', { name: '渠道管理', exact: true }).click();
   await page.getByRole('button', { name: '新建渠道', exact: true }).click();
@@ -37,6 +38,7 @@ test('model connection, publication, invocation and Agent binding', async ({ pag
   await expect(page.getByRole('status')).toContainText('调用完成');
   await expect(page.locator('pre')).toContainText('"demo": true');
   await page.screenshot({ path: 'test-results/model-gateway-desktop.png', fullPage: true });
+  await page.getByRole('navigation').getByRole('button', { name: 'AI 员工' }).click();
   await page.getByRole('navigation').getByRole('button', { name: 'Agent 管理' }).click();
   await page.getByLabel('名称', { exact: true }).fill(name);
   await page.getByLabel('Chat 模型方案').selectOption({ label: `${name} · 发布 v1` });

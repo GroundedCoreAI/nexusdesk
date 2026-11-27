@@ -134,7 +134,8 @@ test.beforeEach(async ({ page }) => {
     if (path.endsWith('/calls/call-error')) data = { id: 'call-error', attempts: [{ error_code: 'model_timeout', usage: null }] };
     await route.fulfill({ json: data });
   });
-  await page.goto('/');
+  await page.goto('/#/overview');
+  await page.getByRole('navigation').getByRole('button', { name: '资源中心' }).click();
   await page.getByRole('navigation').getByRole('button', { name: '模型网关' }).click();
 });
 
@@ -205,6 +206,10 @@ test('new model drawer saves through existing endpoint', async ({ page }) => {
 test('viewer can inspect models but cannot edit', async ({ page }) => {
   await page.route('**/api/v1/me', route => route.fulfill({ json: { role: 'viewer', tenant: '测试工作区' } }));
   await page.reload();
+  const modelNavigation = page.getByRole('navigation').getByRole('button', { name: '模型网关' });
+  if (!await modelNavigation.isVisible()) {
+    await page.getByRole('navigation').getByRole('button', { name: '资源中心' }).click();
+  }
   await page.getByRole('navigation').getByRole('button', { name: '模型网关' }).click();
   await expect(page.getByRole('button', { name: '新建模型' })).toBeDisabled();
   await page.locator('.gateway-card').first().click();

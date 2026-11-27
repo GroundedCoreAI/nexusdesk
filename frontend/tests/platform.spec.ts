@@ -9,7 +9,23 @@ test('knowledge, publication, conversation, confirmed ticket, handoff and evalua
   const stamp = Date.now();
   const kb = `浏览器知识库-${stamp}`;
   const agent = `浏览器客服-${stamp}`;
-  const nav = async (name: string) => { await page.getByRole('navigation').getByRole('button', { name, exact: false }).click(); };
+  const nav = async (name: string) => {
+    const navigation = page.getByRole('navigation');
+    const labels: Record<string, string> = {
+      平台总览: '工作台', 质量大盘: '质量评估', 运行与审计: '运行监控与审计',
+    };
+    const parents: Record<string, string> = {
+      'Agent 管理': 'AI 员工', 人工协同: '服务策略', 质量大盘: '运营中心',
+      运行与审计: '运营中心', 工具目录: '资源中心', 知识库: '资源中心',
+      访问与策略: '系统管理',
+    };
+    const label = labels[name] ?? name;
+    const target = navigation.getByRole('button', { name: label, exact: false });
+    if (parents[name] && !await target.isVisible()) {
+      await navigation.getByRole('button', { name: parents[name], exact: false }).click();
+    }
+    await target.click();
+  };
   const auth = await signInAsAdmin(page, request);
   await page.goto('/#/overview');
   await expect(page.getByRole('heading', { name: '平台总览', exact: true })).toBeVisible();

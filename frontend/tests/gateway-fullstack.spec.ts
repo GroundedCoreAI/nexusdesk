@@ -18,6 +18,7 @@ test('gateway governance persists and governs real requests', async ({ page, req
   expect((await request.post(`${root}/profiles/${profile.id}/publish`, { data: { revision: 1 }, headers: auth })).status()).toBe(200);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/#/overview');
+  await page.getByRole('navigation').getByRole('button', { name: '资源中心' }).click();
   await page.getByRole('navigation').getByRole('button', { name: '模型网关' }).click();
   await page.getByLabel('搜索资源').fill(name);
   await page.locator('.gateway-card').click();

@@ -1,0 +1,487 @@
+/* NexusDesk business sidebar. Loaded after the legacy console themes. */
+.console-layout .console-sider {
+  background: linear-gradient(180deg, #252f40 0%, #1b2534 100%) !important;
+  border: 0;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.console-sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 20px 12px 10px;
+  color: #d6deec;
+}
+
+.console-layout .console-brand {
+  flex: 0 0 48px;
+  height: 48px;
+  margin: 0 0 18px;
+  padding: 0 12px;
+  --brand-ink: #fff;
+  --brand-gradient: linear-gradient(100deg, #fff, #eaf0ff);
+  --brand-subtitle: #94a3b8;
+}
+
+.console-layout .console-brand .brand-mark__word {
+  font-size: 20px;
+}
+
+.console-layout .console-brand .brand-glyph {
+  width: 40px;
+  height: 40px;
+}
+
+.console-layout .business-switcher.ant-btn {
+  display: flex;
+  flex: 0 0 82px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  height: 82px;
+  margin: 0 0 24px;
+  padding: 10px 16px;
+  border: 1px solid #354158;
+  border-radius: 13px;
+  background: #2a3548;
+  color: #fff;
+  text-align: left;
+  box-shadow: none;
+}
+
+.console-layout .business-switcher.ant-btn:hover,
+.console-layout .business-switcher.ant-btn:focus-visible {
+  border-color: #45618f;
+  background: #203353 !important;
+  color: #fff !important;
+}
+
+.business-switcher-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 21px;
+}
+
+.business-switcher-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  line-height: normal;
+}
+
+.business-switcher-copy strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.business-switcher-copy small {
+  margin: 0;
+  color: #a3aec1;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.business-switcher-eyebrow {
+  order: -1;
+}
+
+.business-switcher-arrow {
+  flex: 0 0 auto;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.business-switcher-dropdown .ant-dropdown-menu {
+  padding: 4px;
+  background: #fff;
+}
+
+.business-switcher-menu {
+  min-width: 292px;
+  padding: 4px;
+}
+
+.business-switcher-menu-title {
+  padding: 8px 12px 10px;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.business-switcher-dropdown .ant-dropdown-menu-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.business-switcher-dropdown .ant-dropdown-menu-item-disabled {
+  opacity: .62;
+}
+
+.business-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.business-option-icon {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  background: #eef4ff;
+  color: #2f6bff;
+  font-size: 17px;
+}
+
+.business-option-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.business-option-copy strong {
+  color: #17233c;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.business-option-copy small {
+  margin-top: 3px;
+  color: #7b879d;
+  font-size: 12px;
+}
+
+.business-option-check {
+  color: #2f6bff;
+}
+
+.business-option-status {
+  color: #7b879d;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.console-layout .console-nav {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: #354562 transparent;
+  scrollbar-width: thin;
+}
+
+.console-nav-section + .console-nav-section {
+  margin-top: 0;
+}
+
+.console-layout .nav-group-title {
+  display: none;
+}
+
+.console-layout .console-nav-section:nth-child(3) {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #344052;
+}
+
+.console-layout .console-nav .ant-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 30px;
+  height: 40px;
+  min-height: 40px;
+  margin: 0 0 3px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #e1e7f1;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  text-align: left;
+  box-shadow: none;
+}
+
+.console-layout .console-nav .ant-btn .anticon {
+  flex: 0 0 18px;
+  color: #cbd4e2;
+  font-size: 18px;
+  opacity: 1;
+}
+
+.console-layout .console-nav .ant-btn > span {
+  font-size: inherit;
+  opacity: 1;
+}
+
+.console-layout .console-nav .ant-btn:hover,
+.console-layout .console-nav .ant-btn:focus-visible {
+  background: #19294a !important;
+  color: #fff !important;
+}
+
+.console-layout .console-nav .ant-btn:hover .anticon,
+.console-layout .console-nav .ant-btn:focus-visible .anticon {
+  color: #fff;
+}
+
+.console-layout .console-nav .ant-btn.nav-selected,
+.console-layout .console-nav .ant-btn.nav-selected:hover,
+.console-layout .console-nav .ant-btn.nav-selected:focus-visible {
+  background: #1677ff !important;
+  color: #fff !important;
+  font-weight: 500;
+}
+
+.console-layout .console-nav .ant-btn.nav-selected .anticon,
+.console-layout .console-nav .ant-btn.nav-selected:hover .anticon {
+  color: #fff !important;
+}
+
+.console-layout .console-nav .ant-btn.nav-parent-selected {
+  background: #2c3b54;
+  color: #fff;
+}
+
+.console-layout .console-nav .nav-parent-selected .anticon {
+  color: #fff;
+}
+
+.console-layout .console-nav .nav-label {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-layout .console-nav .ant-btn .nav-status {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #7f8da6;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.console-layout .console-nav .ant-btn.nav-planned,
+.console-layout .console-nav .ant-btn.nav-planned:hover,
+.console-layout .console-nav .ant-btn.nav-planned:focus-visible {
+  background: transparent !important;
+  color: #7f8da6 !important;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.console-layout .console-nav .ant-btn.nav-planned .anticon {
+  color: #65748f !important;
+}
+
+.console-layout .console-nav .nav-parent-arrow {
+  flex: 0 0 10px;
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 10px;
+  transition: transform 160ms ease-out;
+}
+
+.console-layout .console-nav .nav-parent-arrow.is-open {
+  transform: rotate(90deg);
+}
+
+.console-layout .console-nav .nav-children {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.console-layout .console-nav .nav-children .console-nav-item {
+  min-width: 0;
+}
+
+.console-layout .console-nav .ant-btn.nav-child {
+  height: 36px;
+  min-height: 36px;
+  padding-left: 35px;
+  gap: 18px;
+  font-size: 13px;
+}
+
+.console-layout .console-nav .ant-btn.nav-child .anticon {
+  font-size: 15px;
+}
+
+.console-sidebar-footer {
+  display: flex;
+  flex: 0 0 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 4px 0 10px;
+  border-top: 1px solid #344052;
+}
+
+.console-sidebar-edition {
+  display: flex;
+  flex-direction: column;
+  color: #d6deec;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.console-sidebar-edition small {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.console-layout .console-sidebar-collapse.ant-btn {
+  display: grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  color: #94a3b8;
+}
+
+.console-layout .console-sidebar-collapse.ant-btn:hover,
+.console-layout .console-sidebar-collapse.ant-btn:focus-visible {
+  background: #19294a !important;
+  color: #fff !important;
+}
+
+/* Desktop icon mode. Agent focus mode still uses a zero-width sidebar. */
+.console-layout .console-sider.ant-layout-sider-collapsed {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
+
+.console-layout .console-sider.ant-layout-sider-collapsed .console-sidebar-inner {
+  padding: 20px 10px 12px;
+}
+
+.console-layout .console-sider.ant-layout-sider-collapsed .console-brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.console-layout .console-sider.ant-layout-sider-collapsed .brand-mark__body,
+.console-layout .console-sider.ant-layout-sider-collapsed .business-switcher-copy,
+.console-layout .console-sider.ant-layout-sider-collapsed .business-switcher-arrow,
+.console-layout .console-sider.ant-layout-sider-collapsed .nav-group-title,
+.console-layout .console-sider.ant-layout-sider-collapsed .nav-label,
+.console-layout .console-sider.ant-layout-sider-collapsed .nav-parent-arrow,
+.console-layout .console-sider.ant-layout-sider-collapsed .nav-status,
+.console-layout .console-sider.ant-layout-sider-collapsed .console-sidebar-edition {
+  display: none;
+}
+
+.console-layout .console-sider.ant-layout-sider-collapsed .business-switcher.ant-btn {
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  min-height: 48px;
+  margin: 0 auto 18px;
+  padding: 5px;
+}
+
+.console-layout .console-sider.ant-layout-sider-collapsed .console-nav .ant-btn {
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0 auto 5px;
+  padding: 0;
+}
+
+.console-layout .console-sider.ant-layout-sider-collapsed .console-nav .ant-btn .anticon {
+  margin: 0;
+  font-size: 19px;
+}
+
+.console-layout .console-sider.ant-layout-sider-collapsed .console-nav-section + .console-nav-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #24324d;
+}
+
+.console-layout .console-sider.ant-layout-sider-collapsed .console-sidebar-footer {
+  justify-content: center;
+  padding-left: 4px;
+}
+
+.console-sidebar-mask {
+  display: none;
+}
+
+@media (max-width: 991.98px) {
+  .business-switcher-eyebrow {
+    display: none;
+  }
+
+  .console-layout .console-sider {
+    position: fixed !important;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    box-shadow: 12px 0 36px rgba(16, 27, 51, .24);
+  }
+
+  .console-layout .console-sidebar-mask {
+    position: fixed;
+    z-index: 49;
+    display: block;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgba(16, 27, 51, .48);
+    backdrop-filter: blur(2px);
+  }
+
+  .console-layout .console-sidebar-collapse {
+    display: none !important;
+  }
+
+  .console-layout .console-sidebar-footer {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .console-layout .console-nav .nav-parent-arrow {
+    transition: none;
+  }
+}

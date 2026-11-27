@@ -13,6 +13,7 @@ import { ToastHolder } from './shared/components/ui';
 import './styles/global.css';
 import './styles/console.css';
 import './styles/design-system.css';
+import './styles/console-sidebar.css';
 import {consoleTheme} from './styles/theme';
 
 // Public chat surfaces live outside the console router: the widget runs in a

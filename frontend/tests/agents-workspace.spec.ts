@@ -21,7 +21,7 @@ for (const role of ['admin','viewer']) {
    if(path==='/model-gateway/profiles'||path==='/tools'||path==='/knowledge-bases'||path==='/modules')return route.fulfill({json:[]});
    return route.fulfill({json:{}});
   });
-  await page.goto('/');await page.getByRole('navigation').getByRole('button',{name:'Agent 管理'}).click();
+  await page.goto('/#/overview');await page.getByRole('navigation').getByRole('button',{name:'AI 员工'}).click();await page.getByRole('navigation').getByRole('button',{name:'Agent 管理'}).click();
   await expect(page.locator('.agent-card')).toHaveCount(5);
   await page.screenshot({path:`test-results/agents-list-${role}.png`,fullPage:true});
   await page.getByLabel('搜索 Agent').fill('不存在');await expect(page.getByText('暂无符合条件的 Agent')).toBeVisible();
@@ -37,7 +37,7 @@ for (const role of ['admin','viewer']) {
    await page.getByRole('button',{name:'加载更早消息'}).click();await expect(page.getByText('之前的历史消息')).toBeVisible();
    await page.screenshot({path:'test-results/agents-records.png',fullPage:true});
    await page.getByRole('button',{name:'Agent 配置',exact:true}).click();await expect(page.getByLabel('Agent 名称')).toHaveValue('修改中的助手');
-   await page.getByRole('button',{name:/发\s*布/,exact:true}).click();await expect(page.getByRole('alert')).toContainText('agent_revision_conflict');expect(mutations).toEqual(['save']);
+   await page.getByRole('button',{name:/发\s*布/,exact:true}).click();await expect(page.locator('.alert.error')).toContainText('agent_revision_conflict');expect(mutations).toEqual(['save']);
    await page.getByRole('button',{name:/发\s*布/,exact:true}).click();await expect(page.getByText('已发布 v2',{exact:true})).toBeVisible();expect(mutations).toEqual(['save','save','publish']);
    await page.getByLabel('Agent 名称').fill('尚未保存');page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'返回列表',exact:true}).click();await expect(page.getByLabel('Agent 名称')).toHaveValue('尚未保存');
    page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'返回列表',exact:true}).click();await expect(page.locator('.agent-card')).toHaveCount(5);

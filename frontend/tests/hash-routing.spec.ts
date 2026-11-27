@@ -27,6 +27,7 @@ test('top pages and gateway tabs survive refresh and browser history', async ({ 
   await expect(page.getByRole('button', { name: '新建配置方案', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '渠道管理', exact: true }).click();
   await expect(page).toHaveURL(/#\/models\/connections$/);
+  await page.getByRole('navigation').getByRole('button', { name: 'AI 员工' }).click();
   await page.getByRole('navigation').getByRole('button', { name: 'Agent 管理' }).click();
   await expect(page).toHaveURL(/#\/agents$/);
   await page.reload();

@@ -16,7 +16,7 @@ for (const role of ['admin','viewer']) {
    }
    return route.fulfill({json:path.endsWith('/modules')?[]:{}});
   });
-  await page.goto('/#/overview');await page.getByRole('navigation').getByRole('button',{name:'Agent 管理'}).click();
+  await page.goto('/#/overview');await page.getByRole('navigation').getByRole('button',{name:'AI 员工'}).click();await page.getByRole('navigation').getByRole('button',{name:'Agent 管理'}).click();
   await page.getByRole('button',{name:'已归档客服 更多操作'}).click();
   if(role==='viewer'){await expect(page.getByRole('menuitem',{name:'永久删除'})).toHaveCount(0);expect(calls).toBe(0);return;}
   await page.getByRole('menuitem',{name:'永久删除'}).click();
@@ -35,7 +35,7 @@ test('real backend deletes only the newly created fixture and preserves its conv
  const created=await request.post('/api/v1/agents',{data:{name,description:'删除功能自动验收',config:{system_prompt:'测试',tool_names:[],knowledge_base_ids:[],max_model_rounds:6}},headers:auth});expect(created.status()).toBe(201);const agent=await created.json();
  const conv=await request.post('/api/v1/conversations',{data:{external_id:`delete-test-${Date.now()}`,agent_id:agent.id},headers:auth});expect(conv.status()).toBe(201);const conversation=await conv.json();
  expect((await request.patch(`/api/v1/agents/${agent.id}/archive`,{data:{archived:true,revision:1},headers:auth})).ok()).toBeTruthy();
- await page.goto('/#/overview');await page.getByRole('navigation').getByRole('button',{name:'Agent 管理'}).click();await page.getByRole('checkbox',{name:'显示已归档'}).check();await page.getByLabel('搜索 Agent').fill(name);await expect(page.locator('.agent-card')).toHaveCount(1);
+ await page.goto('/#/overview');await page.getByRole('navigation').getByRole('button',{name:'AI 员工'}).click();await page.getByRole('navigation').getByRole('button',{name:'Agent 管理'}).click();await page.getByRole('checkbox',{name:'显示已归档'}).check();await page.getByLabel('搜索 Agent').fill(name);await expect(page.locator('.agent-card')).toHaveCount(1);
  await page.getByRole('button',{name:`${name} 更多操作`}).click();await page.getByRole('menuitem',{name:'永久删除'}).click();await page.getByRole('dialog').getByRole('button',{name:'确认永久删除'}).click();await expect(page.getByText('暂无符合条件的 Agent')).toBeVisible();
  expect((await request.get(`/api/v1/agents/${agent.id}`,{headers:auth})).status()).toBe(404);
  const history=await request.get(`/api/v1/conversations/${conversation.id}`,{headers:auth});expect(history.status()).toBe(200);expect((await history.json()).deleted_agent.name).toBe(name);

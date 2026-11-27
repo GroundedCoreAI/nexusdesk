@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export const modelSections = ['connections', 'models', 'profiles', 'playground', 'logs', 'monitor', 'access_keys', 'sensitive_words', 'alert_rules', 'quota'] as const;
 export type ModelSection = typeof modelSections[number];
-const pages = ['overview', 'conversations', 'service-apps', 'agents', 'knowledge', 'tools', 'handoff', 'tickets', 'memory', 'open-platform', 'evaluation', 'observability', 'access', 'members', 'roles', 'security', 'extensions'];
+const pages = ['overview', 'conversations', 'service-apps', 'agents', 'knowledge', 'tools', 'skills', 'handoff', 'tickets', 'memory', 'open-platform', 'evaluation', 'observability', 'access', 'members', 'roles', 'security', 'extensions', 'approvals'];
 export function normalizeRoute(value: string) {
   const [base, query] = value.split('?');
   const path = normalizePath(base);
   const keepsQuery = path.startsWith('/agents')
     || path.startsWith('/conversations')
     || path.startsWith('/memory')
+    || path.startsWith('/skills')
     || path === '/open-platform/channels';
   return keepsQuery && query ? `${path}?${new URLSearchParams(query)}` : path;
 }
@@ -26,6 +27,9 @@ function normalizePath(value: string) {
   // not-found state instead of silently redirecting or adding a compatibility layer.
   if (path === '/service-apps' || path.startsWith('/service-apps/')) return path;
   if (/^\/tools\/[0-9a-f-]+\/(apis|versions|calls)$/.test(path)) return path;
+  if (path === '/skills/create') return path;
+  if (/^\/skills\/[^/?#]+\/edit$/.test(path)) return path;
+  if (/^\/skills\/[^/?#]+$/.test(path)) return path;
   if (/^\/open-platform\/[0-9a-f-]+\/(settings|integrations|channels|embed|webhook|keys|docs|debug|logs)$/.test(path)) return path;
   if (path === '/open-platform/identity') return path;
   if (path === '/models') return '/models/models';

@@ -260,6 +260,7 @@ async function mockConsole(
         role?: string;
         conversationList?: {
             delayMs?: number;
+            gate?: Promise<unknown>;
             error?: string;
             injectNonCustomer?: boolean;
         };
@@ -412,6 +413,9 @@ async function mockConsole(
         ) {
             if (options.conversationList?.delayMs) {
                 await new Promise(resolve => setTimeout(resolve, options.conversationList?.delayMs));
+            }
+            if (options.conversationList?.gate) {
+                await options.conversationList.gate;
             }
             if (options.conversationList?.error) {
                 return route.fulfill({
@@ -710,6 +714,47 @@ async function mockConsole(
                 },
             });
         }
+        if (
+            path === '/service-apps/consumer-service/delivery'
+            && request.method() === 'GET'
+        ) {
+            return route.fulfill({
+                json: {
+                    id: application.id,
+                    key: application.key,
+                    name: application.name,
+                    status: applicationStatus,
+                    published_version: publishedVersion,
+                    published_at: '2026-11-01T02:00:00Z',
+                    draft_revision: draftRevision,
+                    has_unpublished_changes: false,
+                    open_applications: [],
+                    channels: [{
+                        ...channel,
+                        application_version: publishedVersion ?? 2,
+                    }],
+                    versions: [
+                        {
+                            version: 1,
+                            created_at: '2026-10-30T02:00:00Z',
+                            channel_references: 0,
+                            open_application_references: 0,
+                            follows_latest_references: 0,
+                        },
+                        {
+                            version: 2,
+                            created_at: '2026-11-01T02:00:00Z',
+                            channel_references: 1,
+                            open_application_references: 0,
+                            follows_latest_references: 0,
+                        },
+                    ],
+                    version_total: 2,
+                    version_page: 1,
+                    version_page_size: 5,
+                },
+            });
+        }
         if (path === '/service-apps/consumer-service/versions') {
             return route.fulfill({
                 json: {
@@ -813,6 +858,11 @@ async function mockConsole(
     });
 }
 
+function releasePublishButton(page: Page) {
+    return page.locator('.sa-release-header-actions')
+        .getByRole('button', { name: /发布$/ });
+}
+
 test('publishing warns that unsaved changes are excluded from the release', async ({ page }) => {
     const requests: string[] = [];
     await mockConsole(page, requests);
@@ -823,7 +873,7 @@ test('publishing warns that unsaved changes are excluded from the release', asyn
         .filter({ hasText: '直接失败' })
         .click();
 
-    await page.getByRole('button', { name: /发布$/ }).click();
+    await releasePublishButton(page).click();
     const popover = page.locator('.ant-popover:visible');
     await expect(popover.getByText('当前页面有未保存修改', { exact: true })).toBeVisible();
     await expect(popover.getByText(
@@ -855,7 +905,7 @@ test('publish button exposes the first blocking readiness reason', async ({ page
     });
     await page.goto('/#/service-apps/consumer-service');
 
-    const publishButton = page.getByRole('button', { name: /发布$/ });
+    const publishButton = releasePublishButton(page);
     await expect(publishButton).toBeDisabled();
     await page.locator('.sa-release-header-actions > span').hover();
     await expect(page.locator('.ant-tooltip:visible')).toContainText(
@@ -867,7 +917,7 @@ test('immutable examples expose a specific publish reason', async ({ page }) => 
     await mockConsole(page, []);
     await page.goto('/#/service-apps/example-order-service');
 
-    const examplePublish = page.getByRole('button', { name: /发布$/ });
+    const examplePublish = releasePublishButton(page);
     await expect(examplePublish).toBeDisabled();
     await page.locator('.sa-release-header-actions > span').hover();
     await expect(page.locator('.ant-tooltip:visible')).toContainText(
@@ -879,7 +929,7 @@ test('non-admin users expose a specific publish reason', async ({ page }) => {
     await mockConsole(page, [], { role: 'viewer' });
     await page.goto('/#/service-apps/consumer-service');
 
-    const viewerPublish = page.getByRole('button', { name: /发布$/ });
+    const viewerPublish = releasePublishButton(page);
     await expect(viewerPublish).toBeDisabled();
     await page.locator('.sa-release-header-actions > span').hover();
     await expect(page.locator('.ant-tooltip:visible')).toContainText(
@@ -956,7 +1006,7 @@ test('service application detail exposes only the seven v2 tabs', async ({ page 
     expect(Math.abs(cardAlignment.labelTop - cardAlignment.valueTop)).toBeLessThan(1.5);
     expect(cardAlignment.valueLeft).toBeGreaterThan(cardAlignment.labelLeft);
     await expect(page.locator('.sa-detail-tabs .ant-tabs-nav-list .anticon')).toHaveCount(0);
-    const publishButton = page.getByRole('button', { name: /发布$/ });
+    const publishButton = releasePublishButton(page);
     await expect(publishButton).toBeVisible();
     const tabs = page.getByRole('tab');
     await expect(tabs).toHaveCount(7);
@@ -999,7 +1049,8 @@ test('service application detail exposes only the seven v2 tabs', async ({ page 
     await page.locator('.sa-detail-meta-current').click();
     await expect(page.locator('.sa-version-history')).toBeVisible();
     await expect(page.getByRole('heading', { name: '版本历史', exact: true })).toBeVisible();
-    await expect(page.getByText('渠道数量', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '渠道版本', exact: true })).toBeVisible();
+    await expect(page.locator('.sa-delivery-channel-row')).toContainText('官网帮助中心');
     await expect(page.locator('.sa-versions-panel')).toHaveCount(0);
 });
 
@@ -1157,16 +1208,23 @@ test('customer conversation turns reopen the run trace on demand', async ({ page
 });
 
 test('customer conversation records expose loading and error states without stale rows', async ({ page }) => {
+    let releaseConversationList!: () => void;
+    const conversationListGate = new Promise<void>(resolve => {
+        releaseConversationList = resolve;
+    });
     await mockConsole(page, [], {
         conversationList: {
-            delayMs: 300,
+            gate: conversationListGate,
             error: 'conversation ledger unavailable',
         },
     });
-    await page.goto('/#/service-apps/consumer-service/conversations');
-
     const records = page.locator('.sa-conversation-records-table');
-    await expect(records.locator('.ant-spin-spinning')).toBeVisible();
+    try {
+        await page.goto('/#/service-apps/consumer-service/conversations');
+        await expect(records.locator('.ant-spin-spinning')).toBeVisible();
+    } finally {
+        releaseConversationList();
+    }
     await expect(page.locator('.ant-alert-error')).toContainText(
         '500 · conversation ledger unavailable',
     );
@@ -1238,7 +1296,8 @@ test('service application release publishes and appends a rollback version', asy
 
     await expect(page.locator('.sa-detail-meta')).toBeVisible();
     await expect(page.locator('.sa-release-header-actions')).toBeVisible();
-    await expect(page.getByRole('button', { name: /发布$/ })).toBeVisible();
+    const publishButton = releasePublishButton(page);
+    await expect(publishButton).toBeVisible();
     const agentMeta = page.locator('.sa-detail-meta > div').first();
     await expect(agentMeta).toContainText('购物消费助手-v1');
     await expect(agentMeta).not.toContainText('agent-1');
@@ -1248,19 +1307,20 @@ test('service application release publishes and appends a rollback version', asy
         'flex-direction',
         'row',
     );
-    await expect(page.getByRole('button', { name: /发布$/ })).toHaveCSS('height', '36px');
-    await expect(page.getByRole('heading', { name: '发布', exact: true })).toBeVisible();
+    await expect(publishButton).toHaveCSS('height', '36px');
+    await expect(page.getByRole('tab', { name: '发布', exact: true }))
+        .toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.sa-delivery-tab')).toBeVisible();
     await page.locator('.sa-detail-meta-current').click();
     await expect(page.locator('.sa-version-history')).toBeVisible();
     await expect(page.getByRole('heading', { name: '版本历史', exact: true })).toBeVisible();
-    await expect(page.locator('.sa-channels-panel')).toBeVisible();
-    await expect(page.locator('.sa-readiness-card')).toBeVisible();
-    await expect(page.getByRole('row', { name: /官网帮助中心/ })).toBeVisible();
+    await expect(page.locator('.sa-delivery-channel-row').filter({ hasText: '官网帮助中心' }))
+        .toBeVisible();
+    await expect(page.locator('.sa-readiness-list')).toContainText('智能体版本');
     await expect(page.locator('.sa-version-history .ant-table-row')).toHaveCount(2);
-    await expect(page.locator('.sa-channels-panel .ant-table-pagination')).toHaveCount(0);
-    await expect(page.locator('.sa-version-history .ant-table-pagination')).toHaveCount(0);
+    await expect(page.locator('.sa-delivery-tab .ant-pagination')).toHaveCount(0);
 
-    await page.getByRole('button', { name: /发布$/ }).click();
+    await publishButton.click();
     await page.locator('.ant-popover:visible').getByRole('button', { name: /确认发布/ }).click();
     await expect.poll(() => requests.some(item =>
         item === 'POST /service-apps/consumer-service/publish'
@@ -1316,8 +1376,10 @@ test('published applications must be taken offline before archiving, and archive
     )).toBe(false);
     await archiveDialog.getByRole('button', { name: /前往下线处理/ }).click();
     await expect(page).toHaveURL(/#\/service-apps\/consumer-service\/release$/);
-    await page.getByRole('button', { name: /下线应用/ }).click();
-    await page.locator('.ant-popover:visible').getByRole('button', { name: /确认下线/ }).click();
+    await page.getByRole('button', { name: '取消发布', exact: true }).click();
+    await page.locator('.ant-popover:visible')
+        .getByRole('button', { name: '确认取消发布', exact: true })
+        .click();
     await expect.poll(() => requests.some(item =>
         item.startsWith('POST /service-apps/consumer-service/status'),
     )).toBe(true);
