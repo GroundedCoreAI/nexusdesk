@@ -184,7 +184,7 @@ export function LoginPage({complete, expired=false}:{complete:()=>void;expired?:
 
           <div className="login-story">
             <h1>{heroBefore}<span>AI</span>{heroAfter}</h1>
-            <p>{t('开源 · 可自托管 · 可扩展的 AI 员工平台')}</p>
+            <p>{t('开源 · 可自托管 · 可扩展的企业 AI 运营平台')}</p>
             <div className="login-story-rule"/>
             <div className="login-features">
               {features.map((feature,index)=>(
@@ -198,12 +198,18 @@ export function LoginPage({complete, expired=false}:{complete:()=>void;expired?:
             </div>
           </div>
 
-          <div className="login-brand-footer">
+          <a
+            className="login-brand-footer"
+            href="https://github.com/GroundedCoreAI/nexusdesk"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${t('Open Source')} · Apache 2.0`}
+          >
             <GithubOutlined aria-hidden/>
             <span>{t('Open Source')}</span>
             <i/>
             <span>Apache 2.0</span>
-          </div>
+          </a>
         </section>
 
         <section className="login-form-panel" aria-label={t('登录')}>

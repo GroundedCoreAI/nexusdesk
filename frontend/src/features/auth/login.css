@@ -1,5 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
-
+/*
+ * No remote font import here on purpose. A cross-origin `@import` at the top of
+ * this file gates the whole stylesheet: on a blocked or slow network the CSSOM
+ * never settles, the `load` event stalls, and the login page sits blank for tens
+ * of seconds. The console never imported Inter either, so a system stack keeps
+ * the two surfaces consistent and costs zero requests.
+ */
 :root{
   --nexus-navy:#030B2D;
   --nexus-blue:#125BFF;
@@ -18,11 +23,11 @@
   padding:0;
   color:var(--nexus-ink);
   background:var(--nexus-navy);
-  font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+  font-family:Inter,"Segoe UI Variable","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
   --login-pad-x:clamp(34px,5.4vw,128px);
   --login-pad-y:clamp(34px,5.4vw,92px);
   --login-column-gap:clamp(36px,4.3vw,100px);
-  --login-card-width:clamp(362px,19.5vw,452px);
+  --login-card-width:clamp(380px,20.5vw,475px);
   --login-title-size:clamp(46px,2.8vw,66px);
   --login-subtitle-size:clamp(16px,1.25vw,25px);
   --login-logo-size:clamp(54px,2.8vw,68px);
@@ -150,8 +155,13 @@
   color:rgba(244,249,255,.9);
   font-size:12px;
   letter-spacing:.2px;
+  text-decoration:none;
+  cursor:pointer;
   transform:translateY(28px);
+  transition:color .2s ease,opacity .2s ease;
 }
+.login-brand-footer:hover{color:#fff;opacity:1}
+.login-brand-footer:focus-visible{outline:2px solid rgba(0,207,255,.75);outline-offset:6px;border-radius:4px}
 .login-brand-footer .anticon{font-size:19px}
 .login-brand-footer i,.login-card-footer i{
   width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.7;
@@ -202,6 +212,10 @@
   flex:1;
   padding:0 0 12px;
   font-size:14px;
+  /* Three consecutive −5% steps off the tab row's original 28.95px:
+     28.95 → 27.5 → 26.1 → 24.8px. Row = 12px padding + 12.8px line box.
+     Pinned in px so the font stack cannot inflate it again. */
+  line-height:12.8px;
 }
 .login-tabs .ant-tabs-nav-list{width:100%}
 .login-tabs .ant-tabs-tab-btn{width:100%;text-align:center}
@@ -283,8 +297,14 @@
 
 /* Tablet: keep the split composition but reclaim width for the card. */
 @media(max-width:1100px){
+  /* Same variable, re-declared instead of a second hard-coded track. A separate
+     minmax() here made the card jump 420→380 the moment the viewport crossed
+     1100px — widening the window narrowed the card. This value equals the
+     desktop 380px exactly at 1100px, then grows as the viewport shrinks:
+     490 − 10vw = 380 at 1100px, 414 at 760px, saturated at 420 from 700px down.
+     `.login-layout` keeps its single `var(--login-card-width)` track. */
+  .login-page{--login-card-width:clamp(380px,calc(490px - 10vw),420px)}
   .login-layout{
-    grid-template-columns:minmax(0,1fr) minmax(350px,400px);
     gap:34px;
     padding:36px 42px;
   }
