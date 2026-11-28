@@ -12,6 +12,8 @@ import { locale } from './i18n';
 import { ToastHolder } from './shared/components/ui';
 import './styles/global.css';
 import './styles/console.css';
+import './styles/tokens.css';
+import './styles/workspace-shell.css';
 import './styles/design-system.css';
 import './styles/console-sidebar.css';
 import {consoleTheme} from './styles/theme';

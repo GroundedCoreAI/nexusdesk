@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" fill="none">
+  <!-- floating platform -->
+  <ellipse cx="600" cy="238" rx="560" ry="50" fill="#e4efff"/>
+  <ellipse cx="600" cy="231" rx="560" ry="50" fill="#f0f6ff"/>
+  <ellipse cx="600" cy="231" rx="440" ry="38" fill="#e2eeff"/>
+
+  <!-- far left low towers -->
+  <g>
+    <polygon points="58,138 92,155 92,232 58,215" fill="#a9c4f2"/>
+    <polygon points="58,138 88,124 122,141 92,155" fill="#e9f2ff"/>
+    <rect x="92" y="155" width="30" height="77" fill="#cfdff9"/>
+    <rect x="98" y="166" width="18" height="7" rx="3" fill="#ffffff" opacity=".7"/>
+    <rect x="98" y="180" width="18" height="7" rx="3" fill="#ffffff" opacity=".55"/>
+    <rect x="98" y="194" width="18" height="7" rx="3" fill="#ffffff" opacity=".4"/>
+  </g>
+  <g>
+    <polygon points="130,166 158,180 158,240 130,226" fill="#9cbcee"/>
+    <polygon points="130,166 156,154 184,168 158,180" fill="#e3eeff"/>
+    <rect x="158" y="180" width="26" height="60" fill="#bdd4f8"/>
+    <rect x="163" y="190" width="16" height="6" rx="3" fill="#ffffff" opacity=".6"/>
+    <rect x="163" y="203" width="16" height="6" rx="3" fill="#ffffff" opacity=".45"/>
+  </g>
+
+  <!-- mid-left tower with mini chart -->
+  <g>
+    <polygon points="226,96 268,117 268,246 226,225" fill="#7ea6e8"/>
+    <polygon points="226,96 264,78 306,99 268,117" fill="#f2f7ff"/>
+    <rect x="268" y="117" width="38" height="129" fill="#aecbf5"/>
+    <rect x="275" y="130" width="24" height="8" rx="3" fill="#ffffff" opacity=".75"/>
+    <rect x="275" y="146" width="24" height="8" rx="3" fill="#ffffff" opacity=".6"/>
+    <rect x="275" y="162" width="24" height="8" rx="3" fill="#ffffff" opacity=".5"/>
+    <rect x="275" y="178" width="24" height="8" rx="3" fill="#ffffff" opacity=".4"/>
+    <rect x="275" y="194" width="24" height="8" rx="3" fill="#ffffff" opacity=".3"/>
+  </g>
+
+  <!-- central tall tower -->
+  <g>
+    <polygon points="352,58 404,84 404,252 352,226" fill="#6f9de4"/>
+    <polygon points="352,58 398,36 450,62 404,84" fill="#f5f9ff"/>
+    <rect x="404" y="84" width="46" height="168" fill="#a3c2f2"/>
+    <rect x="412" y="98" width="30" height="9" rx="4" fill="#ffffff" opacity=".8"/>
+    <rect x="412" y="116" width="30" height="9" rx="4" fill="#ffffff" opacity=".7"/>
+    <rect x="412" y="134" width="30" height="9" rx="4" fill="#ffffff" opacity=".6"/>
+    <rect x="412" y="152" width="30" height="9" rx="4" fill="#ffffff" opacity=".5"/>
+    <rect x="412" y="170" width="30" height="9" rx="4" fill="#ffffff" opacity=".4"/>
+    <rect x="412" y="188" width="30" height="9" rx="4" fill="#ffffff" opacity=".3"/>
+    <rect x="412" y="206" width="30" height="9" rx="4" fill="#ffffff" opacity=".24"/>
+  </g>
+
+  <!-- big dashboard screen -->
+  <g>
+    <rect x="490" y="76" width="264" height="150" rx="12" fill="#ffffff"/>
+    <rect x="490" y="76" width="264" height="150" rx="12" fill="none" stroke="#cfe0fb" stroke-width="2"/>
+    <rect x="490" y="76" width="264" height="30" rx="12" fill="#eaf2fe"/>
+    <rect x="490" y="94" width="264" height="12" fill="#eaf2fe"/>
+    <circle cx="510" cy="91" r="4.5" fill="#1677ff"/>
+    <rect x="524" y="87" width="52" height="7" rx="3.5" fill="#b9d2f6"/>
+    <rect x="716" y="87" width="16" height="7" rx="3.5" fill="#d8e6fa"/>
+    <!-- bar chart -->
+    <rect x="512" y="164" width="15" height="46" rx="4" fill="#9cc3fa"/>
+    <rect x="534" y="146" width="15" height="64" rx="4" fill="#6ea6f2"/>
+    <rect x="556" y="155" width="15" height="55" rx="4" fill="#9cc3fa"/>
+    <rect x="578" y="140" width="15" height="70" rx="4" fill="#1677ff"/>
+    <rect x="600" y="152" width="15" height="58" rx="4" fill="#6ea6f2"/>
+    <rect x="622" y="160" width="15" height="50" rx="4" fill="#9cc3fa"/>
+    <!-- line chart -->
+    <polyline points="652,204 668,182 684,192 700,166 716,176 734,158" stroke="#1677ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="734" cy="158" r="4" fill="#1677ff"/>
+  </g>
+  <!-- screen base -->
+  <ellipse cx="622" cy="240" rx="160" ry="20" fill="#d3e4fc"/>
+  <rect x="588" y="226" width="68" height="12" rx="6" fill="#b7cdf1"/>
+
+  <!-- right towers -->
+  <g>
+    <polygon points="806,120 844,139 844,246 806,227" fill="#8fb2e9"/>
+    <polygon points="806,120 840,104 878,123 844,139" fill="#dfecff"/>
+    <rect x="844" y="139" width="34" height="107" fill="#bdd4f8"/>
+    <rect x="851" y="152" width="20" height="7" rx="3" fill="#ffffff" opacity=".7"/>
+    <rect x="851" y="167" width="20" height="7" rx="3" fill="#ffffff" opacity=".55"/>
+    <rect x="851" y="182" width="20" height="7" rx="3" fill="#ffffff" opacity=".42"/>
+    <rect x="851" y="197" width="20" height="7" rx="3" fill="#ffffff" opacity=".3"/>
+  </g>
+  <g>
+    <polygon points="900,158 926,171 926,244 900,231" fill="#9dbdf0"/>
+    <polygon points="900,158 924,146 950,159 926,171" fill="#e8f1ff"/>
+    <rect x="926" y="171" width="24" height="73" fill="#c6dbfa"/>
+    <rect x="931" y="182" width="14" height="6" rx="3" fill="#ffffff" opacity=".6"/>
+    <rect x="931" y="194" width="14" height="6" rx="3" fill="#ffffff" opacity=".45"/>
+  </g>
+
+  <!-- far right low tower -->
+  <g>
+    <polygon points="1030,178 1056,191 1056,248 1030,235" fill="#a9c4f2"/>
+    <polygon points="1030,178 1054,166 1080,179 1056,191" fill="#e9f2ff"/>
+    <rect x="1056" y="191" width="24" height="57" fill="#cfdff9"/>
+    <rect x="1061" y="201" width="14" height="6" rx="3" fill="#ffffff" opacity=".6"/>
+    <rect x="1061" y="213" width="14" height="6" rx="3" fill="#ffffff" opacity=".45"/>
+  </g>
+
+  <!-- decorative pins and cubes -->
+  <g>
+    <path d="M968 92c0 0-17 21-17 32a17 17 0 0 0 34 0c0-11-17-32-17-32z" fill="#4d94ff"/>
+    <circle cx="968" cy="122" r="6.5" fill="#ffffff"/>
+  </g>
+  <g>
+    <path d="M150 58c0 0-13 16-13 24a13 13 0 0 0 26 0c0-8-13-24-13-24z" fill="#8fb8f0"/>
+    <circle cx="150" cy="81" r="5" fill="#ffffff"/>
+  </g>
+  <g>
+    <polygon points="1090,120 1106,128 1106,146 1090,138" fill="#bcd3f7"/>
+    <polygon points="1090,120 1101,114 1117,122 1106,128" fill="#e6f0ff"/>
+    <polygon points="1106,128 1117,122 1117,140 1106,146" fill="#9dbef2"/>
+  </g>
+  <g>
+    <polygon points="20,86 33,92 33,107 20,101" fill="#c4d9f8"/>
+    <polygon points="20,86 28,82 41,88 33,92" fill="#eef5ff"/>
+    <polygon points="33,92 41,88 41,103 33,107" fill="#a4c2f1"/>
+  </g>
+  <circle cx="880" cy="70" r="5" fill="#cfe0fb"/>
+  <circle cx="320" cy="46" r="4" fill="#b9d2f6"/>
+  <circle cx="1130" cy="180" r="4" fill="#d8e6fa"/>
+  <circle cx="440" cy="20" r="4" fill="#cfe0fb"/>
+</svg>

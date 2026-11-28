@@ -1,0 +1,94 @@
+/* Workspace shell — shared by all workspaceShell routes (overview, enterprise, coming-soon spaces).
+   Consumes the tokens in styles/tokens.css only. */
+/* 13. Console shell — scoped so other modules keep their own theme. */
+.console-layout.overview-shell .console-body { background: var(--sk-surface); }
+.console-layout.overview-shell .console-header {
+  max-width: none;
+  min-height: 56px;
+  height: 56px;
+  padding: 8px 24px 8px 28px;
+  align-items: center;
+  background: var(--sk-header-gradient);
+  border-bottom: 1px solid var(--sk-line);
+}
+.console-layout.overview-shell .console-content {
+  max-width: none;
+  padding: 14px 24px 20px;
+  background: var(--sk-page-gradient);
+}
+.ov-header-leading { display: flex; flex: 1; min-width: 0; align-items: center; gap: 12px; }
+.ov-header-leading > .ant-btn { display: none; color: var(--sk-muted); }
+.ov-global-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(300px, 40vw);
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--sk-line);
+  border-radius: var(--sk-r-lg);
+  background: var(--sk-input);
+  color: var(--sk-faint);
+  font-size: var(--sk-fs-label);
+}
+.ov-global-search > span:not(.anticon) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-global-search .anticon { color: var(--sk-muted); font-size: var(--sk-fs-title); }
+.ov-global-search kbd {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sk-faint);
+  font-family: inherit;
+  font-size: var(--sk-fs-xs);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.console-layout.overview-shell .console-header-actions { flex: 0 0 auto; flex-wrap: nowrap; gap: 24px; }
+.console-layout.overview-shell .ov-account.ant-btn {
+  display: flex;
+  height: 38px;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  background: transparent;
+  color: var(--sk-ink);
+  font-size: var(--sk-fs-label);
+  font-weight: 600;
+  box-shadow: none;
+}
+.console-layout.overview-shell .ov-account.ant-btn:hover { background: transparent !important; }
+.console-layout.overview-shell .ov-account .ant-avatar { border: 1px solid var(--sk-line-soft); }
+.console-layout.overview-shell .ov-account .anticon { color: var(--sk-blue-ink); font-size: var(--sk-fs-sm); }
+
+/* Enterprise keeps the shared business sidebar visible; only the header and
+   canvas spacing are specialized for this dashboard. */
+.console-layout.enterprise-shell .console-header {
+  height: 80px;
+  min-height: 80px;
+  padding: 18px 24px;
+}
+.console-layout.enterprise-shell .ov-header-leading > .ant-btn { display: none; }
+.console-layout.enterprise-shell .ov-global-search {
+  width: 344px;
+  min-height: 44px;
+  padding-inline: 18px;
+  border-radius: var(--sk-r-xl);
+  background: rgba(230, 237, 253, .84);
+  color: var(--sk-blue-ink);
+}
+.console-layout.enterprise-shell .ov-global-search .anticon { color: var(--sk-blue-ink); font-size: var(--sk-fs-h2); }
+.console-layout.enterprise-shell .console-content {
+  padding: 0 22px 24px;
+}
+.console-layout.enterprise-shell .console-header-actions { gap: 26px; }
+@media (max-width: 1100px) {
+  .console-layout.overview-shell:not(.enterprise-shell) .ov-header-leading > .ant-btn { display: inline-flex; }
+  .console-layout.overview-shell:not(.enterprise-shell) .ov-global-search { width: min(300px, 46vw); }
+  .console-layout.overview-shell:not(.enterprise-shell) .ov-global-search kbd { display: none; }
+}
+@media (max-width: 760px) {
+  .console-layout.overview-shell:not(.enterprise-shell) .console-header { height: auto; min-height: 66px; padding: 12px 14px; }
+  .console-layout.overview-shell:not(.enterprise-shell) .console-content { padding: 12px 14px 28px; }
+  .console-layout.overview-shell:not(.enterprise-shell) .ov-account > span:not(.ant-avatar) { display: none; }
+  .console-layout.overview-shell:not(.enterprise-shell) .ov-global-search { width: 46vw; }
+}

@@ -7,8 +7,8 @@ import { t } from '../i18n/index';
 import { lazy, Suspense, useState, useRef, useEffect, type ReactNode } from 'react';
 import { Layout, Button, Avatar, Tag, Spin, Grid } from 'antd';
 import { DownOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons';
-import { type CapabilityObservability, type PlatformModule, type Summary, setToken, token } from '../shared/api/client';
-import { Alert, Badge, Empty, Field, Panel, Role, useResource } from '../shared/components/ui';
+import { type CapabilityObservability, setToken, token } from '../shared/api/client';
+import { Alert, Empty, Field, Panel, Role, useResource } from '../shared/components/ui';
 import type { UiExtensionManifest, UiNavigationItem } from '../contracts';
 import { AgentsPage } from '../features/agents/AgentsPage';
 import { ServiceAppsPage } from '../features/service-apps/ServiceAppsPage';
@@ -20,7 +20,7 @@ import { HandoffPage } from '../features/handoff/HandoffPage';
 const TicketsPage = lazy(() => import('../features/tickets/TicketsPage').then(module => ({ default: module.TicketsPage })));
 const MemoryPage = lazy(() => import('../features/memory/MemoryPage').then(module => ({ default: module.MemoryPage })));
 import { QualityPage } from '../features/evaluation/QualityPage';
-import { Metrics, ObservabilityPage } from '../features/observability/ObservabilityPage';
+import { ObservabilityPage } from '../features/observability/ObservabilityPage';
 import { WorkbenchSso } from '../features/open-platform/SsoLogin';
 import { StaffPanel } from '../features/handoff/StaffPanel';
 import { ExtensionsPage } from '../features/extensions/ExtensionsPage';
@@ -28,9 +28,9 @@ import { SampleOperationsPage } from '../features/extensions/SampleOperationsPag
 import { useHashRouter, type ModelSection } from './hashRouter';
 import { ModelsPage } from '../features/models/ModelsPage';
 import { MembersPage, RolesPage, SecurityPage } from '../features/access-control/AccessControlPages';
-import { ConsoleSidebar } from './ConsoleSidebar';
+import { ConsoleSidebar, type SpaceId } from './ConsoleSidebar';
 const OpenPlatformPage = lazy(() => import('../features/open-platform/OpenPlatformPage').then(module => ({ default: module.OpenPlatformPage })));
-const sections = () => ([['overview', t("平台总览")], ['conversations', t("会话工作台")], ['service-apps', t("服务应用")], ['agents', t("Agent 管理")], ['models', t("模型网关")], ['knowledge', t("知识库")], ['tools', t("工具目录")], ['skills', t("Skill 能力库")], ['handoff', t("人工协同")], ['tickets', t("服务工单")], ['memory', t("客户管理")], ['open-platform', t("开放平台")], ['evaluation', t("质量大盘")], ['observability', t("运行与审计")], ['access', t("访问与策略")], ['members', t("成员管理")], ['roles', t("角色与权限")], ['security', t("会话与安全")], ['extensions', t("插件平台")]] as const);
+const sections = () => ([['overview', t("平台总览")], ['enterprise', t("企业总工作台")], ['finance', t("AI 财务运营")], ['sales', t("AI 销售")], ['development', t("AI 研发")], ['conversations', t("会话工作台")], ['service-apps', t("服务应用")], ['agents', t("Agent 管理")], ['models', t("模型网关")], ['knowledge', t("知识库")], ['tools', t("工具目录")], ['skills', t("Skill 能力库")], ['handoff', t("人工协同")], ['tickets', t("服务工单")], ['memory', t("客户管理")], ['open-platform', t("开放平台")], ['evaluation', t("质量大盘")], ['observability', t("运行与审计")], ['access', t("访问与策略")], ['members', t("成员管理")], ['roles', t("角色与权限")], ['security', t("会话与安全")], ['extensions', t("插件平台")]] as const);
 type Page = ReturnType<typeof sections>[number][0] | 'approvals';
 
 interface ResolvedUiNavigation extends UiNavigationItem {
@@ -43,11 +43,9 @@ const uiFeatureRenderers: Record<string, () => ReactNode> = {
     'extensions/sample-operations': () => <SampleOperationsPage />,
 };
 const ApprovalPage = lazy(() => import('../features/approval/ApprovalPage').then(module => ({ default: module.ApprovalPage })));
-function Overview() {
-    const summary = useResource<Summary>('/observability/summary', 5000);
-    const modules = useResource<PlatformModule[]>('/modules');
-    return <><Alert error={summary.error || modules.error}/><Metrics value={summary.data}/><section className="welcome"><p>{t("在一个工作空间中连接知识、配置 Agent，并协同处理客户问题。")}</p></section><div className="module-grid">{modules.data?.map((m, index) => <article key={m.id} className="module-card"><div className="row"><span className="mono muted">{String(index + 1).padStart(2, '0')}</span><Badge value={m.status}/></div><h3>{t(m.name)}</h3><p>{t(m.description)}</p></article>)}</div></>;
-}
+const OverviewPage = lazy(() => import('../features/overview/OverviewPage').then(module => ({ default: module.OverviewPage })));
+const EnterpriseWorkspacePage = lazy(() => import('../features/enterprise/EnterpriseWorkspacePage').then(module => ({ default: module.EnterpriseWorkspacePage })));
+const SpacePlaceholderPage = lazy(() => import('../features/enterprise/EnterpriseWorkspacePage').then(module => ({ default: module.SpacePlaceholderPage })));
 function Access({ onChange }: {
     onChange: () => void;
 }) {
@@ -89,6 +87,15 @@ function Shell({ reset }: {
     const previousCollapsed = useRef(false);
     function navigate(next: Page, entry: 'models' | 'profiles' = 'models') {
         router.navigate(next === 'models' ? `/models/${entry}` : `/${next}`);
+    }
+    // The active space is derived from the route: the enterprise workspace and
+    // not-yet-onboarded businesses own their routes, everything else belongs
+    // to the AI customer-service space.
+    const space: SpaceId = page === 'enterprise' || page === 'finance' || page === 'sales' || page === 'development'
+      ? (page as SpaceId)
+      : 'customer-service';
+    function selectSpace(id: SpaceId) {
+        router.navigate(id === 'enterprise' ? '/enterprise' : id === 'customer-service' ? '/overview' : `/${id}`);
     }
     useEffect(() => {
         if (page !== 'agents') {
@@ -138,33 +145,41 @@ function Shell({ reset }: {
         title: group === 'approval' ? t('审批工作') : group,
         ids,
     }));
-  const pages: Partial<Record<Page, ReactNode>> = { 'service-apps': <ServiceAppsPage route={router.path} onNavigate={router.navigate}/>, 'open-platform': <OpenPlatformPage route={router.path} onNavigate={router.navigate}/>, models: <ModelsPage routeSection={router.path.split('/')[2] as ModelSection} onNavigate={section => router.navigate(`/models/${section}`)}/>, overview: <Overview />, conversations: <ConversationsPage route={router.path} onNavigate={router.navigate} />, agents: <AgentsPage route={router.path} onNavigate={router.navigate} onConfigureModels={() => navigate('models', 'profiles')} onWorkspaceChange={workspaceChanged} onGuardChange={guard => { leaveGuard.current = guard; }}/>, knowledge: <KnowledgePage />, skills: <SkillsPage route={router.path} onNavigate={router.navigate} onGuardChange={guard => { leaveGuard.current = guard; }} />, tools: <ToolsPage route={router.path} onNavigate={router.navigate}/>, handoff: <HandoffPage />, tickets: <TicketsPage />, memory: <MemoryPage route={router.path} onNavigate={router.navigate} />, evaluation: <QualityPage onNavigate={router.navigate} />, observability: <ObservabilityPage />, access: <><Access onChange={reset}/><StaffPanel /></>, members: <MembersPage />, roles: <RolesPage />, security: <SecurityPage />, extensions: <ExtensionsPage /> };
+  const pages: Partial<Record<Page, ReactNode>> = { enterprise: <EnterpriseWorkspacePage />, finance: <SpacePlaceholderPage kind="finance" />, sales: <SpacePlaceholderPage kind="sales" />, development: <SpacePlaceholderPage kind="development" />, 'service-apps': <ServiceAppsPage route={router.path} onNavigate={router.navigate}/>, 'open-platform': <OpenPlatformPage route={router.path} onNavigate={router.navigate}/>, models: <ModelsPage routeSection={router.path.split('/')[2] as ModelSection} onNavigate={section => router.navigate(`/models/${section}`)}/>, overview: <OverviewPage />, conversations: <ConversationsPage route={router.path} onNavigate={router.navigate} />, agents: <AgentsPage route={router.path} onNavigate={router.navigate} onConfigureModels={() => navigate('models', 'profiles')} onWorkspaceChange={workspaceChanged} onGuardChange={guard => { leaveGuard.current = guard; }}/>, knowledge: <KnowledgePage />, skills: <SkillsPage route={router.path} onNavigate={router.navigate} onGuardChange={guard => { leaveGuard.current = guard; }} />, tools: <ToolsPage route={router.path} onNavigate={router.navigate}/>, handoff: <HandoffPage />, tickets: <TicketsPage />, memory: <MemoryPage route={router.path} onNavigate={router.navigate} />, evaluation: <QualityPage onNavigate={router.navigate} />, observability: <ObservabilityPage />, access: <><Access onChange={reset}/><StaffPanel /></>, members: <MembersPage />, roles: <RolesPage />, security: <SecurityPage />, extensions: <ExtensionsPage /> };
     const extensionPage = extensionNavigation.find(item => item.id === page);
     const pageContent = extensionPage ? uiFeatureRenderers[extensionPage.feature]?.() : pages[page];
     const serviceAppsShell = page === 'service-apps';
+    // The immersive shells (skills / workspace pages) share one chrome theme.
+    const workspaceShell = ['overview', 'enterprise', 'finance', 'sales', 'development'].includes(page);
     const serviceApplicationWorkspace = page === 'service-apps' && /^\/service-apps\/(?!standards(?:\/|$))[a-z0-9-]+(?:\/(?:overview|agent|experience|skills|rules|conversations|release))?$/.test(router.path);
-    return <Role.Provider value={role}><Layout className={`console-layout ${page === 'agents' ? 'agents-shell' : page === 'tools' ? 'tools-shell' : page === 'open-platform' ? 'open-platform-shell' : ''} ${page === 'skills' ? 'skills-shell' : ''} ${serviceAppsShell ? 'service-apps-shell' : ''} ${serviceApplicationWorkspace ? 'service-app-workspace' : ''} ${agentWorkspace ? 'agent-focus' : ''}`}>
+    return <Role.Provider value={role}><Layout className={`console-layout ${page === 'agents' ? 'agents-shell' : page === 'tools' ? 'tools-shell' : page === 'open-platform' ? 'open-platform-shell' : ''} ${page === 'skills' ? 'skills-shell' : ''} ${workspaceShell ? 'overview-shell' : ''} ${page === 'enterprise' ? 'enterprise-shell' : ''} ${serviceAppsShell ? 'service-apps-shell' : ''} ${serviceApplicationWorkspace ? 'service-app-workspace' : ''} ${agentWorkspace ? 'agent-focus' : ''}`}>
     {mobile && !collapsed && !agentWorkspace && <button type="button" className="console-sidebar-mask" aria-label={t("收起导航")} onClick={() => setCollapsed(true)}/>}
-    <Layout.Sider className="console-sider" theme="dark" width={228} collapsedWidth={mobile || agentWorkspace ? 0 : 72} collapsed={collapsed} breakpoint="lg" onBreakpoint={setCollapsed} trigger={null}>
+    <Layout.Sider className="console-sider" theme="dark" width={184} collapsedWidth={mobile || agentWorkspace ? 0 : 72} collapsed={collapsed} breakpoint="lg" onBreakpoint={setCollapsed} trigger={null}>
       <ConsoleSidebar
         page={page}
         role={role}
         collapsed={collapsed}
         mobile={mobile}
+        space={space}
         extensionGroups={extensionGroups}
         labelFor={id => labelFor(id as Page)}
         onNavigate={id => navigate(id as Page)}
+        onSpaceSelect={selectSpace}
         onCollapsedChange={setCollapsed}
       />
     </Layout.Sider><Layout className="console-body"><Layout.Header className="console-header">
     {page === 'service-apps'
       ? <Button className="service-apps-nav-toggle" type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/>
+      : workspaceShell
+        ? <div className="ov-header-leading"><Button type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/><div className="ov-global-search"><SearchOutlined /><span>{t("搜索功能、智能体、任务…")}</span><kbd>Ctrl + K</kbd></div></div>
       : page === 'skills'
         ? <div className="skills-header-leading"><Button type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/><div className="skills-global-search"><SearchOutlined /><span>{t("搜索功能、智能体、任务…")}</span><kbd>Ctrl + K</kbd></div></div>
-        : <div className="console-heading"><Button type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/><div><h1>{labelFor(page)}</h1><p className="page-description">{page === 'memory' ? t("查看客户档案与记忆，处理待确认的写入。") : page === 'tickets' ? t("跟进每一个问题，记录每一次处理。") : page === 'overview' ? t("了解服务运行情况，管理你的客服工作空间。") : page === 'models' ? t("统一接入模型服务，管理模型能力与发布方案。") : page === 'evaluation' ? t("跨 Agent 查看评测通过率、待复核队列与回归。") : page === 'members' ? t("管理组织成员、角色和访问状态。") : page === 'roles' ? t("查看固定角色的权限范围。") : page === 'security' ? t("管理当前账号的登录会话和访问安全。") : page === 'extensions' ? t("管理插件生命周期、配置版本和运行状态。") : page === 'approvals' ? t("处理待审批请求，查看决策记录。") : t("管理服务配置与协作，让客户问题得到持续跟进。")}</p></div></div>}
-    <div className="console-header-actions">{page !== 'skills' && <LanguageSelector />}<NotificationButton onNavigate={path => router.navigate(path)} /><AccountMenu access={() => navigate('access')}>{page === 'skills'
+        : <div className="console-heading"><Button type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/><div><h1>{labelFor(page)}</h1><p className="page-description">{page === 'memory' ? t("查看客户档案与记忆，处理待确认的写入。") : page === 'tickets' ? t("跟进每一个问题，记录每一次处理。") : page === 'models' ? t("统一接入模型服务，管理模型能力与发布方案。") : page === 'evaluation' ? t("跨 Agent 查看评测通过率、待复核队列与回归。") : page === 'members' ? t("管理组织成员、角色和访问状态。") : page === 'roles' ? t("查看固定角色的权限范围。") : page === 'security' ? t("管理当前账号的登录会话和访问安全。") : page === 'extensions' ? t("管理插件生命周期、配置版本和运行状态。") : page === 'approvals' ? t("处理待审批请求，查看决策记录。") : t("管理服务配置与协作，让客户问题得到持续跟进。")}</p></div></div>}
+    <div className="console-header-actions">{!workspaceShell && <LanguageSelector />}<NotificationButton onNavigate={path => router.navigate(path)} /><AccountMenu access={() => navigate('access')}>{page === 'skills'
       ? <Button type="text" className="skills-account" aria-label={t("账户菜单")}><Avatar size={44} src="/assets/skills/header-avatar.png" /><span>{accountLabel}</span><DownOutlined /></Button>
-      : <Button type="text" aria-label={t("账户菜单")}><Avatar size="small">{role[0].toUpperCase()}</Avatar>{accountLabel}<Tag>{role}</Tag></Button>}</AccountMenu></div>
+      : workspaceShell
+        ? <Button type="text" className="ov-account" aria-label={t("账户菜单")}><Avatar size={44} src="/assets/skills/header-avatar.png" /><span>{accountLabel}</span><DownOutlined /></Button>
+        : <Button type="text" aria-label={t("账户菜单")}><Avatar size="small">{role[0].toUpperCase()}</Avatar>{accountLabel}<Tag>{role}</Tag></Button>}</AccountMenu></div>
   </Layout.Header>
     <Layout.Content className="console-content">{me.error && page !== 'access' && <div role="alert" className="alert error">{t("无法连接后端或读取权限：")}{me.error} <Button onClick={() => me.refresh()}>{t("重试")}</Button> <Button onClick={() => navigate('access')}>{t("设置凭据")}</Button></div>}{uiExtensions.error && <div role="alert" className="alert error">{t("无法加载 UI 扩展：")}{uiExtensions.error}</div>}{capabilities.error && <div role="alert" className="alert error">{t("无法加载扩展能力状态：")}{capabilities.error}</div>}<div className={`page module-page module-${page}`} key={page}><Suspense fallback={<Spin tip={t("正在加载页面")}><div style={{ minHeight: 160 }}/></Spin>}>{pageContent || <Empty>{t("扩展页面不可用")}</Empty>}</Suspense></div></Layout.Content>
   </Layout></Layout></Role.Provider>;

@@ -44,14 +44,19 @@ export interface SidebarExtensionGroup {
   ids: string[];
 }
 
+/** Top-level space: the enterprise workspace or one business application. */
+export type SpaceId = 'enterprise' | 'customer-service' | 'finance' | 'sales' | 'development';
+
 interface ConsoleSidebarProps {
   page: string;
   role: string;
   collapsed: boolean;
   mobile: boolean;
+  space: SpaceId;
   extensionGroups: SidebarExtensionGroup[];
   labelFor: (id: string) => string;
   onNavigate: (id: string) => void;
+  onSpaceSelect: (id: SpaceId) => void;
   onCollapsedChange: (collapsed: boolean) => void;
 }
 
@@ -108,9 +113,14 @@ const businesses = () => [
   },
 ];
 
-function BusinessSwitcher({ collapsed }: { collapsed: boolean }) {
+function BusinessSwitcher({ collapsed, space, onSelect }: {
+  collapsed: boolean;
+  space: SpaceId;
+  onSelect: (id: SpaceId) => void;
+}) {
   const items = businesses();
-  const current = items[0];
+  const isEnterprise = space === 'enterprise';
+  const current = items.find(item => item.id === space) ?? items[0];
   return (
     <Dropdown
       trigger={['click']}
@@ -118,41 +128,69 @@ function BusinessSwitcher({ collapsed }: { collapsed: boolean }) {
       overlayClassName="business-switcher-dropdown"
       dropdownRender={menu => (
         <div className="business-switcher-menu">
-          <div className="business-switcher-menu-title">{t('切换业务')}</div>
+          <div className="business-switcher-menu-title">{t('切换空间')}</div>
           {menu}
         </div>
       )}
       menu={{
-        items: items.map(business => ({
-          key: business.id,
-          disabled: !business.available,
-          label: (
-            <div className="business-option">
-              <span className="business-option-icon">{business.icon}</span>
-              <span className="business-option-copy">
-                <strong>{business.name}</strong>
-                <small>{business.description}</small>
-              </span>
-              {business.available
-                ? <CheckOutlined className="business-option-check" aria-hidden />
-                : <span className="business-option-status">{t('待接入')}</span>}
-            </div>
-          ),
-        })),
+        items: [
+          {
+            key: 'enterprise',
+            label: (
+              <div className="business-option">
+                <span className="business-option-icon is-enterprise"><AppstoreOutlined /></span>
+                <span className="business-option-copy">
+                  <strong>{t('企业总工作台')}</strong>
+                  <small>{t('企业级总览与协同')}</small>
+                </span>
+                {isEnterprise && <CheckOutlined className="business-option-check" aria-hidden />}
+              </div>
+            ),
+          },
+          { type: 'divider' as const },
+          ...items.map(business => ({
+            key: business.id,
+            label: (
+              <div className="business-option">
+                <span className="business-option-icon">{business.icon}</span>
+                <span className="business-option-copy">
+                  <strong>{business.name}</strong>
+                  <small>{business.description}</small>
+                </span>
+                {space === business.id
+                  ? <CheckOutlined className="business-option-check" aria-hidden />
+                  : !business.available && <span className="business-option-status">{t('待接入')}</span>}
+              </div>
+            ),
+          })),
+        ],
+        onClick: ({ key }) => onSelect(key as SpaceId),
       }}
     >
       <Button
         type="text"
         className="business-switcher"
-        aria-label={`${t('切换业务')}：${current.name}`}
+        aria-label={isEnterprise ? t('企业工作空间') : `${t('当前业务应用')}：${current.name}`}
       >
-        <span className="business-switcher-icon">{current.icon}</span>
-        <span className="business-switcher-copy">
-          <small className="business-switcher-eyebrow">{t('当前业务应用')}</small>
-          <strong>{current.name}</strong>
-          <small>{t('当前业务应用')}</small>
-        </span>
-        <DownOutlined className="business-switcher-arrow" aria-hidden />
+        {isEnterprise ? (
+          <span className="business-switcher-body">
+            <span className="business-switcher-icon is-enterprise"><AppstoreOutlined /></span>
+            <span className="business-switcher-copy">
+              <small className="business-switcher-eyebrow">{t('企业工作空间')}</small>
+              <strong>{t('企业总工作台')}</strong>
+            </span>
+            <DownOutlined className="business-switcher-arrow" aria-hidden />
+          </span>
+        ) : (
+          <span className="business-switcher-body">
+            <span className="business-switcher-icon">{current.icon}</span>
+            <span className="business-switcher-copy">
+              <small className="business-switcher-eyebrow">{t('当前业务应用')}</small>
+              <strong>{current.name}</strong>
+            </span>
+            <DownOutlined className="business-switcher-arrow" aria-hidden />
+          </span>
+        )}
       </Button>
     </Dropdown>
   );
@@ -163,9 +201,11 @@ export function ConsoleSidebar({
   role,
   collapsed,
   mobile,
+  space,
   extensionGroups,
   labelFor,
   onNavigate,
+  onSpaceSelect,
   onCollapsedChange,
 }: ConsoleSidebarProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -181,28 +221,9 @@ export function ConsoleSidebar({
     label,
     planned: true,
   });
-  const sections: NavSection[] = [
-    {
-      items: [leaf('overview', <HomeOutlined />, t('工作台'))],
-    },
-    {
-      title: t('业务工作'),
-      items: [
-        leaf('conversations', <MessageOutlined />),
-        leaf('tickets', <FileTextOutlined />),
-        leaf('memory', <IdcardOutlined />),
-        planned('business-analytics', <FundOutlined />, t('数据分析')),
-        {
-          id: 'service-policy',
-          label: t('服务策略'),
-          icon: <SafetyOutlined />,
-          children: [
-            leaf('service-apps', <AppstoreOutlined />),
-            leaf('handoff', <CustomerServiceOutlined />),
-          ],
-        },
-      ],
-    },
+  // Shared platform branches — identical in both the enterprise and the
+  // business sidebar; only the leading entries differ.
+  const platformSections: NavSection[] = [
     {
       title: t('平台工作空间'),
       items: [
@@ -255,7 +276,6 @@ export function ConsoleSidebar({
     },
     {
       items: [
-        leaf('open-platform', <ApiOutlined />),
         {
           id: 'system',
           label: t('系统管理'),
@@ -272,8 +292,48 @@ export function ConsoleSidebar({
             leaf('security', <LockOutlined />),
           ],
         },
+        leaf('open-platform', <ApiOutlined />),
       ],
     },
+  ];
+  const enterpriseHome = leaf('enterprise', <HomeOutlined />, t('企业总工作台'));
+  const enterpriseSpace = space !== 'customer-service';
+  const sections: NavSection[] = enterpriseSpace ? [
+    {
+      items: [
+        enterpriseHome,
+        leaf('service-apps', <AppstoreOutlined />, t('应用中心')),
+      ],
+    },
+    ...platformSections,
+  ] : [
+    {
+      // The enterprise workspace entry sits above every business menu item
+      // so a business view can always switch back.
+      items: [
+        enterpriseHome,
+        leaf('overview', <HomeOutlined />, t('工作台')),
+      ],
+    },
+    {
+      title: t('业务工作'),
+      items: [
+        leaf('conversations', <MessageOutlined />),
+        leaf('tickets', <FileTextOutlined />),
+        leaf('memory', <IdcardOutlined />),
+        planned('business-analytics', <FundOutlined />, t('数据分析')),
+        {
+          id: 'service-policy',
+          label: t('服务策略'),
+          icon: <SafetyOutlined />,
+          children: [
+            leaf('service-apps', <AppstoreOutlined />),
+            leaf('handoff', <CustomerServiceOutlined />),
+          ],
+        },
+      ],
+    },
+    ...platformSections,
   ];
   const branches = sections.flatMap(section => section.items).filter(
     (item): item is NavBranch => Boolean(item.children),
@@ -358,7 +418,7 @@ export function ConsoleSidebar({
   return (
     <div className="console-sidebar-inner">
       <div className="console-brand"><BrandMark /></div>
-      <BusinessSwitcher collapsed={collapsed} />
+      <BusinessSwitcher collapsed={collapsed} space={space} onSelect={onSpaceSelect} />
       <nav aria-label={t('主导航')} className="console-nav">
         {sections.map((section, sectionIndex) => (
           <div className="console-nav-section" key={section.title ?? sectionIndex}>

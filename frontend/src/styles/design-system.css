@@ -57,8 +57,9 @@
   padding:8px 12px;min-height:36px;max-width:100%;box-sizing:border-box;
 }
 .console-layout .module-page :is(input,select,textarea):not([class*="ant-"]):focus-visible {outline:2px solid #e4e3ff;outline-offset:1px;border-color:#8086fb}
-/* Ant Design pagination arrows are native <button> elements without the .ant-btn class. */
-.console-layout :is(.module-overview,.module-conversations,.module-handoff,.module-evaluation,.module-observability,.module-access,.channel-workspace) button:not(.ant-btn):not(:where(.ant-pagination-item-link)) {
+/* Ant Design pagination arrows are native <button> elements without the .ant-btn class.
+   `.module-overview` is excluded: the workspace page ships its own button system. */
+.console-layout :is(.module-conversations,.module-handoff,.module-evaluation,.module-observability,.module-access,.channel-workspace) button:not(.ant-btn):not(:where(.ant-pagination-item-link)) {
   border:1px solid transparent;border-radius:6px;min-height:36px;padding:8px 14px;background:var(--ui-accent);color:#fff;font-size:13px;font-weight:500;
 }
 .console-layout :is(.module-conversations,.module-handoff,.module-evaluation,.module-observability,.module-access,.channel-workspace) button.secondary {
@@ -86,7 +87,7 @@
 .console-layout .module-conversations button.c-filter-tab.is-active {
   background:var(--ui-accent-soft);border-color:#dcdafe;color:var(--ui-accent);font-weight:500;
 }
-.console-layout .module-page button:not(.ant-btn):disabled {opacity:.45;cursor:not-allowed}
+.console-layout .module-page button:not(.ant-btn):disabled {cursor:not-allowed}
 .console-layout :is(.module-conversations,.module-handoff,.channel-workspace) .secondary+.secondary {margin-left:8px}
 .console-layout .message-content {border:1px solid #edf0f5;border-radius:8px;background:#f8f9fc;color:var(--ui-ink)}
 .console-layout .user .message-content {background:#efefff;border-color:#e3e1fd}
