@@ -62,10 +62,17 @@
 
 /* Enterprise keeps the shared business sidebar visible; only the header and
    canvas spacing are specialized for this dashboard. */
+.console-layout.enterprise-shell {
+  --ep-shell-header-height: 72px;
+  --ep-shell-header-padding-y: 16px;
+  --ep-shell-header-padding-x: 24px;
+  --ep-shell-content-padding-x: 22px;
+  --ep-shell-content-padding-bottom: 24px;
+}
 .console-layout.enterprise-shell .console-header {
-  height: 80px;
-  min-height: 80px;
-  padding: 18px 24px;
+  height: var(--ep-shell-header-height);
+  min-height: var(--ep-shell-header-height);
+  padding: var(--ep-shell-header-padding-y) var(--ep-shell-header-padding-x);
 }
 .console-layout.enterprise-shell .ov-header-leading > .ant-btn { display: none; }
 .console-layout.enterprise-shell .ov-global-search {
@@ -78,9 +85,51 @@
 }
 .console-layout.enterprise-shell .ov-global-search .anticon { color: var(--sk-blue-ink); font-size: var(--sk-fs-h2); }
 .console-layout.enterprise-shell .console-content {
-  padding: 0 22px 24px;
+  padding: 0 var(--ep-shell-content-padding-x) var(--ep-shell-content-padding-bottom);
 }
 .console-layout.enterprise-shell .console-header-actions { gap: 26px; }
+
+/* Desktop density follows the CSS viewport. The sidebar stays expanded and
+   the workbench remains a desktop grid at every supported management width. */
+@media (min-width: 1180px) and (max-width: 1365px),
+  (min-width: 1180px) and (max-height: 760px) {
+  .console-layout.enterprise-shell {
+    --ep-shell-header-height: 60px;
+    --ep-shell-header-padding-y: 10px;
+    --ep-shell-content-padding-x: 16px;
+    --ep-shell-content-padding-bottom: 16px;
+  }
+  .console-layout.enterprise-shell .ov-global-search {
+    width: 300px;
+    min-height: 36px;
+    padding-inline: 14px;
+  }
+  .console-layout.enterprise-shell .console-header-actions { gap: 18px; }
+}
+
+@media (min-width: 1180px) and (max-height: 560px) {
+  .console-layout.enterprise-shell {
+    --ep-shell-header-height: 52px;
+    --ep-shell-header-padding-y: 6px;
+    --ep-shell-content-padding-x: 12px;
+    --ep-shell-content-padding-bottom: 12px;
+  }
+  .console-layout.enterprise-shell .ov-global-search {
+    width: 260px;
+    min-height: 32px;
+    padding-inline: 12px;
+  }
+  .console-layout.enterprise-shell .console-header-actions { gap: 12px; }
+}
+
+@media (min-width: 1600px) and (min-height: 800px) {
+  .console-layout.enterprise-shell {
+    --ep-shell-header-height: 80px;
+    --ep-shell-header-padding-y: 18px;
+    --ep-shell-content-padding-x: 22px;
+    --ep-shell-content-padding-bottom: 24px;
+  }
+}
 @media (max-width: 1100px) {
   .console-layout.overview-shell:not(.enterprise-shell) .ov-header-leading > .ant-btn { display: inline-flex; }
   .console-layout.overview-shell:not(.enterprise-shell) .ov-global-search { width: min(300px, 46vw); }

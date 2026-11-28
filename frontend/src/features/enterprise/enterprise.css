@@ -3,10 +3,27 @@
    Density targets follow the 1920 design mockup scaled to a 1280 CSS px
    viewport (Windows 150% scaling): the whole page must fit one screen. */
 .enterprise-page {
+  --ep-page-gap: 14px;
+  --ep-hero-min-height: 170px;
+  --ep-hero-padding-y: 24px;
+  --ep-hero-padding-x: 36px;
+  --ep-metric-min-height: 100px;
+  --ep-metric-gap: 14px;
+  --ep-metric-padding-y: 14px;
+  --ep-metric-padding-x: 18px;
+  --ep-metric-icon-size: 56px;
+  --ep-metric-icon-font-size: 24px;
+  --ep-panel-padding-y: 14px;
+  --ep-panel-padding-x: 16px;
+  --ep-layout-gap: 12px;
+  --ep-chart-height: 120px;
+  --ep-agents-min-height: 280px;
+  --ep-health-min-height: 210px;
+  --ep-shortcut-icon-size: 38px;
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--ep-page-gap);
   color: var(--sk-ink);
   font-family: var(--sk-font-family);
 }
@@ -21,10 +38,10 @@
 .ep-hero {
   position: relative;
   display: flex;
-  min-height: 198px;
+  min-height: var(--ep-hero-min-height);
   align-items: center;
   overflow: hidden;
-  padding: 28px 46px;
+  padding: var(--ep-hero-padding-y) var(--ep-hero-padding-x);
   border-radius: var(--sk-r-xl);
   background:
     radial-gradient(circle at 10% 40%, rgba(255, 255, 255, .95), transparent 46%),
@@ -101,15 +118,15 @@
 }
 
 /* 2. Metric cards — solid tinted icon tiles + white glyphs, per mockup */
-.ep-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.ep-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--ep-layout-gap); }
 .ep-metric {
   position: relative;
   display: flex;
-  min-height: 111px;
+  min-height: var(--ep-metric-min-height);
   align-items: flex-start;
-  gap: 16px;
+  gap: var(--ep-metric-gap);
   overflow: hidden;
-  padding: 16px 26px;
+  padding: var(--ep-metric-padding-y) var(--ep-metric-padding-x);
   border-radius: var(--sk-r-xl);
   background: var(--sk-card);
   box-shadow: var(--sk-shadow-card);
@@ -118,12 +135,12 @@
 .ep-metric:hover { transform: translateY(-2px); box-shadow: var(--sk-shadow-hover); }
 .ep-metric-icon {
   display: grid;
-  width: 60px;
-  height: 60px;
-  flex: 0 0 60px;
+  width: var(--ep-metric-icon-size);
+  height: var(--ep-metric-icon-size);
+  flex: 0 0 var(--ep-metric-icon-size);
   place-items: center;
   border-radius: 50%;
-  font-size: 26px;
+  font-size: var(--ep-metric-icon-font-size);
   color: var(--sk-blue);
 }
 /* light tinted tile + colored filled glyph, per mockup */
@@ -156,7 +173,7 @@
 /* 3. Panel — borderless white card with soft shadow, per mockup */
 .ep-panel {
   min-width: 0;
-  padding: 16px 18px;
+  padding: var(--ep-panel-padding-y) var(--ep-panel-padding-x);
   border-radius: var(--sk-r-xl);
   background: var(--sk-card);
   box-shadow: var(--sk-shadow-card);
@@ -186,7 +203,7 @@
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
-  gap: 14px;
+  gap: var(--ep-layout-gap);
 }
 /* 3. Overview panel — flex column so the plot area absorbs leftover height on stretch */
 .ep-overview { display: flex; flex-direction: column; }
@@ -197,7 +214,7 @@
   min-height: 226px;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.11fr);
   align-items: stretch;
-  gap: 14px;
+  gap: var(--ep-layout-gap);
 }
 
 /* 5. Series filter pills */
@@ -236,7 +253,7 @@
 /* Fixed plot height. `height:100%` on the svg cannot resolve inside the
    grid/flex chain and falls back to the viewBox aspect ratio (~160px),
    which silently inflates the whole row. */
-.ep-plot svg { display: block; width: 100%; height: 126px; overflow: visible; }
+.ep-plot svg { display: block; width: 100%; height: var(--ep-chart-height); overflow: visible; }
 .ep-grid-line { stroke: var(--sk-line); stroke-width: 1; }
 .ep-plot path { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .ep-cursor-line { stroke: var(--sk-line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -288,8 +305,8 @@
 
 /* 7. Agents status */
 .ep-agents {
-  min-height: 303px;
-  padding: 18px 20px;
+  min-height: var(--ep-agents-min-height);
+  padding: var(--ep-panel-padding-y) var(--ep-panel-padding-x);
 }
 .ep-agents .ep-panel-head,
 .ep-health .ep-panel-head {
@@ -375,8 +392,8 @@
 .ep-shortcut:not(:disabled):hover { border-color: var(--sk-line-strong); box-shadow: var(--sk-shadow-card); }
 .ep-shortcut-icon {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: var(--ep-shortcut-icon-size);
+  height: var(--ep-shortcut-icon-size);
   flex: none;
   place-items: center;
   border-radius: var(--sk-r-md);
@@ -441,8 +458,8 @@
 
 /* 10. Health */
 .ep-health {
-  min-height: 226px;
-  padding: 18px 20px;
+  min-height: var(--ep-health-min-height);
+  padding: var(--ep-panel-padding-y) var(--ep-panel-padding-x);
 }
 .ep-health-body { display: flex; flex: 0 0 auto; align-items: flex-start; gap: 14px; padding-top: 2px; }
 .ep-health-status { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; }
@@ -545,14 +562,95 @@
 .ep-coming-title { margin: 0; color: var(--sk-ink); font-size: var(--sk-fs-h2); font-weight: 600; }
 .ep-coming-desc { margin: 0 0 14px; color: var(--sk-muted); font-size: var(--sk-fs-body); }
 
-/* 13. Desktop management console — the reference is calibrated for the
-   1280/1542 CSS-pixel desktop canvas. Mobile reflow is intentionally not part
-   of this admin workbench's target surface. */
-@media (min-width: 1551px) {
-  .ep-plot svg { height: 168px; }
+/* 13. Desktop management console density.
+   Breakpoints use CSS viewport dimensions, not physical screen pixels or DPR.
+   Mobile reflow is intentionally not part of this admin workbench's target
+   surface; the sidebar and desktop columns remain visible. */
+@media (min-width: 1180px) and (max-width: 1365px),
+  (min-width: 1180px) and (max-height: 760px) {
+  .enterprise-page {
+    --ep-page-gap: 10px;
+    --ep-hero-min-height: 148px;
+    --ep-hero-padding-y: 18px;
+    --ep-hero-padding-x: 28px;
+    --ep-metric-min-height: 90px;
+    --ep-metric-gap: 10px;
+    --ep-metric-padding-y: 12px;
+    --ep-metric-padding-x: 14px;
+    --ep-metric-icon-size: 50px;
+    --ep-metric-icon-font-size: 22px;
+    --ep-panel-padding-y: 12px;
+    --ep-panel-padding-x: 14px;
+    --ep-layout-gap: 10px;
+    --ep-chart-height: 104px;
+    --ep-agents-min-height: 260px;
+    --ep-health-min-height: 200px;
+    --ep-shortcut-icon-size: 36px;
+  }
+  .ep-hero-title { font-size: clamp(21px, 1.8vw, 27px); }
+  .ep-metric-value { font-size: 22px; line-height: 23px; }
+  .ep-agents-body { gap: 10px; }
+  .ep-ring { width: 88px; height: 88px; }
+  .ep-trend-bars { height: 38px; }
+}
+
+@media (min-width: 1180px) and (max-height: 560px) {
+  .enterprise-page {
+    --ep-page-gap: 8px;
+    --ep-hero-min-height: 122px;
+    --ep-hero-padding-y: 12px;
+    --ep-hero-padding-x: 22px;
+    --ep-metric-min-height: 78px;
+    --ep-metric-gap: 8px;
+    --ep-metric-padding-y: 8px;
+    --ep-metric-padding-x: 10px;
+    --ep-metric-icon-size: 44px;
+    --ep-metric-icon-font-size: 19px;
+    --ep-panel-padding-y: 10px;
+    --ep-panel-padding-x: 12px;
+    --ep-layout-gap: 8px;
+    --ep-chart-height: 88px;
+    --ep-agents-min-height: 220px;
+    --ep-health-min-height: 180px;
+    --ep-shortcut-icon-size: 32px;
+  }
+  .ep-hero-title { font-size: 22px; }
+  .ep-hero-sub { margin-top: 3px; }
+  .ep-hero-more { right: 16px; bottom: 12px; height: 26px; }
+  .ep-metric-label { font-size: var(--sk-fs-xs); line-height: 14px; }
+  .ep-metric-value { margin-top: 1px; font-size: 20px; line-height: 21px; }
+  .ep-metric-delta { line-height: 13px; }
+  .ep-spark { right: 8px; bottom: 6px; width: 58px; height: 20px; }
+  .ep-ring { width: 76px; height: 76px; }
+  .ep-ring::before { inset: 8px; }
+  .ep-ring-value { font-size: 18px; line-height: 20px; }
+  .ep-ring-label { font-size: 10px; line-height: 12px; }
+  .ep-trend-bars { height: 30px; }
+  .ep-shortcut { padding-block: 6px; }
+}
+
+@media (min-width: 1600px) and (min-height: 800px) {
+  .enterprise-page {
+    --ep-page-gap: 14px;
+    --ep-hero-min-height: 198px;
+    --ep-hero-padding-y: 28px;
+    --ep-hero-padding-x: 46px;
+    --ep-metric-min-height: 111px;
+    --ep-metric-gap: 16px;
+    --ep-metric-padding-y: 16px;
+    --ep-metric-padding-x: 26px;
+    --ep-metric-icon-size: 60px;
+    --ep-metric-icon-font-size: 26px;
+    --ep-panel-padding-y: 16px;
+    --ep-panel-padding-x: 18px;
+    --ep-layout-gap: 14px;
+    --ep-chart-height: 168px;
+    --ep-agents-min-height: 303px;
+    --ep-health-min-height: 226px;
+    --ep-shortcut-icon-size: 40px;
+  }
   .ep-agents-body { gap: 14px; }
   .ep-trend-bars { height: 46px; }
-  .ep-shortcut-icon { width: 40px; height: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ep-pill, .ep-shortcut { transition: none; }
